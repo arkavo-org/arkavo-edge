@@ -291,6 +291,9 @@ fn run_agent_with_options(
             mcp_servers: Vec::new(),
             api_keys: std::collections::HashMap::new(),
             quiet: true,
+            peers: Vec::new(),
+            a2a_enabled: true,
+            a2a_service_type: None,
         }]
     } else {
         let config_content = fs::read_to_string(&config_path)?;
@@ -339,6 +342,9 @@ fn run_agent_with_options(
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
                     quiet: true,
+                    peers: Vec::new(),
+                    a2a_enabled: true,
+                    a2a_service_type: None,
                 }]
             }
         }
@@ -407,6 +413,9 @@ fn run_agent_with_options(
                 mcp_servers: Vec::new(),
                 api_keys: std::collections::HashMap::new(),
                 quiet: !verbose,
+                peers: Vec::new(),
+                a2a_enabled: true,
+                a2a_service_type: None,
             };
 
             if verbose {
@@ -442,6 +451,10 @@ pub struct AgentConfig {
     pub mcp_servers: Vec<McpServerConfig>,
     pub api_keys: std::collections::HashMap<String, String>,
     pub quiet: bool, // Default true (quiet), false if --verbose is specified
+    // A2A peer configuration
+    pub peers: Vec<String>,               // e.g., ["http://localhost:8352"]
+    pub a2a_enabled: bool,                // Default: true
+    pub a2a_service_type: Option<String>, // Custom mDNS service type
 }
 
 #[derive(Debug, Clone)]
@@ -459,6 +472,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     let mut in_mcp_section = false;
     let mut current_mcp_server: Option<McpServerConfig> = None;
     let mut current_section: Option<String> = None;
+    let mut in_peers_section = false;
+    let mut in_a2a_section = false;
 
     // Check if this is the new markdown format by looking for specific patterns
     let is_new_format = content.contains("## Agent Identity")
@@ -495,6 +510,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
                     quiet: true, // Default is quiet
+                    peers: Vec::new(),
+                    a2a_enabled: true,
+                    a2a_service_type: None,
                 });
                 in_agent_section = true;
                 continue;
@@ -539,6 +557,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
                         quiet: true, // Default is quiet
+                        peers: Vec::new(),
+                        a2a_enabled: true,
+                        a2a_service_type: None,
                     });
                     in_agent_section = true;
                 }
@@ -581,7 +602,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 }
 
                 // Also handle direct YAML-style properties in markdown (for flexibility)
-                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server);
+                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server, &mut in_peers_section, &mut in_a2a_section);
             }
         } else {
             // Handle old YAML-style format
@@ -612,6 +633,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
                     quiet: true, // Default is quiet
+                    peers: Vec::new(),
+                    a2a_enabled: true,
+                    a2a_service_type: None,
                 });
                 in_agent_section = true;
                 continue;
@@ -623,7 +647,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             }
 
             if let Some(agent) = current_agent.as_mut() {
-                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server);
+                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server, &mut in_peers_section, &mut in_a2a_section);
             }
         }
     }
@@ -673,10 +697,70 @@ fn parse_yaml_properties(
     agent: &mut AgentConfig,
     in_mcp_section: &mut bool,
     current_mcp_server: &mut Option<McpServerConfig>,
+    in_peers_section: &mut bool,
+    in_a2a_section: &mut bool,
 ) {
+    // Check for a2a section
+    if trimmed == "a2a:" {
+        *in_a2a_section = true;
+        return;
+    }
+
+    // Check for peers section (can be top-level or under a2a)
+    if trimmed == "peers:" {
+        *in_peers_section = true;
+        return;
+    }
+
+    // Handle peer entries
+    if *in_peers_section && trimmed.starts_with("- ") {
+        let peer = trimmed
+            .strip_prefix("- ")
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"')
+            .to_string();
+        if !peer.is_empty() {
+            agent.peers.push(peer);
+        }
+        return;
+    }
+
+    // End peers section when we hit a non-list item
+    if *in_peers_section && !trimmed.is_empty() && !trimmed.starts_with('-') && !trimmed.starts_with(' ') {
+        *in_peers_section = false;
+    }
+
+    // Parse a2a properties
+    if *in_a2a_section && !*in_peers_section {
+        if trimmed.starts_with("enabled:") {
+            agent.a2a_enabled = !trimmed.contains("false");
+            return;
+        } else if trimmed.starts_with("service_type:") {
+            agent.a2a_service_type = Some(
+                trimmed
+                    .strip_prefix("service_type:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
+            return;
+        }
+        // End a2a section when we hit a non-indented, non-a2a property
+        if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
+            && !trimmed.starts_with("enabled:") && !trimmed.starts_with("service_type:")
+            && trimmed != "peers:" && !trimmed.starts_with("discovery:")
+        {
+            *in_a2a_section = false;
+        }
+    }
+
     // Check for mcp_servers section
     if trimmed == "mcp_servers:" {
         *in_mcp_section = true;
+        *in_a2a_section = false;
+        *in_peers_section = false;
         return;
     }
 
@@ -996,6 +1080,30 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     } else {
         None
     };
+
+    // Connect to peer agents if configured
+    if config.a2a_enabled && !config.peers.is_empty() {
+        use crate::peer_manager::PeerManager;
+
+        let peer_manager = Arc::new(PeerManager::new(config.name.clone()));
+
+        if !quiet {
+            println!("Connecting to {} peer(s)...", config.peers.len());
+        }
+
+        // Give mDNS time to register before connecting to peers
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await {
+            if !quiet {
+                eprintln!("Warning: Failed to connect to some peers: {}", e);
+            }
+        }
+
+        if !quiet && peer_manager.has_peers() {
+            println!("Connected to {} peer(s)", peer_manager.peer_count());
+        }
+    }
 
     if !quiet {
         println!("Ready at {}", config.listen);

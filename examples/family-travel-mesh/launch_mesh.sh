@@ -73,7 +73,7 @@ start_agent() {
     fi
 
     cd "$dir"
-    nohup "$BINARY" agent run > "$log_file" 2>&1 &
+    nohup "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
     cd "$SCRIPT_DIR"
