@@ -1,5 +1,10 @@
 #!/bin/bash
 # Launch all 3 rovers for the Fleet Immunity demonstration
+#
+# This example demonstrates:
+# - Multi-agent coordination via A2A protocol
+# - Collective learning from crashes
+# - Policy synthesis and consensus
 
 set -e
 
@@ -14,55 +19,51 @@ echo "  ╚═══════════════════════
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ARKAVO_BIN="${SCRIPT_DIR}/../../target/debug/arkavo"
 
 cd "$SCRIPT_DIR"
 
-# Build environment simulator if needed
-if [ ! -f env-simulator/target/debug/fleet-env-simulator ]; then
-    echo "[BUILD ] Building environment simulator..."
-    (cd env-simulator && cargo build -q)
+# Check prerequisites
+if [ ! -f "$ARKAVO_BIN" ]; then
+    echo "[BUILD ] Building Arkavo..."
+    (cd ../.. && cargo build -q -p arkavo)
 fi
 
-# Build rover simulator if needed
-if [ ! -f rover-simulator/target/debug/rover-simulator ]; then
-    echo "[BUILD ] Building rover simulator..."
-    (cd rover-simulator && cargo build -q)
+# Build the MCP fleet-env crate
+if [ ! -f "mcp-fleet-env/target/debug/libarkavo_mcp_fleet_env.rlib" ]; then
+    echo "[BUILD ] Building fleet environment MCP tools..."
+    (cd mcp-fleet-env && cargo build -q)
 fi
 
-ROVER_SIM="$SCRIPT_DIR/rover-simulator/target/debug/rover-simulator"
+# Create logs directory
+mkdir -p logs rover-alpha/logs rover-beta/logs rover-gamma/logs
 
-# Start environment simulator
-echo "[ENV   ] Starting warehouse environment on port 8360..."
-./env-simulator/target/debug/fleet-env-simulator &
-ENV_PID=$!
-echo $ENV_PID > .env.pid
-sleep 2
-
-# Define peer URLs for each rover
-ALPHA_URL="http://localhost:8351"
-BETA_URL="http://localhost:8352"
-GAMMA_URL="http://localhost:8353"
-
-# Start rovers with their routes
 echo ""
-"$ROVER_SIM" --name alpha --port 8351 --route "1,2,4,3" --peers "$BETA_URL,$GAMMA_URL" &
+echo "[FLEET ] Starting rovers..."
+echo ""
+
+# Start rovers as arkavo agents
+"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-alpha/AGENTS.md" > logs/alpha.log 2>&1 &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid
+echo "[ALPHA ] Started Rover Alpha on port 8351 (PID: $ALPHA_PID)"
 
 sleep 1
 
-"$ROVER_SIM" --name beta --port 8352 --route "2,3,4,1" --peers "$ALPHA_URL,$GAMMA_URL" &
+"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-beta/AGENTS.md" > logs/beta.log 2>&1 &
 BETA_PID=$!
 echo $BETA_PID > .beta.pid
+echo "[BETA  ] Started Rover Beta on port 8352 (PID: $BETA_PID)"
 
 sleep 1
 
-"$ROVER_SIM" --name gamma --port 8353 --route "3,1,2,4" --peers "$ALPHA_URL,$BETA_URL" &
+"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-gamma/AGENTS.md" > logs/gamma.log 2>&1 &
 GAMMA_PID=$!
 echo $GAMMA_PID > .gamma.pid
+echo "[GAMMA ] Started Rover Gamma on port 8353 (PID: $GAMMA_PID)"
 
 echo ""
-echo "[FLEET ] All rovers launched. Waiting for mesh discovery..."
+echo "[FLEET ] Waiting for mesh discovery..."
 sleep 3
 
 echo ""

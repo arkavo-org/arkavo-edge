@@ -8,27 +8,23 @@ port: 8351
 
 purpose: |
   Autonomous delivery rover for warehouse logistics.
-  Navigates sectors, detects hazards, learns from crashes,
-  and shares safety lessons with the fleet.
+  Route: 1 → 2 → 4 → 3 (Alpha enters Sector 4 early - first to encounter hazards)
+
+  Behavior:
+  - Query each sector before entering using get_sector tool
+  - If hazard detected while driving FAST: report crash, synthesize safety lesson
+  - Broadcast lessons to fleet peers via A2A protocol
+  - Evaluate lessons received from peers and apply if valid
 
 ## Model Configuration
 
 model: ministral-3b
-
-## Capabilities
-
-capabilities:
-  - navigation
-  - hazard_detection
-  - policy_synthesis
-  - fleet_learning
 
 ## Rover Configuration
 
 rover:
   route: [1, 2, 4, 3]
   default_speed: fast
-  sensor_interval_ms: 100
   invariant: "NOT(traction_loss AND drive_fast)"
 
 ## A2A Protocol Configuration
@@ -37,33 +33,20 @@ a2a:
   enabled: true
   discovery:
     mdns: true
-    service_type: "_fleet._tcp.local."
+    service_type: "_a2a._tcp.local."
   peers:
-    - "rover-beta:8352"
-    - "rover-gamma:8353"
-  broadcast:
-    safety_lessons: true
-    patch_verification: true
-    quorum_threshold: 0.67
+    - "http://localhost:8352"
+    - "http://localhost:8353"
 
-## Fleet Immunity Tools
+## MCP Server
 
-mcp_tools:
-  - titan_monitor
-  - sbe_invariant
-  - policy_synthesize
-  - gossip_broadcast
-  - patch_verify
-
-## Environment
-
-environment:
-  warehouse_config: ../environment/warehouse.yaml
-  route_config: ../environment/routes.yaml
+mcp_servers:
+  - name: fleet-env
+    command: ../mcp-fleet-env/target/debug/arkavo-mcp-fleet-env
+    args: ["--sector-count", "4"]
 
 ## Logging
 
 logging:
   level: info
   file: logs/rover-alpha.log
-  format: "[{timestamp}] [{sector}] {speed} >>> {status}"

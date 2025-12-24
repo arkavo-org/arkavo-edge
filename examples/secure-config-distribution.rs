@@ -3,6 +3,22 @@
 //! This example demonstrates how to use the secure configuration transport
 //! system to distribute encrypted configuration bundles from an orchestrator
 //! to agents over the A2A protocol.
+//!
+//! ## Placeholder Values
+//!
+//! This example contains placeholder values that should be replaced in production:
+//! - `admin@example.com` - Replace with actual admin email
+//! - `sk-example-key-12345` - Replace with actual API key
+//! - `https://kas.example.com` - Replace with actual KAS (Key Access Service) URL
+//!
+//! ## Running This Example
+//!
+//! ```bash
+//! cargo run --example secure-config-distribution
+//! ```
+//!
+//! Note: This example simulates the distribution flow. In production, the agent
+//! would actually connect to the orchestrator via A2A RPC.
 
 use arkavo_config_bundle::{
     AgentRole, BundleTarget, ConfigurationBundle, Entitlement, Permission, ResourceType, Secret,
@@ -37,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "content_summarization".to_string(),
             ],
         },
-        "admin@example.com".to_string(),
+        "admin@example.com".to_string(), // EXAMPLE: Replace with actual admin email
         "production".to_string(),
     );
 
@@ -64,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "GOOGLE_API_KEY".to_string(),
         Secret {
             key: "GOOGLE_API_KEY".to_string(),
-            value: Some("sk-example-key-12345".to_string()),
+            value: Some("sk-example-key-12345".to_string()), // EXAMPLE: Replace with actual API key
             secret_type: SecretType::ApiKey,
             rotation_policy: None,
             metadata: None,
@@ -90,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. Setting up orchestrator transport server...");
 
     // Create transport server (orchestrator-side)
+    // EXAMPLE: Replace with actual KAS (Key Access Service) URL
     let server = ConfigTransportServer::new("https://kas.example.com".to_string())?;
 
     println!("   ✓ Server initialized");

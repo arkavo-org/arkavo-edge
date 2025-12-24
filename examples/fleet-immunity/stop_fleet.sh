@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stop all rovers and the environment
+# Stop all rovers
 
 cd "$(dirname "$0")"
 
@@ -14,7 +14,7 @@ if [ -f .alpha.pid ]; then
         echo "[ALPHA ] Stopping Rover Alpha (PID: $PID)..."
         kill $PID 2>/dev/null || true
     fi
-    rm .alpha.pid
+    rm -f .alpha.pid
 fi
 
 if [ -f .beta.pid ]; then
@@ -23,7 +23,7 @@ if [ -f .beta.pid ]; then
         echo "[BETA  ] Stopping Rover Beta (PID: $PID)..."
         kill $PID 2>/dev/null || true
     fi
-    rm .beta.pid
+    rm -f .beta.pid
 fi
 
 if [ -f .gamma.pid ]; then
@@ -32,17 +32,7 @@ if [ -f .gamma.pid ]; then
         echo "[GAMMA ] Stopping Rover Gamma (PID: $PID)..."
         kill $PID 2>/dev/null || true
     fi
-    rm .gamma.pid
-fi
-
-# Stop environment
-if [ -f .env.pid ]; then
-    PID=$(cat .env.pid)
-    if kill -0 $PID 2>/dev/null; then
-        echo "[ENV   ] Stopping warehouse environment (PID: $PID)..."
-        kill $PID 2>/dev/null || true
-    fi
-    rm .env.pid
+    rm -f .gamma.pid
 fi
 
 echo ""

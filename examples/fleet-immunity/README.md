@@ -4,7 +4,7 @@ This example demonstrates a self-healing artificial immune system using autonomo
 
 ## The Story
 
-Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alpha hits black ice in Sector 4, crashes, learns "slow down in Sector 4", and broadcasts this lesson via HTTP. Beta, approaching Sector 4, receives the lesson and slows down instead of crashing.
+Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alpha hits black ice in Sector 4, crashes, learns "slow down in Sector 4", and broadcasts this lesson via A2A protocol. Beta, approaching Sector 4, receives the lesson and slows down instead of crashing.
 
 ## Why This Matters
 
@@ -14,74 +14,84 @@ Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alph
 
 ## Quick Start
 
-### 1. Launch the Fleet
+### Prerequisites
 
 ```bash
+# Build Arkavo
+cargo build -p arkavo
+
+# Build the MCP fleet environment tools
+cd examples/fleet-immunity/mcp-fleet-env
+cargo build
+cd ..
+```
+
+### Run the Demo
+
+```bash
+# 1. Launch the fleet
 ./launch_fleet.sh
-```
 
-This automatically builds the simulators if needed.
+# 2. In another terminal, monitor the fleet
+./monitor_fleet.sh
 
-### 2. Inject the Hazard
-
-```bash
+# 3. In a third terminal, inject the hazard
 ./inject_hazard.sh
-```
 
-### 3. Watch the Magic
+# 4. Watch the rovers learn from Alpha's crash
 
-The rovers will:
-- Navigate through sectors at FAST speed
-- Alpha enters Sector 4, hits black ice, CRASHES
-- Alpha synthesizes lesson: `"IF Sector_4 THEN Drive_Slow"`
-- Alpha broadcasts to Beta and Gamma
-- Beta/Gamma verify and vote APPROVE
-- Beta enters Sector 4 at SLOW speed - CRASH AVOIDED!
-
-### 4. Stop the Fleet
-
-```bash
+# 5. Stop the fleet when done
 ./stop_fleet.sh
 ```
+
+See [RUNBOOK.md](RUNBOOK.md) for detailed test procedures and expected outputs.
 
 ## Directory Structure
 
 ```
 fleet-immunity/
 ├── README.md                    # This file
+├── RUNBOOK.md                   # Detailed test procedures
 ├── launch_fleet.sh              # Start all 3 rovers
 ├── stop_fleet.sh                # Stop all rovers
 ├── inject_hazard.sh             # Inject black ice hazard
 ├── monitor_fleet.sh             # Watch fleet logs
-├── env-simulator/               # Warehouse environment simulator (Rust)
+├── mcp-fleet-env/               # MCP tools for environment simulation
 │   ├── Cargo.toml
-│   └── src/main.rs
-├── rover-simulator/             # Rover behavior simulator (Rust)
-│   ├── Cargo.toml
-│   └── src/main.rs
-├── environment/
-│   ├── warehouse.yaml           # Sector definitions
-│   └── routes.yaml              # Delivery routes
+│   └── src/
+│       ├── lib.rs               # FleetEnvState, Sector, Hazard
+│       ├── get_sector.rs        # GetSectorTool
+│       └── inject_hazard.rs     # InjectHazardTool
 ├── rover-alpha/
-│   ├── AGENTS.md                # Alpha configuration
+│   ├── AGENTS.md                # Alpha agent configuration
 │   └── logs/
 ├── rover-beta/
-│   ├── AGENTS.md                # Beta configuration
+│   ├── AGENTS.md                # Beta agent configuration
 │   └── logs/
-└── rover-gamma/
-    ├── AGENTS.md                # Gamma configuration
-    └── logs/
+├── rover-gamma/
+│   ├── AGENTS.md                # Gamma agent configuration
+│   └── logs/
+└── logs/                        # Combined runtime logs
 ```
 
 ## How It Works
 
 ### The Rovers
 
-Each rover runs as a `rover-simulator` process with a specific route:
+Each rover runs as an `arkavo agent` with MCP tools for environment interaction:
 
 - **Rover Alpha**: Route 1→2→4→3 (hits Sector 4 first)
 - **Rover Beta**: Route 2→3→4→1 (approaches Sector 4 second)
 - **Rover Gamma**: Route 3→1→2→4 (approaches Sector 4 third)
+
+### MCP Tools
+
+Each rover has access to these tools via the `mcp-fleet-env` crate:
+
+| Tool | Description |
+|------|-------------|
+| `get_sector(id)` | Query sector info including hazard status |
+| `inject_hazard(sector, type, traction)` | Inject a hazard into a sector |
 
 ### The Safety Invariant
 
@@ -95,16 +105,16 @@ Translation: "It is forbidden to drive fast while sliding."
 
 1. **Pain Detection**
    - Alpha enters Sector 4 at FAST speed
-   - Environment returns hazard (black_ice, traction: 0.1)
+   - `get_sector(4)` returns hazard (black_ice, traction: 0.1)
    - Alpha detects: driving fast while sliding = CRASH
 
 2. **Synthesis**
-   - Alpha generates a safety lesson
+   - Alpha generates a safety lesson using the LLM
    - Lesson: `"IF Sector_4 THEN Drive_Slow"`
 
 3. **Propagation**
-   - Alpha broadcasts lesson to fleet via HTTP POST
-   - Beta and Gamma receive at `/lesson` endpoint
+   - Alpha broadcasts lesson to fleet via A2A protocol
+   - Beta and Gamma receive the lesson
 
 4. **Verification**
    - Beta and Gamma verify the lesson independently
@@ -118,6 +128,32 @@ Translation: "It is forbidden to drive fast while sliding."
    - Policy check: Sector 4 is in slow-down set
    - Beta enters at SLOW speed
    - Traction loss detected but no crash!
+
+## Architecture
+
+```
+┌─────────────────┐     A2A      ┌─────────────────┐
+│  Rover Alpha    │◄────────────►│  Rover Beta     │
+│  port: 8351     │              │  port: 8352     │
+│  route: 1→2→4→3 │              │  route: 2→3→4→1 │
+└────────┬────────┘              └────────┬────────┘
+         │                                │
+         │            A2A                 │
+         └───────────────┬────────────────┘
+                         │
+                         ▼
+               ┌─────────────────┐
+               │  Rover Gamma    │
+               │  port: 8353     │
+               │  route: 3→1→2→4 │
+               └─────────────────┘
+```
+
+| Component | Port | Description |
+|-----------|------|-------------|
+| **rover-alpha** | 8351 | First rover, route 1→2→4→3 |
+| **rover-beta** | 8352 | Second rover, route 2→3→4→1 |
+| **rover-gamma** | 8353 | Third rover, route 3→1→2→4 |
 
 ## Expected Output
 
@@ -164,25 +200,6 @@ Translation: "It is forbidden to drive fast while sliding."
 
 [BETA  ] [OK] CRASH AVOIDED - Learned from fleet!
 ```
-
-## Architecture
-
-| Component | Port | Description |
-|-----------|------|-------------|
-| **env-simulator** | 8360 | Warehouse environment with sectors and hazards |
-| **rover-alpha** | 8351 | First rover, route 1→2→4→3 |
-| **rover-beta** | 8352 | Second rover, route 2→3→4→1 |
-| **rover-gamma** | 8353 | Third rover, route 3→1→2→4 |
-
-### API Endpoints
-
-**Environment Simulator (port 8360)**
-- `GET /status` - Get all sectors and hazards
-- `GET /sector/:id` - Get specific sector status
-- `POST /inject` - Inject a hazard into a sector
-
-**Rover Simulator (ports 8351-8353)**
-- `POST /lesson` - Receive a safety lesson from another rover
 
 ## Video Recording Tips
 

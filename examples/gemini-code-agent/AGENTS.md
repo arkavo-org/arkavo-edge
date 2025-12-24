@@ -54,6 +54,8 @@ a2a:
       - security_scanning
 
 ## WebSocket Configuration
+# WebSocket is used for `arkavo ui` connections, not agent-to-agent communication.
+# Agents communicate via A2A protocol over HTTP.
 
 websocket:
   enabled: true
@@ -74,25 +76,28 @@ health_check:
   interval: 60
   endpoint: /health
 
-## Budget Tracking
+## Budget Tracking (Orchestrator Only)
+# NOTE: Budget tracking is implemented in arkavo-budget crate and used by the orchestrator.
+# Per-agent budget config from AGENTS.md is not yet parsed - use orchestrator-level config.
+# For standalone agents, monitor usage via Google Cloud Console.
 
-budget:
-  enabled: true
-  limits:
-    hourly: 0.50      # $0.50 per hour (Flash is cheap)
-    daily: 5.00       # $5.00 per day
-    monthly: 50.00    # $50.00 per month
+# budget:
+#   enabled: true
+#   limits:
+#     hourly: 0.50
+#     daily: 5.00
+#     monthly: 50.00
+#   alerts:
+#     warning_percent: 80
+#     critical_percent: 95
 
-  alerts:
-    warning_percent: 80
-    critical_percent: 95
+## Telemetry (Proposed - Not Yet Implemented)
+# NOTE: OpenTelemetry integration is planned but not yet implemented.
 
-## Telemetry
-
-telemetry:
-  enabled: false
-  endpoint: http://localhost:4317
-  service_name: gemini-code-agent
+# telemetry:
+#   enabled: false
+#   endpoint: http://localhost:4317
+#   service_name: gemini-code-agent
 
 ## Environment Variable Overrides
 
