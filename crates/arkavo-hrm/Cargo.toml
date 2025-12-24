@@ -46,3 +46,4 @@ file-store = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+rand = { workspace = true }
