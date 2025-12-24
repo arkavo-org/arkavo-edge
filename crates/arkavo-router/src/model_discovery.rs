@@ -182,10 +182,10 @@ fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
             let path = entry.path();
             if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some(filename) {
                 return Some(path);
-            } else if path.is_dir() {
-                if let Some(found) = find_file_in_dir(&path, filename) {
-                    return Some(found);
-                }
+            } else if path.is_dir()
+                && let Some(found) = find_file_in_dir(&path, filename)
+            {
+                return Some(found);
             }
         }
     }
