@@ -1,5 +1,6 @@
 use crate::browser::BrowserTool;
 use crate::code_review::CodeReviewTool;
+use crate::context_control::ContextRestoreTool;
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
 use crate::github::{
@@ -274,6 +275,9 @@ impl ToolRegistry {
 
         // Code review tool
         self.register("code_review", Box::new(CodeReviewTool::new()));
+        
+        // Context control tool
+        self.register("context_restore", Box::new(ContextRestoreTool::new()));
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {

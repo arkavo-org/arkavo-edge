@@ -5,6 +5,7 @@ pub enum Error {
     Compression(String),
     Model(String),
     Config(String),
+    InvalidFormat(String),
 }
 
 impl fmt::Display for Error {
@@ -13,6 +14,7 @@ impl fmt::Display for Error {
             Self::Compression(msg) => write!(f, "Compression error: {msg}"),
             Self::Model(msg) => write!(f, "Model error: {msg}"),
             Self::Config(msg) => write!(f, "Configuration error: {msg}"),
+            Self::InvalidFormat(msg) => write!(f, "Invalid format: {msg}"),
         }
     }
 }

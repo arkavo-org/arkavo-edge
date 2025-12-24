@@ -14,6 +14,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-browser = { path = "../arkavo-browser" }
 arkavo-observability = { path = "../arkavo-observability" }
+arkavo-memory = { path = "../arkavo-memory" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

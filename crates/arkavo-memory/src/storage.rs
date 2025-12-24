@@ -47,6 +47,8 @@ pub struct MemoryStorage {
 }
 
 impl MemoryStorage {
+    pub const CATEGORY_LEDGER_FRAGMENT: &'static str = "ledger_fragment";
+
     pub async fn new() -> Result<Self> {
         Self::with_config(HnswConfig::default()).await
     }
@@ -329,6 +331,39 @@ impl MemoryStorage {
     fn get_next_index(&self) -> usize {
         let id_mapping = self.id_mapping.read().unwrap();
         id_mapping.len()
+    }
+
+    pub async fn store_ledger_fragment(
+        &self,
+        id: Uuid,
+        content: String,
+        summary: String,
+        source: String,
+    ) -> Result<()> {
+        let embedding = self.embedding_service.generate_embedding(&content).await?;
+
+        // Metadata as JSON
+        let metadata = serde_json::json!({
+            "summary": summary,
+            "source": source,
+            "type": "fragment"
+        });
+
+        let memory = Memory {
+            id,
+            content,
+            metadata: Some(metadata),
+            category: Some(Self::CATEGORY_LEDGER_FRAGMENT.to_string()),
+            embedding,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        self.store(memory).await
+    }
+
+    pub async fn get_ledger_fragment(&self, id: Uuid) -> Result<Memory> {
+        self.get(id).await
     }
 
     pub async fn store(&self, memory: Memory) -> Result<()> {

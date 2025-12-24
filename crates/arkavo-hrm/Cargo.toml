@@ -12,6 +12,7 @@ arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-memory = { path = "../arkavo-memory" }
 
 # Async runtime
 async-trait = { workspace = true }

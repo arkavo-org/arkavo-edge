@@ -5,6 +5,7 @@ use crate::conductor::LoopDetector;
 use crate::error::{Error, Result};
 use crate::schemas::{GlobalTaskState, SubTask, SubTaskResult, TaskBudget, TaskStatus};
 use crate::store::TaskStore;
+use arkavo_memory::{ContextLedger, MemoryStorage};
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,6 +21,8 @@ use uuid::Uuid;
 pub struct Conductor<S: TaskStore> {
     store: Arc<S>,
     loop_detector: Arc<RwLock<LoopDetector>>,
+    /// Context ledger for offloading large context
+    context_ledger: Option<ContextLedger>,
     /// Default context strategy for new contracts
     default_context_strategy: ContextStrategy,
 }
@@ -30,6 +33,7 @@ impl<S: TaskStore> Conductor<S> {
         Self {
             store: Arc::new(store),
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
+            context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
         }
     }
@@ -39,6 +43,7 @@ impl<S: TaskStore> Conductor<S> {
         Self {
             store,
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
+            context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
         }
     }
@@ -47,6 +52,38 @@ impl<S: TaskStore> Conductor<S> {
     pub fn with_context_strategy(mut self, strategy: ContextStrategy) -> Self {
         self.default_context_strategy = strategy;
         self
+    }
+
+    /// Enable the context ledger using the provided memory storage
+    pub fn with_ledger(mut self, storage: MemoryStorage) -> Self {
+        self.context_ledger = Some(ContextLedger::new(storage));
+        self
+    }
+
+    /// Prepare context for a burst based on the strategy
+    ///
+    /// If the strategy is Ledger and a ledger is available, this will offload
+    /// the context to storage and return a semantic pointer.
+    pub async fn prepare_context_for_burst(
+        &self,
+        context: &str,
+        summary: &str,
+        strategy: &ContextStrategy,
+    ) -> Result<String> {
+        match strategy {
+            ContextStrategy::Ledger => {
+                if let Some(ledger) = &self.context_ledger {
+                    ledger
+                        .offload(context, summary, "hrm_burst_handoff")
+                        .await
+                        .map_err(|e| Error::Context(e.to_string()))
+                } else {
+                    // Fallback if ledger is not configured
+                    Ok(context.to_string())
+                }
+            }
+            _ => Ok(context.to_string()),
+        }
     }
 
     /// Create a new task

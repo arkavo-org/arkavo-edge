@@ -3,6 +3,7 @@
 pub mod browser;
 pub mod code_analysis;
 pub mod code_review;
+pub mod context_control;
 pub mod filesystem;
 pub mod git;
 pub mod github;
