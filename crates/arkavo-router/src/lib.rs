@@ -689,9 +689,10 @@ impl Router {
                 "unsloth/gemma-3-270m-it-GGUF",
                 "gemma-3-270m-it-Q4_0.gguf",
             ),
-            ModelChoice::LocalGemma4B => {
-                model_discovery::is_model_cached("unsloth/gemma-3-4b-it-GGUF", "gemma-3-4b-it-Q4_0.gguf")
-            }
+            ModelChoice::LocalGemma4B => model_discovery::is_model_cached(
+                "unsloth/gemma-3-4b-it-GGUF",
+                "gemma-3-4b-it-Q4_0.gguf",
+            ),
             ModelChoice::LocalGemma12B => model_discovery::is_model_cached(
                 "unsloth/gemma-3-12b-it-GGUF",
                 "gemma-3-12b-it-Q4_0.gguf",

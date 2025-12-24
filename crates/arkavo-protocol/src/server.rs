@@ -18,12 +18,7 @@ use crate::types::{
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
-use arkavo_hrm::{
-    Conductor,
-    burst::BurstResult,
-    schemas::TaskBudget,
-    store::InMemoryTaskStore,
-};
+use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, LlmConfig, StreamLlmModel};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -587,8 +582,9 @@ impl A2aRpcServer for A2aRpcImpl {
                                 };
 
                                 // Complete the task
-                                if let Err(e) =
-                                    task_executor.complete_task(&task_id_clone, result_message).await
+                                if let Err(e) = task_executor
+                                    .complete_task(&task_id_clone, result_message)
+                                    .await
                                 {
                                     warn!("Failed to complete task {}: {}", task_id_clone, e);
                                 } else {
@@ -603,7 +599,8 @@ impl A2aRpcServer for A2aRpcImpl {
                                     details: None,
                                 };
 
-                                if let Ok(Some(mut task)) = task_store.get_task(&task_id_clone).await
+                                if let Ok(Some(mut task)) =
+                                    task_store.get_task(&task_id_clone).await
                                 {
                                     task.error = Some(error);
                                     let _ = task_store.create_task(task).await;
@@ -2249,10 +2246,7 @@ async fn execute_with_conductor(
                 }
                 Err(e) => {
                     warn!("Tool {} failed: {}", tool_call.tool_name, e);
-                    tool_results.push(format!(
-                        "## Tool: {} (Error)\n{}",
-                        tool_call.tool_name, e
-                    ));
+                    tool_results.push(format!("## Tool: {} (Error)\n{}", tool_call.tool_name, e));
                 }
             }
         }
@@ -2264,10 +2258,8 @@ async fn execute_with_conductor(
     }
 
     // 7. Record result in Conductor
-    let burst_result = BurstResult::success(
-        contract.id,
-        serde_json::json!({ "content": final_result }),
-    );
+    let burst_result =
+        BurstResult::success(contract.id, serde_json::json!({ "content": final_result }));
     conductor
         .record_result(hrm_task.id, subtask.id, burst_result)
         .await
@@ -2296,9 +2288,9 @@ impl McpBridgeTool {
                 name: tool.name,
                 aliases: None,
                 description: tool.description,
-                parameters: tool.input_schema.unwrap_or_else(|| {
-                    serde_json::json!({"type": "object", "properties": {}})
-                }),
+                parameters: tool
+                    .input_schema
+                    .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
             },
         }
     }
@@ -2310,7 +2302,10 @@ impl arkavo_mcp_tools::server::Tool for McpBridgeTool {
         &self.schema
     }
 
-    async fn execute(&self, params: serde_json::Value) -> arkavo_mcp_tools::Result<serde_json::Value> {
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+    ) -> arkavo_mcp_tools::Result<serde_json::Value> {
         self.registry
             .call_tool(&self.schema.name, params, "hrm-conductor")
             .await

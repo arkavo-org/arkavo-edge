@@ -656,7 +656,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 in_mcp_section = false;
 
                 // Extract name from header
-                let header_prefix = if trimmed.starts_with("## ") { "## " } else { "# " };
+                let header_prefix = if trimmed.starts_with("## ") {
+                    "## "
+                } else {
+                    "# "
+                };
                 let header_text = trimmed.strip_prefix(header_prefix).unwrap_or("").trim();
 
                 // Use a default name that will be overridden by explicit name: field

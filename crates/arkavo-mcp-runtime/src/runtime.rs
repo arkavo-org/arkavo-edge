@@ -95,9 +95,7 @@ impl McpRuntime {
         }
 
         let (client_state, tools) = match config.transport {
-            McpTransportConfig::Stdio { command, args } => {
-                Self::connect_stdio(&command, &args)?
-            }
+            McpTransportConfig::Stdio { command, args } => Self::connect_stdio(&command, &args)?,
             McpTransportConfig::Http { url } => self.connect_http(&url).await?,
         };
 
@@ -179,7 +177,11 @@ impl McpRuntime {
             params: Some(json!({})),
         };
 
-        writeln!(&mut stdin, "{}", serde_json::to_string(&list_tools_request)?)?;
+        writeln!(
+            &mut stdin,
+            "{}",
+            serde_json::to_string(&list_tools_request)?
+        )?;
         stdin.flush()?;
 
         let mut tools_line = String::new();
@@ -340,9 +342,7 @@ impl McpRuntime {
             .ok_or_else(|| format!("Server '{server}' not found"))?;
 
         match client {
-            McpClientState::Stdio(stdio_client) => {
-                Self::call_stdio_tool(stdio_client, tool, args)
-            }
+            McpClientState::Stdio(stdio_client) => Self::call_stdio_tool(stdio_client, tool, args),
             McpClientState::Http(http_client) => {
                 Self::call_http_tool(http_client, tool, args).await
             }
