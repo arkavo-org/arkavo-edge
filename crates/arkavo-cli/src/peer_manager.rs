@@ -49,25 +49,17 @@ pub struct PeerManager {
     config: PeerManagerConfig,
 }
 
-enum Transport {
-    Http(HttpTransport),
-    WebSocket(WebSocketTransport),
-}
-
-impl Transport {
-    fn as_trait(&self) -> &dyn A2aTransport {
-        match self {
-            Transport::Http(t) => t,
-            Transport::WebSocket(t) => t,
-        }
-    }
-}
-
 struct PeerConnection {
     url: String,
-    http_transport: Option<HttpTransport>,
-    ws_transport: Option<Arc<RwLock<WebSocketTransport>>>,
+    http_transport: Option<Arc<HttpTransport>>,
+    ws_transport: Option<Arc<WebSocketTransport>>,
     transport_type: TransportType,
+}
+
+/// Helper enum for transport references to avoid holding locks across await
+enum TransportRef {
+    Http(Arc<HttpTransport>),
+    WebSocket(Arc<WebSocketTransport>),
 }
 
 impl PeerManager {
@@ -88,10 +80,7 @@ impl PeerManager {
     /// Determine if a method requires streaming/WebSocket transport
     fn is_streaming_method(method: &str) -> bool {
         // Methods that require WebSocket for streaming
-        method.ends_with("_stream")
-            || method == "chat_stream"
-            || method == "message/stream"
-            || method.contains("/stream")
+        method.ends_with("_stream") || method.contains("/stream")
     }
 
     /// Determine the appropriate transport type for a method
@@ -168,7 +157,7 @@ impl PeerManager {
                     url.to_string(),
                     PeerConnection {
                         url: normalized_url,
-                        http_transport: Some(transport),
+                        http_transport: Some(Arc::new(transport)),
                         ws_transport: None,
                         transport_type: TransportType::Http,
                     },
@@ -191,7 +180,7 @@ impl PeerManager {
                     PeerConnection {
                         url: normalized_url,
                         http_transport: None,
-                        ws_transport: Some(Arc::new(RwLock::new(transport))),
+                        ws_transport: Some(Arc::new(transport)),
                         transport_type: TransportType::WebSocket,
                     },
                 );
@@ -238,7 +227,6 @@ impl PeerManager {
     }
 
     /// Broadcast a message to all connected peers
-    #[allow(dead_code)]
     pub async fn broadcast(&self, method: &str, params: Value) -> Vec<Result<A2aResponse, String>> {
         let mut results = Vec::new();
 
@@ -261,23 +249,27 @@ impl PeerManager {
             }
 
             let request = A2aRequest::new(method, params.clone());
-            let result = {
+
+            // Get Arc reference outside the lock to avoid holding lock across await
+            let transport_ref = {
                 let peers = self.peers.read().unwrap();
                 if let Some(peer) = peers.get(&peer_url) {
-                    match &peer.http_transport {
-                        Some(transport) => transport.send_request(request).await,
-                        None => {
-                            if let Some(ws_transport) = &peer.ws_transport {
-                                let transport = ws_transport.read().unwrap();
-                                transport.send_request(request).await
-                            } else {
-                                Err(anyhow::anyhow!("No transport available"))
-                            }
-                        }
+                    if let Some(http) = &peer.http_transport {
+                        Some(TransportRef::Http(Arc::clone(http)))
+                    } else if let Some(ws) = &peer.ws_transport {
+                        Some(TransportRef::WebSocket(Arc::clone(ws)))
+                    } else {
+                        None
                     }
                 } else {
-                    Err(anyhow::anyhow!("Peer not found"))
+                    None
                 }
+            };
+
+            let result = match transport_ref {
+                Some(TransportRef::Http(http)) => http.send_request(request).await,
+                Some(TransportRef::WebSocket(ws)) => ws.send_request(request).await,
+                None => Err(anyhow::anyhow!("No transport available")),
             };
 
             match result {
@@ -290,7 +282,6 @@ impl PeerManager {
     }
 
     /// Send a request to a specific peer
-    #[allow(dead_code)]
     pub async fn send_to(
         &self,
         peer_url: &str,
@@ -305,35 +296,37 @@ impl PeerManager {
 
         let request = A2aRequest::new(method, params);
 
-        let peers = self.peers.read().unwrap();
-        let peer = peers
-            .get(peer_url)
-            .ok_or_else(|| format!("Peer not found: {}", peer_url))?;
+        // Get Arc reference outside the lock to avoid holding lock across await
+        let transport_ref = {
+            let peers = self.peers.read().unwrap();
+            let peer = peers
+                .get(peer_url)
+                .ok_or_else(|| format!("Peer not found: {}", peer_url))?;
 
-        let response = match &peer.http_transport {
-            Some(transport) => transport.send_request(request).await?,
-            None => {
-                if let Some(ws_transport) = &peer.ws_transport {
-                    let transport = ws_transport.read().unwrap();
-                    transport.send_request(request).await?
-                } else {
-                    return Err("No transport available".into());
-                }
+            if let Some(http) = &peer.http_transport {
+                Ok(TransportRef::Http(Arc::clone(http)))
+            } else if let Some(ws) = &peer.ws_transport {
+                Ok(TransportRef::WebSocket(Arc::clone(ws)))
+            } else {
+                Err("No transport available")
             }
+        }?;
+
+        let response = match transport_ref {
+            TransportRef::Http(http) => http.send_request(request).await?,
+            TransportRef::WebSocket(ws) => ws.send_request(request).await?,
         };
 
         Ok(response)
     }
 
     /// Get list of connected peer URLs
-    #[allow(dead_code)]
     pub fn connected_peers(&self) -> Vec<String> {
         let peers = self.peers.read().unwrap();
         peers.values().map(|p| p.url.clone()).collect()
     }
 
     /// Get list of peers with their transport types
-    #[allow(dead_code)]
     pub fn connected_peers_with_transport(&self) -> Vec<(String, TransportType)> {
         let peers = self.peers.read().unwrap();
         peers
@@ -355,7 +348,6 @@ impl PeerManager {
     }
 
     /// Get the transport type for a specific peer
-    #[allow(dead_code)]
     pub fn get_peer_transport_type(&self, peer_url: &str) -> Option<TransportType> {
         let peers = self.peers.read().unwrap();
         peers.get(peer_url).map(|p| p.transport_type)
