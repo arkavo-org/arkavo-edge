@@ -2,7 +2,7 @@
 
 ## architecture-agent
 purpose: Design system architecture and scalability patterns
-model:   ollama://10.0.0.101:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8351
 
 # The architecture agent specializes in:

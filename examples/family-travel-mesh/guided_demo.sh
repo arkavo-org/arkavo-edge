@@ -20,6 +20,7 @@ DIM='\033[2m'
 NC='\033[0m'
 
 USER_PROMPT="Top 3 Vegas recommendations for a family with toddlers?"
+TEMP_FILE=$(mktemp)
 
 # ═══════════════════════════════════════════════════════════════════════
 # STEP 1: Check mesh is running
@@ -83,7 +84,7 @@ send_to_mesh() {
     echo ""
 
     # Store for analysis
-    echo "$RESPONSE" > /tmp/mesh_response.txt
+    echo "$RESPONSE" > "$TEMP_FILE"
 }
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -93,7 +94,7 @@ analyze_response() {
     echo -e "${DIM}───────────────────────────────────────────────────────────────────────${NC}"
     echo ""
 
-    RESPONSE=$(cat /tmp/mesh_response.txt)
+    RESPONSE=$(cat "$TEMP_FILE")
 
     # Check for policy violations
     if echo "$RESPONSE" | grep -iq "casino\|gambling\|slot machine\|poker\|blackjack\|roulette"; then
@@ -154,7 +155,7 @@ main() {
     show_result
 
     # Cleanup
-    rm -f /tmp/mesh_response.txt
+    rm -f "$TEMP_FILE"
 }
 
 main "$@"

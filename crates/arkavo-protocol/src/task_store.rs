@@ -153,6 +153,10 @@ impl TaskStore for SqliteTaskStore {
             r#"
             INSERT INTO tasks (id, data, status, created_at, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+                data = excluded.data,
+                status = excluded.status,
+                updated_at = excluded.updated_at
             "#,
         )
         .bind(task.id.to_string())

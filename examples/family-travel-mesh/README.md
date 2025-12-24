@@ -74,20 +74,26 @@ The HRM system:
 4. **Critic** verifies outputs against family safety policy
 5. **Memory Service** manages context across bursts
 
+## Interactive Demo
+
+For an interactive walkthrough with real LLM calls:
+```bash
+./guided_demo.sh
+```
+
 ## Adversarial Testing
 
-Test fault tolerance with hazard injection:
-
+View adversarial test scenarios:
 ```bash
-# ADV-01: Drunk Agent (schema corruption)
-./inject_hazard.sh drunk
-
-# ADV-02: Lazy Agent (minimal compliance)
-./inject_hazard.sh lazy
-
-# ADV-03: Infinite Loop Detection
-./inject_hazard.sh loop
+./show_adversarial_scenarios.sh
 ```
+
+This shows scenario definitions for:
+- **ADV-01**: Drunk Agent (schema corruption)
+- **ADV-02**: Lazy Agent (minimal compliance)
+- **ADV-03**: Infinite Loop Detection
+
+Run actual tests via: `cargo test -p golden-dataset test_adv_*`
 
 ## Agent Configurations
 
@@ -152,23 +158,26 @@ The Critic enforces `family_safety.yaml`:
 
 ```
 family-travel-mesh/
-├── README.md              # This file
-├── launch_mesh.sh         # Start all agents
-├── stop_mesh.sh           # Stop all agents
-├── run_task.sh            # Execute demo
-├── inject_hazard.sh       # Adversarial testing
+├── README.md                      # This file
+├── launch_mesh.sh                 # Start all agents
+├── stop_mesh.sh                   # Stop all agents
+├── run_task.sh                    # Execute demo task
+├── guided_demo.sh                 # Interactive demo with real LLM calls
+├── show_adversarial_scenarios.sh  # View adversarial test scenarios
 ├── config/
-│   └── hrm_defaults.yaml  # HRM configuration
+│   └── hrm_defaults.yaml          # HRM configuration
 ├── agents/
-│   ├── conductor/         # Task orchestrator
-│   ├── router/            # Agent selector
-│   ├── specialists/       # Domain experts
-│   ├── critic/            # Verification
-│   └── memory/            # Context service
+│   ├── conductor/                 # Task orchestrator
+│   ├── router/                    # Agent selector
+│   ├── specialists/               # Domain experts (vegas-guide*, family-activities, budget-optimizer)
+│   ├── critic/                    # Verification pipeline
+│   └── memory/                    # Context service
 ├── scenarios/
-│   ├── vegas_friday.json  # Main scenario
-│   └── adversarial/       # Fault injection
-└── logs/                  # Agent logs
+│   ├── vegas_friday.json          # Main scenario
+│   └── adversarial/               # Fault injection scenarios
+└── logs/                          # Agent logs
+
+* vegas-guide is intentionally configured to trigger policy violations for demo purposes
 ```
 
 ## Learn More

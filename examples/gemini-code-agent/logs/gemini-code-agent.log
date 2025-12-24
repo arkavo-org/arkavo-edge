@@ -1,5 +1,0 @@
-Error: AGENTS.md not found. Please create an agent configuration first with:
-  arkavo agent init <name>
-
-Or specify a configuration file:
-  arkavo agent run path/to/config.md

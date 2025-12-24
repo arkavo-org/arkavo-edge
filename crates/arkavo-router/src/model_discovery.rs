@@ -148,6 +148,50 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
+/// Check if a specific model exists in the HuggingFace cache (no download, no fallback)
+///
+/// Returns true if the model file is already cached, false otherwise.
+/// Used by upgrade_model to only upgrade to models that are available.
+pub fn is_model_cached(repo_id: &str, filename: &str) -> bool {
+    let Some(cache) = get_hf_cache_dir() else {
+        return false;
+    };
+
+    // Convert repo_id to cache directory format: "org/model" -> "models--org--model"
+    let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
+    let repo_cache_path = cache.join(&repo_cache_name);
+
+    if !repo_cache_path.exists() {
+        return false;
+    }
+
+    // Check snapshots directory for the specific file
+    let snapshots_dir = repo_cache_path.join("snapshots");
+    if !snapshots_dir.exists() {
+        return false;
+    }
+
+    // Search for the exact filename
+    find_file_in_dir(&snapshots_dir, filename).is_some()
+}
+
+/// Find a specific file in a directory tree
+fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some(filename) {
+                return Some(path);
+            } else if path.is_dir()
+                && let Some(found) = find_file_in_dir(&path, filename)
+            {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 /// Scan entire HuggingFace cache for any .gguf file
 ///
 /// This is the ultimate fallback when no specific model is found.

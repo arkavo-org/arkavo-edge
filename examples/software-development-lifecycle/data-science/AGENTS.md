@@ -2,7 +2,7 @@
 
 ## data-science-agent
 purpose: Suggest ML models and analyze data patterns
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8352
 
 # The data science agent specializes in:

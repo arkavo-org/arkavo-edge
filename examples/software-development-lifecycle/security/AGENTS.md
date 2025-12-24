@@ -2,7 +2,7 @@
 
 ## security-agent
 purpose: Analyze code for security vulnerabilities and suggest best practices
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8343
 
 # The security agent specializes in:

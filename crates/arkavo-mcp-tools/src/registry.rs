@@ -107,6 +107,8 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Create a new registry with all built-in tools registered.
+    /// Use `empty()` for small models that need progressive tool discovery.
     pub fn new() -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
@@ -114,6 +116,15 @@ impl ToolRegistry {
 
         registry.register_all();
         registry
+    }
+
+    /// Create an empty registry without built-in tools.
+    /// Use this for small models (3B) where progressive tool discovery is essential.
+    /// Only MCP tools from the agent's config will be projected into this registry.
+    pub fn empty() -> Self {
+        Self {
+            tools: HashMap::new(),
+        }
     }
 
     /// Create a ToolRegistry from an MCP connection

@@ -522,16 +522,19 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             if trimmed.starts_with("## ") {
                 let section_name = trimmed.strip_prefix("## ").unwrap_or("").to_string();
 
-                // Check if this is an agent definition (not a standard section like "Agent Identity")
-                if !matches!(
-                    section_name.as_str(),
-                    "Agent Identity"
-                        | "Runtime Configuration"
-                        | "Runtime Configuration (example)"
-                        | "Capabilities"
-                        | "Tool Requirements"
-                        | "MCP Servers"
-                ) {
+                // Check if this is an agent definition (not a standard section)
+                let is_standard_section = section_name.starts_with("Agent Identity")
+                    || section_name.starts_with("Runtime Configuration")
+                    || section_name.starts_with("Capabilities")
+                    || section_name.starts_with("Tool Requirements")
+                    || section_name.starts_with("MCP Server")
+                    || section_name.starts_with("Purpose")
+                    || section_name.starts_with("Model Configuration")
+                    || section_name.starts_with("Rover Configuration")
+                    || section_name.starts_with("A2A Protocol")
+                    || section_name.starts_with("Logging");
+
+                if !is_standard_section {
                     // Save any pending MCP server before switching agents
                     if let (Some(server), Some(agent)) =
                         (current_mcp_server.take(), current_agent.as_mut())
@@ -613,8 +616,30 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             }
         } else {
             // Handle old YAML-style format
-            // Check for agent section header
-            if trimmed.starts_with("## ") {
+            // Check for single # header (creates new agent)
+            let is_top_level_header = trimmed.starts_with("# ") && !trimmed.starts_with("## ");
+
+            // Check for ## header that's not a standard section
+            let is_new_agent_section = if trimmed.starts_with("## ") {
+                let section_name = trimmed.strip_prefix("## ").unwrap_or("").trim();
+                // Standard sections don't create new agents
+                !section_name.starts_with("Agent Identity")
+                    && !section_name.starts_with("Runtime Configuration")
+                    && !section_name.starts_with("Capabilities")
+                    && !section_name.starts_with("Tool Requirements")
+                    && !section_name.starts_with("MCP Server")
+                    && !section_name.starts_with("Purpose")
+                    && !section_name.starts_with("Model Configuration")
+                    && !section_name.starts_with("Rover Configuration")
+                    && !section_name.starts_with("A2A Protocol")
+                    && !section_name.starts_with("Logging")
+            } else {
+                false
+            };
+
+            let is_agent_header = is_top_level_header || is_new_agent_section;
+
+            if is_agent_header {
                 // Save any pending MCP server before switching agents
                 if let (Some(server), Some(agent)) =
                     (current_mcp_server.take(), current_agent.as_mut())
@@ -630,12 +655,29 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 // Reset MCP section flag
                 in_mcp_section = false;
 
-                let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
+                // Extract name from header
+                let header_prefix = if trimmed.starts_with("## ") {
+                    "## "
+                } else {
+                    "# "
+                };
+                let header_text = trimmed.strip_prefix(header_prefix).unwrap_or("").trim();
+
+                // Use a default name that will be overridden by explicit name: field
+                let name = header_text.to_string();
+
+                // Get a random port for this agent
+                let port = std::net::TcpListener::bind("127.0.0.1:0")
+                    .ok()
+                    .and_then(|listener| listener.local_addr().ok())
+                    .map(|addr| addr.port())
+                    .unwrap_or(8342);
+
                 current_agent = Some(AgentConfig {
                     name,
                     purpose: String::new(),
                     model: String::new(),
-                    listen: String::new(),
+                    listen: format!("0.0.0.0:{port}"),
                     mdns_enabled: true, // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -849,7 +891,14 @@ fn parse_yaml_properties(
 
     // Parse agent properties (when not in MCP section)
     if !*in_mcp_section {
-        if trimmed.starts_with("purpose:") {
+        if trimmed.starts_with("name:") && !trimmed.starts_with("name: |") {
+            agent.name = trimmed
+                .strip_prefix("name:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+        } else if trimmed.starts_with("purpose:") {
             agent.purpose = trimmed
                 .strip_prefix("purpose:")
                 .unwrap_or("")
@@ -937,20 +986,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
 
-    // Initialize MCP connections
+    // Initialize MCP connections from agent config only.
+    // Built-in tools are not registered - agents use only their configured MCP servers.
+    // This enables small models (ministral-3b) to work with focused tool sets.
     let mcp_registry = server.mcp_registry();
-
-    // Register built-in MCP tools first
-    {
-        use crate::builtin_mcp::BuiltinMcpConnection;
-        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
-        let builtin_connection = BuiltinMcpConnection::new_with_test_tools().await;
-        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
-        let builtin_connection = BuiltinMcpConnection::new_with_test_tools();
-        mcp_registry
-            .register("arkavo".to_string(), Box::new(builtin_connection))
-            .await;
-    }
 
     let debug_mode = std::env::var("ARKAVO_DEBUG").is_ok();
     let quiet = config.quiet;
@@ -1024,6 +1063,12 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                 }
             }
         }
+    }
+
+    // Router is initialized by A2aServer when set_agent_metadata() is called with an empty model.
+    // The Conductor is directly integrated in A2aRpcImpl for task execution.
+    if debug_mode {
+        println!("HRM Conductor integrated for A2A task execution");
     }
 
     let handle = server.start().await?;

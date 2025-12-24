@@ -75,6 +75,9 @@ arkavo-events = { path = "../arkavo-events" }
 # Crypto for registration
 arkavo-crypto = { path = "../arkavo-crypto" }
 
+# HRM for task orchestration
+arkavo-hrm = { path = "../arkavo-hrm" }
+
 # Additional utilities for registration
 rand = { workspace = true }
 base64 = { workspace = true }

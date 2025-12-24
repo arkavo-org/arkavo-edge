@@ -8,7 +8,6 @@ description = "HRM-Style Orchestration for bounded AI agent execution"
 
 [dependencies]
 # Core arkavo crates
-arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-mcp = { path = "../arkavo-mcp" }

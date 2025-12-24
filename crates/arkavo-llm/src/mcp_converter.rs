@@ -65,12 +65,20 @@ impl McpConverter {
     }
 
     /// Make JSON Schema compatible with Gemini API
-    /// Gemini doesn't support "const", so convert to "enum" with single value
+    /// - Gemini doesn't support "const", so convert to "enum" with single value
+    /// - Strip out non-JSON-Schema fields that may leak from MCP ToolSchema
     fn make_gemini_compatible(schema: &Value) -> Value {
+        // Invalid fields that may leak from MCP ToolSchema into parameters
+        const INVALID_FIELDS: &[&str] = &["name", "aliases", "parameters", "category"];
+
         match schema {
             Value::Object(map) => {
                 let mut new_map = serde_json::Map::new();
                 for (key, value) in map {
+                    // Skip fields that are not valid JSON Schema
+                    if INVALID_FIELDS.contains(&key.as_str()) {
+                        continue;
+                    }
                     if key == "const" {
                         // Replace const with enum containing single value
                         new_map.insert("enum".to_string(), json!([value]));

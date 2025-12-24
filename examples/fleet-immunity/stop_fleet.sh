@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stop all rovers and the environment
+# Stop all rovers and fleet environment server
 
 cd "$(dirname "$0")"
 
@@ -8,41 +8,27 @@ echo "[FLEET ] Stopping Fleet Immunity demonstration..."
 echo ""
 
 # Stop rovers
-if [ -f .alpha.pid ]; then
-    PID=$(cat .alpha.pid)
-    if kill -0 $PID 2>/dev/null; then
-        echo "[ALPHA ] Stopping Rover Alpha (PID: $PID)..."
-        kill $PID 2>/dev/null || true
+for name in alpha beta gamma; do
+    pidfile=".${name}.pid"
+    if [ -f "$pidfile" ]; then
+        PID=$(cat "$pidfile")
+        NAME=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+        if kill -0 $PID 2>/dev/null; then
+            printf "[%-6s] Stopping Rover %s (PID: %s)...\n" "$NAME" "$NAME" "$PID"
+            kill $PID 2>/dev/null || true
+        fi
+        rm -f "$pidfile"
     fi
-    rm .alpha.pid
-fi
+done
 
-if [ -f .beta.pid ]; then
-    PID=$(cat .beta.pid)
+# Stop fleet environment server
+if [ -f .fleet-env.pid ]; then
+    PID=$(cat .fleet-env.pid)
     if kill -0 $PID 2>/dev/null; then
-        echo "[BETA  ] Stopping Rover Beta (PID: $PID)..."
+        echo "[ENV   ] Stopping Fleet Environment server (PID: $PID)..."
         kill $PID 2>/dev/null || true
     fi
-    rm .beta.pid
-fi
-
-if [ -f .gamma.pid ]; then
-    PID=$(cat .gamma.pid)
-    if kill -0 $PID 2>/dev/null; then
-        echo "[GAMMA ] Stopping Rover Gamma (PID: $PID)..."
-        kill $PID 2>/dev/null || true
-    fi
-    rm .gamma.pid
-fi
-
-# Stop environment
-if [ -f .env.pid ]; then
-    PID=$(cat .env.pid)
-    if kill -0 $PID 2>/dev/null; then
-        echo "[ENV   ] Stopping warehouse environment (PID: $PID)..."
-        kill $PID 2>/dev/null || true
-    fi
-    rm .env.pid
+    rm -f .fleet-env.pid
 fi
 
 echo ""

@@ -62,9 +62,13 @@ The orchestrator needs these tools to coordinate the mesh:
 ```yaml
 mcp_servers:
   - name: mesh
-    command: arkavo-mesh-tools
+    # Use relative path from examples/orchestrator-agent/ to target/debug/
+    # Or add target/debug to PATH before running
+    command: ../../target/debug/arkavo-mesh-tools
     args: []
 ```
+
+**Note:** Ensure the binary is built (`cargo build -p arkavo-mesh-tools`) or add `target/debug` to your PATH.
 
 ## Agent Configuration
 
