@@ -6,8 +6,8 @@ This directory contains example configurations demonstrating Arkavo's agent capa
 
 | Example | Description | Complexity |
 |---------|-------------|------------|
-| [claude-code-agent](claude-code-agent/) | AI coding assistant with Claude | Single agent |
-| [gemini-code-agent](gemini-code-agent/) | AI coding assistant with Gemini | Single agent |
+| [code-agent-claude](code-agent-claude/) | AI coding assistant with Claude | Single agent |
+| [code-agent-gemini](code-agent-gemini/) | AI coding assistant with Gemini | Single agent |
 | [orchestrator-agent](orchestrator-agent/) | Central task router for agent mesh | Single agent |
 | [fleet-immunity](fleet-immunity/) | Multi-rover learning through adversity | Multi-agent mesh |
 | [family-travel-mesh](family-travel-mesh/) | HRM-style hierarchical orchestration | Multi-agent mesh |
@@ -18,8 +18,8 @@ This directory contains example configurations demonstrating Arkavo's agent capa
 
 ### Single Agent Examples
 Demonstrate individual agent capabilities with specific LLM backends:
-- `claude-code-agent` - Uses Anthropic Claude API
-- `gemini-code-agent` - Uses Google Gemini API
+- `code-agent-claude` - Uses Anthropic Claude API
+- `code-agent-gemini` - Uses Google Gemini API
 - `orchestrator-agent` - Central coordinator (works with any LLM)
 
 ### Multi-Agent Mesh Examples
@@ -77,8 +77,8 @@ cd examples/<example-name>
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | Required for claude-code-agent |
-| `GEMINI_API_KEY` | Required for gemini-code-agent |
+| `ANTHROPIC_API_KEY` | Required for code-agent-claude |
+| `GEMINI_API_KEY` | Required for code-agent-gemini |
 | `RUST_LOG` | Debug logging (e.g., `RUST_LOG=debug`) |
 
 ## Agent Discovery
