@@ -3,10 +3,10 @@
 //! Manages connections to peer agents for agent-to-agent communication.
 
 use arkavo_protocol::http::HttpTransport;
-use arkavo_protocol::websocket::WebSocketTransport;
 use arkavo_protocol::transport::{
     A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig,
 };
+use arkavo_protocol::websocket::WebSocketTransport;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -88,7 +88,7 @@ impl PeerManager {
     /// Determine if a method requires streaming/WebSocket transport
     fn is_streaming_method(method: &str) -> bool {
         // Methods that require WebSocket for streaming
-        method.ends_with("_stream") 
+        method.ends_with("_stream")
             || method == "chat_stream"
             || method == "message/stream"
             || method.contains("/stream")
