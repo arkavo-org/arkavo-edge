@@ -13,6 +13,7 @@ This directory contains example configurations demonstrating Arkavo's agent capa
 | [family-travel-mesh](family-travel-mesh/) | HRM-style hierarchical orchestration | Multi-agent mesh |
 | [software-development-lifecycle](software-development-lifecycle/) | 12-agent SDLC collaboration | Multi-agent mesh |
 | [software-development-simple](software-development-simple/) | Simplified 3-agent development team | Multi-agent mesh |
+| [minecraft](minecraft/) | Minecraft bot controlled via MCP | Single agent + MCP |
 
 ## Example Categories
 
@@ -21,6 +22,7 @@ Demonstrate individual agent capabilities with specific LLM backends:
 - `code-agent-claude` - Uses Anthropic Claude API
 - `code-agent-gemini` - Uses Google Gemini API
 - `orchestrator-agent` - Central coordinator (works with any LLM)
+- `minecraft` - Game bot controlled via MCP tools
 
 ### Multi-Agent Mesh Examples
 Demonstrate agent-to-agent collaboration:
