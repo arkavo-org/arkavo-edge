@@ -2,8 +2,7 @@
 //!
 //! Queries sector information including current hazard status.
 
-use crate::FleetEnvState;
-use arkavo_mcp::{Tool, ToolSchema};
+use crate::{FleetEnvState, Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -84,7 +83,7 @@ mod tests {
 
         let result = tool.execute(json!({"id": 1})).await.unwrap();
         assert_eq!(result["id"], 1);
-        assert_eq!(result["name"], "Sector 1");
+        assert_eq!(result["name"], "Loading Dock");
         assert!(result["hazard"].is_null());
     }
 

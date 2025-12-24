@@ -18,6 +18,12 @@ use crate::types::{
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
+use arkavo_hrm::{
+    Conductor,
+    burst::BurstResult,
+    schemas::TaskBudget,
+    store::InMemoryTaskStore,
+};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, LlmConfig, StreamLlmModel};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -181,6 +187,10 @@ pub struct A2aRpcImpl {
     event_sequence: Arc<tokio::sync::RwLock<u64>>,
     auth_backend: Arc<dyn AuthBackend>,
     registration_service: Arc<crate::registration::RegistrationService>,
+    /// HRM Conductor for task orchestration
+    conductor: Arc<Conductor<InMemoryTaskStore>>,
+    /// Router for LLM calls during HRM task execution
+    router: Option<Arc<arkavo_router::Router>>,
 }
 
 #[derive(Default, Clone)]
@@ -522,9 +532,96 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
+        // Extract task content from message parts
+        let task_content: String = request
+            .message
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                crate::types::MessagePart::Text { content } => Some(content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
         // Submit the task using our task executor
         match self.task_executor.submit_task(request.message).await {
             Ok(task_id) => {
+                // If we have a router, spawn async execution via HRM Conductor
+                if let Some(ref router) = self.router {
+                    let router = router.clone();
+                    let conductor = self.conductor.clone();
+                    let mcp_registry = self.mcp_registry.clone();
+                    let task_executor = self.task_executor.clone();
+                    let task_store = self.task_store.clone();
+                    let task_id_clone = task_id;
+
+                    tokio::spawn(async move {
+                        // Transition to Working
+                        if let Err(e) = task_executor
+                            .update_task_status(&task_id_clone, TaskStatus::Working)
+                            .await
+                        {
+                            warn!("Failed to update task {} to Working: {}", task_id_clone, e);
+                            return;
+                        }
+
+                        info!("Executing task {} via HRM Conductor", task_id_clone);
+
+                        // Execute using Conductor
+                        match execute_with_conductor(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            task_content,
+                        )
+                        .await
+                        {
+                            Ok(result_content) => {
+                                // Create result message
+                                let result_message = Message {
+                                    parts: vec![crate::types::MessagePart::Text {
+                                        content: result_content,
+                                    }],
+                                    metadata: None,
+                                };
+
+                                // Complete the task
+                                if let Err(e) =
+                                    task_executor.complete_task(&task_id_clone, result_message).await
+                                {
+                                    warn!("Failed to complete task {}: {}", task_id_clone, e);
+                                } else {
+                                    info!("Task {} completed successfully via HRM", task_id_clone);
+                                }
+                            }
+                            Err(error_msg) => {
+                                // Store error and fail the task
+                                let error = crate::types::TaskError {
+                                    code: "HRM_EXECUTION_ERROR".to_string(),
+                                    message: error_msg.clone(),
+                                    details: None,
+                                };
+
+                                if let Ok(Some(mut task)) = task_store.get_task(&task_id_clone).await
+                                {
+                                    task.error = Some(error);
+                                    let _ = task_store.create_task(task).await;
+                                }
+
+                                if let Err(e) = task_executor
+                                    .update_task_status(&task_id_clone, TaskStatus::Failed)
+                                    .await
+                                {
+                                    warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
+                                } else {
+                                    warn!("Task {} failed: {}", task_id_clone, error_msg);
+                                }
+                            }
+                        }
+                    });
+                }
+
                 let response = MessageSendResponse {
                     task_id: task_id.to_string(),
                     status: TaskStatus::Submitted,
@@ -2048,6 +2145,179 @@ async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
     }
 }
 
+/// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
+async fn execute_with_conductor(
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    router: &Arc<arkavo_router::Router>,
+    mcp_registry: &Arc<McpRegistry>,
+    task_content: String,
+) -> std::result::Result<String, String> {
+    use arkavo_mcp_tools::ToolRegistry;
+
+    // 1. Create HRM task with default budget
+    let budget = TaskBudget::default();
+    let hrm_task = conductor
+        .create_task(task_content.clone(), budget)
+        .await
+        .map_err(|e| format!("Failed to create HRM task: {e}"))?;
+
+    info!("Created HRM task {}", hrm_task.id);
+
+    // 2. Add single subtask (1:1 mapping)
+    let subtask = conductor
+        .add_subtask(hrm_task.id, task_content.clone(), vec![])
+        .await
+        .map_err(|e| format!("Failed to add subtask: {e}"))?;
+
+    info!("Added subtask {} for task {}", subtask.id, hrm_task.id);
+
+    // 3. Create burst contract
+    let contract = conductor
+        .create_contract(&subtask)
+        .await
+        .map_err(|e| format!("Failed to create contract: {e}"))?;
+
+    info!("Created contract {} for subtask", contract.id);
+
+    // 4. Project MCP tools to ToolRegistry for Router
+    let mut tool_registry = ToolRegistry::empty();
+    let mcp_tools = mcp_registry
+        .list_all_tools()
+        .await
+        .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
+
+    let tool_count = mcp_tools.len();
+    for tool in mcp_tools {
+        // Create bridge tool that delegates to MCP registry
+        let tool_name = tool.name.clone();
+        let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
+        tool_registry.register(&tool_name, Box::new(bridge));
+    }
+
+    info!(
+        "Task has {} MCP tools available: {:?}",
+        tool_count,
+        tool_registry
+            .list_tools()
+            .iter()
+            .map(|t| &t.name)
+            .collect::<Vec<_>>()
+    );
+
+    // 5. Execute via Router
+    let registry_arc = Arc::new(tool_registry);
+    let messages = vec![arkavo_llm::Message {
+        role: arkavo_llm::Role::User,
+        content: task_content.clone(),
+        images: None,
+    }];
+
+    let stream = router
+        .route(&task_content, messages, Some(&registry_arc))
+        .await
+        .map_err(|e| format!("Router failed: {e}"))?;
+
+    let response = stream
+        .complete()
+        .await
+        .map_err(|e| format!("Failed to complete LLM stream: {e}"))?;
+
+    info!("LLM response received, {} chars", response.content.len());
+
+    // 6. Handle any tool calls returned by the LLM
+    let mut final_result = response.content.clone();
+
+    if !response.tool_calls.is_empty() {
+        info!("Executing {} tool calls", response.tool_calls.len());
+
+        let mut tool_results = Vec::new();
+        for tool_call in &response.tool_calls {
+            let args = tool_call.arguments.clone();
+
+            // Call the tool via MCP registry
+            match mcp_registry
+                .call_tool(&tool_call.tool_name, args, "hrm")
+                .await
+            {
+                Ok(result) => {
+                    info!("Tool {} succeeded", tool_call.tool_name);
+                    tool_results.push(format!(
+                        "## Tool: {}\n{}",
+                        tool_call.tool_name,
+                        serde_json::to_string_pretty(&result).unwrap_or_default()
+                    ));
+                }
+                Err(e) => {
+                    warn!("Tool {} failed: {}", tool_call.tool_name, e);
+                    tool_results.push(format!(
+                        "## Tool: {} (Error)\n{}",
+                        tool_call.tool_name, e
+                    ));
+                }
+            }
+        }
+
+        if !tool_results.is_empty() {
+            final_result.push_str("\n\n## Tool Execution Results\n");
+            final_result.push_str(&tool_results.join("\n\n"));
+        }
+    }
+
+    // 7. Record result in Conductor
+    let burst_result = BurstResult::success(
+        contract.id,
+        serde_json::json!({ "content": final_result }),
+    );
+    conductor
+        .record_result(hrm_task.id, subtask.id, burst_result)
+        .await
+        .map_err(|e| format!("Failed to record result: {e}"))?;
+
+    info!("Task {} completed via Conductor", hrm_task.id);
+
+    Ok(final_result)
+}
+
+/// Bridge tool that wraps an MCP tool from McpRegistry
+///
+/// This implements the Tool trait for ToolRegistry, but delegates
+/// actual execution to the McpRegistry (the source of truth for
+/// active MCP connections).
+struct McpBridgeTool {
+    registry: Arc<McpRegistry>,
+    schema: arkavo_mcp_tools::ToolSchema,
+}
+
+impl McpBridgeTool {
+    fn new(registry: Arc<McpRegistry>, tool: crate::mcp_registry::Tool) -> Self {
+        Self {
+            registry,
+            schema: arkavo_mcp_tools::ToolSchema {
+                name: tool.name,
+                aliases: None,
+                description: tool.description,
+                parameters: tool.input_schema.unwrap_or_else(|| {
+                    serde_json::json!({"type": "object", "properties": {}})
+                }),
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl arkavo_mcp_tools::server::Tool for McpBridgeTool {
+    fn schema(&self) -> &arkavo_mcp_tools::ToolSchema {
+        &self.schema
+    }
+
+    async fn execute(&self, params: serde_json::Value) -> arkavo_mcp_tools::Result<serde_json::Value> {
+        self.registry
+            .call_tool(&self.schema.name, params, "hrm-conductor")
+            .await
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))
+    }
+}
+
 pub struct A2aServer {
     config: ServerConfig,
     buffer_config: BufferConfig,
@@ -2063,6 +2333,8 @@ pub struct A2aServer {
     #[allow(dead_code)]
     #[allow(clippy::type_complexity)]
     mcp_reload_callback: Arc<tokio::sync::RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
+    /// HRM Conductor
+    conductor: Arc<tokio::sync::RwLock<Arc<Conductor<InMemoryTaskStore>>>>,
 }
 
 impl A2aServer {
@@ -2084,6 +2356,9 @@ impl A2aServer {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             file_watcher_handle: Arc::new(tokio::sync::RwLock::new(None)),
             mcp_reload_callback: Arc::new(tokio::sync::RwLock::new(None)),
+            conductor: Arc::new(tokio::sync::RwLock::new(Arc::new(Conductor::new(
+                InMemoryTaskStore::new(),
+            )))),
         }
     }
 
@@ -2628,6 +2903,14 @@ impl A2aServer {
             event_sequence: self.event_sequence.clone(),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: {
+                let guard = self.conductor.read().await;
+                guard.clone()
+            },
+            router: {
+                let guard = self.router.read().await;
+                guard.clone()
+            },
         };
 
         // Start file watcher for hot-reload
@@ -2686,6 +2969,8 @@ mod tests {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: Arc::new(Conductor::new(InMemoryTaskStore::new())),
+            router: None,
         };
         let result = impl_instance
             .task_request(
@@ -2739,6 +3024,8 @@ mod tests {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: Arc::new(Conductor::new(InMemoryTaskStore::new())),
+            router: None,
         };
         let result = impl_instance
             .task_declare(
@@ -2795,6 +3082,8 @@ mod tests {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: Arc::new(Conductor::new(InMemoryTaskStore::new())),
+            router: None,
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -2843,6 +3132,8 @@ mod tests {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: Arc::new(Conductor::new(InMemoryTaskStore::new())),
+            router: None,
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -2888,6 +3179,8 @@ mod tests {
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            conductor: Arc::new(Conductor::new(InMemoryTaskStore::new())),
+            router: None,
         };
 
         // First request should succeed

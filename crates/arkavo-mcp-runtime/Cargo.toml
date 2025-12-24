@@ -11,7 +11,7 @@ categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
-arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
 anyhow.workspace = true
@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # For the built-in tools
 uuid.workspace = true

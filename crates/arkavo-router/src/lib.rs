@@ -627,8 +627,12 @@ impl Router {
         })
     }
 
+    /// Upgrade to a more capable model, but only if it's available
+    ///
+    /// Returns the current model if the upgrade target is not installed/cached.
+    /// This prevents upgrade loops where we try to use unavailable models.
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
-        match current {
+        let candidate = match current {
             // Qwen3/Ministral upgrade path
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
@@ -645,6 +649,57 @@ impl Router {
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
+        };
+
+        // Check if the candidate model is available before upgrading
+        if self.is_model_available(&candidate) {
+            candidate
+        } else {
+            tracing::debug!(
+                "Upgrade target {:?} not available, staying with {:?}",
+                candidate,
+                current
+            );
+            current.clone()
+        }
+    }
+
+    /// Check if a model is available (installed/cached or has API key)
+    fn is_model_available(&self, model: &ModelChoice) -> bool {
+        match model {
+            // Cloud models - check API keys
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
+            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => self.is_gemini_available(),
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+                std::env::var("DEEPSEEK_API_KEY").is_ok()
+            }
+            // Local models - check if cached
+            ModelChoice::LocalQwen3 => {
+                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
+            }
+            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
+                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
+                "mistralai/Ministral-8B-Instruct-2512-GGUF",
+                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
+                "unsloth/gemma-3-270m-it-GGUF",
+                "gemma-3-270m-it-Q4_0.gguf",
+            ),
+            ModelChoice::LocalGemma4B => {
+                model_discovery::is_model_cached("unsloth/gemma-3-4b-it-GGUF", "gemma-3-4b-it-Q4_0.gguf")
+            }
+            ModelChoice::LocalGemma12B => model_discovery::is_model_cached(
+                "unsloth/gemma-3-12b-it-GGUF",
+                "gemma-3-12b-it-Q4_0.gguf",
+            ),
+            ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
+                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+            ),
         }
     }
 

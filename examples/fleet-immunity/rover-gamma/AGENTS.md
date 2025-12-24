@@ -2,7 +2,6 @@
 
 name: rover-gamma
 type: autonomous-rover
-# port: dynamic (assigned via mDNS discovery)
 
 ## Purpose
 
@@ -36,16 +35,13 @@ a2a:
   discovery:
     mdns: true
     service_type: "_a2a._tcp.local."
-  peers:
-    - "http://localhost:8351"
-    - "http://localhost:8352"
 
-## MCP Server
+## MCP Server (connects to shared fleet environment)
 
 mcp_servers:
   - name: fleet-env
-    command: ../mcp-fleet-env/target/debug/arkavo-mcp-fleet-env
-    args: ["--sector-count", "4"]
+    command: ./mcp-fleet-env/target/debug/arkavo-mcp-fleet-env
+    args: ["--connect", "http://localhost:8360"]
 
 ## Logging
 

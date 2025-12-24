@@ -2,8 +2,7 @@
 //!
 //! Injects a hazard into a specific sector.
 
-use crate::{FleetEnvState, Hazard};
-use arkavo_mcp::{Tool, ToolSchema};
+use crate::{FleetEnvState, Hazard, Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;

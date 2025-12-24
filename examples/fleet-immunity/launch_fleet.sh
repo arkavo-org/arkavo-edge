@@ -1,10 +1,9 @@
 #!/bin/bash
 # Launch all 3 rovers for the Fleet Immunity demonstration
 #
-# This example demonstrates:
-# - Multi-agent coordination via A2A protocol
-# - Collective learning from crashes
-# - Policy synthesis and consensus
+# Architecture:
+# - One shared fleet-env HTTP server (port 8360)
+# - Three rover agents, each with MCP proxy to shared server
 
 set -e
 
@@ -20,9 +19,7 @@ echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARKAVO_BIN="${ARKAVO_BIN:-${SCRIPT_DIR}/../../target/debug/arkavo}"
-if [ ! -f "$ARKAVO_BIN" ]; then
-    ARKAVO_BIN="${SCRIPT_DIR}/../../target/release/arkavo"
-fi
+FLEET_ENV_BIN="${SCRIPT_DIR}/mcp-fleet-env/target/debug/arkavo-mcp-fleet-env"
 
 cd "$SCRIPT_DIR"
 
@@ -32,20 +29,37 @@ if [ ! -f "$ARKAVO_BIN" ]; then
     (cd ../.. && cargo build -q -p arkavo)
 fi
 
-# Build the MCP fleet-env crate
-if [ ! -f "mcp-fleet-env/target/debug/libarkavo_mcp_fleet_env.rlib" ]; then
-    echo "[BUILD ] Building fleet environment MCP tools..."
+# Build the fleet-env server
+if [ ! -f "$FLEET_ENV_BIN" ]; then
+    echo "[BUILD ] Building fleet environment server..."
     (cd mcp-fleet-env && cargo build -q)
 fi
 
 # Create logs directory
 mkdir -p logs rover-alpha/logs rover-beta/logs rover-gamma/logs
 
+# Start the shared fleet environment server
+echo ""
+echo "[ENV   ] Starting shared Fleet Environment server on port 8360..."
+"$FLEET_ENV_BIN" --serve --port 8360 --sector-count 4 > logs/fleet-env.log 2>&1 &
+ENV_PID=$!
+echo $ENV_PID > .fleet-env.pid
+echo "[ENV   ] Fleet Environment server started (PID: $ENV_PID)"
+
+# Wait for server to be ready
+sleep 1
+if ! curl -s http://localhost:8360/health > /dev/null 2>&1; then
+    echo "[ERROR ] Fleet Environment server failed to start"
+    cat logs/fleet-env.log
+    exit 1
+fi
+echo "[ENV   ] Fleet Environment server ready"
+
 echo ""
 echo "[FLEET ] Starting rovers..."
 echo ""
 
-# Start rovers as arkavo agents (ports assigned dynamically via mDNS)
+# Start rovers as arkavo agents
 "$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-alpha/AGENTS.md" > logs/alpha.log 2>&1 &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid
