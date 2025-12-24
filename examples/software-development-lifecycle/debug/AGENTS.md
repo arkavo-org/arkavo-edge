@@ -1,3 +1,10 @@
+# AGENTS.md
+
+## debug-agent
+purpose: Analyze agent sessions and diagnose errors
+model:   ministral-3b
+listen:  0.0.0.0:8353
+
 # Debug Agent
 
 A hyper-specialized agent for debugging and analyzing agent sessions using the Interactive Agent Debugger infrastructure.

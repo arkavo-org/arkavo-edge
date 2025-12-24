@@ -2,7 +2,7 @@
 
 ## devops-agent
 purpose: Design CI/CD pipelines and deployment strategies
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8349
 
 # The devops agent specializes in:

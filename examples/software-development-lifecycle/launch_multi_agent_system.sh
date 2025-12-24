@@ -13,7 +13,10 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="${PROJECT_ROOT}/target/debug/arkavo"
+BINARY="${BINARY:-${PROJECT_ROOT}/target/debug/arkavo}"
+if [ ! -f "$BINARY" ]; then
+    BINARY="${PROJECT_ROOT}/target/release/arkavo"
+fi
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 

@@ -1,0 +1,10 @@
+# Logs
+logs/*
+!logs/.gitkeep
+
+# PID files
+*.pid
+.agent_pids
+
+# Ignore environment files
+.env

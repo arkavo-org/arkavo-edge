@@ -2,7 +2,7 @@
 
 ## testing-agent
 purpose: Generate tests and analyze code coverage
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8346
 
 # The testing agent specializes in:

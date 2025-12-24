@@ -2,7 +2,7 @@
 
 ## orchestrator-agent
 purpose: Decompose complex tasks and coordinate specialized agents to achieve goals
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
+model:   ministral-3b
 listen:  0.0.0.0:8342
 
 # The orchestrator agent is responsible for:

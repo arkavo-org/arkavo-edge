@@ -2,7 +2,7 @@
 
 name: rover-beta
 type: autonomous-rover
-port: 8352
+# port: dynamic (assigned via mDNS discovery)
 
 ## Purpose
 

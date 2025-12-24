@@ -1,0 +1,17 @@
+# Ignore AGENTS.md with API keys
+AGENTS.md
+
+# But track the example configuration
+!AGENTS.md.example
+
+# Ignore environment files
+.env
+
+# Workspace and logs
+workspace/*
+!workspace/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# PID files
+*.pid

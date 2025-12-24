@@ -19,7 +19,10 @@ echo "  ╚═══════════════════════
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ARKAVO_BIN="${SCRIPT_DIR}/../../target/debug/arkavo"
+ARKAVO_BIN="${ARKAVO_BIN:-${SCRIPT_DIR}/../../target/debug/arkavo}"
+if [ ! -f "$ARKAVO_BIN" ]; then
+    ARKAVO_BIN="${SCRIPT_DIR}/../../target/release/arkavo"
+fi
 
 cd "$SCRIPT_DIR"
 
@@ -42,25 +45,25 @@ echo ""
 echo "[FLEET ] Starting rovers..."
 echo ""
 
-# Start rovers as arkavo agents
+# Start rovers as arkavo agents (ports assigned dynamically via mDNS)
 "$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-alpha/AGENTS.md" > logs/alpha.log 2>&1 &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid
-echo "[ALPHA ] Started Rover Alpha on port 8351 (PID: $ALPHA_PID)"
+echo "[ALPHA ] Started Rover Alpha (PID: $ALPHA_PID)"
 
 sleep 1
 
 "$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-beta/AGENTS.md" > logs/beta.log 2>&1 &
 BETA_PID=$!
 echo $BETA_PID > .beta.pid
-echo "[BETA  ] Started Rover Beta on port 8352 (PID: $BETA_PID)"
+echo "[BETA  ] Started Rover Beta (PID: $BETA_PID)"
 
 sleep 1
 
 "$ARKAVO_BIN" agent --config "$SCRIPT_DIR/rover-gamma/AGENTS.md" > logs/gamma.log 2>&1 &
 GAMMA_PID=$!
 echo $GAMMA_PID > .gamma.pid
-echo "[GAMMA ] Started Rover Gamma on port 8353 (PID: $GAMMA_PID)"
+echo "[GAMMA ] Started Rover Gamma (PID: $GAMMA_PID)"
 
 echo ""
 echo "[FLEET ] Waiting for mesh discovery..."

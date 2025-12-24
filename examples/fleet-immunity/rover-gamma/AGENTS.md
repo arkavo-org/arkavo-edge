@@ -2,7 +2,7 @@
 
 name: rover-gamma
 type: autonomous-rover
-port: 8353
+# port: dynamic (assigned via mDNS discovery)
 
 ## Purpose
 

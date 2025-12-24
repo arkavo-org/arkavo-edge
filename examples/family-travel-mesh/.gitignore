@@ -1,0 +1,7 @@
+# Logs
+logs/*
+!logs/.gitkeep
+
+# PID files
+*.pid
+.pids

@@ -2,7 +2,7 @@
 
 name: rover-alpha
 type: autonomous-rover
-port: 8351
+# port: dynamic (assigned via mDNS discovery)
 
 ## Purpose
 
