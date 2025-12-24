@@ -21,7 +21,7 @@ glob = { workspace = true }
 once_cell = "1.19"
 
 # Internal dependencies
-arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-authorization = { path = "../arkavo-authorization" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }

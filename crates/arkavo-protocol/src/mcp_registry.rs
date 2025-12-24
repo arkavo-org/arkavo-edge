@@ -1,5 +1,5 @@
 use crate::types::{AgentCard, AgentStatus};
-use arkavo_mcp_core::ToolSchema;
+use arkavo_mcp::ToolSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

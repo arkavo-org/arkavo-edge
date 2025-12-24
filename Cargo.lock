@@ -404,7 +404,7 @@ dependencies = [
  "arkavo-authorization",
  "arkavo-budget",
  "arkavo-events",
- "arkavo-mcp-core",
+ "arkavo-mcp",
  "async-trait",
  "chrono",
  "glob",
@@ -435,7 +435,6 @@ dependencies = [
  "arkavo-kimi",
  "arkavo-llm",
  "arkavo-mcp",
- "arkavo-mcp-core",
  "arkavo-mcp-macos",
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
@@ -856,15 +855,6 @@ dependencies = [
 name = "arkavo-mcp"
 version = "0.50.4"
 dependencies = [
- "async-trait",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "arkavo-mcp-core"
-version = "0.50.4"
-dependencies = [
  "anyhow",
  "async-trait",
  "serde",
@@ -906,14 +896,18 @@ version = "0.50.4"
 dependencies = [
  "anyhow",
  "arkavo-llm",
- "arkavo-mcp-core",
+ "arkavo-mcp",
  "arkavo-memory",
  "async-trait",
  "chrono",
+ "futures",
+ "http",
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "uuid",
 ]
@@ -1043,7 +1037,7 @@ dependencies = [
  "arkavo-events",
  "arkavo-hrm",
  "arkavo-llm",
- "arkavo-mcp-core",
+ "arkavo-mcp",
  "arkavo-mcp-tools",
  "arkavo-observability",
  "arkavo-router",
