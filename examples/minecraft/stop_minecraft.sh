@@ -1,23 +1,15 @@
 #!/bin/bash
-# stop_minecraft.sh - Stop Minecraft server and agent
+# stop_minecraft.sh - Stop Minecraft server and MCP bot
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${YELLOW}[MINECRAFT]${NC} Stopping Minecraft demo..."
+echo -e "${YELLOW}[MINECRAFT]${NC} Stopping Minecraft server and MCP bot..."
 
-# Stop any arkavo agent processes in this directory
-pkill -f "arkavo agent" 2>/dev/null || true
-
-# Stop Docker containers
 cd "$SCRIPT_DIR"
-if docker compose ps 2>/dev/null | grep -q "minecraft"; then
-    echo -e "${YELLOW}[MINECRAFT]${NC} Stopping Minecraft server..."
-    docker compose down
-fi
+docker compose down
 
 echo -e "${GREEN}[MINECRAFT]${NC} Stopped."

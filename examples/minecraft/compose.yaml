@@ -1,12 +1,11 @@
+# Minecraft Server + MCP Server for Arkavo Edge
+#
 # Usage:
-# 1) Start Minecraft server (background):
-#    docker compose up -d minecraft
+#   docker compose up -d        # Start both services
+#   docker compose logs -f      # Watch logs
+#   docker compose down         # Stop everything
 #
-# 2) Run the MCP server over *stdio* (foreground; Arkavo Edge should spawn this command):
-#    docker compose run --rm mcp
-#
-# MCP stdio requirement: client launches server as a subprocess and communicates via stdin/stdout.  [oai_citation:0‡Model Context Protocol](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports?utm_source=chatgpt.com)
-# This MCP server is invoked via npx per repo instructions.  [oai_citation:1‡GitHub](https://github.com/yuniko-software/minecraft-mcp-server)
+# The MCP server runs via stdio transport. Connect Arkavo Edge to it.
 
 services:
   minecraft:
@@ -15,8 +14,8 @@ services:
     ports:
       - "25565:25565"
     environment:
-      EULA: "TRUE"          # required  [oai_citation:2‡Docker Minecraft Server](https://docker-minecraft-server.readthedocs.io/en/latest/variables/?utm_source=chatgpt.com)
-      ONLINE_MODE: "FALSE"  # simplest for bot demos (no Mojang auth); supported by itzg image  [oai_citation:3‡Docker Minecraft Server](https://docker-minecraft-server.readthedocs.io/en/latest/variables/?utm_source=chatgpt.com)
+      EULA: "TRUE"
+      ONLINE_MODE: "FALSE"
       DIFFICULTY: "easy"
       MODE: "survival"
       MOTD: "Arkavo Edge MCP Demo"
@@ -24,28 +23,28 @@ services:
       VERSION: "1.21.8"
     volumes:
       - mc-data:/data
+    healthcheck:
+      test: mc-health
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   mcp:
-    image: node:20-alpine
+    image: node:22-alpine
     container_name: arkavo-minecraft-mcp
     depends_on:
-      - minecraft
-    working_dir: /work
-    environment:
-      # Mineflayer bot connection target (service name resolves via compose DNS)
-      MC_HOST: "minecraft"
-      MC_PORT: "25565"
-      BOT_USERNAME: "Edge"
-    # Keep stdio usable when run interactively (Arkavo Edge spawns `docker compose run --rm mcp`)
+      minecraft:
+        condition: service_healthy
     stdin_open: true
     tty: true
-    entrypoint: ["sh","-lc"]
-    command:
-      - >
-        npx -y github:yuniko-software/minecraft-mcp-server
-        --host "$$MC_HOST"
-        --port "$$MC_PORT"
-        --username "$$BOT_USERNAME"
+    command: >
+      sh -c "apk add --no-cache git &&
+      npx -y github:yuniko-software/minecraft-mcp-server
+      --host minecraft
+      --port 25565
+      --username Edge"
+    restart: unless-stopped
 
 volumes:
   mc-data:
