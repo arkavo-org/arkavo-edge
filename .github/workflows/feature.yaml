@@ -107,6 +107,55 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  hardcoded-paths:
+    name: No Hardcoded Paths
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for hardcoded user paths
+        run: |
+          echo "Checking for hardcoded user-specific paths in Rust source files..."
+
+          # Patterns that indicate real hardcoded local paths (not test fixtures)
+          # Excludes:
+          #   - /home/user/ (generic test fixture)
+          #   - /Users/arkavo-agent (documentation)
+          #   - Paths inside #[cfg(test)] blocks are acceptable
+
+          FOUND=0
+
+          # Check for macOS user paths (e.g., /Users/paul/, /Users/john/)
+          # but NOT /Users/user/ or /Users/arkavo-agent
+          if grep -r --include="*.rs" -nE '/Users/[a-z]+/' crates/ 2>/dev/null | grep -vE '/Users/(user|arkavo-agent)/'; then
+            echo "Found macOS user-specific paths:"
+            grep -r --include="*.rs" -nE '/Users/[a-z]+/' crates/ 2>/dev/null | grep -vE '/Users/(user|arkavo-agent)/'
+            FOUND=1
+          fi
+
+          # Check for /Volumes/ (macOS mounted volumes)
+          if grep -r --include="*.rs" -n '/Volumes/' crates/ 2>/dev/null; then
+            echo "Found macOS volume paths:"
+            grep -r --include="*.rs" -n '/Volumes/' crates/ 2>/dev/null
+            FOUND=1
+          fi
+
+          # Check for specific home directories (not generic /home/user/)
+          if grep -r --include="*.rs" -nE '/home/[a-z]+/' crates/ 2>/dev/null | grep -vE '/home/user/'; then
+            echo "Found Linux user-specific paths:"
+            grep -r --include="*.rs" -nE '/home/[a-z]+/' crates/ 2>/dev/null | grep -vE '/home/user/'
+            FOUND=1
+          fi
+
+          if [ $FOUND -eq 1 ]; then
+            echo ""
+            echo "❌ ERROR: Found hardcoded user-specific paths!"
+            echo "These paths will fail on other machines and in CI."
+            echo "Use runtime path discovery instead (e.g., dirs::home_dir(), model_discovery::find_gguf_model)"
+            exit 1
+          fi
+
+          echo "✅ No hardcoded paths found"
+
   # Combined test + lint jobs for maximum cache reuse
   # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
   test-and-lint:

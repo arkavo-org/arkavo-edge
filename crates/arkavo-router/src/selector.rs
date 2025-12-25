@@ -1,6 +1,7 @@
 use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
+use crate::model_discovery;
 
 /// Provider availability status
 #[derive(Debug, Clone, Default)]
@@ -71,6 +72,40 @@ impl ModelSelector {
         ))
     }
 
+    /// Get the best available local model, checking cache availability
+    fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
+        if prefer_larger {
+            // Try larger models first, fall back to smaller if not cached
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+                ModelChoice::LocalMinistral8B
+            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+                ModelChoice::LocalMinistral3B
+            } else {
+                ModelChoice::LocalQwen3
+            }
+        } else {
+            ModelChoice::LocalQwen3
+        }
+    }
+
+    /// Check if a local model is cached (static helper)
+    fn is_local_model_cached(model: &ModelChoice) -> bool {
+        match model {
+            ModelChoice::LocalQwen3 => {
+                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
+            }
+            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
+                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
+                "mistralai/Ministral-8B-Instruct-2512-GGUF",
+                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            _ => false,
+        }
+    }
+
     /// Select the best available cloud model, preferring Anthropic > Gemini
     fn best_cloud_model(&self, prefer_pro: bool) -> ModelChoice {
         if self.availability.anthropic {
@@ -86,12 +121,8 @@ impl ModelSelector {
                 ModelChoice::GeminiFlash
             }
         } else {
-            // No cloud available, use local (prefer Qwen3/Ministral)
-            if prefer_pro {
-                ModelChoice::LocalMinistral8B
-            } else {
-                ModelChoice::LocalQwen3
-            }
+            // No cloud available, use local (with availability check)
+            self.best_available_local_model(prefer_pro)
         }
     }
 
@@ -126,7 +157,7 @@ impl ModelSelector {
 
             // General tasks with high confidence use larger local model for better reasoning
             TaskCategory::General if classification.confidence > 0.7 => {
-                ModelChoice::LocalMinistral8B
+                self.best_available_local_model(true)
             }
 
             // Low confidence general tasks use fast model

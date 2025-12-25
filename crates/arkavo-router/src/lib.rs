@@ -455,8 +455,9 @@ impl Router {
     }
 
     /// Upgrade model within local tier only - never escalate to cloud
+    /// Only returns an upgrade if the target model is actually cached.
     fn upgrade_model_local_only(current: &ModelChoice) -> Option<ModelChoice> {
-        match current {
+        let candidate = match current {
             // Qwen3/Ministral upgrade path
             ModelChoice::LocalQwen3 => Some(ModelChoice::LocalMinistral3B),
             ModelChoice::LocalMinistral3B => Some(ModelChoice::LocalMinistral8B),
@@ -472,6 +473,44 @@ impl Router {
 
             // Cloud models - no local upgrade available
             _ => None,
+        };
+
+        // Verify the candidate model is actually cached before returning it
+        candidate.filter(Self::is_model_cached_static)
+    }
+
+    /// Check if a local model is cached (static version for use in upgrade_model_local_only)
+    fn is_model_cached_static(model: &ModelChoice) -> bool {
+        match model {
+            ModelChoice::LocalQwen3 => {
+                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
+            }
+            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
+                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
+                "mistralai/Ministral-8B-Instruct-2512-GGUF",
+                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
+                "unsloth/gemma-3-270m-it-GGUF",
+                "gemma-3-270m-it-Q4_0.gguf",
+            ),
+            ModelChoice::LocalGemma4B => model_discovery::is_model_cached(
+                "unsloth/gemma-3-4b-it-GGUF",
+                "gemma-3-4b-it-Q4_0.gguf",
+            ),
+            ModelChoice::LocalGemma12B => model_discovery::is_model_cached(
+                "unsloth/gemma-3-12b-it-GGUF",
+                "gemma-3-12b-it-Q4_0.gguf",
+            ),
+            ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
+                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+            ),
+            // Cloud models aren't cached locally
+            _ => false,
         }
     }
 
@@ -974,6 +1013,8 @@ impl Router {
                 .await
                 .map_err(Error::ModelExecution)?;
 
+                tracing::info!(path = %model_path.display(), "Loading Ministral-3B model");
+
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "ministral-3b".to_string(),
                     model_path.to_string_lossy().to_string(),
@@ -981,6 +1022,8 @@ impl Router {
                 .map_err(|e| {
                     Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
                 })?;
+
+                tracing::info!("Ministral-3B provider ready");
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
