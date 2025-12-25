@@ -383,9 +383,9 @@ impl McpConverter {
             let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
         }
 
-        prompt.push_str("\nFormat (ALWAYS include required parameters):\n```tool_name\nparameter_name: value\n```\n\n");
+        prompt.push_str("\nFormat:\n```<tool>\n<param>: <value>\n```\n\n");
 
-        // Show required parameters for all tools
+        // Show required parameters for all tools (helps LLMs use correct param names)
         prompt.push_str("Required parameters:\n");
         for tool in tools {
             let required: Vec<&str> = tool
@@ -400,7 +400,7 @@ impl McpConverter {
         }
         prompt.push('\n');
 
-        // Add concrete examples for first few tools
+        // Add concrete examples for each tool
         prompt.push_str("Examples:\n");
         for tool in tools.iter().take(3) {
             let _ = writeln!(prompt, "```{}", tool.name);
@@ -423,9 +423,7 @@ impl McpConverter {
                             "command" => "ls -la",
                             "message" | "text" | "content" => "Hello world",
                             "x" | "y" | "z" => "100",
-                            "direction" => "forward",
-                            "type" | "entityType" => "entity_type",
-                            _ => "example_value",
+                            _ => "value",
                         };
                         let _ = writeln!(prompt, "{name}: {example}");
                     }

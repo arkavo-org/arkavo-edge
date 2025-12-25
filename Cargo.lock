@@ -1148,6 +1148,7 @@ dependencies = [
  "hf-hub 0.4.3 (git+https://github.com/huggingface/hf-hub)",
  "rand 0.8.5",
  "rand_distr",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

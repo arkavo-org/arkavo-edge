@@ -1037,7 +1037,80 @@ impl Router {
             return calls;
         }
 
+        // Try Python function-call syntax: tool_name(param="value")
+        if let Some(calls) = Self::extract_python_function_calls(content) {
+            return calls;
+        }
+
         Vec::new()
+    }
+
+    /// Extract Python-style function calls from text
+    ///
+    /// Handles formats like:
+    /// - tool_name(param="value")
+    /// - result = tool-name(param="value", param2=123)
+    fn extract_python_function_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        use regex::Regex;
+
+        // Match: optional_var = tool-name(args)
+        let re = match Regex::new(r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*)\)") {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        // Parse kwargs: param="value", param2=123
+        let kwarg_re = match Regex::new(r#"(\w+)\s*=\s*(?:"([^"]*)"|(\d+(?:\.\d+)?)|(\w+))"#) {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        let mut calls = Vec::new();
+
+        for cap in re.captures_iter(content) {
+            let (tool_name, args_str) = match (cap.get(1), cap.get(2)) {
+                (Some(t), Some(a)) => (t.as_str().to_string(), a.as_str()),
+                _ => continue,
+            };
+
+            // Skip common Python built-ins
+            if [
+                "print", "len", "str", "int", "float", "list", "dict", "range", "type",
+            ]
+            .contains(&tool_name.as_str())
+            {
+                continue;
+            }
+
+            let mut args = serde_json::Map::new();
+
+            for kwarg in kwarg_re.captures_iter(args_str) {
+                let key = match kwarg.get(1) {
+                    Some(k) => k.as_str().to_string(),
+                    None => continue,
+                };
+                let value = if let Some(s) = kwarg.get(2) {
+                    serde_json::Value::String(s.as_str().to_string())
+                } else if let Some(n) = kwarg.get(3) {
+                    if let Ok(num) = n.as_str().parse::<f64>() {
+                        serde_json::json!(num)
+                    } else {
+                        serde_json::Value::String(n.as_str().to_string())
+                    }
+                } else if let Some(id) = kwarg.get(4) {
+                    serde_json::Value::String(id.as_str().to_string())
+                } else {
+                    continue;
+                };
+                args.insert(key, value);
+            }
+
+            calls.push(arkavo_llm::ParsedToolCall {
+                tool_name,
+                arguments: serde_json::Value::Object(args),
+                call_id: None,
+            });
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
     }
 
     /// Extract JSON-formatted tool calls from text
