@@ -22,7 +22,11 @@ mod org_analysis_tests {
         // to analyze an entire organization across multiple repositories
 
         let router = Router::new().await.expect("Failed to create router");
-        let storage = Arc::new(MemoryStorage::new().await.expect("Failed to create storage"));
+        let storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .expect("Failed to create storage"),
+        );
         let tool_registry = Arc::new(ToolRegistry::new(storage));
 
         let task = "Analyze the arkavo-org GitHub organization. \
@@ -85,7 +89,11 @@ mod org_analysis_tests {
         // to find patterns (e.g., common bugs, feature requests)
 
         let router = Router::new().await.expect("Failed to create router");
-        let storage = Arc::new(MemoryStorage::new().await.expect("Failed to create storage"));
+        let storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .expect("Failed to create storage"),
+        );
         let tool_registry = Arc::new(ToolRegistry::new(storage));
 
         let task = "Look at open issues across arkavo-org repositories. \

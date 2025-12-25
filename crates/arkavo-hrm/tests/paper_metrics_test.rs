@@ -1,7 +1,7 @@
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::MemoryStorage;
 use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use std::sync::Arc;
 
 /// Estimate tokens (approx 4 chars/token)

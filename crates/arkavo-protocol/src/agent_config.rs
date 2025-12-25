@@ -276,7 +276,9 @@ paths:
 
         assert_eq!(
             paths.memory_db_path,
-            Some(PathBuf::from("/home/user/project/.arkavo/memory_server/memories.db"))
+            Some(PathBuf::from(
+                "/home/user/project/.arkavo/memory_server/memories.db"
+            ))
         );
         assert_eq!(paths.workspace_root, workspace_root);
     }

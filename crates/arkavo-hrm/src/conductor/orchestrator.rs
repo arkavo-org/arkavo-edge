@@ -14,6 +14,11 @@ use uuid::Uuid;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_context::ContextSummarizer;
 
+/// Default minimum context size (in characters) required to trigger offloading.
+/// Contexts smaller than this threshold are not worth the overhead of archiving.
+/// Based on ~500 tokens * 4 chars/token = 2000 characters.
+const DEFAULT_MIN_OFFLOAD_CHARS: usize = 2000;
+
 /// The Conductor orchestrates strategic task decomposition and execution
 ///
 /// Key responsibilities:
@@ -28,6 +33,8 @@ pub struct Conductor<S: TaskStore> {
     context_ledger: Option<ContextLedger>,
     /// Default context strategy for new contracts
     default_context_strategy: ContextStrategy,
+    /// Minimum context size (in characters) to trigger offloading
+    min_offload_chars: usize,
     /// Context summarizer for generating descriptive summaries before offloading
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     context_summarizer: Option<ContextSummarizer>,
@@ -41,6 +48,7 @@ impl<S: TaskStore> Conductor<S> {
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             context_summarizer: None,
         }
@@ -53,6 +61,7 @@ impl<S: TaskStore> Conductor<S> {
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             context_summarizer: None,
         }
@@ -80,6 +89,18 @@ impl<S: TaskStore> Conductor<S> {
         self
     }
 
+    /// Set the minimum context size (in characters) required for offloading.
+    ///
+    /// Contexts smaller than this threshold will be passed through unchanged
+    /// even when using `ContextStrategy::Ledger`, avoiding overhead for tiny
+    /// responses like "OK" or short status messages.
+    ///
+    /// The default is 2000 characters (~500 tokens using the 4 chars/token heuristic).
+    pub fn with_min_offload_threshold(mut self, chars: usize) -> Self {
+        self.min_offload_chars = chars;
+        self
+    }
+
     /// Prepare context for a burst based on the strategy
     ///
     /// If the strategy is Ledger and a ledger is available, this will offload
@@ -95,6 +116,11 @@ impl<S: TaskStore> Conductor<S> {
     ) -> Result<String> {
         match strategy {
             ContextStrategy::Ledger => {
+                // Skip offloading for small contexts - not worth the overhead
+                if context.len() <= self.min_offload_chars {
+                    return Ok(context.to_string());
+                }
+
                 if let Some(ledger) = &self.context_ledger {
                     let summary_str = match summary {
                         Some(s) => s.to_string(),
@@ -528,5 +554,66 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(Error::StrategicThrashing { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_offload_threshold_skips_small_context() {
+        use arkavo_memory::MemoryStorage;
+
+        let store = InMemoryTaskStore::new();
+        let memory_storage = std::sync::Arc::new(
+            MemoryStorage::new_test()
+                .await
+                .expect("Failed to create memory storage"),
+        );
+
+        let conductor = Conductor::new(store)
+            .with_ledger(memory_storage)
+            .with_min_offload_threshold(100); // 100 chars minimum
+
+        // Small context should pass through unchanged
+        let small_context = "OK";
+        let result = conductor
+            .prepare_context_for_burst(small_context, Some("Status"), &ContextStrategy::Ledger)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, small_context,
+            "Small context should not be offloaded"
+        );
+        assert!(
+            !result.contains("[ARCHIVED:"),
+            "Should not contain archive marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_offload_threshold_offloads_large_context() {
+        use arkavo_memory::MemoryStorage;
+
+        let store = InMemoryTaskStore::new();
+        let memory_storage = std::sync::Arc::new(
+            MemoryStorage::new_test()
+                .await
+                .expect("Failed to create memory storage"),
+        );
+
+        let conductor = Conductor::new(store)
+            .with_ledger(memory_storage)
+            .with_min_offload_threshold(100); // 100 chars minimum
+
+        // Large context should be offloaded
+        let large_context = "This is a large context. ".repeat(50); // ~1250 chars
+        let result = conductor
+            .prepare_context_for_burst(&large_context, Some("Large test"), &ContextStrategy::Ledger)
+            .await
+            .unwrap();
+
+        assert!(
+            result.contains("[ARCHIVED:"),
+            "Large context should be offloaded"
+        );
+        assert_ne!(result, large_context, "Should return pointer, not original");
     }
 }

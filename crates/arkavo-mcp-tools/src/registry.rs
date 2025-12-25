@@ -293,7 +293,10 @@ impl ToolRegistry {
         self.register("code_review", Box::new(CodeReviewTool::new()));
 
         // Context control tool
-        self.register("context_restore", Box::new(ContextRestoreTool::new(storage)));
+        self.register(
+            "context_restore",
+            Box::new(ContextRestoreTool::new(storage)),
+        );
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -358,10 +361,14 @@ impl ToolRegistry {
     /// Vector of matching tools with requested detail level
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use arkavo_mcp_tools::{ToolRegistry, DetailLevel};
+    /// use arkavo_memory::MemoryStorage;
+    /// use std::sync::Arc;
     ///
-    /// let registry = ToolRegistry::new();
+    /// // Requires async setup for MemoryStorage
+    /// let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    /// let registry = ToolRegistry::new(storage);
     ///
     /// // Get just names for initial discovery
     /// let tools = registry.search_tools("github", DetailLevel::NameOnly);

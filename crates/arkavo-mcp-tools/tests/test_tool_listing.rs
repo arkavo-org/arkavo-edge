@@ -293,8 +293,8 @@ async fn test_mcp_includes_native_tools() {
 
     let mcp_client = Arc::new(MockMcpClient);
     let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
-    let registry =
-        ToolRegistry::from_mcp_connection(mcp_client, storage).expect("Should create registry from MCP");
+    let registry = ToolRegistry::from_mcp_connection(mcp_client, storage)
+        .expect("Should create registry from MCP");
 
     let all_tools = registry.list_tools();
     println!("Total tools in MCP registry: {}", all_tools.len());

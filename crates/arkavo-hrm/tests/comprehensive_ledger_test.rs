@@ -112,9 +112,11 @@ async fn test_comprehensive_ledger_capabilities() {
     // ==================================================================================
     println!("\n--- Testing Capability: Strategy Enforcement ---");
     // Re-create conductor with new storage
+    // Use threshold of 0 to test strategy enforcement without size limits
     let storage_for_conductor = Arc::new(MemoryStorage::new_test().await.expect("Storage 3"));
-    let conductor_strat =
-        Conductor::new(InMemoryTaskStore::new()).with_ledger(storage_for_conductor);
+    let conductor_strat = Conductor::new(InMemoryTaskStore::new())
+        .with_ledger(storage_for_conductor)
+        .with_min_offload_threshold(0);
 
     let text = "Small text";
 

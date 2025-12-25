@@ -11,7 +11,11 @@ use std::sync::Arc;
 #[tokio::test]
 #[ignore]
 async fn test_pr_creation_with_mcp_tool() {
-    let storage = Arc::new(MemoryStorage::new().await.expect("Failed to create storage"));
+    let storage = Arc::new(
+        MemoryStorage::new()
+            .await
+            .expect("Failed to create storage"),
+    );
     let tool_registry = Arc::new(ToolRegistry::new(storage));
 
     let event_config = EventWriterConfig {
