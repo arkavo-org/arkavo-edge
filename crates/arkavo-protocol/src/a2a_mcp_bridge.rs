@@ -1,4 +1,5 @@
 use arkavo_mcp_tools::ToolRegistry;
+use arkavo_memory::MemoryStorage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -22,10 +23,11 @@ pub struct A2aMcpBridge {
 }
 
 impl A2aMcpBridge {
-    pub fn new() -> Self {
-        Self {
-            registry: Arc::new(RwLock::new(ToolRegistry::new())),
-        }
+    pub async fn new() -> Result<Self, arkavo_memory::error::MemoryError> {
+        let storage = Arc::new(MemoryStorage::new().await?);
+        Ok(Self {
+            registry: Arc::new(RwLock::new(ToolRegistry::new(storage))),
+        })
     }
 
     pub async fn call_tool(&self, request: McpToolRequest) -> McpToolResponse {
@@ -78,11 +80,7 @@ impl A2aMcpBridge {
     }
 }
 
-impl Default for A2aMcpBridge {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default cannot be implemented for A2aMcpBridge since new() is async.
 
 #[cfg(test)]
 mod tests {
@@ -91,14 +89,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_bridge_creation() {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let tools = bridge.list_tools().await;
         assert!(!tools.is_empty());
     }
 
     #[tokio::test]
     async fn test_call_get_agent_time() {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let request = McpToolRequest {
             tool_name: "get_agent_time".to_string(),
             params: json!({"format": "unix"}),
@@ -112,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_nonexistent_tool() {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let request = McpToolRequest {
             tool_name: "nonexistent_tool".to_string(),
             params: json!({}),
@@ -126,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_includes_time_tools() {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let tools = bridge.list_tools().await;
 
         assert!(tools.contains(&"get_agent_time".to_string()));
@@ -136,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_tool_schema() {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let schema = bridge.get_tool_schema("get_agent_time").await;
 
         assert!(schema.is_some());

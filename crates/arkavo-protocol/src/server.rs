@@ -15,7 +15,8 @@ use crate::types::{
     ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
     FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
     MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
-    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
+    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskProgress, TaskResponse, TaskStatus,
+    UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
@@ -569,7 +570,8 @@ impl A2aRpcServer for A2aRpcImpl {
                             &router,
                             &mcp_registry,
                             task_content,
-                            None,
+                            Some(task_id_clone),
+                            Some(&task_executor),
                         )
                         .await
                         {
@@ -2150,9 +2152,27 @@ async fn execute_with_conductor(
     router: &Arc<arkavo_router::Router>,
     mcp_registry: &Arc<McpRegistry>,
     task_content: String,
-    memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
+    task_id: Option<uuid::Uuid>,
+    task_executor: Option<&Arc<TaskExecutor>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
+
+    // Helper to update progress (no-op if task tracking not available)
+    let update_progress = |msg: &str, pct: u8| {
+        if let (Some(id), Some(executor)) = (task_id, task_executor) {
+            let progress = TaskProgress {
+                message: Some(msg.to_string()),
+                percentage: Some(pct),
+                eta_seconds: None,
+            };
+            let executor = executor.clone();
+            tokio::spawn(async move {
+                let _ = executor.update_task_progress(&id, progress).await;
+            });
+        }
+    };
+
+    update_progress("Creating task structure", 10);
 
     // 1. Create HRM task with default budget
     let budget = TaskBudget::default();
@@ -2178,6 +2198,8 @@ async fn execute_with_conductor(
         .map_err(|e| format!("Failed to create contract: {e}"))?;
 
     info!("Created contract {} for subtask", contract.id);
+
+    update_progress("Setting up tools", 25);
 
     // 4. Project MCP tools to ToolRegistry for Router
     let mut tool_registry = ToolRegistry::empty();
@@ -2212,6 +2234,8 @@ async fn execute_with_conductor(
             .collect::<Vec<_>>()
     );
 
+    update_progress("Generating LLM response", 40);
+
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
     let registry_arc = Arc::new(tool_registry);
     let messages = vec![arkavo_llm::Message {
@@ -2226,6 +2250,8 @@ async fn execute_with_conductor(
         .map_err(|e| format!("Router failed: {e}"))?;
 
     info!("LLM response received, {} chars", response.content.len());
+
+    update_progress("Processing response", 60);
 
     // Debug: show full LLM response for tool call debugging
     if std::env::var("ARKAVO_DEBUG").is_ok() {
@@ -2258,7 +2284,9 @@ async fn execute_with_conductor(
     let mut final_result = response.content.clone();
 
     if !response.tool_calls.is_empty() {
-        info!("Executing {} tool calls", response.tool_calls.len());
+        let tool_count = response.tool_calls.len();
+        update_progress(&format!("Executing {tool_count} tool calls"), 70);
+        info!("Executing {tool_count} tool calls");
 
         let mut tool_results = Vec::new();
         for tool_call in &response.tool_calls {
@@ -2281,13 +2309,6 @@ async fn execute_with_conductor(
                     let result_str = serde_json::to_string(&result).unwrap_or_default();
                     debug!("Tool {} result: {}", tool_call.tool_name, result_str);
 
-                    // Record in memory if available
-                    if let Some(mem) = memory {
-                        mem.write()
-                            .await
-                            .add(tool_call.tool_name.clone(), &args, &result_str);
-                    }
-
                     tool_results.push(format!(
                         "## Tool: {}\n{}",
                         tool_call.tool_name,
@@ -2296,15 +2317,6 @@ async fn execute_with_conductor(
                 }
                 Err(err_str) => {
                     warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
-
-                    // Record errors in memory too
-                    if let Some(mem) = memory {
-                        mem.write().await.add(
-                            tool_call.tool_name.clone(),
-                            &args,
-                            &format!("ERROR: {err_str}"),
-                        );
-                    }
 
                     tool_results.push(format!(
                         "## Tool: {} (Error)\n{}",
@@ -2329,6 +2341,8 @@ async fn execute_with_conductor(
         .record_result(hrm_task.id, subtask.id, burst_result)
         .await
         .map_err(|e| format!("Failed to record result: {e}"))?;
+
+    update_progress("Finalizing", 95);
 
     info!("Task {} completed via Conductor", hrm_task.id);
 
@@ -2454,7 +2468,7 @@ async fn run_startup_planning_phase(
 
     // 5. Execute planning through conductor (uses larger model for high-confidence tasks)
     let result =
-        execute_with_conductor(conductor, router, mcp_registry, planning_prompt, None).await;
+        execute_with_conductor(conductor, router, mcp_registry, planning_prompt, None, None).await;
 
     match result {
         Ok(response) => {
@@ -3146,7 +3160,14 @@ impl A2aServer {
     /// Build tool registry from MCP connections
     async fn build_tool_registry(&self) {
         info!("Building tool registry from MCP connections");
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new();
+        let storage = match arkavo_memory::MemoryStorage::new().await {
+            Ok(s) => std::sync::Arc::new(s),
+            Err(e) => {
+                error!(error = %e, "Failed to initialize storage for tool registry");
+                return;
+            }
+        };
+        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
 
         // Get all tools from MCP registry
         match self.mcp_registry.list_all_tools().await {
@@ -3399,7 +3420,8 @@ impl A2aServer {
                             &router,
                             &mcp_registry,
                             prompt,
-                            Some(&agent_memory),
+                            None,
+                            None,
                         )
                         .await
                         {

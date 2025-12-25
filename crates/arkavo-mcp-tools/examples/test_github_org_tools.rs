@@ -1,13 +1,16 @@
+use arkavo_mcp_tools::Tool;
 use arkavo_mcp_tools::registry::ToolRegistry;
-use arkavo_mcp_tools::server::Tool;
+use arkavo_memory::MemoryStorage;
 use serde_json::json;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing GitHub Org Knowledge Tools\n");
     println!("===================================\n");
 
-    let registry = ToolRegistry::new();
+    let storage = Arc::new(MemoryStorage::new().await?);
+    let registry = ToolRegistry::new(storage);
     let all_tools = registry.list_tools();
 
     println!("Total tools registered: {}\n", all_tools.len());

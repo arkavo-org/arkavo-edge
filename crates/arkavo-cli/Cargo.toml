@@ -24,7 +24,7 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-ter
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
@@ -35,6 +35,7 @@ arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
+arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }

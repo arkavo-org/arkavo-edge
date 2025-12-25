@@ -43,6 +43,11 @@ Examples:
 
 The system will search for matching tools and provide their definitions.
 
+**Archived Context Protocol:**
+When you see [ARCHIVED: <description> - ID: <uuid>] in context:
+1. Use `context_restore` tool with the UUID to read the full content
+2. Never guess what archived content contains - always restore first
+
 ### Without MCP Tools  
 You are a helpful AI assistant. Be concise and direct in your responses.
 

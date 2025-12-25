@@ -13,6 +13,8 @@ arkavo-workspace = { path = "../arkavo-workspace" }
 arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
 arkavo-orchestrator = { path = "../arkavo-orchestrator" }
 arkavo-context = { path = "../arkavo-context" }
+arkavo-hrm = { path = "../arkavo-hrm" }
+arkavo-memory = { path = "../arkavo-memory" }
 async-trait = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }

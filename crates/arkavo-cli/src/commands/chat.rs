@@ -2,7 +2,7 @@ use crate::commands::agent::extract_agent_role;
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, LlmConfig, Message, encode_image_file};
-use arkavo_memory::storage::MemoryStorage;
+use arkavo_memory::{ContextLedger, storage::MemoryStorage};
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
@@ -406,6 +406,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize conversation manager
     let mut conversation_manager = ConversationManager::new(memory_storage.clone())?;
 
+    // Initialize context ledger for archiving old messages (shares storage with conversation manager)
+    let context_ledger = ContextLedger::new(memory_storage.clone());
+
     // Initialize repository context manager
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;
 
@@ -421,18 +424,41 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     ))?;
 
     // Detect model size hint from model name
-    let model_size_hint =
-        if client.provider_name().contains("270m") || client.provider_name().contains("270M") {
-            Some("270M")
-        } else if client.provider_name().contains("1b") || client.provider_name().contains("1B") {
-            Some("1B")
-        } else if client.provider_name().contains("2b") || client.provider_name().contains("2B") {
-            Some("2B")
-        } else if client.provider_name().contains("7b") || client.provider_name().contains("7B") {
-            Some("7B")
-        } else {
-            None
-        };
+    let provider_name = client.provider_name().to_lowercase();
+    let model_size_hint = if provider_name.contains("270m") {
+        Some("270M")
+    } else if provider_name.contains("1b") {
+        Some("1B")
+    } else if provider_name.contains("2b") {
+        Some("2B")
+    } else if provider_name.contains("7b") {
+        Some("7B")
+    } else {
+        None
+    };
+
+    // Detect cloud providers with large context windows
+    let is_large_context_provider = provider_name.contains("gemini")
+        || provider_name.contains("claude")
+        || provider_name.contains("gpt")
+        || provider_name.contains("deepseek")
+        || provider_name.contains("anthropic")
+        || provider_name.contains("openai");
+
+    // Context offload threshold scales with model context window
+    // Small models: offload early to preserve working memory
+    // Cloud models: much larger context windows (Gemini up to 1M tokens)
+    let (context_offload_threshold, preserve_recent_messages) = if is_large_context_provider {
+        (262_144, 20) // ~64K tokens for cloud models, preserve 20 turns
+    } else {
+        match model_size_hint {
+            Some("270M") => (2_048, 2),    // ~512 tokens, preserve 2 turns
+            Some("1B") => (4_096, 4),      // ~1K tokens, preserve 4 turns
+            Some("2B") => (8_192, 4),      // ~2K tokens, preserve 4 turns
+            Some("7B") => (16_384, 6),     // ~4K tokens, preserve 6 turns
+            Some(_) | None => (32_768, 8), // ~8K tokens for large local models
+        }
+    };
 
     if !print_mode {
         println!("Starting UI testing chat session...");
@@ -1120,6 +1146,70 @@ Q: \"Recent commits?\" → A: @git_status
                 let assistant_msg = Message::assistant(&response);
                 runtime.block_on(conversation_manager.add_message(&assistant_msg))?;
                 messages.push(assistant_msg);
+
+                // Check context size and offload if threshold exceeded
+                let total_context_bytes: usize = messages.iter().map(|m| m.content.len()).sum();
+                if total_context_bytes > context_offload_threshold
+                    && messages.len() > preserve_recent_messages
+                {
+                    // Offload oldest messages (excluding system and recent messages)
+                    let offload_count = messages.len().saturating_sub(preserve_recent_messages);
+                    let has_system = messages
+                        .first()
+                        .is_some_and(|m| matches!(m.role, arkavo_llm::Role::System));
+                    let start_idx = if has_system { 1 } else { 0 };
+                    let end_idx = start_idx + offload_count.min(messages.len() - start_idx);
+
+                    if end_idx > start_idx {
+                        // Collect content to offload
+                        let offload_content: String = messages[start_idx..end_idx]
+                            .iter()
+                            .map(|m| {
+                                let role_str = match m.role {
+                                    arkavo_llm::Role::User => "User",
+                                    arkavo_llm::Role::Assistant => "Assistant",
+                                    arkavo_llm::Role::System => "System",
+                                };
+                                format!("[{role_str}]: {}", m.content)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+
+                        // Generate summary (simple truncation if summarizer not available)
+                        let summary = if offload_content.len() > 100 {
+                            format!("{}...", &offload_content[..100])
+                        } else {
+                            offload_content.clone()
+                        };
+
+                        // Offload to ledger
+                        match runtime.block_on(context_ledger.offload(
+                            &offload_content,
+                            &summary,
+                            "chat-context",
+                        )) {
+                            Ok(pointer) => {
+                                // Replace offloaded messages with a single pointer message
+                                messages.drain(start_idx..end_idx);
+                                let pointer_msg = Message::system(&pointer);
+                                messages.insert(start_idx, pointer_msg);
+
+                                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                    eprintln!(
+                                        "[DEBUG] Context offloaded: {} messages -> {}",
+                                        end_idx - start_idx,
+                                        pointer
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                    eprintln!("[DEBUG] Context offload failed: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // If the response contains tool execution results, we might need to continue the conversation
                 if response.contains("[Tool execution completed. Results shown above.]") {

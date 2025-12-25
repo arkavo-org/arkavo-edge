@@ -1,5 +1,6 @@
 use arkavo_events::{EventWriter, EventWriterConfig};
 use arkavo_mcp_tools::ToolRegistry;
+use arkavo_memory::MemoryStorage;
 use arkavo_orchestrator::agent_assignment::{AgentAssignment, RoutingDecision};
 use arkavo_orchestrator::cognitive_engine::{
     ExecutionPlan, PlanStep, PrCreator, VerificationCheck,
@@ -10,7 +11,12 @@ use std::sync::Arc;
 #[tokio::test]
 #[ignore]
 async fn test_pr_creation_with_mcp_tool() {
-    let tool_registry = Arc::new(ToolRegistry::new());
+    let storage = Arc::new(
+        MemoryStorage::new()
+            .await
+            .expect("Failed to create storage"),
+    );
+    let tool_registry = Arc::new(ToolRegistry::new(storage));
 
     let event_config = EventWriterConfig {
         buffer_size: 1024,
