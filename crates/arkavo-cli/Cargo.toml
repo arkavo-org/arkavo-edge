@@ -36,7 +36,6 @@ arkavo-git = { path = "../arkavo-git" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
@@ -78,6 +77,7 @@ hf-hub = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

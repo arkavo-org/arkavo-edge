@@ -1,5 +1,4 @@
-use anyhow::Result;
-use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -38,14 +37,17 @@ impl UiControlTool {
 
 #[async_trait]
 impl Tool for UiControlTool {
-    async fn execute(&self, params: Value) -> Result<Value> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let action: UiAction = serde_json::from_value(params)?;
 
         // Send the action to the UI
         self.ui_tx
             .send(action)
             .await
-            .map_err(|_| anyhow::anyhow!("Failed to send UI command"))?;
+            .map_err(|_| "Failed to send UI command")?;
 
         Ok(json!({
             "success": true,

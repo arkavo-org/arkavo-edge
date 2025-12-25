@@ -632,7 +632,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Build base system prompt (without repo context initially)
     // When agent has persona, use progressive tools (don't inject tool examples)
-    let mut base_system_prompt = if has_agent_persona {
+    let base_system_prompt = if has_agent_persona {
         // Agent mode: persona-focused, tools loaded progressively on demand
         let persona = agent_purpose.as_ref().unwrap();
         format!(

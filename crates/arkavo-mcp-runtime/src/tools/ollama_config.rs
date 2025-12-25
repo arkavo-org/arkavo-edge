@@ -1,5 +1,4 @@
-use anyhow::Result;
-use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_mcp::{Tool, ToolSchema};
 use arkavo_memory::storage::MemoryStorage;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -24,7 +23,10 @@ impl OllamaConfigTool {
 
 #[async_trait]
 impl Tool for OllamaConfigTool {
-    async fn execute(&self, params: Value) -> Result<Value> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let config_params: OllamaConfigParams = serde_json::from_value(params)?;
 
         match config_params.action.as_str() {

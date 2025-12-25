@@ -117,7 +117,7 @@ impl PeerManager {
                 if url.starts_with("http://") || url.starts_with("https://") {
                     url.to_string()
                 } else {
-                    format!("http://{}", url)
+                    format!("http://{url}")
                 }
             }
             TransportType::WebSocket => {
@@ -128,7 +128,7 @@ impl PeerManager {
                 } else if url.starts_with("https://") {
                     url.replace("https://", "wss://")
                 } else {
-                    format!("ws://{}", url)
+                    format!("ws://{url}")
                 }
             }
         };
@@ -242,8 +242,7 @@ impl PeerManager {
             // Ensure peer has the required transport
             if let Err(e) = self.ensure_transport(&peer_url, required_transport).await {
                 results.push(Err(format!(
-                    "Failed to ensure transport for {}: {}",
-                    peer_url, e
+                    "Failed to ensure transport for {peer_url}: {e}"
                 )));
                 continue;
             }
@@ -256,10 +255,10 @@ impl PeerManager {
                 if let Some(peer) = peers.get(&peer_url) {
                     if let Some(http) = &peer.http_transport {
                         Some(TransportRef::Http(Arc::clone(http)))
-                    } else if let Some(ws) = &peer.ws_transport {
-                        Some(TransportRef::WebSocket(Arc::clone(ws)))
                     } else {
-                        None
+                        peer.ws_transport
+                            .as_ref()
+                            .map(|ws| TransportRef::WebSocket(Arc::clone(ws)))
                     }
                 } else {
                     None
@@ -274,7 +273,7 @@ impl PeerManager {
 
             match result {
                 Ok(response) => results.push(Ok(response)),
-                Err(e) => results.push(Err(format!("Failed to send to {}: {}", peer_url, e))),
+                Err(e) => results.push(Err(format!("Failed to send to {peer_url}: {e}"))),
             }
         }
 
@@ -301,7 +300,7 @@ impl PeerManager {
             let peers = self.peers.read().unwrap();
             let peer = peers
                 .get(peer_url)
-                .ok_or_else(|| format!("Peer not found: {}", peer_url))?;
+                .ok_or_else(|| format!("Peer not found: {peer_url}"))?;
 
             if let Some(http) = &peer.http_transport {
                 Ok(TransportRef::Http(Arc::clone(http)))

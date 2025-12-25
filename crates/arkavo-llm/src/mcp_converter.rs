@@ -385,9 +385,24 @@ impl McpConverter {
 
         prompt.push_str("\nFormat:\n```<tool>\n<param>: <value>\n```\n\n");
 
+        // Show required parameters for all tools (helps LLMs use correct param names)
+        prompt.push_str("Required parameters:\n");
+        for tool in tools {
+            let required: Vec<&str> = tool
+                .schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            if !required.is_empty() {
+                let _ = writeln!(prompt, "- {}: {}", tool.name, required.join(", "));
+            }
+        }
+        prompt.push('\n');
+
         // Add concrete examples for each tool
         prompt.push_str("Examples:\n");
-        for tool in tools.iter().take(2) {
+        for tool in tools.iter().take(3) {
             let _ = writeln!(prompt, "```{}", tool.name);
             if let Some(props) = tool.schema.get("properties").and_then(|p| p.as_object()) {
                 let required: Vec<&str> = tool
@@ -406,6 +421,8 @@ impl McpConverter {
                             "query" => "search term",
                             "url" => "https://example.com",
                             "command" => "ls -la",
+                            "message" | "text" | "content" => "Hello world",
+                            "x" | "y" | "z" => "100",
                             _ => "value",
                         };
                         let _ = writeln!(prompt, "{name}: {example}");

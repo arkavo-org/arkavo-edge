@@ -116,7 +116,7 @@ jobs:
       fail-fast: false  # Run all groups even if one fails
       matrix:
         group:
-          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context, arkavo-mcp-core
+          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context
           - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-tools, arkavo-workspace
           - llm-heavy   # arkavo-router (no llama-cpp), arkavo-dataflow, arkavo-terminal
           - ui-heavy    # arkavo-ui-generator, arkavo-agui (no llama-cpp)
@@ -166,7 +166,6 @@ jobs:
             cargo test --locked -p arkavo-memory --test mcp_integration_test
             cargo test --locked -p arkavo-budget
             cargo test --locked -p arkavo-context
-            cargo test --locked -p arkavo-mcp-core
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo test --locked -p arkavo-protocol
             cargo test --locked -p arkavo-observability
@@ -192,11 +191,9 @@ jobs:
             cargo clippy --locked -p arkavo-memory --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-budget --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-context --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
             cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
