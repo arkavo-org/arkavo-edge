@@ -12,7 +12,7 @@ use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use super::super::config_helpers::{cleanup_old_backups, validate_agent_config, AgentMetadata};
+use super::super::config_helpers::{AgentMetadata, cleanup_old_backups, validate_agent_config};
 
 pub async fn handle_config_get(
     metrics: &Arc<MetricsCollector>,

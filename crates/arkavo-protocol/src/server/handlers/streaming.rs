@@ -169,10 +169,7 @@ pub async fn handle_chat_subscribe(
                             Ok(stream_delta) => {
                                 let message_delta = match stream_delta.delta {
                                     DeltaType::Text { content } => MessageDelta {
-                                        session_id: request
-                                            .session_id
-                                            .clone()
-                                            .unwrap_or_default(),
+                                        session_id: request.session_id.clone().unwrap_or_default(),
                                         message_id: message_id.clone(),
                                         sequence: 0,
                                         delta: MessageDeltaContent::Text { text: content },
@@ -183,10 +180,7 @@ pub async fn handle_chat_subscribe(
                                         name,
                                         arguments,
                                     } => MessageDelta {
-                                        session_id: request
-                                            .session_id
-                                            .clone()
-                                            .unwrap_or_default(),
+                                        session_id: request.session_id.clone().unwrap_or_default(),
                                         message_id: message_id.clone(),
                                         sequence: 0,
                                         delta: MessageDeltaContent::ToolCall {

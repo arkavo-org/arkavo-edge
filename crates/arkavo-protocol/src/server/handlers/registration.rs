@@ -93,7 +93,10 @@ pub async fn handle_registration_status(
         ));
     }
 
-    match registration_service.get_registration_status(&device_id).await {
+    match registration_service
+        .get_registration_status(&device_id)
+        .await
+    {
         Ok(status) => {
             timer.success();
             Ok(status)

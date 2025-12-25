@@ -2,7 +2,9 @@ use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::rate_limit::RateLimiter;
 use crate::task_executor::TaskExecutor;
 use crate::task_store::TaskStore;
-use crate::types::{Message, TaskCancelRequest, TaskCancelResponse, TaskGetRequest, TaskGetResponse, TaskStatus};
+use crate::types::{
+    Message, TaskCancelRequest, TaskCancelResponse, TaskGetRequest, TaskGetResponse, TaskStatus,
+};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 

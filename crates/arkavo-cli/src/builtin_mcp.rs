@@ -139,11 +139,11 @@ impl McpClient for BuiltinMcpConnection {
         #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
         {
             if let Some(ref test_conn) = self.test_connection {
-                return test_conn.call_tool(tool_name, arguments, llm_provider).map_err(
-                    |e| -> Box<dyn std::error::Error + Send + Sync> {
+                return test_conn
+                    .call_tool(tool_name, arguments, llm_provider)
+                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                         Box::new(std::io::Error::other(e.to_string()))
-                    },
-                );
+                    });
             }
         }
 

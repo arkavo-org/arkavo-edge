@@ -1,4 +1,6 @@
-use arkavo_mcp_runtime::polling::{AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint};
+use arkavo_mcp_runtime::polling::{
+    AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;

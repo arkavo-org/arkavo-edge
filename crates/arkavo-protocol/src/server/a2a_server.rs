@@ -16,10 +16,10 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 
-use super::config_helpers::{reload_configuration_for_watcher, AgentMetadata};
-use super::startup::{run_startup_planning_phase, AgentPlan};
+use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
+use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
-use super::{execute_with_conductor, A2aRpcImpl, A2aRpcServer};
+use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
 
 pub struct A2aServer {
     config: ServerConfig,
@@ -146,7 +146,9 @@ impl A2aServer {
         }
 
         if !new_config.mcp_servers.is_empty() {
-            warn!("MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3.");
+            warn!(
+                "MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3."
+            );
             warn!("For now, MCP server changes require agent restart to take effect.");
         }
 
@@ -219,9 +221,18 @@ impl A2aServer {
                     capabilities: Some(capabilities),
                     metadata: Some(
                         [
-                            ("model".to_string(), serde_json::Value::String(metadata.model.clone())),
-                            ("purpose".to_string(), serde_json::Value::String(metadata.purpose.clone())),
-                            ("endpoint".to_string(), serde_json::Value::String(metadata.endpoint.clone())),
+                            (
+                                "model".to_string(),
+                                serde_json::Value::String(metadata.model.clone()),
+                            ),
+                            (
+                                "purpose".to_string(),
+                                serde_json::Value::String(metadata.purpose.clone()),
+                            ),
+                            (
+                                "endpoint".to_string(),
+                                serde_json::Value::String(metadata.endpoint.clone()),
+                            ),
                         ]
                         .into_iter()
                         .collect(),
@@ -263,7 +274,8 @@ impl A2aServer {
             match provider {
                 "ollama" => {
                     if let Some((host_port, model_name)) = rest.rsplit_once('/') {
-                        let config = LlmConfig::ollama_with(format!("http://{host_port}"), model_name);
+                        let config =
+                            LlmConfig::ollama_with(format!("http://{host_port}"), model_name);
                         let client = LlmClient::from_config(&config).map_err(|e| {
                             A2aError::InvalidRequest(format!("Failed to create LLM client: {e}"))
                         })?;
@@ -315,7 +327,10 @@ impl A2aServer {
                 ))
             })?;
 
-            info!("Successfully created LLM client from environment for model: {}", model_url);
+            info!(
+                "Successfully created LLM client from environment for model: {}",
+                model_url
+            );
             Ok(Arc::new(LlmClientAdapter::new(client)))
         }
     }
@@ -394,7 +409,10 @@ impl A2aServer {
 
             loop {
                 match rx.recv_timeout(Duration::from_secs(1)) {
-                    Ok(Ok(Event { kind: EventKind::Modify(_), .. })) => {
+                    Ok(Ok(Event {
+                        kind: EventKind::Modify(_),
+                        ..
+                    })) => {
                         if last_reload.elapsed() > Duration::from_secs(1) {
                             info!("AGENTS.md modified, triggering hot-reload");
 
@@ -523,7 +541,9 @@ impl A2aServer {
                                 .goals
                                 .iter()
                                 .enumerate()
-                                .map(|(i, g)| format!("{}. {} ({:?})", i + 1, g.description, g.status))
+                                .map(|(i, g)| {
+                                    format!("{}. {} ({:?})", i + 1, g.description, g.status)
+                                })
                                 .collect();
                             format!("\n\n## Active Goals\n{}", goals_str.join("\n"))
                         } else {
@@ -537,11 +557,27 @@ impl A2aServer {
 
                         let prompt = format!(
                             "{}{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
-                            system_prompt, goals_section, memory_section, notification.server, event_str
+                            system_prompt,
+                            goals_section,
+                            memory_section,
+                            notification.server,
+                            event_str
                         );
 
-                        eprintln!("[Notifications] Processing with LLM: {} chars", prompt.len());
-                        match execute_with_conductor(&conductor, &router, &mcp_registry, prompt, None, None).await {
+                        eprintln!(
+                            "[Notifications] Processing with LLM: {} chars",
+                            prompt.len()
+                        );
+                        match execute_with_conductor(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            prompt,
+                            None,
+                            None,
+                        )
+                        .await
+                        {
                             Ok(result) => {
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
                                 if !result.is_empty() {
@@ -589,7 +625,9 @@ impl A2aServer {
         let tool_registry = self.tool_registry.read().await.clone();
 
         let chat_sessions = if let Some(router_instance) = router.clone() {
-            info!("✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)");
+            info!(
+                "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
+            );
             Arc::new(crate::chat_session::ChatSessionManager::with_config(
                 None,
                 Some(router_instance),
@@ -607,23 +645,30 @@ impl A2aServer {
                 self.buffer_config.clone(),
             ))
         } else {
-            warn!("✗ ChatSessionManager will be created WITHOUT LLM adapter or router - messages will fail!");
+            warn!(
+                "✗ ChatSessionManager will be created WITHOUT LLM adapter or router - messages will fail!"
+            );
             Arc::new(crate::chat_session::ChatSessionManager::with_config(
-                None, None, None, 3600, self.buffer_config.clone(),
+                None,
+                None,
+                None,
+                3600,
+                self.buffer_config.clone(),
             ))
         };
 
-        let task_store: Arc<dyn TaskStore> = match &self.config.task_store_path {
-            Some(path) => {
-                let task_store_path = std::path::Path::new(path);
-                Arc::new(SqliteTaskStore::new(task_store_path).await.map_err(|e| {
-                    A2aError::Internal(format!("Failed to create task store: {e}"))
-                })?)
-            }
-            None => Arc::new(SqliteTaskStore::new_in_memory().await.map_err(|e| {
-                A2aError::Internal(format!("Failed to create in-memory task store: {e}"))
-            })?),
-        };
+        let task_store: Arc<dyn TaskStore> =
+            match &self.config.task_store_path {
+                Some(path) => {
+                    let task_store_path = std::path::Path::new(path);
+                    Arc::new(SqliteTaskStore::new(task_store_path).await.map_err(|e| {
+                        A2aError::Internal(format!("Failed to create task store: {e}"))
+                    })?)
+                }
+                None => Arc::new(SqliteTaskStore::new_in_memory().await.map_err(|e| {
+                    A2aError::Internal(format!("Failed to create in-memory task store: {e}"))
+                })?),
+            };
 
         let task_executor = Arc::new(TaskExecutor::with_metrics(
             task_store.clone(),

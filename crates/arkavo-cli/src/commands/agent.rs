@@ -1520,8 +1520,10 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
     ) -> Result<Vec<arkavo_mcp::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
         // Convert from cli Tool to McpTool
         let cli_tools = self.inner.list_tools().map_err(|e| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
         })?;
         let protocol_tools = cli_tools
             .into_iter()
@@ -1543,8 +1545,10 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
         self.inner
             .call_tool(tool_name, arguments, llm_provider)
             .map_err(|e| {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }

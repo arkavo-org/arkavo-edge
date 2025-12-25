@@ -85,8 +85,9 @@ pub async fn handle_message_send(
                                 metadata: None,
                             };
 
-                            if let Err(e) =
-                                task_executor.complete_task(&task_id_clone, result_message).await
+                            if let Err(e) = task_executor
+                                .complete_task(&task_id_clone, result_message)
+                                .await
                             {
                                 warn!("Failed to complete task {}: {}", task_id_clone, e);
                             } else {

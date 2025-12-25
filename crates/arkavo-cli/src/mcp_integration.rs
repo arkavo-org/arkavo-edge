@@ -164,8 +164,14 @@ impl arkavo_mcp_tools::McpClient for McpConnection {
     fn list_tools(
         &self,
     ) -> Result<Vec<arkavo_mcp_tools::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
-        let protocol_tools =
-            McpConnection::list_tools(self).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) })?;
+        let protocol_tools = McpConnection::list_tools(self).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            },
+        )?;
         Ok(protocol_tools
             .into_iter()
             .map(|t| arkavo_mcp_tools::McpTool {
@@ -182,7 +188,13 @@ impl arkavo_mcp_tools::McpClient for McpConnection {
         args: Value,
         llm_origin: &str,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        McpConnection::call_tool(self, tool_name, args, llm_origin)
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) })
+        McpConnection::call_tool(self, tool_name, args, llm_origin).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            },
+        )
     }
 }

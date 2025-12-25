@@ -109,7 +109,9 @@ impl McpRegistry {
     }
 
     /// List all available tools from all connections (uses cached tools)
-    pub async fn list_all_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn list_all_tools(
+        &self,
+    ) -> Result<Vec<Tool>, Box<dyn std::error::Error + Send + Sync>> {
         let mut all_tools = Vec::new();
 
         {
@@ -277,7 +279,10 @@ impl McpRegistry {
     }
 
     /// Disconnect and remove a server
-    pub async fn disconnect(&self, server_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn disconnect(
+        &self,
+        server_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.connections.write().await.remove(server_name);
         Ok(())
     }
