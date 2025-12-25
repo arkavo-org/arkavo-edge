@@ -1,7 +1,20 @@
 mod conductor;
+mod config_helpers;
 mod mcp_bridge;
 mod startup;
+mod tool_memory;
 
+pub use conductor::execute_with_conductor;
+pub use config_helpers::AgentMetadata;
+pub use mcp_bridge::McpBridgeTool;
+pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
+pub use tool_memory::{ToolMemory, ToolMemoryEntry};
+
+use config_helpers::{
+    cleanup_old_backups, reload_configuration_for_watcher, validate_agent_config,
+};
+
+use crate::agent_config::parse_agents_config;
 use crate::auth::{AuthBackend, NoOpAuthBackend};
 use crate::config::{BufferConfig, ServerConfig};
 use crate::error::{A2aError, Result};
@@ -25,7 +38,6 @@ use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, LlmConfig, StreamLlmModel};
 use async_trait::async_trait;
-pub use conductor::execute_with_conductor;
 use futures::StreamExt;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::types::ErrorObjectOwned;
@@ -34,8 +46,6 @@ use jsonrpsee::{
     core::{RpcResult, SubscriptionResult},
     proc_macros::rpc,
 };
-pub use mcp_bridge::McpBridgeTool;
-pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -193,15 +203,6 @@ pub struct A2aRpcImpl {
     conductor: Arc<Conductor<InMemoryTaskStore>>,
     /// Router for LLM calls during HRM task execution
     router: Option<Arc<arkavo_router::Router>>,
-}
-
-#[derive(Default, Clone)]
-struct AgentMetadata {
-    name: String,
-    purpose: String,
-    model: String,
-    endpoint: String,
-    api_keys: std::collections::HashMap<String, String>,
 }
 
 #[async_trait]
@@ -1961,255 +1962,6 @@ impl A2aRpcImpl {
 
         info!("Configuration hot-reload completed successfully");
         Ok(())
-    }
-}
-
-// Helper function to validate agent configuration
-fn validate_agent_config(content: &str) -> std::result::Result<(), String> {
-    // Basic validation - ensure it can be parsed
-    match parse_agents_config(content) {
-        Ok(agents) if agents.is_empty() => Err("No agent configurations found".to_string()),
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("Parse error: {e}")),
-    }
-}
-
-// Simple agent configuration structure for validation
-#[derive(Debug)]
-struct SimpleAgentConfig {
-    name: String,
-    purpose: String,
-    model: String,
-    listen: String,
-}
-
-// Basic parser for agent configuration validation
-fn parse_agents_config(content: &str) -> std::result::Result<Vec<SimpleAgentConfig>, String> {
-    let mut agents = Vec::new();
-    let mut current_agent: Option<SimpleAgentConfig> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Check for agent section header
-        if trimmed.starts_with("## ") {
-            // Save previous agent if exists
-            if let Some(agent) = current_agent.take() {
-                agents.push(agent);
-            }
-
-            let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
-            current_agent = Some(SimpleAgentConfig {
-                name,
-                purpose: String::new(),
-                model: String::new(),
-                listen: String::new(),
-            });
-        } else if let Some(ref mut agent) = current_agent {
-            // Parse agent properties
-            if let Some((key, value)) = trimmed.split_once(':') {
-                let key = key.trim();
-                let value = value.trim();
-
-                match key {
-                    "purpose" => agent.purpose = value.to_string(),
-                    "model" => agent.model = value.to_string(),
-                    "listen" => agent.listen = value.to_string(),
-                    _ => {} // Ignore other fields for now
-                }
-            }
-        }
-    }
-
-    // Save last agent if exists
-    if let Some(agent) = current_agent {
-        agents.push(agent);
-    }
-
-    Ok(agents)
-}
-
-// Helper function for file watcher to reload configuration
-async fn reload_configuration_for_watcher(
-    content: &str,
-    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
-    _llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
-    mcp_registry: Arc<McpRegistry>,
-) -> Result<()> {
-    use crate::agent_config::parse_agents_config;
-
-    // Validate configuration before applying
-    if content.trim().is_empty() {
-        return Err(A2aError::Configuration(
-            "Configuration file is empty".to_string(),
-        ));
-    }
-
-    // Parse the new configuration
-    let agents = parse_agents_config(content)
-        .map_err(|e| A2aError::Configuration(format!("Failed to parse configuration: {e}")))?;
-
-    if agents.is_empty() {
-        return Err(A2aError::Configuration(
-            "No agent configurations found".to_string(),
-        ));
-    }
-
-    // Find our agent's configuration
-    let our_agent_name = agent_metadata.read().await.name.clone();
-
-    let new_config = agents
-        .iter()
-        .find(|a| a.name == our_agent_name)
-        .ok_or_else(|| {
-            A2aError::Configuration(format!(
-                "Agent '{our_agent_name}' not found in new configuration"
-            ))
-        })?;
-
-    // Validate required fields
-    if new_config.purpose.is_empty() {
-        return Err(A2aError::Configuration(
-            "Agent purpose cannot be empty".to_string(),
-        ));
-    }
-    if new_config.model.is_empty() {
-        return Err(A2aError::Configuration(
-            "Agent model cannot be empty".to_string(),
-        ));
-    }
-
-    // Update metadata
-    {
-        let mut metadata = agent_metadata.write().await;
-        metadata.purpose.clone_from(&new_config.purpose);
-        metadata.endpoint.clone_from(&new_config.listen);
-        // Update API keys in metadata (no longer setting env vars - use LlmConfig instead)
-        metadata.api_keys.clone_from(&new_config.api_keys);
-
-        info!("Updated agent metadata for '{}'", metadata.name);
-        info!("  Purpose: {}", metadata.purpose);
-        info!("  Endpoint: {}", metadata.endpoint);
-        info!("  API keys updated: {}", metadata.api_keys.len());
-    }
-
-    // Handle model changes
-    if new_config.model != agent_metadata.read().await.model {
-        warn!("Model change detected, but LLM adapter recreation not yet implemented");
-        let mut metadata = agent_metadata.write().await;
-        metadata.model.clone_from(&new_config.model);
-    }
-
-    // Handle MCP server changes
-    if !new_config.mcp_servers.is_empty() {
-        info!("MCP server configuration changed, clearing existing connections");
-
-        // Clear existing MCP connections
-        mcp_registry.clear_connections().await;
-
-        // Log the MCP servers that need to be restarted
-        for mcp_server in &new_config.mcp_servers {
-            info!("MCP server '{}' needs restart:", mcp_server.name);
-            if let Some(cmd) = &mcp_server.command {
-                info!("  Command: {} {:?}", cmd, mcp_server.args);
-            } else if let Some(url) = &mcp_server.url {
-                info!("  URL: {}", url);
-            }
-        }
-
-        warn!(
-            "MCP servers cleared. Manual restart required or use agent restart for full MCP reload"
-        );
-    }
-
-    Ok(())
-}
-
-// Helper function to clean up old backups
-async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
-    if let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {
-        let mut backups = Vec::new();
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            if let Ok(metadata) = entry.metadata().await
-                && metadata.is_file()
-            {
-                let filename = entry.file_name().to_string_lossy().to_string();
-                if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
-                    backups.push((entry.path(), metadata.modified().ok()));
-                }
-            }
-        }
-
-        // Sort by modification time, newest first
-        backups.sort_by(|a, b| b.1.cmp(&a.1));
-
-        // Remove old backups
-        for (path, _) in backups.iter().skip(keep_count) {
-            let _ = tokio::fs::remove_file(path).await;
-        }
-    }
-}
-
-/// Sliding window memory for recent tool calls and responses
-#[derive(Debug, Clone, Default)]
-pub struct ToolMemory {
-    entries: std::collections::VecDeque<ToolMemoryEntry>,
-    max_entries: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolMemoryEntry {
-    pub tool_name: String,
-    pub args_summary: String,
-    pub result_summary: String,
-    pub timestamp: std::time::Instant,
-}
-
-impl ToolMemory {
-    pub fn new(max_entries: usize) -> Self {
-        Self {
-            entries: std::collections::VecDeque::with_capacity(max_entries),
-            max_entries,
-        }
-    }
-
-    pub fn add(&mut self, tool_name: String, args: &serde_json::Value, result: &str) {
-        let args_summary = serde_json::to_string(args)
-            .unwrap_or_default()
-            .chars()
-            .take(100)
-            .collect();
-        let result_summary: String = result.chars().take(200).collect();
-
-        if self.entries.len() >= self.max_entries {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(ToolMemoryEntry {
-            tool_name,
-            args_summary,
-            result_summary,
-            timestamp: std::time::Instant::now(),
-        });
-    }
-
-    pub fn format_for_prompt(&self) -> String {
-        use std::fmt::Write;
-        if self.entries.is_empty() {
-            return String::new();
-        }
-        let mut output = String::from("\n\n## Recent Actions\n");
-        for (i, entry) in self.entries.iter().enumerate() {
-            let _ = writeln!(
-                output,
-                "{}. {} {} → {}",
-                i + 1,
-                entry.tool_name,
-                entry.args_summary,
-                entry.result_summary
-            );
-        }
-        output
     }
 }
 
