@@ -291,53 +291,188 @@ impl Router {
         llms
     }
 
-    /// Route a request with MCP tool support
-    #[deprecated(since = "0.44.0", note = "Use route() instead")]
+    /// Route with tools and Judge loop validation (local models only)
+    ///
+    /// Includes quality gate with:
+    /// - ResponseValidator for fast validation (hallucinated tools, missing params)
+    /// - ResponseJudge for LLM-based quality evaluation
+    /// - Automatic model escalation within LOCAL models only (up to 3 retries)
     pub async fn route_with_tools(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
-        let decision = self.classify(task_description).await?;
+        const MAX_RETRIES: u8 = 3;
+        let mut current_decision = self.classify(task_description).await?;
 
-        let tools_json = match tool_registry {
-            Some(registry) => {
-                let detail_level = Self::detail_level_for_model(&decision.recommended_model);
-                let keywords = Self::extract_keywords(task_description);
+        for attempt in 0..MAX_RETRIES {
+            let tools_json = match tool_registry {
+                Some(registry) => {
+                    let detail_level =
+                        Self::detail_level_for_model(&current_decision.recommended_model);
+                    let keywords = Self::extract_keywords(task_description);
 
-                // Use hybrid search: semantic + token-based
-                let tool_infos = Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based
+                    let tool_infos =
+                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
 
-                Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
-                    &tool_infos,
-                ))
+                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
+                        &tool_infos,
+                    ))
+                }
+                None => None,
+            };
+
+            let provider = self
+                .instantiate_provider(&current_decision.recommended_model)
+                .await?;
+
+            let mut response = provider
+                .complete_with_tools(messages.clone(), tools_json, None)
+                .await
+                .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Extract tool calls from text content if structured tool_calls is empty
+            if response.tool_calls.is_empty() && !response.content.is_empty() {
+                let extracted = Self::extract_tool_calls_from_text(&response.content);
+                if !extracted.is_empty() {
+                    tracing::debug!(
+                        "Extracted {} tool calls from text response",
+                        extracted.len()
+                    );
+                    response.tool_calls = extracted;
+                }
             }
-            None => None,
-        };
 
-        let provider = self
-            .instantiate_provider(&decision.recommended_model)
-            .await?;
-
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        // Extract tool calls from text content if structured tool_calls is empty
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = Self::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                tracing::debug!(
-                    "Extracted {} tool calls from text response",
-                    extracted.len()
-                );
-                response.tool_calls = extracted;
+            // Debug: log tool calls
+            if !response.tool_calls.is_empty() {
+                for tc in &response.tool_calls {
+                    tracing::debug!("[Judge] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
             }
+
+            // Quality gate validation
+            if let Some(registry) = tool_registry {
+                let tool_infos = registry.list_tools();
+
+                // Fast validation: check for hallucinated tools, missing params
+                let validator = validator::ResponseValidator::new(&tool_infos);
+                if let Err(validation_error) = validator.quick_validate(&response) {
+                    tracing::warn!(
+                        "Fast validation failed on attempt {}/{}: {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        validation_error
+                    );
+
+                    if attempt + 1 < MAX_RETRIES
+                        && let Some(upgraded) =
+                            Self::upgrade_model_local_only(&current_decision.recommended_model)
+                    {
+                        current_decision.recommended_model = upgraded;
+                        tracing::info!(
+                            "Upgrading to {:?} due to validation failure (local only)",
+                            current_decision.recommended_model
+                        );
+                        continue;
+                    }
+                    // No more local upgrades available or max retries reached
+                    // Return the response anyway with a warning
+                    tracing::warn!(
+                        "Validation failed but no local upgrade available, returning response"
+                    );
+                    return Ok(response);
+                }
+
+                // LLM-based Judge evaluation (only with llama-cpp feature)
+                #[cfg(feature = "llama-cpp")]
+                {
+                    use crate::judge::IssueType;
+
+                    match judge::ResponseJudge::new_local().await {
+                        Ok(judge) => {
+                            let judgment = judge
+                                .evaluate(task_description, &response, &tool_infos, None)
+                                .await?;
+
+                            if !judgment.passed {
+                                tracing::warn!(
+                                    "Judge rejected response on attempt {}/{}: {:?} - {}",
+                                    attempt + 1,
+                                    MAX_RETRIES,
+                                    judgment.issue_type,
+                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                );
+
+                                // Special handling for MissingToolUse
+                                if judgment.issue_type == IssueType::MissingToolUse
+                                    && !judgment.suggested_keywords.is_empty()
+                                {
+                                    tracing::info!(
+                                        "Judge detected missing tool usage, searching for: {:?}",
+                                        judgment.suggested_keywords
+                                    );
+                                    return Err(Error::ModelExecution(format!(
+                                        "MISSING_TOOL_USE:{:?}",
+                                        judgment.suggested_keywords
+                                    )));
+                                }
+
+                                if attempt + 1 < MAX_RETRIES
+                                    && let Some(upgraded) = Self::upgrade_model_local_only(
+                                        &current_decision.recommended_model,
+                                    )
+                                {
+                                    current_decision.recommended_model = upgraded;
+                                    tracing::info!(
+                                        "Upgrading to {:?} after judge rejection (local only)",
+                                        current_decision.recommended_model
+                                    );
+                                    continue;
+                                }
+                                // No more local upgrades, return response with warning
+                                tracing::warn!(
+                                    "Judge rejected but no local upgrade available, returning response"
+                                );
+                                return Ok(response);
+                            }
+                        }
+                        Err(e) => {
+                            // Judge unavailable, skip LLM-based validation
+                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
+                        }
+                    }
+                }
+            }
+
+            return Ok(response);
         }
 
-        Ok(response)
+        Err(Error::ModelExecution(
+            "Max retries exceeded without successful response".to_string(),
+        ))
+    }
+
+    /// Upgrade model within local tier only - never escalate to cloud
+    fn upgrade_model_local_only(current: &ModelChoice) -> Option<ModelChoice> {
+        match current {
+            // Qwen3/Ministral upgrade path
+            ModelChoice::LocalQwen3 => Some(ModelChoice::LocalMinistral3B),
+            ModelChoice::LocalMinistral3B => Some(ModelChoice::LocalMinistral8B),
+            ModelChoice::LocalMinistral8B => None, // Already at max local
+
+            // Gemma upgrade path
+            ModelChoice::LocalGemma270M => Some(ModelChoice::LocalGemma4B),
+            ModelChoice::LocalGemma4B => Some(ModelChoice::LocalGemma12B),
+            ModelChoice::LocalGemma12B => None, // Already at max local
+
+            // DeepSeek local stays local
+            ModelChoice::LocalDeepSeekCoder => None, // Don't escalate to cloud
+
+            // Cloud models - no local upgrade available
+            _ => None,
+        }
     }
 
     /// Route with automatic quality evaluation and model escalation
