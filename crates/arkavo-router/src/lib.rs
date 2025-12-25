@@ -291,53 +291,163 @@ impl Router {
         llms
     }
 
-    /// Route a request with MCP tool support
-    #[deprecated(since = "0.44.0", note = "Use route() instead")]
+    /// Route with tools and Judge loop validation
+    ///
+    /// Includes quality gate with:
+    /// - ResponseValidator for fast validation (hallucinated tools, missing params)
+    /// - ResponseJudge for LLM-based quality evaluation
+    /// - Automatic model escalation on failure (up to 3 retries)
     pub async fn route_with_tools(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
-        let decision = self.classify(task_description).await?;
+        const MAX_RETRIES: u8 = 3;
+        let mut current_decision = self.classify(task_description).await?;
 
-        let tools_json = match tool_registry {
-            Some(registry) => {
-                let detail_level = Self::detail_level_for_model(&decision.recommended_model);
-                let keywords = Self::extract_keywords(task_description);
+        for attempt in 0..MAX_RETRIES {
+            let tools_json = match tool_registry {
+                Some(registry) => {
+                    let detail_level =
+                        Self::detail_level_for_model(&current_decision.recommended_model);
+                    let keywords = Self::extract_keywords(task_description);
 
-                // Use hybrid search: semantic + token-based
-                let tool_infos = Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based
+                    let tool_infos =
+                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
 
-                Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
-                    &tool_infos,
-                ))
+                    // Use the correct format based on the model provider
+                    let json = match current_decision.recommended_model {
+                        decision::ModelChoice::GeminiFlash | decision::ModelChoice::GeminiPro => {
+                            arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                        }
+                        _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                    };
+                    Some(json)
+                }
+                None => None,
+            };
+
+            let provider = self
+                .instantiate_provider(&current_decision.recommended_model)
+                .await?;
+
+            let mut response = provider
+                .complete_with_tools(messages.clone(), tools_json, None)
+                .await
+                .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Extract tool calls from text content if structured tool_calls is empty
+            if response.tool_calls.is_empty() && !response.content.is_empty() {
+                let extracted = Self::extract_tool_calls_from_text(&response.content);
+                if !extracted.is_empty() {
+                    tracing::debug!(
+                        "Extracted {} tool calls from text response",
+                        extracted.len()
+                    );
+                    response.tool_calls = extracted;
+                }
             }
-            None => None,
-        };
 
-        let provider = self
-            .instantiate_provider(&decision.recommended_model)
-            .await?;
-
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        // Extract tool calls from text content if structured tool_calls is empty
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = Self::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                tracing::debug!(
-                    "Extracted {} tool calls from text response",
-                    extracted.len()
-                );
-                response.tool_calls = extracted;
+            // Debug: log tool calls
+            if !response.tool_calls.is_empty() {
+                for tc in &response.tool_calls {
+                    tracing::debug!("[Judge] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
             }
+
+            // Quality gate validation
+            if let Some(registry) = tool_registry {
+                let tool_infos = registry.list_tools();
+
+                // Fast validation: check for hallucinated tools, missing params
+                let validator = validator::ResponseValidator::new(&tool_infos);
+                if let Err(validation_error) = validator.quick_validate(&response) {
+                    tracing::warn!(
+                        "Fast validation failed on attempt {}/{}: {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        validation_error
+                    );
+
+                    if attempt + 1 < MAX_RETRIES {
+                        current_decision.recommended_model =
+                            self.upgrade_model(&current_decision.recommended_model);
+                        tracing::info!(
+                            "Upgrading to {:?} due to validation failure",
+                            current_decision.recommended_model
+                        );
+                        continue;
+                    }
+                    return Err(Error::ModelExecution(format!(
+                        "Max retries exceeded. Last error: {validation_error}"
+                    )));
+                }
+
+                // LLM-based Judge evaluation (only with llama-cpp feature)
+                #[cfg(feature = "llama-cpp")]
+                {
+                    use crate::judge::IssueType;
+
+                    match judge::ResponseJudge::new_local().await {
+                        Ok(judge) => {
+                            let judgment = judge
+                                .evaluate(task_description, &response, &tool_infos, None)
+                                .await?;
+
+                            if !judgment.passed {
+                                tracing::warn!(
+                                    "Judge rejected response on attempt {}/{}: {:?} - {}",
+                                    attempt + 1,
+                                    MAX_RETRIES,
+                                    judgment.issue_type,
+                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                );
+
+                                // Special handling for MissingToolUse
+                                if judgment.issue_type == IssueType::MissingToolUse
+                                    && !judgment.suggested_keywords.is_empty()
+                                {
+                                    tracing::info!(
+                                        "Judge detected missing tool usage, searching for: {:?}",
+                                        judgment.suggested_keywords
+                                    );
+                                    return Err(Error::ModelExecution(format!(
+                                        "MISSING_TOOL_USE:{:?}",
+                                        judgment.suggested_keywords
+                                    )));
+                                }
+
+                                if attempt + 1 < MAX_RETRIES {
+                                    current_decision.recommended_model =
+                                        self.upgrade_model(&current_decision.recommended_model);
+                                    tracing::info!(
+                                        "Upgrading to {:?} after judge rejection",
+                                        current_decision.recommended_model
+                                    );
+                                    continue;
+                                }
+                                return Err(Error::ModelExecution(format!(
+                                    "Max retries exceeded. Judge rejected: {:?}",
+                                    judgment.issue_type
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            // Judge unavailable, skip LLM-based validation
+                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
+                        }
+                    }
+                }
+            }
+
+            return Ok(response);
         }
 
-        Ok(response)
+        Err(Error::ModelExecution(
+            "Max retries exceeded without successful response".to_string(),
+        ))
     }
 
     /// Route with automatic quality evaluation and model escalation
