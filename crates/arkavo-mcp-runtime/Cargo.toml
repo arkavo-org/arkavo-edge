@@ -10,16 +10,22 @@ keywords = ["mcp", "server", "runtime", "protocol"]
 categories = ["network-programming", "asynchronous"]
 
 [dependencies]
-arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+thiserror.workspace = true
+
+# Transport dependencies
+reqwest.workspace = true
+tokio-tungstenite.workspace = true
+futures.workspace = true
+http.workspace = true
 
 # For the built-in tools
 uuid.workspace = true

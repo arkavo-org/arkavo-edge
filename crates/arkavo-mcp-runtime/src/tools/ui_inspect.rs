@@ -1,5 +1,4 @@
-use anyhow::Result;
-use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -18,9 +17,10 @@ impl UiInspectTool {
 
 #[async_trait]
 impl Tool for UiInspectTool {
-    async fn execute(&self, _params: Value) -> Result<Value> {
-        // For now, return a message indicating the UI state was exported
-        // In a full implementation, this would retrieve the actual state
+    async fn execute(
+        &self,
+        _params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         Ok(json!({
             "success": true,
             "message": "UI state exported to file. Use Ctrl+S in the terminal to export current state.",

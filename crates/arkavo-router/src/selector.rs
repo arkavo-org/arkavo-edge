@@ -61,7 +61,6 @@ impl ModelSelector {
         _task_description: &str,
     ) -> Result<RoutingDecision> {
         let model = self.select_model_by_category(classification);
-
         let reasoning = self.explain_selection(&model, classification);
 
         Ok(RoutingDecision::new(
@@ -102,9 +101,8 @@ impl ModelSelector {
                 self.best_cloud_model(false)
             }
 
-            TaskCategory::BackendAPI if classification.confidence > 0.70 => {
-                self.best_cloud_model(true)
-            }
+            // BackendAPI uses local model for simple tasks - saves cloud for complex API design
+            TaskCategory::BackendAPI => ModelChoice::LocalQwen3,
 
             TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
 
@@ -126,7 +124,13 @@ impl ModelSelector {
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
-            _ => self.best_cloud_model(false),
+            // General tasks with high confidence use larger local model for better reasoning
+            TaskCategory::General if classification.confidence > 0.7 => {
+                ModelChoice::LocalMinistral8B
+            }
+
+            // Low confidence general tasks use fast model
+            _ => ModelChoice::LocalQwen3,
         }
     }
 
@@ -165,10 +169,10 @@ impl ModelSelector {
             (TaskCategory::VisionAnalysis, _) => {
                 "Vision analysis: Gemini Flash with multimodal support"
             }
-            (TaskCategory::General, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "General task: Claude as balanced default"
+            (TaskCategory::General, ModelChoice::LocalQwen3) => {
+                "General task: Fast local Qwen3 for quick responses"
             }
-            (TaskCategory::General, _) => "General task: Gemini Flash as balanced default",
+            (TaskCategory::General, _) => "General task: Local model for efficiency",
         };
 
         let model_benefit = match model {
@@ -271,8 +275,12 @@ impl ModelSelector {
                 }
             }
 
-            // General: Use balanced default
-            TaskCategory::General => {
+            // General: Use fast local model
+            TaskCategory::General => ModelChoice::LocalQwen3,
+
+            // Fallback for any future categories - prefer local
+            #[allow(unreachable_patterns)]
+            _ => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {
@@ -416,7 +424,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_backend_api_routing_gemini() {
+    async fn test_backend_api_routing_uses_local() {
+        // BackendAPI now uses local models for simple tasks (saves cloud for complex API design)
         let selector = ModelSelector::with_availability(gemini_only());
 
         let classification =
@@ -426,22 +435,8 @@ mod tests {
             .select(&classification, "Create a REST API endpoint")
             .unwrap();
 
-        assert_eq!(decision.recommended_model, ModelChoice::GeminiPro);
-    }
-
-    #[tokio::test]
-    async fn test_backend_api_routing_anthropic() {
-        let selector = ModelSelector::with_availability(anthropic_only());
-
-        let classification =
-            Classification::new(TaskCategory::BackendAPI, 0.85, "Backend API".to_string());
-
-        let decision = selector
-            .select(&classification, "Create a REST API endpoint")
-            .unwrap();
-
-        assert_eq!(decision.recommended_model, ModelChoice::ClaudeOpus);
-        assert!(decision.reasoning.contains("Claude Opus"));
+        assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
+        assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
     #[tokio::test]

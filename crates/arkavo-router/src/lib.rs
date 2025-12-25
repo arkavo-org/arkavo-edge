@@ -45,7 +45,7 @@ pub use learning::{
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
+use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse, ToolParser};
 use arkavo_mcp_tools::ToolRegistry;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -98,7 +98,19 @@ impl Router {
     pub async fn classify(&self, task_description: &str) -> Result<RoutingDecision> {
         let classification = self.classifier.classify(task_description).await?;
 
+        tracing::info!(
+            category = ?classification.category,
+            confidence = classification.confidence,
+            "Task classified"
+        );
+
         let mut decision = self.selector.select(&classification, task_description)?;
+
+        tracing::info!(
+            model = %decision.recommended_model.name(),
+            reasoning = %decision.reasoning,
+            "Model selected"
+        );
 
         if (self.offline_mode || !self.connectivity.is_online().await)
             && decision.recommended_model.is_cloud()
@@ -279,39 +291,188 @@ impl Router {
         llms
     }
 
-    /// Route a request with MCP tool support
-    #[deprecated(since = "0.44.0", note = "Use route() instead")]
+    /// Route with tools and Judge loop validation (local models only)
+    ///
+    /// Includes quality gate with:
+    /// - ResponseValidator for fast validation (hallucinated tools, missing params)
+    /// - ResponseJudge for LLM-based quality evaluation
+    /// - Automatic model escalation within LOCAL models only (up to 3 retries)
     pub async fn route_with_tools(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
-        let decision = self.classify(task_description).await?;
+        const MAX_RETRIES: u8 = 3;
+        let mut current_decision = self.classify(task_description).await?;
 
-        let tools_json = match tool_registry {
-            Some(registry) => {
-                let detail_level = Self::detail_level_for_model(&decision.recommended_model);
-                let keywords = Self::extract_keywords(task_description);
+        for attempt in 0..MAX_RETRIES {
+            let tools_json = match tool_registry {
+                Some(registry) => {
+                    let detail_level =
+                        Self::detail_level_for_model(&current_decision.recommended_model);
+                    let keywords = Self::extract_keywords(task_description);
 
-                // Use hybrid search: semantic + token-based
-                let tool_infos = Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based
+                    let tool_infos =
+                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
 
-                Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
-                    &tool_infos,
-                ))
+                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
+                        &tool_infos,
+                    ))
+                }
+                None => None,
+            };
+
+            let provider = self
+                .instantiate_provider(&current_decision.recommended_model)
+                .await?;
+
+            let mut response = provider
+                .complete_with_tools(messages.clone(), tools_json, None)
+                .await
+                .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Extract tool calls from text content if structured tool_calls is empty
+            if response.tool_calls.is_empty() && !response.content.is_empty() {
+                let extracted = Self::extract_tool_calls_from_text(&response.content);
+                if !extracted.is_empty() {
+                    tracing::debug!(
+                        "Extracted {} tool calls from text response",
+                        extracted.len()
+                    );
+                    response.tool_calls = extracted;
+                }
             }
-            None => None,
-        };
 
-        let provider = self
-            .instantiate_provider(&decision.recommended_model)
-            .await?;
+            // Debug: log tool calls
+            if !response.tool_calls.is_empty() {
+                for tc in &response.tool_calls {
+                    tracing::debug!("[Judge] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
+            }
 
-        provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))
+            // Quality gate validation
+            if let Some(registry) = tool_registry {
+                let tool_infos = registry.list_tools();
+
+                // Fast validation: check for hallucinated tools, missing params
+                let validator = validator::ResponseValidator::new(&tool_infos);
+                if let Err(validation_error) = validator.quick_validate(&response) {
+                    tracing::warn!(
+                        "Fast validation failed on attempt {}/{}: {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        validation_error
+                    );
+
+                    if attempt + 1 < MAX_RETRIES
+                        && let Some(upgraded) =
+                            Self::upgrade_model_local_only(&current_decision.recommended_model)
+                    {
+                        current_decision.recommended_model = upgraded;
+                        tracing::info!(
+                            "Upgrading to {:?} due to validation failure (local only)",
+                            current_decision.recommended_model
+                        );
+                        continue;
+                    }
+                    // No more local upgrades available or max retries reached
+                    // Return the response anyway with a warning
+                    tracing::warn!(
+                        "Validation failed but no local upgrade available, returning response"
+                    );
+                    return Ok(response);
+                }
+
+                // LLM-based Judge evaluation (only with llama-cpp feature)
+                #[cfg(feature = "llama-cpp")]
+                {
+                    use crate::judge::IssueType;
+
+                    match judge::ResponseJudge::new_local().await {
+                        Ok(judge) => {
+                            let judgment = judge
+                                .evaluate(task_description, &response, &tool_infos, None)
+                                .await?;
+
+                            if !judgment.passed {
+                                tracing::warn!(
+                                    "Judge rejected response on attempt {}/{}: {:?} - {}",
+                                    attempt + 1,
+                                    MAX_RETRIES,
+                                    judgment.issue_type,
+                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                );
+
+                                // Special handling for MissingToolUse
+                                if judgment.issue_type == IssueType::MissingToolUse
+                                    && !judgment.suggested_keywords.is_empty()
+                                {
+                                    tracing::info!(
+                                        "Judge detected missing tool usage, searching for: {:?}",
+                                        judgment.suggested_keywords
+                                    );
+                                    return Err(Error::ModelExecution(format!(
+                                        "MISSING_TOOL_USE:{:?}",
+                                        judgment.suggested_keywords
+                                    )));
+                                }
+
+                                if attempt + 1 < MAX_RETRIES
+                                    && let Some(upgraded) = Self::upgrade_model_local_only(
+                                        &current_decision.recommended_model,
+                                    )
+                                {
+                                    current_decision.recommended_model = upgraded;
+                                    tracing::info!(
+                                        "Upgrading to {:?} after judge rejection (local only)",
+                                        current_decision.recommended_model
+                                    );
+                                    continue;
+                                }
+                                // No more local upgrades, return response with warning
+                                tracing::warn!(
+                                    "Judge rejected but no local upgrade available, returning response"
+                                );
+                                return Ok(response);
+                            }
+                        }
+                        Err(e) => {
+                            // Judge unavailable, skip LLM-based validation
+                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
+                        }
+                    }
+                }
+            }
+
+            return Ok(response);
+        }
+
+        Err(Error::ModelExecution(
+            "Max retries exceeded without successful response".to_string(),
+        ))
+    }
+
+    /// Upgrade model within local tier only - never escalate to cloud
+    fn upgrade_model_local_only(current: &ModelChoice) -> Option<ModelChoice> {
+        match current {
+            // Qwen3/Ministral upgrade path
+            ModelChoice::LocalQwen3 => Some(ModelChoice::LocalMinistral3B),
+            ModelChoice::LocalMinistral3B => Some(ModelChoice::LocalMinistral8B),
+            ModelChoice::LocalMinistral8B => None, // Already at max local
+
+            // Gemma upgrade path
+            ModelChoice::LocalGemma270M => Some(ModelChoice::LocalGemma4B),
+            ModelChoice::LocalGemma4B => Some(ModelChoice::LocalGemma12B),
+            ModelChoice::LocalGemma12B => None, // Already at max local
+
+            // DeepSeek local stays local
+            ModelChoice::LocalDeepSeekCoder => None, // Don't escalate to cloud
+
+            // Cloud models - no local upgrade available
+            _ => None,
+        }
     }
 
     /// Route with automatic quality evaluation and model escalation
@@ -352,10 +513,29 @@ impl Router {
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
-            let response = provider
-                .complete_with_tools(messages.clone(), tools_json, None)
+            let mut response = provider
+                .complete_with_tools(messages.clone(), tools_json.clone(), None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // For local models, extract tool calls from text content if structured tool_calls is empty
+            if response.tool_calls.is_empty() && !response.content.is_empty() {
+                let extracted = Self::extract_tool_calls_from_text(&response.content);
+                if !extracted.is_empty() {
+                    tracing::debug!(
+                        "Extracted {} tool calls from text response",
+                        extracted.len()
+                    );
+                    response.tool_calls = extracted;
+                }
+            }
+
+            // Debug: log tool calls
+            if !response.tool_calls.is_empty() {
+                for tc in &response.tool_calls {
+                    eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
+            }
 
             if let Some(registry) = tool_registry {
                 let tool_infos = registry.list_tools();
@@ -633,14 +813,14 @@ impl Router {
     /// This prevents upgrade loops where we try to use unavailable models.
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
         let candidate = match current {
-            // Qwen3/Ministral upgrade path
+            // Qwen3/Ministral upgrade path - stay local, don't escalate to cloud
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::GeminiFlash,
-            // Legacy Gemma upgrade path
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalMinistral8B, // Cap at local
+            // Legacy Gemma upgrade path - stay local
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
-            ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
+            ModelChoice::LocalGemma12B => ModelChoice::LocalGemma12B, // Cap at local
             // Other upgrade paths
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
@@ -705,6 +885,7 @@ impl Router {
     }
 
     async fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+        tracing::debug!(model = %model.name(), "Instantiating provider");
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
@@ -771,6 +952,8 @@ impl Router {
                 .await
                 .map_err(Error::ModelExecution)?;
 
+                tracing::info!(path = %model_path.display(), "Loading Qwen3 model");
+
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "qwen3-0.6b".to_string(),
                     model_path.to_string_lossy().to_string(),
@@ -778,6 +961,8 @@ impl Router {
                 .map_err(|e| {
                     Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
                 })?;
+
+                tracing::info!("Qwen3 provider ready");
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
@@ -942,6 +1127,302 @@ impl Router {
     ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
         // See #383: Add semantic search with local model when llama-cpp feature is enabled
         registry.search_tools(query, detail)
+    }
+
+    /// Extract tool calls from text content using multiple parsing strategies
+    ///
+    /// Local LLMs output tool calls as text in various formats. This function
+    /// tries multiple parsers to be accommodating of different output styles:
+    /// 1. Fence format: ```tool_name\nkey: value\n```
+    /// 2. JSON format: {"tool": "name", "parameters": {...}}
+    /// 3. XML format: <tool_call><name>...</name><arguments>...</arguments></tool_call>
+    /// 4. Python function-call syntax: tool_name(param="value")
+    fn extract_tool_calls_from_text(content: &str) -> Vec<arkavo_llm::ParsedToolCall> {
+        // Known programming language identifiers that aren't tool names
+        const LANG_IDENTIFIERS: &[&str] = &[
+            "python",
+            "py",
+            "javascript",
+            "js",
+            "typescript",
+            "ts",
+            "rust",
+            "go",
+            "java",
+            "ruby",
+            "bash",
+            "sh",
+            "shell",
+            "zsh",
+            "powershell",
+            "ps1",
+            "sql",
+            "json",
+            "yaml",
+            "toml",
+        ];
+
+        // Try fence format first (most common for local models)
+        if let Ok(calls) = ToolParser::parse_fence(content) {
+            // Handle special cases where fence type is a language, not a tool
+            let filtered: Vec<_> = calls
+                .into_iter()
+                .flat_map(|call| {
+                    let tool_lower = call.tool_name.to_lowercase();
+
+                    if tool_lower == "json" {
+                        // The content is JSON, try to extract tool call from it
+                        let json_str = serde_json::to_string(&call.arguments).unwrap_or_default();
+                        if let Some(extracted) = Self::extract_json_tool_calls(&json_str) {
+                            return extracted;
+                        }
+                        vec![call]
+                    } else if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
+                        // Fence is a language identifier (e.g., ```python)
+                        // Try to extract tool calls from the content
+                        // First, try Python function-call syntax
+                        let fence_content = serde_json::to_string(&call.arguments)
+                            .unwrap_or_default()
+                            .trim_matches('"')
+                            .to_string();
+                        if let Some(extracted) = Self::extract_python_function_calls(&fence_content)
+                        {
+                            return extracted;
+                        }
+                        // Try to find tool name as first word on a line
+                        if let Some(extracted) = Self::extract_tool_from_first_word(&fence_content)
+                        {
+                            return extracted;
+                        }
+                        vec![] // No tool found in language fence, filter it out
+                    } else {
+                        vec![call]
+                    }
+                })
+                .collect();
+
+            if !filtered.is_empty() {
+                return filtered;
+            }
+        }
+
+        // Try to find JSON tool calls embedded in text
+        if let Some(calls) = Self::extract_json_tool_calls(content) {
+            return calls;
+        }
+
+        // Try XML format
+        if let Ok(calls) = ToolParser::parse_xml(content) {
+            return calls;
+        }
+
+        // Try Python function-call syntax: tool_name(param="value")
+        if let Some(calls) = Self::extract_python_function_calls(content) {
+            return calls;
+        }
+
+        Vec::new()
+    }
+
+    /// Extract Python-style function calls from text
+    ///
+    /// Handles formats like:
+    /// - tool_name(param="value")
+    /// - result = tool-name(param="value", param2=123)
+    fn extract_python_function_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        use regex::Regex;
+
+        // Match: optional_var = tool-name(args)
+        let re = match Regex::new(r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*)\)") {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        // Parse kwargs: param="value", param2=123
+        let kwarg_re = match Regex::new(r#"(\w+)\s*=\s*(?:"([^"]*)"|(\d+(?:\.\d+)?)|(\w+))"#) {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        let mut calls = Vec::new();
+
+        for cap in re.captures_iter(content) {
+            let (tool_name, args_str) = match (cap.get(1), cap.get(2)) {
+                (Some(t), Some(a)) => (t.as_str().to_string(), a.as_str()),
+                _ => continue,
+            };
+
+            // Skip common Python built-ins
+            if [
+                "print", "len", "str", "int", "float", "list", "dict", "range", "type",
+            ]
+            .contains(&tool_name.as_str())
+            {
+                continue;
+            }
+
+            let mut args = serde_json::Map::new();
+
+            for kwarg in kwarg_re.captures_iter(args_str) {
+                let key = match kwarg.get(1) {
+                    Some(k) => k.as_str().to_string(),
+                    None => continue,
+                };
+                let value = if let Some(s) = kwarg.get(2) {
+                    serde_json::Value::String(s.as_str().to_string())
+                } else if let Some(n) = kwarg.get(3) {
+                    if let Ok(num) = n.as_str().parse::<f64>() {
+                        serde_json::json!(num)
+                    } else {
+                        serde_json::Value::String(n.as_str().to_string())
+                    }
+                } else if let Some(id) = kwarg.get(4) {
+                    serde_json::Value::String(id.as_str().to_string())
+                } else {
+                    continue;
+                };
+                args.insert(key, value);
+            }
+
+            calls.push(arkavo_llm::ParsedToolCall {
+                tool_name,
+                arguments: serde_json::Value::Object(args),
+                call_id: None,
+            });
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Extract tool name from first word on each line
+    ///
+    /// Handles cases like:
+    /// ```python
+    /// detect-gamemode()
+    /// get-position()
+    /// ```
+    /// Where the fence is a language but the first word is the tool name
+    fn extract_tool_from_first_word(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        let mut calls = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+                continue;
+            }
+
+            // Extract first word (tool name) - may end with () or have args
+            // Match: tool-name or tool-name() or tool_name(args)
+            let first_word = trimmed
+                .split(|c: char| c.is_whitespace() || c == '(' || c == '=')
+                .next()
+                .unwrap_or("")
+                .trim();
+
+            // Must look like a tool name (contains letters, may have hyphens/underscores)
+            if first_word.is_empty()
+                || !first_word.chars().next().unwrap_or(' ').is_alphabetic()
+                || first_word
+                    .chars()
+                    .all(|c| c.is_lowercase() && c.is_ascii_alphabetic())
+                    && first_word.len() < 3
+            {
+                continue;
+            }
+
+            // Skip common language keywords
+            if [
+                "import", "from", "def", "class", "if", "else", "for", "while", "return", "let",
+                "const", "var", "function", "async", "await", "try", "catch", "finally",
+            ]
+            .contains(&first_word)
+            {
+                continue;
+            }
+
+            // Check if this looks like a tool call (has parentheses or follows = assignment)
+            if trimmed.contains('(') || trimmed.contains('=') {
+                calls.push(arkavo_llm::ParsedToolCall {
+                    tool_name: first_word.to_string(),
+                    arguments: serde_json::Value::Object(serde_json::Map::new()),
+                    call_id: None,
+                });
+            }
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Extract JSON-formatted tool calls from text
+    ///
+    /// Handles various JSON formats LLMs might output:
+    /// - {"tool": "name", "parameters": {...}}
+    /// - {"tool_name": "name", "args": {...}}
+    /// - {"name": "tool", "arguments": {...}}
+    fn extract_json_tool_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        let mut calls = Vec::new();
+
+        // Find JSON objects in the content (between { and })
+        let mut depth = 0;
+        let mut start = None;
+
+        for (i, c) in content.char_indices() {
+            match c {
+                '{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            let json_str = &content[s..=i];
+                            if let Some(call) = Self::parse_json_tool_call(json_str) {
+                                calls.push(call);
+                            }
+                        }
+                        start = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Parse a single JSON object as a tool call
+    fn parse_json_tool_call(json_str: &str) -> Option<arkavo_llm::ParsedToolCall> {
+        let json: serde_json::Value = serde_json::from_str(json_str).ok()?;
+        let obj = json.as_object()?;
+
+        // Try different field names for tool name
+        let tool_name = obj
+            .get("tool")
+            .or_else(|| obj.get("tool_name"))
+            .or_else(|| obj.get("name"))
+            .and_then(|v| v.as_str())?
+            .to_string();
+
+        // Skip if it doesn't look like a tool call (must have a colon or be a known tool pattern)
+        if tool_name.is_empty() {
+            return None;
+        }
+
+        // Try different field names for arguments
+        let arguments = obj
+            .get("parameters")
+            .or_else(|| obj.get("args"))
+            .or_else(|| obj.get("arguments"))
+            .or_else(|| obj.get("input"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+        Some(arkavo_llm::ParsedToolCall {
+            tool_name,
+            arguments,
+            call_id: None,
+        })
     }
 }
 

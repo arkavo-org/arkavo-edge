@@ -1,4 +1,4 @@
-use arkavo_mcp_core::Tool;
+use arkavo_mcp::Tool;
 use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
 use arkavo_protocol::mcp_registry::{McpConnectionTrait, Tool as RegistryTool};
 use log::{error, info};
@@ -128,7 +128,11 @@ impl McpConnectionTrait for BuiltinMcpConnection {
             #[allow(clippy::disallowed_methods)]
             let handle = tokio::runtime::Handle::current();
             #[allow(clippy::disallowed_methods)]
-            let result = handle.block_on(tool.execute(arguments))?;
+            let result = handle.block_on(tool.execute(arguments)).map_err(
+                |e| -> Box<dyn std::error::Error> {
+                    Box::new(std::io::Error::other(e.to_string()))
+                },
+            )?;
             return Ok(result);
         }
 

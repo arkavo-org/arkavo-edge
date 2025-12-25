@@ -8,7 +8,7 @@ use uuid::Uuid;
 use arkavo_authorization::AuthorizationClient;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::{Event, EventPayload, EventWriter};
-use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_mcp::{Tool, ToolSchema};
 
 use crate::config::ClaudeCodeConfig;
 use crate::event_mapper::EventMapper;
@@ -232,22 +232,30 @@ impl ClaudeCodeCapability {
 
 #[async_trait]
 impl Tool for ClaudeCodeCapability {
-    async fn execute(&self, params: Value) -> anyhow::Result<Value> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> std::result::Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let tool_name = params["tool"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing tool name"))?;
+            .ok_or_else(|| Box::<dyn std::error::Error + Send + Sync>::from("Missing tool name"))?;
 
         match tool_name {
             "claude_code_run" => {
                 let prompt = params["prompt"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing prompt"))?
+                    .ok_or_else(|| {
+                        Box::<dyn std::error::Error + Send + Sync>::from("Missing prompt")
+                    })?
                     .to_string();
 
                 let context = params.get("context").cloned();
 
                 // Start a streaming run
-                let run_id = self.start_run(prompt, context).await?;
+                let run_id = self
+                    .start_run(prompt, context)
+                    .await
+                    .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
 
                 Ok(serde_json::json!({
                     "success": true,
@@ -258,7 +266,9 @@ impl Tool for ClaudeCodeCapability {
             "claude_code_plan" => {
                 let prompt = params["prompt"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing prompt"))?
+                    .ok_or_else(|| {
+                        Box::<dyn std::error::Error + Send + Sync>::from("Missing prompt")
+                    })?
                     .to_string();
 
                 let mut context = params
@@ -272,7 +282,10 @@ impl Tool for ClaudeCodeCapability {
                 });
 
                 // Start a streaming run in plan-only mode
-                let run_id = self.start_run(prompt, Some(context)).await?;
+                let run_id = self
+                    .start_run(prompt, Some(context))
+                    .await
+                    .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
 
                 Ok(serde_json::json!({
                     "success": true,
@@ -280,7 +293,10 @@ impl Tool for ClaudeCodeCapability {
                     "run_id": run_id
                 }))
             }
-            _ => Err(anyhow::anyhow!("Unknown tool: {}", tool_name)),
+            _ => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
+                "Unknown tool: {}",
+                tool_name
+            ))),
         }
     }
 

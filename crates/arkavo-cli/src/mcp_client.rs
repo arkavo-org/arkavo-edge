@@ -1,21 +1,56 @@
+use crate::mcp_polling::{AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::{broadcast, oneshot, watch};
 
-#[derive(Debug)]
-pub struct McpProcess {
-    pub child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+fn debug_mcp() -> bool {
+    std::env::var("ARKAVO_DEBUG").is_ok() || std::env::var("ARKAVO_DEBUG_MCP").is_ok()
 }
 
-#[derive(Debug, Clone)]
+fn log_mcp(msg: &str) {
+    if debug_mcp() {
+        eprintln!("[MCP] {msg}");
+    }
+}
+
+/// Dual-mode pending request - supports both sync (mpsc) and async (oneshot)
+enum PendingRequest {
+    Sync(mpsc::Sender<JsonRpcResponse>),
+    Async(oneshot::Sender<JsonRpcResponse>),
+}
+
+/// Type alias for pending request senders
+type PendingRequests = Arc<Mutex<HashMap<u64, PendingRequest>>>;
+
+/// MCP client for communicating with MCP servers via subprocess
+#[derive(Clone)]
 pub struct McpClient {
-    pub process: Arc<Mutex<McpProcess>>,
+    stdin: Arc<Mutex<ChildStdin>>,
     request_id: Arc<Mutex<u64>>,
+    pending_requests: PendingRequests,
+    notification_tx: broadcast::Sender<JsonRpcNotification>,
+    child: Arc<Mutex<Child>>,
+    // Polling support
+    poll_endpoints: Arc<Mutex<Vec<PollableEndpoint>>>,
+    poll_shutdown_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
+    server_name: String,
+}
+
+impl std::fmt::Debug for McpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpClient")
+            .field("server_name", &self.server_name)
+            .field(
+                "poll_endpoints_count",
+                &self.poll_endpoints.lock().map(|e| e.len()).unwrap_or(0),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -26,25 +61,60 @@ struct JsonRpcRequest {
     params: Option<Value>,
 }
 
+/// Response from MCP server
 #[derive(Debug, Deserialize)]
-struct JsonRpcResponse {
+pub struct JsonRpcResponse {
     #[allow(dead_code)]
     jsonrpc: String,
     #[allow(dead_code)]
     id: u64,
+    /// The result value if successful
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
+    pub result: Option<Value>,
+    /// Error information if request failed
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
+    pub error: Option<JsonRpcError>,
 }
 
+/// Error from MCP server
 #[derive(Debug, Deserialize)]
-struct JsonRpcError {
-    #[allow(dead_code)]
-    code: i32,
-    message: String,
-    #[allow(dead_code)]
-    data: Option<Value>,
+pub struct JsonRpcError {
+    /// Error code
+    pub code: i32,
+    /// Error message
+    pub message: String,
+    /// Optional additional data
+    pub data: Option<Value>,
+}
+
+/// Notification from MCP server (no id field)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonRpcNotification {
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+}
+
+/// Generic message that can be either a response or notification
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum JsonRpcMessage {
+    Response {
+        #[allow(dead_code)]
+        jsonrpc: String,
+        id: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<JsonRpcError>,
+    },
+    Notification {
+        #[allow(dead_code)]
+        jsonrpc: String,
+        method: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        params: Option<Value>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +159,8 @@ impl McpClient {
         cmd: &str,
         args: &[String],
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        log_mcp(&format!("Starting: {cmd} {}", args.join(" ")));
+
         // Start MCP server process
         let mut child = Command::new(cmd)
             .args(args)
@@ -98,38 +170,62 @@ impl McpClient {
             .spawn()
             .map_err(|e| format!("Failed to start MCP server '{cmd}': {e}"))?;
 
+        let pid = child.id();
+        log_mcp(&format!("Subprocess PID: {pid}"));
+
+        // Spawn stderr reader thread to capture MCP server errors
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line_result in reader.lines() {
+                    match line_result {
+                        Ok(line) => eprintln!("[MCP-STDERR] {line}"),
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
         // Take ownership of stdin and stdout
         let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-        let stdout_reader = BufReader::new(stdout);
+        let mut stdout_reader = BufReader::new(stdout);
 
+        // Initialize handshake (synchronous, before background reader starts)
         let init_request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: 1,
             method: "initialize".to_string(),
             params: Some(json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "roots": { "listChanged": true },
+                    "sampling": {}
+                },
                 "clientInfo": {
-                    "name": "arkavo-chat",
+                    "name": "arkavo-cli",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             })),
         };
 
-        // Send initialize request
+        log_mcp("Sending initialize request");
         writeln!(&mut stdin, "{}", serde_json::to_string(&init_request)?)?;
         stdin.flush()?;
 
-        // Create a mutable reference to read the response
-        let mut reader = stdout_reader;
         let mut init_line = String::new();
-        reader.read_line(&mut init_line)?;
+        stdout_reader.read_line(&mut init_line)?;
 
         if !init_line.is_empty() {
+            log_mcp(&format!("Initialize response: {}", init_line.trim()));
             let response: JsonRpcResponse = serde_json::from_str(&init_line)?;
             if let Some(error) = response.error {
+                log_mcp(&format!("Initialize FAILED: {}", error.message));
                 return Err(format!("MCP initialization failed: {}", error.message).into());
             }
-            // Removed large debug output
+            log_mcp("Initialize succeeded");
+        } else {
+            log_mcp("WARNING: Empty initialize response");
         }
 
         // Send initialized notification
@@ -144,27 +240,121 @@ impl McpClient {
         )?;
         stdin.flush()?;
 
-        // Create the process wrapper with persistent stdin/stdout
-        let mcp_process = McpProcess {
-            child,
-            stdin,
-            stdout: reader,
-        };
+        // Set up channels for async communication
+        let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let (notification_tx, _) = broadcast::channel(256);
+
+        // Spawn background reader thread for push-based notifications
+        let pending_clone = pending_requests.clone();
+        let notif_tx_clone = notification_tx.clone();
+        std::thread::spawn(move || {
+            Self::reader_loop(stdout_reader, pending_clone, notif_tx_clone);
+        });
+
+        // Extract server name from command for poll notifications
+        let server_name = cmd.split('/').next_back().unwrap_or(cmd).to_string();
 
         Ok(Self {
-            process: Arc::new(Mutex::new(mcp_process)),
+            stdin: Arc::new(Mutex::new(stdin)),
             request_id: Arc::new(Mutex::new(2)), // Start from 2 since we used 1 for init
+            pending_requests,
+            notification_tx,
+            child: Arc::new(Mutex::new(child)),
+            poll_endpoints: Arc::new(Mutex::new(Vec::new())),
+            poll_shutdown_tx: Arc::new(Mutex::new(None)),
+            server_name,
         })
     }
 
+    /// Background reader loop - routes responses to pending requests, notifications to broadcast
+    fn reader_loop(
+        mut reader: BufReader<ChildStdout>,
+        pending_requests: PendingRequests,
+        notification_tx: broadcast::Sender<JsonRpcNotification>,
+    ) {
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    log_mcp("MCP server closed stdout");
+                    break;
+                }
+                Ok(_) => {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    // Log all incoming messages when debugging
+                    if debug_mcp() {
+                        eprintln!("[MCP] << {line}");
+                    }
+
+                    // Parse as generic JSON-RPC message
+                    match serde_json::from_str::<JsonRpcMessage>(line) {
+                        Ok(JsonRpcMessage::Response {
+                            id, result, error, ..
+                        }) => {
+                            // Route response to pending request (sync or async)
+                            if let Ok(mut pending) = pending_requests.lock() {
+                                if let Some(sender) = pending.remove(&id) {
+                                    let response = JsonRpcResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id,
+                                        result,
+                                        error,
+                                    };
+                                    match sender {
+                                        PendingRequest::Sync(tx) => {
+                                            let _ = tx.send(response);
+                                        }
+                                        PendingRequest::Async(tx) => {
+                                            let _ = tx.send(response);
+                                        }
+                                    }
+                                } else {
+                                    log_mcp(&format!("No pending request for id {id}"));
+                                }
+                            }
+                        }
+                        Ok(JsonRpcMessage::Notification { method, params, .. }) => {
+                            // Broadcast notification to subscribers
+                            eprintln!("[MCP] Notification received: {method}");
+                            let notification = JsonRpcNotification { method, params };
+                            let _ = notification_tx.send(notification);
+                        }
+                        Err(e) => {
+                            log_mcp(&format!("Failed to parse message: {e} - {line}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_mcp(&format!("Read error: {e}"));
+                    break;
+                }
+            }
+        }
+    }
+
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
-        // The tools are returned in the initialize response, let's request them again
+        log_mcp("Requesting tools/list");
         let response = self.send_request("tools/list", Some(json!({})))?;
+
+        if let Some(error) = &response.error {
+            log_mcp(&format!("tools/list FAILED: {}", error.message));
+            return Ok(vec![]);
+        }
 
         if let Some(result) = response.result {
             // Check for tools in different possible locations
             if let Some(tools_value) = result.get("tools") {
                 let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+                let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+                log_mcp(&format!(
+                    "Discovered {} tools: {:?}",
+                    tools.len(),
+                    tool_names
+                ));
                 Ok(tools)
             } else if let Some(tools_value) = result
                 .get("capabilities")
@@ -172,12 +362,23 @@ impl McpClient {
                 .and_then(|t| t.get("available"))
             {
                 let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+                let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+                log_mcp(&format!(
+                    "Discovered {} tools: {:?}",
+                    tools.len(),
+                    tool_names
+                ));
                 Ok(tools)
             } else {
-                // If not found, return empty list
+                log_mcp("WARNING: No tools found in response");
+                log_mcp(&format!(
+                    "Response structure: {}",
+                    serde_json::to_string(&result)?
+                ));
                 Ok(vec![])
             }
         } else {
+            log_mcp("WARNING: Empty result from tools/list");
             Ok(vec![])
         }
     }
@@ -201,7 +402,13 @@ impl McpClient {
             request_id: *self.request_id.lock().unwrap_or_else(|e| e.into_inner()),
         };
 
-        // Log the tool call
+        log_mcp(&format!(
+            "Tool call: {} args={}",
+            tool_name,
+            serde_json::to_string(&arguments).unwrap_or_default()
+        ));
+
+        // Log the tool call (always visible)
         eprintln!(
             "[MCP Tool Call] {} | LLM: {} | Tool: {} | Args: {}",
             metadata.timestamp,
@@ -218,11 +425,16 @@ impl McpClient {
         let response = self.send_request("tools/call", Some(params))?;
 
         if let Some(error) = response.error {
+            log_mcp(&format!("Tool call FAILED: {}", error.message));
             return Err(format!("Tool execution error: {}", error.message).into());
         }
 
         // Extract the text content from the MCP response format
         if let Some(result) = response.result {
+            log_mcp(&format!(
+                "Tool response: {}",
+                serde_json::to_string(&result).unwrap_or_default()
+            ));
             if let Some(content_array) = result.get("content").and_then(|c| c.as_array())
                 && let Some(first_content) = content_array.first()
                 && let Some(text) = first_content.get("text").and_then(|t| t.as_str())
@@ -231,21 +443,26 @@ impl McpClient {
             }
             Ok(result)
         } else {
+            log_mcp("WARNING: Empty result from tool call");
             Ok(json!({}))
         }
     }
 
-    #[allow(clippy::significant_drop_tightening)]
+    /// Subscribe to notifications from this MCP server
+    pub fn subscribe_notifications(&self) -> broadcast::Receiver<JsonRpcNotification> {
+        self.notification_tx.subscribe()
+    }
+
+    /// Get the process ID of the MCP server subprocess
+    pub fn pid(&self) -> Option<u32> {
+        self.child.lock().ok().map(|c| c.id())
+    }
+
     fn send_request(
         &self,
         method: &str,
         params: Option<Value>,
     ) -> Result<JsonRpcResponse, Box<dyn std::error::Error>> {
-        let mut process = self
-            .process
-            .lock()
-            .map_err(|_| "MCP process lock poisoned")?;
-
         // Get next request ID
         let request_id = {
             let mut id = self
@@ -257,6 +474,18 @@ impl McpClient {
             current
         };
 
+        // Create sync channel for response (works in both sync and async contexts)
+        let (tx, rx) = mpsc::channel();
+
+        // Register pending request (sync mode)
+        {
+            let mut pending = self
+                .pending_requests
+                .lock()
+                .map_err(|_| "Pending requests lock poisoned")?;
+            pending.insert(request_id, PendingRequest::Sync(tx));
+        }
+
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: request_id,
@@ -265,19 +494,133 @@ impl McpClient {
         };
 
         // Send request
-        writeln!(process.stdin, "{}", serde_json::to_string(&request)?)?;
-        process.stdin.flush()?;
-
-        // Read response
-        let mut line = String::new();
-        process.stdout.read_line(&mut line)?;
-
-        if line.is_empty() {
-            Err("No response from MCP server".into())
-        } else {
-            let response: JsonRpcResponse = serde_json::from_str(&line)?;
-            Ok(response)
+        {
+            let mut stdin = self.stdin.lock().map_err(|_| "Stdin lock poisoned")?;
+            writeln!(stdin, "{}", serde_json::to_string(&request)?)?;
+            stdin.flush()?;
         }
+
+        // Wait for response with timeout (background thread will send it)
+        rx.recv_timeout(Duration::from_secs(30))
+            .map_err(|e| format!("Response timeout or channel closed: {e}").into())
+    }
+
+    /// Async version of send_request for use in polling loop (non-blocking)
+    pub async fn send_request_async(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<JsonRpcResponse, Box<dyn std::error::Error + Send + Sync>> {
+        // Get next request ID
+        let request_id = {
+            let mut id = self
+                .request_id
+                .lock()
+                .map_err(|_| "Request ID lock poisoned")?;
+            let current = *id;
+            *id += 1;
+            current
+        };
+
+        // Create oneshot channel for async response
+        let (tx, rx) = oneshot::channel();
+
+        // Register pending request (async mode)
+        {
+            let mut pending = self
+                .pending_requests
+                .lock()
+                .map_err(|_| "Pending requests lock poisoned")?;
+            pending.insert(request_id, PendingRequest::Async(tx));
+        }
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: request_id,
+            method: method.to_string(),
+            params,
+        };
+
+        // Send request
+        {
+            let mut stdin = self.stdin.lock().map_err(|_| "Stdin lock poisoned")?;
+            writeln!(stdin, "{}", serde_json::to_string(&request)?)?;
+            stdin.flush()?;
+        }
+
+        // Async await with timeout
+        tokio::time::timeout(Duration::from_secs(30), rx)
+            .await
+            .map_err(|_| "Request timeout")?
+            .map_err(|_| "Channel closed".into())
+    }
+
+    /// Register a pollable endpoint
+    pub fn register_pollable(&self, endpoint: PollableEndpoint) {
+        if let Ok(mut endpoints) = self.poll_endpoints.lock() {
+            endpoints.push(endpoint);
+        }
+    }
+
+    /// Unregister a pollable endpoint by method name
+    pub fn unregister_pollable(&self, method: &str) -> bool {
+        if let Ok(mut endpoints) = self.poll_endpoints.lock() {
+            let len_before = endpoints.len();
+            endpoints.retain(|e| e.method != method);
+            return endpoints.len() < len_before;
+        }
+        false
+    }
+
+    /// Get list of registered pollable endpoint methods
+    pub fn list_pollables(&self) -> Vec<String> {
+        self.poll_endpoints
+            .lock()
+            .map(|e| e.iter().map(|ep| ep.method.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Start the polling loop with given configuration
+    pub fn start_polling(self: &Arc<Self>, config: PollConfig) {
+        // Check if already polling
+        if self.poll_shutdown_tx.lock().is_ok_and(|g| g.is_some()) {
+            log_mcp("Polling already started");
+            return;
+        }
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        // Store shutdown sender
+        if let Ok(mut guard) = self.poll_shutdown_tx.lock() {
+            *guard = Some(shutdown_tx);
+        }
+
+        let client = Arc::clone(self);
+        tokio::spawn(async move {
+            polling_loop(client, config, shutdown_rx).await;
+        });
+
+        log_mcp("Polling loop started");
+    }
+
+    /// Stop the polling loop
+    pub fn stop_polling(&self) {
+        if let Ok(mut guard) = self.poll_shutdown_tx.lock()
+            && let Some(tx) = guard.take()
+        {
+            let _ = tx.send(true);
+            log_mcp("Polling loop stopped");
+        }
+    }
+
+    /// Get the server name (used in poll notifications)
+    pub fn server_name(&self) -> &str {
+        &self.server_name
+    }
+
+    /// Set the server name (useful when the auto-detected name isn't ideal)
+    pub fn set_server_name(&mut self, name: String) {
+        self.server_name = name;
     }
 }
 
@@ -291,8 +634,103 @@ pub struct Tool {
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        if let Ok(mut process) = self.process.lock() {
-            let _ = process.child.kill();
+        // Stop polling first
+        self.stop_polling();
+        // Then kill the subprocess
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+        }
+    }
+}
+
+/// Check if a JSON value represents an empty result
+fn is_empty_result(result: Option<&Value>) -> bool {
+    match result {
+        None => true,
+        Some(Value::Null) => true,
+        Some(Value::Array(arr)) => arr.is_empty(),
+        Some(Value::Object(obj)) => obj.is_empty(),
+        Some(Value::String(s)) => s.is_empty(),
+        _ => false,
+    }
+}
+
+/// Polling loop that runs in a tokio::spawn task
+async fn polling_loop(
+    client: Arc<McpClient>,
+    config: PollConfig,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
+    let mut backoff = AdaptiveBackoff::new(config.clone());
+    let min_cycle = backoff.min_cycle_time();
+
+    loop {
+        let cycle_start = Instant::now();
+
+        // Snapshot endpoints (release lock before awaiting)
+        let endpoints: Vec<PollableEndpoint> = {
+            match client.poll_endpoints.lock() {
+                Ok(guard) => guard.clone(),
+                Err(_) => break,
+            }
+        };
+
+        for endpoint in endpoints {
+            // Check shutdown before each poll
+            if *shutdown_rx.borrow() {
+                return;
+            }
+
+            let start = Instant::now();
+            match client
+                .send_request_async(&endpoint.method, endpoint.params.clone())
+                .await
+            {
+                Ok(response) => {
+                    let latency = start.elapsed();
+                    let has_data = !is_empty_result(response.result.as_ref());
+
+                    backoff.record(latency, has_data);
+
+                    if has_data {
+                        // Emit normalized poll notification
+                        let poll_result = PollResultParams {
+                            server: client.server_name.clone(),
+                            endpoint: endpoint.method.clone(),
+                            result: response.result.unwrap_or(Value::Null),
+                            latency_ms: latency.as_millis() as u64,
+                            is_poll: true,
+                        };
+
+                        let notif = JsonRpcNotification {
+                            method: "mcp.poll.result".to_string(),
+                            params: Some(serde_json::to_value(poll_result).unwrap_or(Value::Null)),
+                        };
+                        let _ = client.notification_tx.send(notif);
+                    }
+                }
+                Err(e) => {
+                    log_mcp(&format!("Poll error for {}: {e}", endpoint.method));
+                    backoff.record_error();
+                }
+            }
+        }
+
+        // Enforce rate limit
+        let elapsed = cycle_start.elapsed();
+        if let Some(remaining) = min_cycle.checked_sub(elapsed) {
+            tokio::time::sleep(remaining).await;
+        }
+
+        // Apply backoff interval
+        let interval = backoff.next_interval();
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => {}
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    return;
+                }
+            }
         }
     }
 }

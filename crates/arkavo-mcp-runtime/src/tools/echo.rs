@@ -1,5 +1,4 @@
-use anyhow::Result;
-use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -21,7 +20,10 @@ impl Default for EchoTool {
 
 #[async_trait]
 impl Tool for EchoTool {
-    async fn execute(&self, params: Value) -> Result<Value> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         Ok(json!({
             "echo": params,
             "timestamp": chrono::Utc::now().to_rfc3339(),

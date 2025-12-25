@@ -57,7 +57,7 @@ notify = { workspace = true }
 sqlx = { workspace = true }
 
 # MCP support
-arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
 
