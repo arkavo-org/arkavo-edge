@@ -1,13 +1,14 @@
-# Minecraft MCP Bot Runbook
+# Minecraft Survival Swarm Runbook
 
-This runbook describes how to run and validate the Minecraft MCP integration.
+This runbook describes how to run and validate the 5-agent Minecraft swarm.
 
 ## Overview
 
 This example demonstrates:
-- MCP stdio transport for subprocess communication
-- Real-time game bot control via tool calls
-- Natural language to game action translation
+- HRM (Hierarchical Reasoning Model) multi-agent architecture
+- A2A protocol for agent-to-agent coordination
+- Commander pattern with specialist delegation
+- MCP stdio transport for Minecraft bot control
 
 ## Prerequisites
 
@@ -18,187 +19,201 @@ cargo build -p arkavo
 # Verify Docker is running
 docker info
 
-# Verify Node.js version (20+ required)
-node --version
+# Verify binary exists
+ls -la ../../target/debug/arkavo
 ```
 
 ## Running the Demo
 
-### Step 1: Start Minecraft Server
-
-```bash
-docker compose up -d minecraft
-```
-
-**What to watch for:**
-- Container starts without errors
-- Server initializes world generation
-
-```bash
-# Monitor startup (wait for "Done" message)
-docker compose logs -f minecraft
-```
-
-**Expected output:**
-```
-[Server] Starting minecraft server version 1.21.8
-[Server] Preparing level "world"
-[Server] Done (12.345s)! For help, type "help"
-```
-
-### Step 2: Verify Server Ready
-
-```bash
-# Check container is running
-docker compose ps
-
-# Test port is accessible
-nc -zv localhost 25565
-```
-
-**Expected:** Connection succeeds.
-
-### Step 3: Launch the Agent
+### Step 1: Start the Swarm
 
 ```bash
 ./launch_minecraft.sh
 ```
 
-**What to watch for:**
-- MCP server spawns successfully
-- Bot connects to Minecraft server
-- Tools are discovered and registered
+**What happens:**
+1. Minecraft server starts in Docker
+2. Waits for server health check
+3. Starts 5 agents in dependency order:
+   - Specialists: scout, builder, runner (parallel)
+   - Router (needs specialists)
+   - Commander (needs router)
+4. Waits 5s for mDNS discovery
+5. Verifies all agents are healthy
 
 **Expected output:**
 ```
-[MINECRAFT] Starting Minecraft agent...
-[MCP      ] Spawning minecraft-mcp-server...
-[MCP      ] Connected, discovering tools...
-[MCP      ] Registered 8 tools from minecraft server
-[MINECRAFT] Bot "ClaudeBot" joined the game
+========================================
+ MINECRAFT SURVIVAL SWARM
+ 5-Agent HRM Demo
+========================================
+
+[MINECRAFT] Starting Minecraft server...
+[INFO] Waiting for server to be healthy...
+[SUCCESS] Minecraft server is healthy!
+[SUCCESS] MCP container ready!
+
+[INFO] Starting HRM swarm agents...
+
+[SWARM] Starting scout on port 8410...
+[SUCCESS] scout started (PID: 12345)
+[SWARM] Starting builder on port 8411...
+[SUCCESS] builder started (PID: 12346)
+[SWARM] Starting runner on port 8412...
+[SUCCESS] runner started (PID: 12347)
+[SWARM] Starting router on port 8402...
+[SUCCESS] router started (PID: 12348)
+[SWARM] Starting commander on port 8401...
+[SUCCESS] commander started (PID: 12349)
+
+[INFO] Waiting for mDNS discovery (5s)...
+
+[INFO] Verifying swarm connectivity...
+[SUCCESS] commander is healthy
+[SUCCESS] router is healthy
+[SUCCESS] scout is healthy
+[SUCCESS] builder is healthy
+[SUCCESS] runner is healthy
+
+[SUCCESS] Minecraft Survival Swarm is ready!
+
+Agent Endpoints:
+  Commander: http://localhost:8401  (has MCP tools)
+  Router:    http://localhost:8402
+  Scout:     http://localhost:8410
+  Builder:   http://localhost:8411
+  Runner:    http://localhost:8412
+
+Minecraft: localhost:25565 (connect with client)
 ```
 
-### Step 4: Interact with the Bot
+### Step 2: Check Swarm Status
 
-The agent accepts natural language commands. Try:
-
-```
-> Look around and tell me what you see
-> Move forward 10 blocks
-> Mine the nearest tree
-> What's in your inventory?
-> Build a small shelter
+```bash
+./launch_minecraft.sh status
 ```
 
-### Step 5: Watch in Minecraft Client (Optional)
+**Expected:** All 5 agents report healthy.
+
+### Step 3: View Agent Logs
+
+```bash
+# Commander (has MCP tools)
+tail -f logs/commander.log
+
+# Router decisions
+tail -f logs/router.log
+
+# Specialist advice
+tail -f logs/scout.log
+tail -f logs/builder.log
+tail -f logs/runner.log
+```
+
+### Step 4: Connect Minecraft Client
 
 1. Open Minecraft Java Edition 1.21.x
 2. Multiplayer > Direct Connect > `localhost:25565`
-3. Join and find ClaudeBot
+3. Join and find the bot "Edge"
 
-### Step 6: Stop Everything
+### Step 5: Stop the Swarm
 
 ```bash
+./launch_minecraft.sh stop
+# or
 ./stop_minecraft.sh
 ```
 
 ## Verification
 
-### Manual Test
+### Health Check All Agents
 
 ```bash
-# 1. Start server
-docker compose up -d minecraft
-
-# 2. Wait for ready
-sleep 30
-
-# 3. Test MCP server directly
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}' | \
-  npx -y github:yuniko-software/minecraft-mcp-server \
-    --host localhost --port 25565 --username TestBot
-
-# 4. Stop
-docker compose down
+for port in 8401 8402 8410 8411 8412; do
+  echo -n "Port $port: "
+  curl -s http://localhost:$port/health && echo "OK" || echo "FAIL"
+done
 ```
 
-### Expected MCP Response
+### Verify MCP Tools on Commander
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "protocolVersion": "2024-11-05",
-    "serverInfo": {"name": "minecraft-mcp-server"},
-    "capabilities": {"tools": {}}
-  }
-}
+Check `logs/commander.log` for:
+```
+[MCP] Discovered 17 tools: ["get-position", "move-to-position", ...]
+```
+
+### Verify A2A Peers
+
+Check `logs/router.log` for peer discovery:
+```
+[A2A] Discovered peers: 8401, 8410, 8411, 8412
 ```
 
 ## Troubleshooting
 
-### Server Not Starting
+### Agent Fails to Start
+
+```bash
+# Check port in use
+lsof -i :8401
+
+# Check log for errors
+cat logs/commander.log
+```
+
+### MCP Tools Not Discovered
+
+```bash
+# Verify MCP container is running
+docker compose ps mcp
+
+# Verify Docker exec works
+docker exec arkavo-minecraft-mcp echo "test"
+```
+
+### Minecraft Server Not Ready
 
 ```bash
 # Check Docker logs
 docker compose logs minecraft
 
-# Common issue: EULA not accepted (compose.yaml sets EULA=TRUE)
-# Common issue: Port 25565 already in use
-lsof -i :25565
+# Wait for "Done" message
+docker compose logs -f minecraft | grep -m1 "Done"
 ```
 
-### Bot Not Connecting
+### Agents Not Discovering Peers
 
 ```bash
-# Verify server accepts connections
-nc -zv localhost 25565
-
-# Check MCP server logs
-# The bot needs ~5 seconds to spawn and connect
-```
-
-### MCP Server Fails
-
-```bash
-# Verify Node.js version
-node --version  # Must be 20+
-
-# Try running MCP server directly
-npx -y github:yuniko-software/minecraft-mcp-server --help
-```
-
-### Tools Not Working
-
-```bash
-# Check if bot has spawned in-game
-# Some tools require the bot to be fully loaded
-
-# Verify with get_position first
+# Increase mDNS wait time (edit launch_minecraft.sh)
+# Or add explicit peers in AGENTS.md
 ```
 
 ## Architecture Notes
 
-### Why Stdio Transport?
+### Why HRM?
 
-The MCP specification defines stdio as the primary transport for local tool servers. The client (Arkavo) spawns the server as a subprocess and communicates via stdin/stdout with JSON-RPC messages.
+The Hierarchical Reasoning Model separates:
+- **Strategic reasoning** (Commander) - what to do
+- **Specialist selection** (Router) - who to ask
+- **Domain knowledge** (Specialists) - how to do it
 
-### Why Docker for Minecraft?
+### Why Single Bot?
 
-- Consistent server version
-- No manual Java/server setup
-- Easy cleanup with `docker compose down -v`
-- Offline mode for simpler testing (no Mojang auth)
+Multiple agents coordinate to control ONE bot because:
+- Minecraft limits concurrent actions per entity
+- Demonstrates collaborative AI without resource conflicts
+- Commander serializes actions based on specialist consensus
 
-### Bot Limitations
+### Agent Communication
 
-- Single bot per MCP server instance
-- Bot respawns if killed (Mineflayer behavior)
-- Some complex actions may require multiple tool calls
+- **A2A**: HTTP JSON-RPC on local ports
+- **mDNS**: Zero-config peer discovery
+- **Explicit peers**: Fallback for testing reliability
 
 ## Related Files
 
-- `AGENTS.md` - Agent configuration with MCP server definition
-- `compose.yaml` - Docker Compose for Minecraft server
-- `logs/` - Runtime logs (gitignored)
+- `agents/commander/AGENTS.md` - MCP tools, coordination
+- `agents/router/AGENTS.md` - Specialist selection
+- `agents/specialists/*/AGENTS.md` - Domain expertise
+- `compose.yaml` - Minecraft server config
+- `logs/` - Per-agent logs (gitignored)

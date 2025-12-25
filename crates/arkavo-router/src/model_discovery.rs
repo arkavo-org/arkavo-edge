@@ -64,16 +64,29 @@ pub fn load_api_keys_from_config() {
 pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
     use hf_hub::api::tokio::Api;
 
+    tracing::debug!(
+        "find_gguf_model: looking for repo={} filename={}",
+        repo_id,
+        filename
+    );
+
     let api = Api::new().map_err(|e| format!("Failed to initialize HuggingFace API: {e}"))?;
 
     // 1. Try preferred model first (download if needed, or use cached)
     let repo = api.repo(hf_hub::Repo::model(repo_id.to_string()));
-    if let Ok(path) = repo.get(filename).await {
-        return Ok(path);
+    match repo.get(filename).await {
+        Ok(path) => {
+            tracing::debug!("find_gguf_model: found via hf_hub API at {:?}", path);
+            return Ok(path);
+        }
+        Err(e) => {
+            tracing::debug!("find_gguf_model: hf_hub API failed: {}", e);
+        }
     }
 
     // 2. Scan cache for any GGUF in the preferred repo
     if let Some(path) = scan_cache_for_gguf(&api, repo_id).await {
+        tracing::debug!("find_gguf_model: found via cache scan at {:?}", path);
         return Ok(path);
     }
 
@@ -101,10 +114,16 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
 async fn scan_cache_for_gguf(_api: &hf_hub::api::tokio::Api, repo_id: &str) -> Option<PathBuf> {
     // Get standard HuggingFace cache location
     let cache = get_hf_cache_dir()?;
+    tracing::debug!("scan_cache_for_gguf: cache_dir={:?}", cache);
 
     // Convert repo_id to cache directory format: "org/model" -> "models--org--model"
     let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
     let repo_cache_path = cache.join(&repo_cache_name);
+    tracing::debug!(
+        "scan_cache_for_gguf: repo_cache_path={:?} exists={}",
+        repo_cache_path,
+        repo_cache_path.exists()
+    );
 
     if !repo_cache_path.exists() {
         return None;
@@ -112,12 +131,20 @@ async fn scan_cache_for_gguf(_api: &hf_hub::api::tokio::Api, repo_id: &str) -> O
 
     // Scan snapshots directory for .gguf files
     let snapshots_dir = repo_cache_path.join("snapshots");
+    tracing::debug!(
+        "scan_cache_for_gguf: snapshots_dir={:?} exists={}",
+        snapshots_dir,
+        snapshots_dir.exists()
+    );
+
     if !snapshots_dir.exists() {
         return None;
     }
 
     // Recursively search for .gguf files
-    find_gguf_in_dir(&snapshots_dir)
+    let result = find_gguf_in_dir(&snapshots_dir);
+    tracing::debug!("scan_cache_for_gguf: found={:?}", result);
+    result
 }
 
 /// Get the HuggingFace cache directory
@@ -133,10 +160,20 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
 
 /// Recursively find the first .gguf file in a directory
 fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
+    tracing::debug!("find_gguf_in_dir: scanning {:?}", dir);
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+            let is_file = path.is_file();
+            let ext = path.extension().and_then(|s| s.to_str());
+            tracing::debug!(
+                "find_gguf_in_dir: entry {:?} is_file={} ext={:?}",
+                path.file_name(),
+                is_file,
+                ext
+            );
+            if is_file && ext == Some("gguf") {
+                tracing::debug!("find_gguf_in_dir: found GGUF at {:?}", path);
                 return Some(path);
             } else if path.is_dir()
                 && let Some(found) = find_gguf_in_dir(&path)
@@ -144,7 +181,10 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
                 return Some(found);
             }
         }
+    } else {
+        tracing::debug!("find_gguf_in_dir: failed to read dir {:?}", dir);
     }
+    tracing::debug!("find_gguf_in_dir: no GGUF found in {:?}", dir);
     None
 }
 
