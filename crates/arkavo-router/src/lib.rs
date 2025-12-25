@@ -1001,29 +1001,73 @@ impl Router {
     /// 1. Fence format: ```tool_name\nkey: value\n```
     /// 2. JSON format: {"tool": "name", "parameters": {...}}
     /// 3. XML format: <tool_call><name>...</name><arguments>...</arguments></tool_call>
+    /// 4. Python function-call syntax: tool_name(param="value")
     fn extract_tool_calls_from_text(content: &str) -> Vec<arkavo_llm::ParsedToolCall> {
+        // Known programming language identifiers that aren't tool names
+        const LANG_IDENTIFIERS: &[&str] = &[
+            "python",
+            "py",
+            "javascript",
+            "js",
+            "typescript",
+            "ts",
+            "rust",
+            "go",
+            "java",
+            "ruby",
+            "bash",
+            "sh",
+            "shell",
+            "zsh",
+            "powershell",
+            "ps1",
+            "sql",
+            "json",
+            "yaml",
+            "toml",
+        ];
+
         // Try fence format first (most common for local models)
         if let Ok(calls) = ToolParser::parse_fence(content) {
-            // Handle special case: ```json\n{...}\n``` where the tool is inside the JSON
-            let processed: Vec<_> = calls
+            // Handle special cases where fence type is a language, not a tool
+            let filtered: Vec<_> = calls
                 .into_iter()
                 .flat_map(|call| {
-                    if call.tool_name == "json" {
+                    let tool_lower = call.tool_name.to_lowercase();
+
+                    if tool_lower == "json" {
                         // The content is JSON, try to extract tool call from it
                         let json_str = serde_json::to_string(&call.arguments).unwrap_or_default();
                         if let Some(extracted) = Self::extract_json_tool_calls(&json_str) {
                             return extracted;
                         }
-                        // Also try parsing the raw fence content as JSON
                         vec![call]
+                    } else if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
+                        // Fence is a language identifier (e.g., ```python)
+                        // Try to extract tool calls from the content
+                        // First, try Python function-call syntax
+                        let fence_content = serde_json::to_string(&call.arguments)
+                            .unwrap_or_default()
+                            .trim_matches('"')
+                            .to_string();
+                        if let Some(extracted) = Self::extract_python_function_calls(&fence_content)
+                        {
+                            return extracted;
+                        }
+                        // Try to find tool name as first word on a line
+                        if let Some(extracted) = Self::extract_tool_from_first_word(&fence_content)
+                        {
+                            return extracted;
+                        }
+                        vec![] // No tool found in language fence, filter it out
                     } else {
                         vec![call]
                     }
                 })
                 .collect();
 
-            if !(processed.is_empty() || processed.len() == 1 && processed[0].tool_name == "json") {
-                return processed;
+            if !filtered.is_empty() {
+                return filtered;
             }
         }
 
@@ -1108,6 +1152,65 @@ impl Router {
                 arguments: serde_json::Value::Object(args),
                 call_id: None,
             });
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Extract tool name from first word on each line
+    ///
+    /// Handles cases like:
+    /// ```python
+    /// detect-gamemode()
+    /// get-position()
+    /// ```
+    /// Where the fence is a language but the first word is the tool name
+    fn extract_tool_from_first_word(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        let mut calls = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+                continue;
+            }
+
+            // Extract first word (tool name) - may end with () or have args
+            // Match: tool-name or tool-name() or tool_name(args)
+            let first_word = trimmed
+                .split(|c: char| c.is_whitespace() || c == '(' || c == '=')
+                .next()
+                .unwrap_or("")
+                .trim();
+
+            // Must look like a tool name (contains letters, may have hyphens/underscores)
+            if first_word.is_empty()
+                || !first_word.chars().next().unwrap_or(' ').is_alphabetic()
+                || first_word
+                    .chars()
+                    .all(|c| c.is_lowercase() && c.is_ascii_alphabetic())
+                    && first_word.len() < 3
+            {
+                continue;
+            }
+
+            // Skip common language keywords
+            if [
+                "import", "from", "def", "class", "if", "else", "for", "while", "return", "let",
+                "const", "var", "function", "async", "await", "try", "catch", "finally",
+            ]
+            .contains(&first_word)
+            {
+                continue;
+            }
+
+            // Check if this looks like a tool call (has parentheses or follows = assignment)
+            if trimmed.contains('(') || trimmed.contains('=') {
+                calls.push(arkavo_llm::ParsedToolCall {
+                    tool_name: first_word.to_string(),
+                    arguments: serde_json::Value::Object(serde_json::Map::new()),
+                    call_id: None,
+                });
+            }
         }
 
         if calls.is_empty() { None } else { Some(calls) }
