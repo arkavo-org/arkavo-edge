@@ -2253,8 +2253,8 @@ async fn execute_with_conductor(
 
     if !response.tool_calls.is_empty() {
         let tool_count = response.tool_calls.len();
-        update_progress(&format!("Executing {} tool calls", tool_count), 70);
-        info!("Executing {} tool calls", tool_count);
+        update_progress(&format!("Executing {tool_count} tool calls"), 70);
+        info!("Executing {tool_count} tool calls");
 
         let mut tool_results = Vec::new();
         for tool_call in &response.tool_calls {
