@@ -1287,10 +1287,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Give mDNS time to register before connecting to peers
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await {
-            if !quiet {
-                eprintln!("Warning: Failed to connect to some peers: {}", e);
-            }
+        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await
+            && !quiet
+        {
+            eprintln!("Warning: Failed to connect to some peers: {e}");
         }
 
         if !quiet && peer_manager.has_peers() {

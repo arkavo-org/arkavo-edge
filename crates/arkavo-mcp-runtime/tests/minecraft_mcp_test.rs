@@ -102,7 +102,10 @@ async fn test_minecraft_tool_call() {
         };
 
         let response = server.execute_tool(request).await;
-        println!("Tool response: success={}, result={}", response.success, response.result);
+        println!(
+            "Tool response: success={}, result={}",
+            response.success, response.result
+        );
     } else {
         println!("No position tool found, available: {:?}", tool_names);
     }

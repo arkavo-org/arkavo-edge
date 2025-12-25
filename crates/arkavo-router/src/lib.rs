@@ -45,7 +45,7 @@ pub use learning::{
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
+use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse, ToolParser};
 use arkavo_mcp_tools::ToolRegistry;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -320,10 +320,24 @@ impl Router {
             .instantiate_provider(&decision.recommended_model)
             .await?;
 
-        provider
+        let mut response = provider
             .complete_with_tools(messages, tools_json, None)
             .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))
+            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+        // Extract tool calls from text content if structured tool_calls is empty
+        if response.tool_calls.is_empty() && !response.content.is_empty() {
+            let extracted = Self::extract_tool_calls_from_text(&response.content);
+            if !extracted.is_empty() {
+                tracing::debug!(
+                    "Extracted {} tool calls from text response",
+                    extracted.len()
+                );
+                response.tool_calls = extracted;
+            }
+        }
+
+        Ok(response)
     }
 
     /// Route with automatic quality evaluation and model escalation
@@ -364,10 +378,22 @@ impl Router {
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
-            let response = provider
+            let mut response = provider
                 .complete_with_tools(messages.clone(), tools_json.clone(), None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // For local models, extract tool calls from text content if structured tool_calls is empty
+            if response.tool_calls.is_empty() && !response.content.is_empty() {
+                let extracted = Self::extract_tool_calls_from_text(&response.content);
+                if !extracted.is_empty() {
+                    tracing::debug!(
+                        "Extracted {} tool calls from text response",
+                        extracted.len()
+                    );
+                    response.tool_calls = extracted;
+                }
+            }
 
             // Debug: log tool calls
             if !response.tool_calls.is_empty() {
@@ -966,6 +992,126 @@ impl Router {
     ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
         // See #383: Add semantic search with local model when llama-cpp feature is enabled
         registry.search_tools(query, detail)
+    }
+
+    /// Extract tool calls from text content using multiple parsing strategies
+    ///
+    /// Local LLMs output tool calls as text in various formats. This function
+    /// tries multiple parsers to be accommodating of different output styles:
+    /// 1. Fence format: ```tool_name\nkey: value\n```
+    /// 2. JSON format: {"tool": "name", "parameters": {...}}
+    /// 3. XML format: <tool_call><name>...</name><arguments>...</arguments></tool_call>
+    fn extract_tool_calls_from_text(content: &str) -> Vec<arkavo_llm::ParsedToolCall> {
+        // Try fence format first (most common for local models)
+        if let Ok(calls) = ToolParser::parse_fence(content) {
+            // Handle special case: ```json\n{...}\n``` where the tool is inside the JSON
+            let processed: Vec<_> = calls
+                .into_iter()
+                .flat_map(|call| {
+                    if call.tool_name == "json" {
+                        // The content is JSON, try to extract tool call from it
+                        let json_str = serde_json::to_string(&call.arguments).unwrap_or_default();
+                        if let Some(extracted) = Self::extract_json_tool_calls(&json_str) {
+                            return extracted;
+                        }
+                        // Also try parsing the raw fence content as JSON
+                        vec![call]
+                    } else {
+                        vec![call]
+                    }
+                })
+                .collect();
+
+            if !(processed.is_empty() || processed.len() == 1 && processed[0].tool_name == "json") {
+                return processed;
+            }
+        }
+
+        // Try to find JSON tool calls embedded in text
+        if let Some(calls) = Self::extract_json_tool_calls(content) {
+            return calls;
+        }
+
+        // Try XML format
+        if let Ok(calls) = ToolParser::parse_xml(content) {
+            return calls;
+        }
+
+        Vec::new()
+    }
+
+    /// Extract JSON-formatted tool calls from text
+    ///
+    /// Handles various JSON formats LLMs might output:
+    /// - {"tool": "name", "parameters": {...}}
+    /// - {"tool_name": "name", "args": {...}}
+    /// - {"name": "tool", "arguments": {...}}
+    fn extract_json_tool_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
+        let mut calls = Vec::new();
+
+        // Find JSON objects in the content (between { and })
+        let mut depth = 0;
+        let mut start = None;
+
+        for (i, c) in content.char_indices() {
+            match c {
+                '{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            let json_str = &content[s..=i];
+                            if let Some(call) = Self::parse_json_tool_call(json_str) {
+                                calls.push(call);
+                            }
+                        }
+                        start = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Parse a single JSON object as a tool call
+    fn parse_json_tool_call(json_str: &str) -> Option<arkavo_llm::ParsedToolCall> {
+        let json: serde_json::Value = serde_json::from_str(json_str).ok()?;
+        let obj = json.as_object()?;
+
+        // Try different field names for tool name
+        let tool_name = obj
+            .get("tool")
+            .or_else(|| obj.get("tool_name"))
+            .or_else(|| obj.get("name"))
+            .and_then(|v| v.as_str())?
+            .to_string();
+
+        // Skip if it doesn't look like a tool call (must have a colon or be a known tool pattern)
+        if tool_name.is_empty() {
+            return None;
+        }
+
+        // Try different field names for arguments
+        let arguments = obj
+            .get("parameters")
+            .or_else(|| obj.get("args"))
+            .or_else(|| obj.get("arguments"))
+            .or_else(|| obj.get("input"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+        Some(arkavo_llm::ParsedToolCall {
+            tool_name,
+            arguments,
+            call_id: None,
+        })
     }
 }
 

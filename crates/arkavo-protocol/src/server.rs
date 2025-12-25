@@ -2224,6 +2224,16 @@ async fn execute_with_conductor(
         .map_err(|e| format!("Router failed: {e}"))?;
 
     info!("LLM response received, {} chars", response.content.len());
+
+    // Debug: show full LLM response for tool call debugging
+    if std::env::var("ARKAVO_DEBUG").is_ok() {
+        eprintln!("[LLM Response] {} chars:", response.content.len());
+        eprintln!(
+            "{}",
+            &response.content[..std::cmp::min(1000, response.content.len())]
+        );
+    }
+
     debug!(
         "LLM response content: {}",
         if response.content.len() > 500 {
@@ -2238,7 +2248,7 @@ async fn execute_with_conductor(
         response
             .tool_calls
             .iter()
-            .map(|tc| &tc.tool_name)
+            .map(|tc| format!("{}({})", tc.tool_name, tc.arguments))
             .collect::<Vec<_>>()
     );
 
@@ -2322,6 +2332,36 @@ async fn run_startup_planning_phase(
     // 1. Get available tools first
     let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
 
+    // 1b. Generate parameter aliases for each MCP server (if not already done)
+    // Group tools by server and generate aliases
+    let mut servers_needing_aliases: std::collections::HashMap<
+        String,
+        Vec<crate::mcp_registry::Tool>,
+    > = std::collections::HashMap::new();
+    for tool in &tools {
+        if let Some((server, tool_name)) = tool.name.split_once(':')
+            && !mcp_registry.has_param_aliases(server).await
+        {
+            let entry = servers_needing_aliases
+                .entry(server.to_string())
+                .or_default();
+            // Store tool with unprefixed name for alias generation
+            let mut unprefixed_tool = tool.clone();
+            unprefixed_tool.name = tool_name.to_string();
+            entry.push(unprefixed_tool);
+        }
+    }
+
+    // Generate and store aliases for each server
+    for (server_name, server_tools) in servers_needing_aliases {
+        let aliases = generate_param_aliases(&server_name, &server_tools, router).await;
+        if !aliases.is_empty()
+            && let Err(e) = mcp_registry.set_param_aliases(&server_name, aliases).await
+        {
+            eprintln!("[Aliases] Failed to set aliases for {server_name}: {e}");
+        }
+    }
+
     // 2. Gather situational context using available MCP tools
     let mut context_parts = Vec::new();
 
@@ -2332,15 +2372,15 @@ async fn run_startup_planning_phase(
         // Find a tool matching this pattern
         if let Some(tool) = tools.iter().find(|t| t.name.contains(pattern)) {
             // Strip server prefix for call (call_tool now handles both formats)
-            let tool_name = tool.name.split(':').last().unwrap_or(&tool.name);
+            let tool_name = tool.name.split(':').next_back().unwrap_or(&tool.name);
             if let Ok(result) = mcp_registry
                 .call_tool(tool_name, serde_json::json!({}), "startup-planning")
                 .await
             {
                 if let Some(text) = result.as_str() {
-                    context_parts.push(format!("{}: {}", tool_name, text));
+                    context_parts.push(format!("{tool_name}: {text}"));
                 } else {
-                    context_parts.push(format!("{}: {}", tool_name, result));
+                    context_parts.push(format!("{tool_name}: {result}"));
                 }
             }
         }
@@ -2407,7 +2447,7 @@ async fn run_startup_planning_phase(
             }
         }
         Err(e) => {
-            eprintln!("[Planning] Planning failed: {}", e);
+            eprintln!("[Planning] Planning failed: {e}");
             AgentPlan::default()
         }
     }
@@ -2438,9 +2478,7 @@ fn extract_goals_from_response(response: &str) -> Vec<AgentGoal> {
                     .map(|(_, desc)| desc.trim())
                     .unwrap_or(trimmed)
             } else {
-                trimmed
-                    .trim_start_matches(|c| c == '-' || c == '*' || c == ' ')
-                    .trim()
+                trimmed.trim_start_matches(['-', '*', ' ']).trim()
             };
 
             // Skip if too short or looks like a tool call
@@ -2463,6 +2501,135 @@ fn extract_goals_from_response(response: &str) -> Vec<AgentGoal> {
     }
 
     goals
+}
+
+/// Generate parameter aliases for MCP tools using the LLM
+///
+/// Asks the LLM to analyze tool schemas and generate alternative parameter names
+/// that might be used by smaller models when calling tools.
+#[allow(deprecated)] // route_with_tools bypasses architect mode
+async fn generate_param_aliases(
+    server_name: &str,
+    tools: &[crate::mcp_registry::Tool],
+    router: &Arc<arkavo_router::Router>,
+) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+    use std::collections::HashMap;
+
+    if tools.is_empty() {
+        return HashMap::new();
+    }
+
+    // Build a prompt describing the tools and their required parameters
+    let mut tool_descriptions = Vec::new();
+    for tool in tools {
+        if let Some(schema) = &tool.input_schema
+            && let Some(required) = schema.get("required").and_then(|r| r.as_array())
+        {
+            let required_params: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+            if !required_params.is_empty() {
+                tool_descriptions.push(format!(
+                    "- {}: required parameters: {}",
+                    tool.name,
+                    required_params.join(", ")
+                ));
+            }
+        }
+    }
+
+    if tool_descriptions.is_empty() {
+        return HashMap::new();
+    }
+
+    let alias_prompt = format!(
+        "List parameter aliases for these MCP tools. Output ONLY lines in format:\n\
+         tool.param: alt1, alt2, alt3\n\n\
+         Tools:\n{}\n\n\
+         Example output:\n\
+         search.query: q, search_term, keyword\n\
+         create-file.fileName: file, name, path\n\n\
+         Output ONLY the alias lines, nothing else:",
+        tool_descriptions.join("\n")
+    );
+
+    // Use the router to call the LLM
+    let messages = vec![arkavo_llm::Message {
+        role: arkavo_llm::Role::User,
+        content: alias_prompt,
+        images: None,
+    }];
+
+    let response = match router.route_with_tools(&"", messages, None).await {
+        Ok(resp) => resp.content,
+        Err(e) => {
+            eprintln!("[Aliases] Failed to generate aliases: {e}");
+            return HashMap::new();
+        }
+    };
+
+    // Parse the response
+    let mut aliases: HashMap<String, HashMap<String, String>> = HashMap::new();
+
+    for line in response.lines() {
+        let line = line.trim();
+
+        // Skip empty lines, lines without both . and :, or lines that look like explanations
+        if line.is_empty()
+            || !line.contains('.')
+            || !line.contains(':')
+            || line.contains("->")
+            || line.len() > 100
+        {
+            continue;
+        }
+
+        // Parse "tool_name.param_name: alt1, alt2, alt3"
+        if let Some((tool_param, alts)) = line.split_once(':') {
+            let tool_param = tool_param.trim();
+            // Ensure tool_param looks like "tool-name.paramName"
+            if !tool_param
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+            {
+                continue;
+            }
+
+            if let Some((tool_name, param_name)) = tool_param.split_once('.') {
+                let tool_name = tool_name.trim().to_lowercase();
+                let param_name = param_name.trim().to_string();
+
+                // Skip if tool name or param name is too long (likely garbage)
+                if tool_name.len() > 30 || param_name.len() > 30 {
+                    continue;
+                }
+
+                let tool_aliases = aliases.entry(tool_name).or_default();
+
+                for alt in alts.split(',') {
+                    let alt = alt.trim().to_string();
+                    // Only accept simple alphanumeric alternatives
+                    if !alt.is_empty()
+                        && alt != param_name
+                        && alt.len() < 30
+                        && alt.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    {
+                        tool_aliases.insert(alt, param_name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let alias_count: usize = aliases.values().map(|m| m.len()).sum();
+    if alias_count > 0 {
+        eprintln!(
+            "[Aliases] Generated {} aliases for {} tools on server {}",
+            alias_count,
+            aliases.len(),
+            server_name
+        );
+    }
+
+    aliases
 }
 
 /// Bridge tool that wraps an MCP tool from McpRegistry
@@ -3094,7 +3261,8 @@ impl A2aServer {
                                 &router,
                                 &mcp_registry,
                                 &conductor,
-                            ).await;
+                            )
+                            .await;
 
                             // Store the plan
                             *agent_plan.write().await = plan;
@@ -3104,10 +3272,13 @@ impl A2aServer {
                         // Build prompt with goals if available
                         let plan = agent_plan.read().await;
                         let goals_section = if !plan.goals.is_empty() {
-                            let goals_str: Vec<String> = plan.goals
+                            let goals_str: Vec<String> = plan
+                                .goals
                                 .iter()
                                 .enumerate()
-                                .map(|(i, g)| format!("{}. {} ({:?})", i + 1, g.description, g.status))
+                                .map(|(i, g)| {
+                                    format!("{}. {} ({:?})", i + 1, g.description, g.status)
+                                })
                                 .collect();
                             format!("\n\n## Active Goals\n{}", goals_str.join("\n"))
                         } else {
@@ -3117,15 +3288,17 @@ impl A2aServer {
 
                         let prompt = format!(
                             "{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals when responding. Use tools to take action.",
-                            system_prompt,
-                            goals_section,
-                            notification.server,
-                            event_str
+                            system_prompt, goals_section, notification.server, event_str
                         );
 
                         // Execute through conductor
-                        eprintln!("[Notifications] Processing with LLM: {} chars", prompt.len());
-                        match execute_with_conductor(&conductor, &router, &mcp_registry, prompt).await {
+                        eprintln!(
+                            "[Notifications] Processing with LLM: {} chars",
+                            prompt.len()
+                        );
+                        match execute_with_conductor(&conductor, &router, &mcp_registry, prompt)
+                            .await
+                        {
                             Ok(result) => {
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
                                 if !result.is_empty() {
@@ -3134,7 +3307,7 @@ impl A2aServer {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[Notifications] Processing failed: {}", e);
+                                eprintln!("[Notifications] Processing failed: {e}");
                                 warn!("Notification processing failed: {}", e);
                             }
                         }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, info};
 
 /// MCP notification from server
@@ -39,6 +39,8 @@ pub trait McpConnectionTrait: Send + Sync {
 struct RegisteredConnection {
     connection: Box<dyn McpConnectionTrait>,
     cached_tools: Vec<Tool>,
+    /// Parameter aliases: tool_name -> (alternative_param -> canonical_param)
+    param_aliases: HashMap<String, HashMap<String, String>>,
 }
 
 /// Registry to manage multiple MCP server connections
@@ -94,6 +96,7 @@ impl McpRegistry {
             RegisteredConnection {
                 connection,
                 cached_tools,
+                param_aliases: HashMap::new(),
             },
         );
     }
@@ -165,44 +168,52 @@ impl McpRegistry {
         // Check if tool name has server prefix (format: "server:tool")
         if let Some((server_name, actual_tool_name)) = tool_name.split_once(':') {
             // Prefixed format - route to specific server
-            debug!(
-                server = %server_name,
-                tool = %actual_tool_name,
-                args = %serde_json::to_string(&arguments).unwrap_or_default(),
-                "Executing tool on MCP server"
-            );
-
             if let Some(registered) = connections.get(server_name) {
-                return Self::execute_tool(
-                    &registered.connection,
-                    server_name,
+                // Apply parameter aliases before executing
+                let normalized_args = Self::apply_param_aliases(
+                    &registered.param_aliases,
                     actual_tool_name,
                     arguments,
+                );
+
+                debug!(
+                    server = %server_name,
+                    tool = %actual_tool_name,
+                    args = %serde_json::to_string(&normalized_args).unwrap_or_default(),
+                    "Executing tool on MCP server"
+                );
+
+                return Self::execute_tool(
+                    registered.connection.as_ref(),
+                    server_name,
+                    actual_tool_name,
+                    normalized_args,
                     llm_provider,
                 );
-            } else {
-                error!(server = %server_name, "MCP server not found");
-                return Err(format!("MCP server '{server_name}' not found").into());
             }
+            error!(server = %server_name, "MCP server not found");
+            return Err(format!("MCP server '{server_name}' not found").into());
         }
 
         // Unprefixed format - search all servers for matching tool
         for (server_name, registered) in connections.iter() {
-            if registered
-                .cached_tools
-                .iter()
-                .any(|t| t.name == tool_name)
-            {
+            if registered.cached_tools.iter().any(|t| t.name == tool_name) {
+                // Apply parameter aliases before executing
+                let normalized_args =
+                    Self::apply_param_aliases(&registered.param_aliases, tool_name, arguments);
+
                 debug!(
                     server = %server_name,
                     tool = %tool_name,
+                    args = %serde_json::to_string(&normalized_args).unwrap_or_default(),
                     "Found tool in server"
                 );
+
                 return Self::execute_tool(
-                    &registered.connection,
+                    registered.connection.as_ref(),
                     server_name,
                     tool_name,
-                    arguments,
+                    normalized_args,
                     llm_provider,
                 );
             }
@@ -214,7 +225,7 @@ impl McpRegistry {
 
     /// Execute a tool on a specific connection
     fn execute_tool(
-        connection: &Box<dyn McpConnectionTrait>,
+        connection: &dyn McpConnectionTrait,
         server_name: &str,
         tool_name: &str,
         arguments: Value,
@@ -304,6 +315,76 @@ impl McpRegistry {
         } else {
             Err(format!("MCP server '{server_name}' not found").into())
         }
+    }
+
+    /// Set parameter aliases for tools on a specific server
+    ///
+    /// Aliases map alternative parameter names to canonical ones.
+    /// Example: For find-block tool, "block" -> "blockType"
+    pub async fn set_param_aliases(
+        &self,
+        server_name: &str,
+        aliases: HashMap<String, HashMap<String, String>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connections = self.connections.write().await;
+
+        if let Some(registered) = connections.get_mut(server_name) {
+            let alias_count: usize = aliases.values().map(|m| m.len()).sum();
+            info!(
+                server = %server_name,
+                tools = aliases.len(),
+                aliases = alias_count,
+                "Set parameter aliases for MCP server"
+            );
+            registered.param_aliases = aliases;
+            Ok(())
+        } else {
+            Err(format!("MCP server '{server_name}' not found").into())
+        }
+    }
+
+    /// Check if a server has parameter aliases configured
+    pub async fn has_param_aliases(&self, server_name: &str) -> bool {
+        let connections = self.connections.read().await;
+        connections
+            .get(server_name)
+            .map(|r| !r.param_aliases.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Apply parameter aliases to tool arguments
+    fn apply_param_aliases(
+        aliases: &HashMap<String, HashMap<String, String>>,
+        tool_name: &str,
+        mut arguments: Value,
+    ) -> Value {
+        if let Some(tool_aliases) = aliases.get(tool_name)
+            && let Some(obj) = arguments.as_object_mut()
+        {
+            // Collect keys to rename (avoid mutating while iterating)
+            let renames: Vec<(String, String, Value)> = obj
+                .iter()
+                .filter_map(|(key, value)| {
+                    tool_aliases
+                        .get(key)
+                        .map(|canonical| (key.clone(), canonical.clone(), value.clone()))
+                })
+                .collect();
+
+            for (alt_key, canonical_key, value) in renames {
+                if !obj.contains_key(&canonical_key) {
+                    obj.remove(&alt_key);
+                    obj.insert(canonical_key.clone(), value);
+                    debug!(
+                        tool = %tool_name,
+                        from = %alt_key,
+                        to = %canonical_key,
+                        "Applied parameter alias"
+                    );
+                }
+            }
+        }
+        arguments
     }
 
     /// Register an agent with its card

@@ -383,11 +383,26 @@ impl McpConverter {
             let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
         }
 
-        prompt.push_str("\nFormat:\n```<tool>\n<param>: <value>\n```\n\n");
+        prompt.push_str("\nFormat (ALWAYS include required parameters):\n```tool_name\nparameter_name: value\n```\n\n");
 
-        // Add concrete examples for each tool
+        // Show required parameters for all tools
+        prompt.push_str("Required parameters:\n");
+        for tool in tools {
+            let required: Vec<&str> = tool
+                .schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            if !required.is_empty() {
+                let _ = writeln!(prompt, "- {}: {}", tool.name, required.join(", "));
+            }
+        }
+        prompt.push('\n');
+
+        // Add concrete examples for first few tools
         prompt.push_str("Examples:\n");
-        for tool in tools.iter().take(2) {
+        for tool in tools.iter().take(3) {
             let _ = writeln!(prompt, "```{}", tool.name);
             if let Some(props) = tool.schema.get("properties").and_then(|p| p.as_object()) {
                 let required: Vec<&str> = tool
@@ -408,7 +423,9 @@ impl McpConverter {
                             "command" => "ls -la",
                             "message" | "text" | "content" => "Hello world",
                             "x" | "y" | "z" => "100",
-                            _ => "value",
+                            "direction" => "forward",
+                            "type" | "entityType" => "entity_type",
+                            _ => "example_value",
                         };
                         let _ = writeln!(prompt, "{name}: {example}");
                     }
