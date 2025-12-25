@@ -1,4 +1,6 @@
-use crate::mcp_polling::{AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint};
+use arkavo_mcp_runtime::polling::{
+    AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -197,7 +199,7 @@ impl McpClient {
             id: 1,
             method: "initialize".to_string(),
             params: Some(json!({
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-11-25",
                 "capabilities": {
                     "roots": { "listChanged": true },
                     "sampling": {}

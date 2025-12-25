@@ -30,6 +30,7 @@ http.workspace = true
 # For the built-in tools
 uuid.workspace = true
 chrono.workspace = true
+rand.workspace = true
 
 [lints]
 workspace = true

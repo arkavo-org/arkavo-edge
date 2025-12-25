@@ -24,32 +24,13 @@ use crate::tdf::{TdfFetchTool, TdfStageTool};
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
 use crate::web_search::WebSearchTool;
-use arkavo_mcp::ToolSchema;
+use arkavo_mcp::{McpClient, ToolSchema};
 use arkavo_memory::MemoryStorage;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// MCP Tool definition to avoid circular dependency with arkavo-protocol
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpTool {
-    pub name: String,
-    pub description: String,
-    pub input_schema: Option<Value>,
-}
-
-/// Trait for MCP connection abstraction to avoid circular dependency
-pub trait McpClient: Send + Sync {
-    fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error>>;
-    fn call_tool(
-        &self,
-        tool_name: &str,
-        args: Value,
-        llm_origin: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>>;
-}
 
 /// Wrapper that adapts an MCP tool to the Tool trait
 struct McpToolWrapper {
@@ -141,7 +122,7 @@ impl ToolRegistry {
     pub fn from_mcp_connection(
         mcp_client: Arc<dyn McpClient>,
         storage: Arc<MemoryStorage>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Start with all native tools (filesystem, browser, git, time, etc.)
         let mut registry = Self::new(storage);
 
