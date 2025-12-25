@@ -8,8 +8,10 @@ pub mod models;
 pub mod orchestrator_state;
 #[cfg(feature = "vector-search")]
 pub mod storage;
+pub mod workspace_config;
 
 pub use ledger::ContextLedger;
+pub use workspace_config::WorkspaceConfig;
 pub use models::{AgentConversation, AgentDomain, CreateMemoryRequest, Memory, SearchResult};
 pub use orchestrator_state::{
     IssueProcessingStatus, OrchestratorStateStore, OrgStats, ProcessedIssue, RepoState, RepoStatus,

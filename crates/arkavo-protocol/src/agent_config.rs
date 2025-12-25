@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Agent configuration parsed from AGENTS.md
 #[derive(Debug, Clone)]
@@ -195,4 +196,119 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     }
 
     Ok(agents)
+}
+
+/// Workspace paths parsed from AGENTS.md paths: section
+#[derive(Debug, Clone, Default)]
+pub struct WorkspacePaths {
+    pub memory_db_path: Option<PathBuf>,
+    pub workspace_root: PathBuf,
+}
+
+/// Parse workspace paths from AGENTS.md content.
+/// Relative paths are resolved against the workspace_root (parent of .arkavo directory).
+pub fn parse_workspace_paths(content: &str, workspace_root: &Path) -> WorkspacePaths {
+    let mut paths = WorkspacePaths {
+        memory_db_path: None,
+        workspace_root: workspace_root.to_path_buf(),
+    };
+
+    let mut in_paths_section = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Check for Paths section header
+        if trimmed == "## Paths" {
+            in_paths_section = true;
+            continue;
+        }
+
+        // End paths section on next ## header
+        if in_paths_section && trimmed.starts_with("## ") {
+            break;
+        }
+
+        // Parse paths: section marker
+        if trimmed == "paths:" {
+            in_paths_section = true;
+            continue;
+        }
+
+        // Parse memory_db path
+        if in_paths_section && trimmed.starts_with("memory_db:") {
+            let path_str = trimmed
+                .strip_prefix("memory_db:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+
+            if !path_str.is_empty() {
+                let path = PathBuf::from(path_str);
+                // Resolve relative paths against workspace root
+                let resolved = if path.is_absolute() {
+                    path
+                } else {
+                    workspace_root.join(path)
+                };
+                paths.memory_db_path = Some(resolved);
+            }
+        }
+    }
+
+    paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_workspace_paths_relative() {
+        let content = r#"
+## Paths
+
+paths:
+  memory_db: .arkavo/memory_server/memories.db
+"#;
+        let workspace_root = PathBuf::from("/home/user/project");
+        let paths = parse_workspace_paths(content, &workspace_root);
+
+        assert_eq!(
+            paths.memory_db_path,
+            Some(PathBuf::from("/home/user/project/.arkavo/memory_server/memories.db"))
+        );
+        assert_eq!(paths.workspace_root, workspace_root);
+    }
+
+    #[test]
+    fn test_parse_workspace_paths_absolute() {
+        let content = r#"
+## Paths
+
+paths:
+  memory_db: /absolute/path/to/memories.db
+"#;
+        let workspace_root = PathBuf::from("/home/user/project");
+        let paths = parse_workspace_paths(content, &workspace_root);
+
+        assert_eq!(
+            paths.memory_db_path,
+            Some(PathBuf::from("/absolute/path/to/memories.db"))
+        );
+    }
+
+    #[test]
+    fn test_parse_workspace_paths_no_paths_section() {
+        let content = r#"
+## Agent
+
+name: test-agent
+model: gpt-4
+"#;
+        let workspace_root = PathBuf::from("/home/user/project");
+        let paths = parse_workspace_paths(content, &workspace_root);
+
+        assert_eq!(paths.memory_db_path, None);
+    }
 }

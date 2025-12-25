@@ -1,6 +1,6 @@
 use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
-use arkavo_memory::{ContextLedger, HnswConfig, MemoryStorage};
+use arkavo_memory::{ContextLedger, HnswConfig, MemoryStorage, WorkspaceConfig};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -18,7 +18,9 @@ impl Default for ContextRestoreTool {
 
 impl ContextRestoreTool {
     pub fn new() -> Self {
-        Self::with_path(None)
+        // Use workspace config for consistent cross-process database access
+        let db_path = WorkspaceConfig::get().memory_db_path.clone();
+        Self::with_path(db_path)
     }
 
     /// Creates a tool that uses a specific database path.

@@ -2,6 +2,7 @@ use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
 use crate::event_store::{EventStore, SerializedEvent, StoredEvent};
 use crate::models::{AgentConversation, Memory, SearchResult};
+use crate::workspace_config::WorkspaceConfig;
 use hnsw_rs::prelude::*;
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -71,7 +72,18 @@ impl MemoryStorage {
     }
 
     pub fn get_data_directory() -> Result<PathBuf> {
-        let data_dir = PathBuf::from(".arkavo").join("memory_server");
+        // Check workspace config for absolute path first
+        let config = WorkspaceConfig::get();
+        let data_dir = if let Some(db_path) = &config.memory_db_path {
+            // Use parent directory of the configured database path
+            db_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".arkavo").join("memory_server"))
+        } else {
+            // Fallback to relative path (existing behavior)
+            PathBuf::from(".arkavo").join("memory_server")
+        };
 
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {e}")))?;
