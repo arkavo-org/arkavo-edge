@@ -223,8 +223,8 @@ impl ToolParser {
         let mut calls = Vec::new();
 
         // Primary pattern: ```tool_name\n...content...\n```
-        // Tool names are lowercase with underscores, no spaces
-        let primary_pattern = Regex::new(r"```([a-z][a-z0-9_]*)\s*\n([\s\S]*?)```")
+        // Tool names allow lowercase letters, numbers, underscores, hyphens, and colons (for namespacing)
+        let primary_pattern = Regex::new(r"```([a-z][a-z0-9_\-:]*)\s*\n([\s\S]*?)```")
             .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
 
         for cap in primary_pattern.captures_iter(text) {
@@ -241,7 +241,7 @@ impl ToolParser {
         // Fallback pattern: ```\ntool_name\nkey: value\n```
         // Some models put empty fence then tool name on next line
         if calls.is_empty() {
-            let fallback_pattern = Regex::new(r"```\s*\n([a-z][a-z0-9_]*)\s*\n([\s\S]*?)```")
+            let fallback_pattern = Regex::new(r"```\s*\n([a-z][a-z0-9_\-:]*)\s*\n([\s\S]*?)```")
                 .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
 
             for cap in fallback_pattern.captures_iter(text) {
@@ -298,6 +298,15 @@ impl ToolParser {
         if s.is_empty() {
             return Value::String(String::new());
         }
+
+        // Strip surrounding quotes if present (e.g., "hello" -> hello)
+        let s = if (s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\''))
+        {
+            &s[1..s.len() - 1]
+        } else {
+            s
+        };
 
         // Boolean
         if s.eq_ignore_ascii_case("true") {

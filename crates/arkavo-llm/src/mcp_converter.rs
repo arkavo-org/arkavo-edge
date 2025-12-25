@@ -406,6 +406,8 @@ impl McpConverter {
                             "query" => "search term",
                             "url" => "https://example.com",
                             "command" => "ls -la",
+                            "message" | "text" | "content" => "Hello world",
+                            "x" | "y" | "z" => "100",
                             _ => "value",
                         };
                         let _ = writeln!(prompt, "{name}: {example}");

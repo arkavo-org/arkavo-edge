@@ -4,8 +4,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{error, info};
+use tokio::sync::{broadcast, RwLock};
+use tracing::{debug, error, info};
+
+/// MCP notification from server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpNotification {
+    pub server: String,
+    pub method: String,
+    pub params: Option<Value>,
+}
 
 /// Tool information structure matching MCP protocol
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -27,75 +35,210 @@ pub trait McpConnectionTrait: Send + Sync {
     ) -> Result<Value, Box<dyn std::error::Error>>;
 }
 
+/// Registered connection with cached tools
+struct RegisteredConnection {
+    connection: Box<dyn McpConnectionTrait>,
+    cached_tools: Vec<Tool>,
+}
+
 /// Registry to manage multiple MCP server connections
 pub struct McpRegistry {
-    connections: Arc<RwLock<HashMap<String, Box<dyn McpConnectionTrait>>>>,
+    connections: Arc<RwLock<HashMap<String, RegisteredConnection>>>,
     agents: Arc<RwLock<HashMap<String, AgentCard>>>,
     agent_status: Arc<RwLock<HashMap<String, AgentStatus>>>,
+    notification_tx: broadcast::Sender<McpNotification>,
 }
 
 impl McpRegistry {
     pub fn new() -> Self {
+        let (notification_tx, _) = broadcast::channel(256);
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
             agents: Arc::new(RwLock::new(HashMap::new())),
             agent_status: Arc::new(RwLock::new(HashMap::new())),
+            notification_tx,
         }
     }
 
-    /// Register a new MCP connection
-    pub async fn register(&self, name: String, connection: Box<dyn McpConnectionTrait>) {
-        let mut connections = self.connections.write().await;
-        connections.insert(name, connection);
+    /// Subscribe to notifications from all MCP servers
+    pub fn subscribe_notifications(&self) -> broadcast::Receiver<McpNotification> {
+        self.notification_tx.subscribe()
     }
 
-    /// List all available tools from all connections
+    /// Send a notification to all subscribers (used by MCP clients)
+    pub fn emit_notification(&self, notification: McpNotification) {
+        let _ = self.notification_tx.send(notification);
+    }
+
+    /// Register a new MCP connection (caches tools at registration time)
+    pub async fn register(&self, name: String, connection: Box<dyn McpConnectionTrait>) {
+        // Cache tools at registration time to avoid repeated tools/list calls
+        let cached_tools = match connection.list_tools() {
+            Ok(tools) => {
+                info!(
+                    server = %name,
+                    count = tools.len(),
+                    "Cached tools from MCP server"
+                );
+                tools
+            }
+            Err(e) => {
+                error!(server = %name, error = %e, "Failed to cache tools from MCP server");
+                Vec::new()
+            }
+        };
+
+        let mut connections = self.connections.write().await;
+        connections.insert(
+            name,
+            RegisteredConnection {
+                connection,
+                cached_tools,
+            },
+        );
+    }
+
+    /// Refresh cached tools for a specific server
+    pub async fn refresh_tools(&self, server_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connections = self.connections.write().await;
+        if let Some(registered) = connections.get_mut(server_name) {
+            let tools = registered.connection.list_tools()?;
+            info!(
+                server = %server_name,
+                count = tools.len(),
+                "Refreshed cached tools"
+            );
+            registered.cached_tools = tools;
+            Ok(())
+        } else {
+            Err(format!("MCP server '{server_name}' not found").into())
+        }
+    }
+
+    /// List all available tools from all connections (uses cached tools)
     pub async fn list_all_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         let mut all_tools = Vec::new();
 
         {
             let connections = self.connections.read().await;
-            for (server_name, connection) in connections.iter() {
-                match connection.list_tools() {
-                    Ok(tools) => {
-                        // Prefix tool names with server name to avoid conflicts
-                        for mut tool in tools {
-                            tool.name = format!("{server_name}:{}", tool.name);
-                            all_tools.push(tool);
-                        }
-                    }
-                    Err(e) => {
-                        error!(server = %server_name, error = %e, "Failed to list tools from MCP server");
-                    }
+            debug!("Listing tools from {} MCP connection(s)", connections.len());
+
+            for (server_name, registered) in connections.iter() {
+                debug!(
+                    server = %server_name,
+                    count = registered.cached_tools.len(),
+                    "Using cached tools from MCP server"
+                );
+                // Prefix tool names with server name to avoid conflicts
+                for tool in &registered.cached_tools {
+                    let mut prefixed_tool = tool.clone();
+                    prefixed_tool.name = format!("{server_name}:{}", tool.name);
+                    debug!(tool = %prefixed_tool.name, "Registered tool");
+                    all_tools.push(prefixed_tool);
                 }
             }
         }
 
+        debug!("Total tools available: {}", all_tools.len());
         Ok(all_tools)
     }
 
     /// Execute a tool on the appropriate MCP server
+    ///
+    /// Tool names can be either:
+    /// - Prefixed: "server:tool-name" - routes to specific server
+    /// - Unprefixed: "tool-name" - searches all servers for matching tool
     pub async fn call_tool(
         &self,
         tool_name: &str,
         arguments: Value,
         llm_provider: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        // Parse server name from tool name (format: "server:tool")
-        let parts: Vec<&str> = tool_name.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err("Tool name must be in format 'server:tool'".into());
-        }
-
-        let server_name = parts[0];
-        let actual_tool_name = parts[1];
+        debug!(
+            tool = %tool_name,
+            provider = %llm_provider,
+            "Routing tool call"
+        );
 
         let connections = self.connections.read().await;
 
-        if let Some(connection) = connections.get(server_name) {
-            connection.call_tool(actual_tool_name, arguments, llm_provider)
-        } else {
-            Err(format!("MCP server '{server_name}' not found").into())
+        // Check if tool name has server prefix (format: "server:tool")
+        if let Some((server_name, actual_tool_name)) = tool_name.split_once(':') {
+            // Prefixed format - route to specific server
+            debug!(
+                server = %server_name,
+                tool = %actual_tool_name,
+                args = %serde_json::to_string(&arguments).unwrap_or_default(),
+                "Executing tool on MCP server"
+            );
+
+            if let Some(registered) = connections.get(server_name) {
+                return Self::execute_tool(
+                    &registered.connection,
+                    server_name,
+                    actual_tool_name,
+                    arguments,
+                    llm_provider,
+                );
+            } else {
+                error!(server = %server_name, "MCP server not found");
+                return Err(format!("MCP server '{server_name}' not found").into());
+            }
+        }
+
+        // Unprefixed format - search all servers for matching tool
+        for (server_name, registered) in connections.iter() {
+            if registered
+                .cached_tools
+                .iter()
+                .any(|t| t.name == tool_name)
+            {
+                debug!(
+                    server = %server_name,
+                    tool = %tool_name,
+                    "Found tool in server"
+                );
+                return Self::execute_tool(
+                    &registered.connection,
+                    server_name,
+                    tool_name,
+                    arguments,
+                    llm_provider,
+                );
+            }
+        }
+
+        error!(tool = %tool_name, "Tool not found in any MCP server");
+        Err(format!("Tool '{tool_name}' not found in any MCP server").into())
+    }
+
+    /// Execute a tool on a specific connection
+    fn execute_tool(
+        connection: &Box<dyn McpConnectionTrait>,
+        server_name: &str,
+        tool_name: &str,
+        arguments: Value,
+        llm_provider: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        match connection.call_tool(tool_name, arguments, llm_provider) {
+            Ok(result) => {
+                debug!(
+                    server = %server_name,
+                    tool = %tool_name,
+                    result = %serde_json::to_string(&result).unwrap_or_default(),
+                    "Tool execution succeeded"
+                );
+                Ok(result)
+            }
+            Err(e) => {
+                error!(
+                    server = %server_name,
+                    tool = %tool_name,
+                    error = %e,
+                    "Tool execution failed"
+                );
+                Err(e)
+            }
         }
     }
 
@@ -115,21 +258,16 @@ impl McpRegistry {
         connections.remove(name).is_some()
     }
 
-    /// Get list of connected servers and their status
+    /// Get list of connected servers and their status (uses cached tool count)
     pub async fn get_server_status(&self) -> HashMap<String, String> {
         let mut status = HashMap::new();
 
         {
             let connections = self.connections.read().await;
-            for (name, connection) in connections.iter() {
-                // Perform health check by attempting to list tools
-                let health_status = match connection.list_tools() {
-                    Ok(tools) => format!("healthy ({} tools available)", tools.len()),
-                    Err(e) => {
-                        error!("Health check failed for {}: {}", name, e);
-                        format!("unhealthy: {e}")
-                    }
-                };
+            for (name, registered) in connections.iter() {
+                // Report cached tool count - no network call needed
+                let health_status =
+                    format!("connected ({} tools cached)", registered.cached_tools.len());
                 status.insert(name.clone(), health_status);
             }
         }
@@ -143,24 +281,23 @@ impl McpRegistry {
         Ok(())
     }
 
-    /// Get tool schemas for a specific server
+    /// Get tool schemas for a specific server (uses cached tools)
     pub async fn get_tool_schemas(
         &self,
         server_name: &str,
     ) -> Result<Vec<ToolSchema>, Box<dyn std::error::Error>> {
         let connections = self.connections.read().await;
 
-        if let Some(connection) = connections.get(server_name) {
-            // For now, we'll convert Tools to ToolSchemas
-            // In a real implementation, MCP should provide schemas directly
-            let tools = connection.list_tools()?;
-            let schemas: Vec<ToolSchema> = tools
-                .into_iter()
+        if let Some(registered) = connections.get(server_name) {
+            // Convert cached Tools to ToolSchemas
+            let schemas: Vec<ToolSchema> = registered
+                .cached_tools
+                .iter()
                 .map(|tool| ToolSchema {
-                    name: tool.name,
+                    name: tool.name.clone(),
                     aliases: None,
-                    description: tool.description,
-                    parameters: tool.input_schema.unwrap_or_default(),
+                    description: tool.description.clone(),
+                    parameters: tool.input_schema.clone().unwrap_or_default(),
                 })
                 .collect();
             Ok(schemas)

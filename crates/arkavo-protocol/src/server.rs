@@ -2143,6 +2143,7 @@ async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
 }
 
 /// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
+#[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
 async fn execute_with_conductor(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: &Arc<arkavo_router::Router>,
@@ -2184,6 +2185,14 @@ async fn execute_with_conductor(
         .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
 
     let tool_count = mcp_tools.len();
+    for tool in &mcp_tools {
+        debug!(
+            "Tool schema: {} - {} (params: {})",
+            tool.name,
+            tool.description,
+            serde_json::to_string(&tool.input_schema).unwrap_or_default()
+        );
+    }
     for tool in mcp_tools {
         // Create bridge tool that delegates to MCP registry
         let tool_name = tool.name.clone();
@@ -2201,7 +2210,7 @@ async fn execute_with_conductor(
             .collect::<Vec<_>>()
     );
 
-    // 5. Execute via Router
+    // 5. Execute via Router (using route_with_tools to bypass architect mode)
     let registry_arc = Arc::new(tool_registry);
     let messages = vec![arkavo_llm::Message {
         role: arkavo_llm::Role::User,
@@ -2209,17 +2218,29 @@ async fn execute_with_conductor(
         images: None,
     }];
 
-    let stream = router
-        .route(&task_content, messages, Some(&registry_arc))
+    let response = router
+        .route_with_tools(&task_content, messages, Some(&registry_arc))
         .await
         .map_err(|e| format!("Router failed: {e}"))?;
 
-    let response = stream
-        .complete()
-        .await
-        .map_err(|e| format!("Failed to complete LLM stream: {e}"))?;
-
     info!("LLM response received, {} chars", response.content.len());
+    debug!(
+        "LLM response content: {}",
+        if response.content.len() > 500 {
+            format!("{}...", &response.content[..500])
+        } else {
+            response.content.clone()
+        }
+    );
+    debug!(
+        "LLM returned {} tool calls: {:?}",
+        response.tool_calls.len(),
+        response
+            .tool_calls
+            .iter()
+            .map(|tc| &tc.tool_name)
+            .collect::<Vec<_>>()
+    );
 
     // 6. Handle any tool calls returned by the LLM
     let mut final_result = response.content.clone();
@@ -2230,6 +2251,11 @@ async fn execute_with_conductor(
         let mut tool_results = Vec::new();
         for tool_call in &response.tool_calls {
             let args = tool_call.arguments.clone();
+            debug!(
+                "Tool call: {} with args: {}",
+                tool_call.tool_name,
+                serde_json::to_string(&args).unwrap_or_default()
+            );
 
             // Call the tool via MCP registry
             match mcp_registry
@@ -2238,6 +2264,11 @@ async fn execute_with_conductor(
             {
                 Ok(result) => {
                     info!("Tool {} succeeded", tool_call.tool_name);
+                    debug!(
+                        "Tool {} result: {}",
+                        tool_call.tool_name,
+                        serde_json::to_string(&result).unwrap_or_default()
+                    );
                     tool_results.push(format!(
                         "## Tool: {}\n{}",
                         tool_call.tool_name,
@@ -2255,6 +2286,8 @@ async fn execute_with_conductor(
             final_result.push_str("\n\n## Tool Execution Results\n");
             final_result.push_str(&tool_results.join("\n\n"));
         }
+    } else {
+        debug!("LLM did not request any tool calls");
     }
 
     // 7. Record result in Conductor
@@ -2268,6 +2301,168 @@ async fn execute_with_conductor(
     info!("Task {} completed via Conductor", hrm_task.id);
 
     Ok(final_result)
+}
+
+/// Run startup planning phase when agent first connects to its environment
+///
+/// This is triggered when:
+/// 1. Purpose is known (system prompt from AGENTS.md)
+/// 2. MCP tools are registered
+/// 3. MCP tools are working (first successful response)
+async fn run_startup_planning_phase(
+    system_prompt: &str,
+    router: &Arc<arkavo_router::Router>,
+    mcp_registry: &Arc<McpRegistry>,
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+) -> AgentPlan {
+    use arkavo_mcp_tools::ToolRegistry;
+
+    eprintln!("[Planning] Gathering situational context...");
+
+    // 1. Get available tools first
+    let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
+
+    // 2. Gather situational context using available MCP tools
+    let mut context_parts = Vec::new();
+
+    // Try common situational tools (only if they exist)
+    let situational_patterns = ["position", "inventory", "health", "status"];
+
+    for pattern in &situational_patterns {
+        // Find a tool matching this pattern
+        if let Some(tool) = tools.iter().find(|t| t.name.contains(pattern)) {
+            // Strip server prefix for call (call_tool now handles both formats)
+            let tool_name = tool.name.split(':').last().unwrap_or(&tool.name);
+            if let Ok(result) = mcp_registry
+                .call_tool(tool_name, serde_json::json!({}), "startup-planning")
+                .await
+            {
+                if let Some(text) = result.as_str() {
+                    context_parts.push(format!("{}: {}", tool_name, text));
+                } else {
+                    context_parts.push(format!("{}: {}", tool_name, result));
+                }
+            }
+        }
+    }
+
+    let situation = if context_parts.is_empty() {
+        "No situational context available".to_string()
+    } else {
+        context_parts.join("\n")
+    };
+
+    // 3. Get tool descriptions for planning
+    let tool_descriptions: Vec<String> = tools
+        .iter()
+        .map(|t| format!("- {}: {}", t.name, t.description))
+        .collect();
+
+    // 3. Build planning prompt
+    let planning_prompt = format!(
+        "{}\n\n\
+         ## Current Situation\n{}\n\n\
+         ## Available Tools\n{}\n\n\
+         ## Task\n\
+         Based on your purpose and current situation, create an initial plan:\n\
+         1. What are your immediate goals? (List 2-4 goals)\n\
+         2. What actions should you take first?\n\
+         3. What should you watch for in incoming events?\n\n\
+         After stating your plan, execute your first action using the appropriate tools.",
+        system_prompt,
+        situation,
+        tool_descriptions.join("\n")
+    );
+
+    eprintln!(
+        "[Planning] Planning prompt: {} chars, {} tools available",
+        planning_prompt.len(),
+        tools.len()
+    );
+
+    // 4. Project MCP tools for Router
+    let mut tool_registry = ToolRegistry::empty();
+    if let Ok(mcp_tools) = mcp_registry.list_all_tools().await {
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
+    }
+
+    // 5. Execute planning through conductor (uses larger model for high-confidence tasks)
+    let result = execute_with_conductor(conductor, router, mcp_registry, planning_prompt).await;
+
+    match result {
+        Ok(response) => {
+            eprintln!("[Planning] Got planning response: {} chars", response.len());
+
+            // 6. Extract goals from response
+            let goals = extract_goals_from_response(&response);
+            eprintln!("[Planning] Extracted {} goals", goals.len());
+
+            AgentPlan {
+                goals,
+                watch_for: vec!["chat".to_string(), "player".to_string()],
+            }
+        }
+        Err(e) => {
+            eprintln!("[Planning] Planning failed: {}", e);
+            AgentPlan::default()
+        }
+    }
+}
+
+/// Extract goals from LLM planning response
+fn extract_goals_from_response(response: &str) -> Vec<AgentGoal> {
+    let mut goals = Vec::new();
+
+    // Look for numbered items that look like goals
+    for line in response.lines() {
+        let trimmed = line.trim();
+
+        // Match patterns like "1. Goal description" or "- Goal description"
+        let is_numbered = trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+            && trimmed.contains(". ");
+        let is_bulleted = trimmed.starts_with("- ") || trimmed.starts_with("* ");
+
+        if is_numbered || is_bulleted {
+            // Extract the description after the marker
+            let description = if is_numbered {
+                trimmed
+                    .split_once(". ")
+                    .map(|(_, desc)| desc.trim())
+                    .unwrap_or(trimmed)
+            } else {
+                trimmed
+                    .trim_start_matches(|c| c == '-' || c == '*' || c == ' ')
+                    .trim()
+            };
+
+            // Skip if too short or looks like a tool call
+            if description.len() > 10
+                && !description.contains("```")
+                && !description.starts_with('{')
+            {
+                goals.push(AgentGoal {
+                    description: description.to_string(),
+                    priority: (goals.len() + 1) as u8,
+                    status: GoalStatus::Active,
+                });
+            }
+        }
+
+        // Limit to first 5 goals
+        if goals.len() >= 5 {
+            break;
+        }
+    }
+
+    goals
 }
 
 /// Bridge tool that wraps an MCP tool from McpRegistry
@@ -2313,6 +2508,27 @@ impl arkavo_mcp_tools::server::Tool for McpBridgeTool {
     }
 }
 
+/// Agent planning state for startup goal creation
+#[derive(Debug, Clone, Default)]
+pub struct AgentPlan {
+    pub goals: Vec<AgentGoal>,
+    pub watch_for: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentGoal {
+    pub description: String,
+    pub priority: u8,
+    pub status: GoalStatus,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GoalStatus {
+    Active,
+    InProgress,
+    Completed,
+}
+
 pub struct A2aServer {
     config: ServerConfig,
     buffer_config: BufferConfig,
@@ -2330,6 +2546,10 @@ pub struct A2aServer {
     mcp_reload_callback: Arc<tokio::sync::RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
     /// HRM Conductor
     conductor: Arc<tokio::sync::RwLock<Arc<Conductor<InMemoryTaskStore>>>>,
+    /// Agent startup planning state
+    agent_plan: Arc<tokio::sync::RwLock<AgentPlan>>,
+    /// Flag to ensure planning runs only once
+    planning_completed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl A2aServer {
@@ -2354,6 +2574,8 @@ impl A2aServer {
             conductor: Arc::new(tokio::sync::RwLock::new(Arc::new(Conductor::new(
                 InMemoryTaskStore::new(),
             )))),
+            agent_plan: Arc::new(tokio::sync::RwLock::new(AgentPlan::default())),
+            planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -2802,6 +3024,133 @@ impl A2aServer {
             handle.abort();
             info!("File watcher stopped");
         }
+    }
+
+    /// Start push-based notification handler
+    /// Listens for MCP server notifications and processes them through the LLM
+    pub async fn start_notification_handler(
+        &self,
+        system_prompt: String,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        use std::sync::atomic::Ordering;
+
+        let router_guard = self.router.read().await;
+        let router = match router_guard.clone() {
+            Some(r) => r,
+            None => {
+                eprintln!("[Notifications] Cannot start: no router configured");
+                return None;
+            }
+        };
+        drop(router_guard);
+
+        let mcp_registry = self.mcp_registry.clone();
+        let conductor = self.conductor.read().await.clone();
+        let mut notification_rx = mcp_registry.subscribe_notifications();
+
+        // Clone planning state for the async task
+        let planning_completed = self.planning_completed.clone();
+        let agent_plan = self.agent_plan.clone();
+
+        eprintln!("[Notifications] Starting push-based notification handler");
+
+        let handle = tokio::spawn(async move {
+            loop {
+                match notification_rx.recv().await {
+                    Ok(notification) => {
+                        if std::env::var("ARKAVO_DEBUG").is_ok() {
+                            eprintln!(
+                                "[Notifications] Received: server={} method={}",
+                                notification.server, notification.method
+                            );
+                        }
+
+                        // Build prompt with notification context
+                        let event_str = serde_json::to_string(&notification.params)
+                            .unwrap_or_else(|_| "{}".to_string());
+
+                        // Skip empty poll results and errors to avoid unnecessary LLM calls
+                        if event_str.contains("\"result\":{}")
+                            || event_str.contains("\"content\":[]")
+                            || event_str.contains("\"isError\":true")
+                        {
+                            continue;
+                        }
+
+                        // Check if we need to run startup planning
+                        // Trigger: purpose known + tools known + tools working (first successful response)
+                        let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
+                        let should_plan = !planning_completed.load(Ordering::SeqCst)
+                            && !system_prompt.is_empty()
+                            && !tools.is_empty();
+
+                        if should_plan {
+                            eprintln!("[Planning] Conditions met - starting startup planning");
+                            planning_completed.store(true, Ordering::SeqCst);
+
+                            // Run planning phase
+                            let plan = run_startup_planning_phase(
+                                &system_prompt,
+                                &router,
+                                &mcp_registry,
+                                &conductor,
+                            ).await;
+
+                            // Store the plan
+                            *agent_plan.write().await = plan;
+                            eprintln!("[Planning] Agent startup planning complete");
+                        }
+
+                        // Build prompt with goals if available
+                        let plan = agent_plan.read().await;
+                        let goals_section = if !plan.goals.is_empty() {
+                            let goals_str: Vec<String> = plan.goals
+                                .iter()
+                                .enumerate()
+                                .map(|(i, g)| format!("{}. {} ({:?})", i + 1, g.description, g.status))
+                                .collect();
+                            format!("\n\n## Active Goals\n{}", goals_str.join("\n"))
+                        } else {
+                            String::new()
+                        };
+                        drop(plan);
+
+                        let prompt = format!(
+                            "{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals when responding. Use tools to take action.",
+                            system_prompt,
+                            goals_section,
+                            notification.server,
+                            event_str
+                        );
+
+                        // Execute through conductor
+                        eprintln!("[Notifications] Processing with LLM: {} chars", prompt.len());
+                        match execute_with_conductor(&conductor, &router, &mcp_registry, prompt).await {
+                            Ok(result) => {
+                                eprintln!("[Notifications] LLM result: {} chars", result.len());
+                                if !result.is_empty() {
+                                    info!("Notification processed: {} chars", result.len());
+                                    debug!("Notification result: {}", result);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[Notifications] Processing failed: {}", e);
+                                warn!("Notification processing failed: {}", e);
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("Notification handler lagged, missed {} messages", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Notification channel closed, stopping handler");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Some(handle)
     }
 
     pub async fn start(&self) -> Result<ServerHandle> {

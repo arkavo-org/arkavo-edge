@@ -1,5 +1,6 @@
-use crate::mcp_client::McpClient;
+use crate::mcp_client::{JsonRpcNotification, McpClient};
 use serde_json::Value;
+use tokio::sync::broadcast;
 
 #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 use {
@@ -140,6 +141,18 @@ impl McpConnection {
                 .call_tool(tool_name, args, llm_origin)
                 .map_err(|e| e.into()),
             Self::External(client) => client.call_tool(tool_name, args, llm_origin),
+        }
+    }
+
+    /// Subscribe to push notifications from this connection
+    /// Returns Some(receiver) for External connections, None for others
+    pub fn subscribe_notifications(&self) -> Option<broadcast::Receiver<JsonRpcNotification>> {
+        match self {
+            Self::External(client) => Some(client.subscribe_notifications()),
+            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            Self::InProcess(_) => None,
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            Self::CrossPlatform(_) => None,
         }
     }
 }

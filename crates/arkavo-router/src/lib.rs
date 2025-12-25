@@ -98,7 +98,19 @@ impl Router {
     pub async fn classify(&self, task_description: &str) -> Result<RoutingDecision> {
         let classification = self.classifier.classify(task_description).await?;
 
+        tracing::info!(
+            category = ?classification.category,
+            confidence = classification.confidence,
+            "Task classified"
+        );
+
         let mut decision = self.selector.select(&classification, task_description)?;
+
+        tracing::info!(
+            model = %decision.recommended_model.name(),
+            reasoning = %decision.reasoning,
+            "Model selected"
+        );
 
         if (self.offline_mode || !self.connectivity.is_online().await)
             && decision.recommended_model.is_cloud()
@@ -353,9 +365,16 @@ impl Router {
                 .await?;
 
             let response = provider
-                .complete_with_tools(messages.clone(), tools_json, None)
+                .complete_with_tools(messages.clone(), tools_json.clone(), None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Debug: log tool calls
+            if !response.tool_calls.is_empty() {
+                for tc in &response.tool_calls {
+                    eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
+            }
 
             if let Some(registry) = tool_registry {
                 let tool_infos = registry.list_tools();
@@ -633,14 +652,14 @@ impl Router {
     /// This prevents upgrade loops where we try to use unavailable models.
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
         let candidate = match current {
-            // Qwen3/Ministral upgrade path
+            // Qwen3/Ministral upgrade path - stay local, don't escalate to cloud
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::GeminiFlash,
-            // Legacy Gemma upgrade path
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalMinistral8B, // Cap at local
+            // Legacy Gemma upgrade path - stay local
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
-            ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
+            ModelChoice::LocalGemma12B => ModelChoice::LocalGemma12B, // Cap at local
             // Other upgrade paths
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
@@ -705,6 +724,7 @@ impl Router {
     }
 
     async fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+        tracing::debug!(model = %model.name(), "Instantiating provider");
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
@@ -771,6 +791,8 @@ impl Router {
                 .await
                 .map_err(Error::ModelExecution)?;
 
+                tracing::info!(path = %model_path.display(), "Loading Qwen3 model");
+
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "qwen3-0.6b".to_string(),
                     model_path.to_string_lossy().to_string(),
@@ -778,6 +800,8 @@ impl Router {
                 .map_err(|e| {
                     Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
                 })?;
+
+                tracing::info!("Qwen3 provider ready");
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
