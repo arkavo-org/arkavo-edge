@@ -1,4 +1,4 @@
-use arkavo_protocol::{McpConnectionTrait, get_service_ip};
+use arkavo_protocol::get_service_ip;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -444,7 +444,7 @@ fn run_agent_with_options(
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
     pub name: String,
-    pub purpose: String,
+    pub purpose: String, // Used as system prompt for LLM
     pub model: String,
     pub listen: String,
     pub mdns_enabled: bool,
@@ -473,6 +473,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     let mut current_mcp_server: Option<McpServerConfig> = None;
     let mut current_section: Option<String> = None;
     let mut in_peers_section = false;
+    let mut in_args_section = false;
     let mut in_a2a_section = false;
 
     // Check if this is the new markdown format by looking for specific patterns
@@ -612,6 +613,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     &mut current_mcp_server,
                     &mut in_peers_section,
                     &mut in_a2a_section,
+                    &mut in_args_section,
                 );
             }
         } else {
@@ -703,6 +705,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     &mut current_mcp_server,
                     &mut in_peers_section,
                     &mut in_a2a_section,
+                    &mut in_args_section,
                 );
             }
         }
@@ -747,7 +750,17 @@ fn extract_yaml_value(line: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Check if a tool's input schema has required arguments
+fn has_required_args(schema: &serde_json::Value) -> bool {
+    // Check if there's a "required" array with any entries
+    schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .is_some_and(|arr| !arr.is_empty())
+}
+
 // Helper function to parse YAML-style properties (used by both old and new format parsers)
+#[allow(clippy::too_many_arguments)]
 fn parse_yaml_properties(
     trimmed: &str,
     agent: &mut AgentConfig,
@@ -755,6 +768,7 @@ fn parse_yaml_properties(
     current_mcp_server: &mut Option<McpServerConfig>,
     in_peers_section: &mut bool,
     in_a2a_section: &mut bool,
+    in_args_section: &mut bool,
 ) {
     // Check for a2a section
     if trimmed == "a2a:" {
@@ -849,9 +863,31 @@ fn parse_yaml_properties(
         return;
     }
 
+    // Handle YAML list args (e.g., "- value")
+    if *in_args_section && trimmed.starts_with("- ") {
+        if let Some(server) = current_mcp_server.as_mut() {
+            let arg = trimmed
+                .strip_prefix("- ")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+            if !arg.is_empty() {
+                server.args.push(arg);
+            }
+        }
+        return;
+    }
+
+    // End args section when we hit a non-list item
+    if *in_args_section && !trimmed.starts_with("- ") && !trimmed.is_empty() {
+        *in_args_section = false;
+    }
+
     // Parse MCP server properties
     if *in_mcp_section && let Some(server) = current_mcp_server.as_mut() {
         if trimmed.starts_with("command:") {
+            *in_args_section = false;
             server.command = Some(
                 trimmed
                     .strip_prefix("command:")
@@ -861,7 +897,7 @@ fn parse_yaml_properties(
                     .to_string(),
             );
         } else if trimmed.starts_with("args:") {
-            // Parse array format: ["arg1", "arg2"]
+            // Check for inline array format: ["arg1", "arg2"]
             let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
             if args_str.starts_with('[') && args_str.ends_with(']') {
                 let args_content = &args_str[1..args_str.len() - 1];
@@ -870,8 +906,12 @@ fn parse_yaml_properties(
                     .map(|s| s.trim().trim_matches('"').to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
+            } else if args_str.is_empty() {
+                // Start YAML list mode for args
+                *in_args_section = true;
             }
         } else if trimmed.starts_with("url:") {
+            *in_args_section = false;
             server.url = Some(
                 trimmed
                     .strip_prefix("url:")
@@ -880,9 +920,13 @@ fn parse_yaml_properties(
                     .trim_matches('"')
                     .to_string(),
             );
+        } else if trimmed.starts_with("transport:") {
+            *in_args_section = false;
+            // Skip transport for now, not used
         } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
             // End of MCP section
             *in_mcp_section = false;
+            *in_args_section = false;
             if let Some(server) = current_mcp_server.take() {
                 agent.mcp_servers.push(server);
             }
@@ -933,6 +977,7 @@ fn parse_yaml_properties(
                 agent.api_keys.insert(key_name, key_value);
             }
         }
+        // Note: autonomous_interval and event_tool are deprecated - push notifications are used instead
     }
 }
 
@@ -996,7 +1041,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     for mcp_config in &config.mcp_servers {
         if debug_mode {
-            println!("Initializing MCP server: {}", mcp_config.name);
+            println!(
+                "[MCP] Initializing server: name={} command={:?} args={:?}",
+                mcp_config.name, mcp_config.command, mcp_config.args
+            );
         }
 
         // Create appropriate MCP connection based on config
@@ -1006,18 +1054,78 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             use crate::mcp_integration::McpConnection;
 
             match McpClient::new_with_command(command, &mcp_config.args) {
-                Ok(client) => {
+                Ok(mut client) => {
+                    // Set server name for poll notifications
+                    client.set_server_name(mcp_config.name.clone());
+
                     // Register the spawned process with the process manager for cleanup
-                    // Note: McpClient handles its own process lifecycle, but we track it for coordinated shutdown
-                    let pid = if let Ok(process) = client.process.lock() {
-                        let pid = process.child.id();
+                    let pid = client.pid().unwrap_or(0);
+                    if pid > 0 {
                         process_manager.register_process(mcp_config.name.clone(), pid);
-                        pid
-                    } else {
-                        0
+                    }
+
+                    // Get tools and set up polling for "read-*" and "get-*" tools
+                    let tools = client.list_tools().unwrap_or_default();
+                    let tool_count = tools.len();
+
+                    // Wrap in Arc for polling support
+                    let client = std::sync::Arc::new(client);
+
+                    // Auto-register pollable tools (read-* pattern with no required args)
+                    let poll_count = {
+                        use arkavo_mcp_runtime::polling::PollableEndpoint;
+                        let mut count = 0;
+                        for tool in &tools {
+                            // Only poll read-* tools that have no required arguments
+                            if tool.name.starts_with("read-")
+                                && !has_required_args(&tool.input_schema)
+                            {
+                                client.register_pollable(PollableEndpoint {
+                                    method: "tools/call".to_string(),
+                                    params: Some(serde_json::json!({
+                                        "name": tool.name,
+                                        "arguments": {}
+                                    })),
+                                });
+                                count += 1;
+                                if debug_mode {
+                                    println!("[MCP] Registered pollable tool: {}", tool.name);
+                                }
+                            }
+                        }
+                        count
                     };
 
-                    let connection = McpConnection::External(client);
+                    // Set up notification forwarding BEFORE starting polling
+                    // (broadcast receivers only get messages sent after they subscribe)
+                    let mut notif_rx = client.subscribe_notifications();
+                    let registry_clone = mcp_registry.clone();
+                    let server_name_for_notif = mcp_config.name.clone();
+                    tokio::spawn(async move {
+                        use arkavo_protocol::mcp_registry::McpNotification;
+                        while let Ok(notification) = notif_rx.recv().await {
+                            registry_clone.emit_notification(McpNotification {
+                                server: server_name_for_notif.clone(),
+                                method: notification.method,
+                                params: notification.params,
+                            });
+                        }
+                    });
+
+                    // Start polling AFTER subscribing to notifications
+                    if poll_count > 0 {
+                        use arkavo_mcp_runtime::polling::PollConfig;
+                        client.start_polling(PollConfig::default());
+                        println!(
+                            "[MCP] Started polling for {} tool(s) on server {}",
+                            poll_count, mcp_config.name
+                        );
+                    }
+
+                    // Unwrap Arc for McpConnection (client is Clone, all fields are Arc-wrapped)
+                    let connection = McpConnection::External(
+                        std::sync::Arc::try_unwrap(client).unwrap_or_else(|arc| (*arc).clone()),
+                    );
                     let wrapped = McpConnectionWrapper::new(connection);
                     mcp_registry
                         .register(mcp_config.name.clone(), Box::new(wrapped))
@@ -1025,18 +1133,16 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
                     if debug_mode {
                         println!(
-                            "[INFO] mcp.server.started name={} command={} pid={} args={:?}",
-                            mcp_config.name, command, pid, mcp_config.args
+                            "[MCP] Server started: name={} command={} pid={} tools={}",
+                            mcp_config.name, command, pid, tool_count
                         );
                     }
                 }
                 Err(e) => {
-                    if debug_mode {
-                        eprintln!(
-                            "[WARN] mcp.server.start_failed name={} command={} error=\"{}\"",
-                            mcp_config.name, command, e
-                        );
-                    }
+                    eprintln!(
+                        "[MCP] Server FAILED: name={} command={} error=\"{}\"",
+                        mcp_config.name, command, e
+                    );
                 }
             }
         } else if let Some(url) = &mcp_config.url {
@@ -1051,16 +1157,36 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
                     if debug_mode {
                         println!(
-                            "Connected to external MCP server: {} at {}",
+                            "[MCP] External server connected: name={} url={}",
                             mcp_config.name, url
                         );
                     }
                 }
                 Err(e) => {
-                    if debug_mode {
-                        eprintln!("Failed to connect to MCP server {}: {}", mcp_config.name, e);
-                    }
+                    eprintln!(
+                        "[MCP] External server FAILED: name={} url={} error=\"{}\"",
+                        mcp_config.name, url, e
+                    );
                 }
+            }
+        }
+    }
+
+    // Log summary of all registered MCP servers
+    if debug_mode {
+        match mcp_registry.list_all_tools().await {
+            Ok(tools) => {
+                println!(
+                    "[MCP] Total tools registered: {} from {} server(s)",
+                    tools.len(),
+                    config.mcp_servers.len()
+                );
+                for tool in &tools {
+                    println!("[MCP]   - {}: {}", tool.name, tool.description);
+                }
+            }
+            Err(e) => {
+                eprintln!("[MCP] Failed to list tools: {e}");
             }
         }
     }
@@ -1161,15 +1287,24 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Give mDNS time to register before connecting to peers
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await {
-            if !quiet {
-                eprintln!("Warning: Failed to connect to some peers: {}", e);
-            }
+        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await
+            && !quiet
+        {
+            eprintln!("Warning: Failed to connect to some peers: {e}");
         }
 
         if !quiet && peer_manager.has_peers() {
             println!("Connected to {} peer(s)", peer_manager.peer_count());
         }
+    }
+
+    // Start push-based notification handler (always on by default)
+    let notification_handle = server
+        .start_notification_handler(config.purpose.clone())
+        .await;
+
+    if notification_handle.is_some() && !quiet {
+        println!("Notification handler: listening for MCP push events");
     }
 
     if !quiet {
@@ -1178,6 +1313,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Keep the server running
     tokio::signal::ctrl_c().await?;
+
+    // Stop notification handler if running
+    if let Some(handle) = notification_handle {
+        handle.abort();
+    }
 
     println!("Shutting down agent server...");
 
@@ -1363,7 +1503,7 @@ fn broadcast_agent_mdns_sync(
     Ok(())
 }
 
-// Wrapper to implement McpConnectionTrait for arkavo-cli's McpConnection
+// Wrapper to implement McpClient trait from arkavo-mcp for arkavo-cli's McpConnection
 struct McpConnectionWrapper {
     inner: crate::mcp_integration::McpConnection,
 }
@@ -1374,15 +1514,20 @@ impl McpConnectionWrapper {
     }
 }
 
-impl McpConnectionTrait for McpConnectionWrapper {
+impl arkavo_mcp::McpClient for McpConnectionWrapper {
     fn list_tools(
         &self,
-    ) -> Result<Vec<arkavo_protocol::mcp_registry::Tool>, Box<dyn std::error::Error>> {
-        // Convert from cli Tool to protocol Tool
-        let cli_tools = self.inner.list_tools()?;
+    ) -> Result<Vec<arkavo_mcp::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
+        // Convert from cli Tool to McpTool
+        let cli_tools = self.inner.list_tools().map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
         let protocol_tools = cli_tools
             .into_iter()
-            .map(|t| arkavo_protocol::mcp_registry::Tool {
+            .map(|t| arkavo_mcp::McpTool {
                 name: t.name,
                 description: t.description,
                 input_schema: Some(t.input_schema),
@@ -1396,8 +1541,15 @@ impl McpConnectionTrait for McpConnectionWrapper {
         tool_name: &str,
         arguments: Value,
         llm_provider: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        self.inner.call_tool(tool_name, arguments, llm_provider)
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .call_tool(tool_name, arguments, llm_provider)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 

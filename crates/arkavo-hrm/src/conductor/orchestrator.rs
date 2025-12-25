@@ -5,10 +5,19 @@ use crate::conductor::LoopDetector;
 use crate::error::{Error, Result};
 use crate::schemas::{GlobalTaskState, SubTask, SubTaskResult, TaskBudget, TaskStatus};
 use crate::store::TaskStore;
+use arkavo_memory::{ContextLedger, MemoryStorage};
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_context::ContextSummarizer;
+
+/// Default minimum context size (in characters) required to trigger offloading.
+/// Contexts smaller than this threshold are not worth the overhead of archiving.
+/// Based on ~500 tokens * 4 chars/token = 2000 characters.
+const DEFAULT_MIN_OFFLOAD_CHARS: usize = 2000;
 
 /// The Conductor orchestrates strategic task decomposition and execution
 ///
@@ -20,8 +29,15 @@ use uuid::Uuid;
 pub struct Conductor<S: TaskStore> {
     store: Arc<S>,
     loop_detector: Arc<RwLock<LoopDetector>>,
+    /// Context ledger for offloading large context
+    context_ledger: Option<ContextLedger>,
     /// Default context strategy for new contracts
     default_context_strategy: ContextStrategy,
+    /// Minimum context size (in characters) to trigger offloading
+    min_offload_chars: usize,
+    /// Context summarizer for generating descriptive summaries before offloading
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    context_summarizer: Option<ContextSummarizer>,
 }
 
 impl<S: TaskStore> Conductor<S> {
@@ -30,7 +46,11 @@ impl<S: TaskStore> Conductor<S> {
         Self {
             store: Arc::new(store),
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
+            context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            context_summarizer: None,
         }
     }
 
@@ -39,14 +59,103 @@ impl<S: TaskStore> Conductor<S> {
         Self {
             store,
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
+            context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            context_summarizer: None,
         }
+    }
+
+    /// Enable context summarization using a local LLM model
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub async fn with_summarizer(mut self, model_path: String) -> Result<Self> {
+        let summarizer = ContextSummarizer::new(model_path)
+            .await
+            .map_err(|e| Error::Context(e.to_string()))?;
+        self.context_summarizer = Some(summarizer);
+        Ok(self)
     }
 
     /// Set the default context strategy
     pub fn with_context_strategy(mut self, strategy: ContextStrategy) -> Self {
         self.default_context_strategy = strategy;
         self
+    }
+
+    /// Enable the context ledger using the provided memory storage
+    pub fn with_ledger(mut self, storage: std::sync::Arc<MemoryStorage>) -> Self {
+        self.context_ledger = Some(ContextLedger::new(storage));
+        self
+    }
+
+    /// Set the minimum context size (in characters) required for offloading.
+    ///
+    /// Contexts smaller than this threshold will be passed through unchanged
+    /// even when using `ContextStrategy::Ledger`, avoiding overhead for tiny
+    /// responses like "OK" or short status messages.
+    ///
+    /// The default is 2000 characters (~500 tokens using the 4 chars/token heuristic).
+    pub fn with_min_offload_threshold(mut self, chars: usize) -> Self {
+        self.min_offload_chars = chars;
+        self
+    }
+
+    /// Prepare context for a burst based on the strategy
+    ///
+    /// If the strategy is Ledger and a ledger is available, this will offload
+    /// the context to storage and return a semantic pointer.
+    ///
+    /// If `summary` is `None` and a summarizer is configured, a descriptive
+    /// summary will be auto-generated using a local LLM.
+    pub async fn prepare_context_for_burst(
+        &self,
+        context: &str,
+        summary: Option<&str>,
+        strategy: &ContextStrategy,
+    ) -> Result<String> {
+        match strategy {
+            ContextStrategy::Ledger => {
+                // Skip offloading for small contexts - not worth the overhead
+                if context.len() <= self.min_offload_chars {
+                    return Ok(context.to_string());
+                }
+
+                if let Some(ledger) = &self.context_ledger {
+                    let summary_str = match summary {
+                        Some(s) => s.to_string(),
+                        None => self.generate_summary(context).await?,
+                    };
+                    ledger
+                        .offload(context, &summary_str, "hrm_burst_handoff")
+                        .await
+                        .map_err(|e| Error::Context(e.to_string()))
+                } else {
+                    // Fallback if ledger is not configured
+                    Ok(context.to_string())
+                }
+            }
+            _ => Ok(context.to_string()),
+        }
+    }
+
+    /// Generate a descriptive summary of context using the local summarizer.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    async fn generate_summary(&self, content: &str) -> Result<String> {
+        self.context_summarizer
+            .as_ref()
+            .ok_or_else(|| Error::Context("Summarizer not configured".to_string()))?
+            .summarize(content)
+            .await
+            .map_err(|e| Error::Context(e.to_string()))
+    }
+
+    /// Stub for when llama-cpp feature is disabled.
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    async fn generate_summary(&self, _content: &str) -> Result<String> {
+        Err(Error::Context(
+            "Context summarization requires llama-cpp feature".to_string(),
+        ))
     }
 
     /// Create a new task
@@ -445,5 +554,66 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(Error::StrategicThrashing { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_offload_threshold_skips_small_context() {
+        use arkavo_memory::MemoryStorage;
+
+        let store = InMemoryTaskStore::new();
+        let memory_storage = std::sync::Arc::new(
+            MemoryStorage::new_test()
+                .await
+                .expect("Failed to create memory storage"),
+        );
+
+        let conductor = Conductor::new(store)
+            .with_ledger(memory_storage)
+            .with_min_offload_threshold(100); // 100 chars minimum
+
+        // Small context should pass through unchanged
+        let small_context = "OK";
+        let result = conductor
+            .prepare_context_for_burst(small_context, Some("Status"), &ContextStrategy::Ledger)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, small_context,
+            "Small context should not be offloaded"
+        );
+        assert!(
+            !result.contains("[ARCHIVED:"),
+            "Should not contain archive marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_offload_threshold_offloads_large_context() {
+        use arkavo_memory::MemoryStorage;
+
+        let store = InMemoryTaskStore::new();
+        let memory_storage = std::sync::Arc::new(
+            MemoryStorage::new_test()
+                .await
+                .expect("Failed to create memory storage"),
+        );
+
+        let conductor = Conductor::new(store)
+            .with_ledger(memory_storage)
+            .with_min_offload_threshold(100); // 100 chars minimum
+
+        // Large context should be offloaded
+        let large_context = "This is a large context. ".repeat(50); // ~1250 chars
+        let result = conductor
+            .prepare_context_for_burst(&large_context, Some("Large test"), &ContextStrategy::Ledger)
+            .await
+            .unwrap();
+
+        assert!(
+            result.contains("[ARCHIVED:"),
+            "Large context should be offloaded"
+        );
+        assert_ne!(result, large_context, "Should return pointer, not original");
     }
 }

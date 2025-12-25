@@ -1,5 +1,6 @@
 use crate::browser::BrowserTool;
 use crate::code_review::CodeReviewTool;
+use crate::context_control::ContextRestoreTool;
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
 use crate::github::{
@@ -23,31 +24,13 @@ use crate::tdf::{TdfFetchTool, TdfStageTool};
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
 use crate::web_search::WebSearchTool;
-use arkavo_mcp::ToolSchema;
+use arkavo_mcp::{McpClient, ToolSchema};
+use arkavo_memory::MemoryStorage;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// MCP Tool definition to avoid circular dependency with arkavo-protocol
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpTool {
-    pub name: String,
-    pub description: String,
-    pub input_schema: Option<Value>,
-}
-
-/// Trait for MCP connection abstraction to avoid circular dependency
-pub trait McpClient: Send + Sync {
-    fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error>>;
-    fn call_tool(
-        &self,
-        tool_name: &str,
-        args: Value,
-        llm_origin: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>>;
-}
 
 /// Wrapper that adapts an MCP tool to the Tool trait
 struct McpToolWrapper {
@@ -109,12 +92,15 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     /// Create a new registry with all built-in tools registered.
     /// Use `empty()` for small models that need progressive tool discovery.
-    pub fn new() -> Self {
+    ///
+    /// # Arguments
+    /// * `storage` - Shared memory storage for tools that need persistence
+    pub fn new(storage: Arc<MemoryStorage>) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
         };
 
-        registry.register_all();
+        registry.register_all(storage);
         registry
     }
 
@@ -129,11 +115,16 @@ impl ToolRegistry {
 
     /// Create a ToolRegistry from an MCP connection
     /// This dynamically discovers tools from the MCP server
+    ///
+    /// # Arguments
+    /// * `mcp_client` - MCP client connection
+    /// * `storage` - Shared memory storage for tools that need persistence
     pub fn from_mcp_connection(
         mcp_client: Arc<dyn McpClient>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        storage: Arc<MemoryStorage>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Start with all native tools (filesystem, browser, git, time, etc.)
-        let mut registry = Self::new();
+        let mut registry = Self::new(storage);
 
         // Add MCP tools on top (they can override native tools if needed)
         let mcp_tools = mcp_client.list_tools()?;
@@ -174,21 +165,28 @@ impl ToolRegistry {
     }
 
     /// Create a ToolRegistry from MCP if available, otherwise use default hardcoded tools
-    pub fn from_mcp_or_default(mcp_client: Option<Arc<dyn McpClient>>) -> Self {
+    ///
+    /// # Arguments
+    /// * `mcp_client` - Optional MCP client connection
+    /// * `storage` - Shared memory storage for tools that need persistence
+    pub fn from_mcp_or_default(
+        mcp_client: Option<Arc<dyn McpClient>>,
+        storage: Arc<MemoryStorage>,
+    ) -> Self {
         if let Some(client) = mcp_client {
-            Self::from_mcp_connection(client).unwrap_or_else(|e| {
+            Self::from_mcp_connection(client, storage.clone()).unwrap_or_else(|e| {
                 eprintln!(
                     "Warning: Failed to load MCP tools, falling back to defaults: {}",
                     e
                 );
-                Self::new()
+                Self::new(storage)
             })
         } else {
-            Self::new()
+            Self::new(storage)
         }
     }
 
-    fn register_all(&mut self) {
+    fn register_all(&mut self, storage: Arc<MemoryStorage>) {
         self.register("filesystem_tools", Box::new(FileSystemKit::new()));
         self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
@@ -274,6 +272,12 @@ impl ToolRegistry {
 
         // Code review tool
         self.register("code_review", Box::new(CodeReviewTool::new()));
+
+        // Context control tool
+        self.register(
+            "context_restore",
+            Box::new(ContextRestoreTool::new(storage)),
+        );
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -338,10 +342,14 @@ impl ToolRegistry {
     /// Vector of matching tools with requested detail level
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use arkavo_mcp_tools::{ToolRegistry, DetailLevel};
+    /// use arkavo_memory::MemoryStorage;
+    /// use std::sync::Arc;
     ///
-    /// let registry = ToolRegistry::new();
+    /// // Requires async setup for MemoryStorage
+    /// let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    /// let registry = ToolRegistry::new(storage);
     ///
     /// // Get just names for initial discovery
     /// let tools = registry.search_tools("github", DetailLevel::NameOnly);
@@ -602,41 +610,43 @@ impl ToolRegistry {
     }
 }
 
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default cannot be implemented for ToolRegistry since it requires async storage initialization.
+// Use ToolRegistry::new(storage) or ToolRegistry::empty() instead.
 
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_registry_creation() {
-        let registry = ToolRegistry::new();
+    async fn create_test_registry() -> ToolRegistry {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+        ToolRegistry::new(storage)
+    }
+
+    #[tokio::test]
+    async fn test_registry_creation() {
+        let registry = create_test_registry().await;
         assert!(!registry.tools.is_empty());
     }
 
-    #[test]
-    fn test_tool_retrieval() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_tool_retrieval() {
+        let registry = create_test_registry().await;
         // Test retrieval with a tool that's always present
         assert!(registry.get("get_agent_time").is_some());
         assert!(registry.get("nonexistent").is_none());
     }
 
-    #[test]
-    fn test_list_tools() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_list_tools() {
+        let registry = create_test_registry().await;
         let tools = registry.list_tools();
         assert!(!tools.is_empty());
     }
 
-    #[test]
-    fn test_categorization() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_categorization() {
+        let registry = create_test_registry().await;
         let categories = registry.list_by_category();
         // Security tools are only registered if binaries are available
         // Always check for GitHub tools which are always present
@@ -645,17 +655,17 @@ mod tests {
         assert!(!categories.is_empty());
     }
 
-    #[test]
-    fn test_export_schemas() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_export_schemas() {
+        let registry = create_test_registry().await;
         let schemas = registry.export_schemas();
         assert!(schemas.get("version").is_some());
         assert!(schemas.get("tools").is_some());
     }
 
-    #[test]
-    fn test_search_tools_name_only() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_name_only() {
+        let registry = create_test_registry().await;
         let results = registry.search_tools("github", DetailLevel::NameOnly);
 
         assert!(!results.is_empty(), "Should find GitHub tools");
@@ -677,9 +687,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_search_tools_name_and_description() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_name_and_description() {
+        let registry = create_test_registry().await;
         // Use "time" which is always available instead of "security" which depends on binaries
         let results = registry.search_tools("time", DetailLevel::NameAndDescription);
 
@@ -692,9 +702,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_search_tools_full_schema() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_full_schema() {
+        let registry = create_test_registry().await;
         // Use "filesystem" which is always available instead of "semgrep" which depends on binaries
         let results = registry.search_tools("filesystem", DetailLevel::FullSchema);
 
@@ -707,9 +717,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_search_tools_case_insensitive() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_case_insensitive() {
+        let registry = create_test_registry().await;
 
         let lower = registry.search_tools("github", DetailLevel::NameOnly);
         let upper = registry.search_tools("GITHUB", DetailLevel::NameOnly);
@@ -727,18 +737,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_tools_no_matches() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_no_matches() {
+        let registry = create_test_registry().await;
         // Use a truly non-matching query (no common words like "tool")
         let results = registry.search_tools("zzqxvwkj_foobar_blorp", DetailLevel::NameOnly);
 
         assert!(results.is_empty(), "Should return empty vec for no matches");
     }
 
-    #[test]
-    fn test_search_tools_exact_name_with_underscore() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_exact_name_with_underscore() {
+        let registry = create_test_registry().await;
         // Search for exact tool name containing underscore (e.g., "shell_exec")
         let results = registry.search_tools("shell_exec", DetailLevel::NameOnly);
 
@@ -759,9 +769,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_tools_matches_description() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_search_tools_matches_description() {
+        let registry = create_test_registry().await;
         let results = registry.search_tools("check", DetailLevel::NameAndDescription);
 
         assert!(
@@ -770,9 +780,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_tool_info() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_get_tool_info() {
+        let registry = create_test_registry().await;
 
         if let Some(first_tool) = registry.list_tools().first() {
             let tool_info = registry.get_tool_info(&first_tool.name);
@@ -787,9 +797,9 @@ mod tests {
         assert!(missing.is_none(), "Should return None for missing tool");
     }
 
-    #[test]
-    fn test_progressive_disclosure_token_efficiency() {
-        let registry = ToolRegistry::new();
+    #[tokio::test]
+    async fn test_progressive_disclosure_token_efficiency() {
+        let registry = create_test_registry().await;
 
         let all_tools = registry.list_tools();
         let all_tools_json = serde_json::to_string(&all_tools).unwrap();

@@ -23,6 +23,7 @@ glob = { workspace = true }
 dirs = { workspace = true }
 rand = { workspace = true }
 rand_distr = "0.4"
+regex = { workspace = true }
 
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }

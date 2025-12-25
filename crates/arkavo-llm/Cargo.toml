@@ -51,6 +51,7 @@ arkavo-qwen = { path = "../arkavo-qwen", optional = true }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-memory = { path = "../arkavo-memory" }
 
 # llama-cpp specific dependencies
 scopeguard = { workspace = true, optional = true }

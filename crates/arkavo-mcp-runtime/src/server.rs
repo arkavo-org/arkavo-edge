@@ -1,7 +1,5 @@
 use anyhow::Result;
-use arkavo_mcp_core::{
-    RpcError, RpcRequest, RpcResponse, Tool, ToolRequest, ToolResponse, error_codes,
-};
+use arkavo_mcp::{RpcError, RpcRequest, RpcResponse, Tool, ToolRequest, ToolResponse, error_codes};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,6 +29,23 @@ impl McpServer {
         tools.insert(name, tool);
         drop(tools);
         Ok(())
+    }
+
+    /// Register a tool, replacing if it already exists
+    pub async fn register_or_replace_tool(&self, name: String, tool: Arc<dyn Tool>) {
+        let mut tools = self.tools.write().await;
+        info!("Registered tool: {} (replacing if exists)", name);
+        tools.insert(name, tool);
+    }
+
+    /// Unregister a tool from the server
+    pub async fn unregister_tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        let mut tools = self.tools.write().await;
+        let removed = tools.remove(name);
+        if removed.is_some() {
+            info!("Unregistered tool: {}", name);
+        }
+        removed
     }
 
     /// Execute a tool by name

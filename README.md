@@ -58,6 +58,14 @@ GEMINI_API_KEY=your-key arkavo chat --prompt "Hello"
 DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek --prompt "Explain Rust"
 ```
 
+### Context Control Demo
+The Autonomous Refactor demo demonstrates Active Context Management. It simulates a large-scale "breaking change" refactor that generates extensive compiler output, showing how the Context Ledger maintains a small active window while preserving data access.
+
+```bash
+cd examples/autonomous_refactor
+./run_demo.sh
+```
+
 ### Custom Agent Config (Optional)
 ```bash
 arkavo agent init my-agent  # Creates AGENTS.md template

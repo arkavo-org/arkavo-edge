@@ -4,10 +4,16 @@ use arkavo_mcp_tools::{
     Tool, ToolRegistry,
     time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
 };
+use arkavo_memory::MemoryStorage;
 use common::{AgentSimulator, calculate_drift_statistics, run_concurrent_operations};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
+
+async fn create_test_registry() -> ToolRegistry {
+    let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+    ToolRegistry::new(storage)
+}
 
 #[cfg(feature = "ntp-server")]
 use arkavo_mcp_tools::ntp_server::NtpServer;
@@ -171,7 +177,7 @@ async fn test_coordinator_sync_workflow() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
     let get_time = registry.get("get_agent_time").unwrap();
     let sync_time = registry.get("sync_agent_time").unwrap();
     let get_status = registry.get("get_time_status").unwrap();
@@ -350,7 +356,7 @@ async fn test_orchestrator_server_stats() {
 
 #[tokio::test]
 async fn test_all_time_tools_in_registry() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     assert!(registry.get("get_agent_time").is_some());
     assert!(registry.get("sync_agent_time").is_some());

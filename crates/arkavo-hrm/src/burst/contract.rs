@@ -48,6 +48,8 @@ pub enum ContextStrategy {
     /// Pass only artifact IDs, fetch content on demand
     #[default]
     ArtifactReference,
+    /// Offload large context chunks to local vector store
+    Ledger,
 }
 
 impl ContextStrategy {
@@ -58,6 +60,7 @@ impl ContextStrategy {
             Self::SummaryOnly => 500,
             Self::LastNMessages(n) => (*n as u64) * 200,
             Self::ArtifactReference => 100,
+            Self::Ledger => 300,
         }
     }
 }

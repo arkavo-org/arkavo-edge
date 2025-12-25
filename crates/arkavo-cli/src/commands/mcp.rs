@@ -328,7 +328,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "initialize" => success_response(
                 request_id.clone(),
                 json!({
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": "2025-11-25",
                     "serverInfo": {
                         "name": "arkavo",
                         "version": env!("CARGO_PKG_VERSION")

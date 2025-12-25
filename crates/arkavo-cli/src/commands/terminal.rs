@@ -210,9 +210,13 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(all(unix, feature = "mcp-tools"))]
     let (router, tool_registry) = {
         let router = runtime.block_on(Router::new()).ok();
-        let registry = mcp_client
-            .as_ref()
-            .map(|_| ToolRegistry::from_mcp_or_default(None));
+        let registry = mcp_client.as_ref().and_then(|_| {
+            let storage = runtime
+                .block_on(arkavo_memory::MemoryStorage::new())
+                .ok()
+                .map(std::sync::Arc::new)?;
+            Some(ToolRegistry::from_mcp_or_default(None, storage))
+        });
         (router, registry)
     };
 

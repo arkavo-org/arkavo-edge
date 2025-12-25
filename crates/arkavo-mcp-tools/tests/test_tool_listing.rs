@@ -1,9 +1,16 @@
 // Test to list all tools and verify filesystem tool registration
 use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
+use arkavo_memory::MemoryStorage;
+use std::sync::Arc;
+
+async fn create_test_registry() -> ToolRegistry {
+    let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+    ToolRegistry::new(storage)
+}
 
 #[tokio::test]
 async fn test_list_all_tools() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("=== All Registered Tools ===\n");
 
@@ -51,7 +58,7 @@ async fn test_list_all_tools() {
 
 #[tokio::test]
 async fn test_filesystem_tool_registration() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== Filesystem Tool Verification ===\n");
 
@@ -117,7 +124,7 @@ async fn test_filesystem_tool_registration() {
 
 #[tokio::test]
 async fn test_search_file_tools() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== Search for 'file' ===");
     let file_tools = registry.search_tools("file", DetailLevel::NameAndDescription);
@@ -141,7 +148,7 @@ async fn test_search_file_tools() {
 
 #[tokio::test]
 async fn test_total_tool_count() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== Total Tool Count ===");
     let all_tools = registry.search_tools("", DetailLevel::NameOnly);
@@ -159,7 +166,7 @@ async fn test_total_tool_count() {
 
 #[tokio::test]
 async fn test_time_tool_discovery_by_alias() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== Time Tool Discovery (Regression Test) ===");
 
@@ -222,7 +229,7 @@ async fn test_time_tool_discovery_by_alias() {
 
 #[tokio::test]
 async fn test_judge_sees_time_tool() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== Judge Tool Visibility Test ===");
 
@@ -256,13 +263,12 @@ async fn test_judge_sees_time_tool() {
 async fn test_mcp_includes_native_tools() {
     use arkavo_mcp_tools::{McpClient, McpTool, ToolRegistry};
     use serde_json::Value;
-    use std::sync::Arc;
 
     // Mock MCP client that returns a few tools
     struct MockMcpClient;
 
     impl McpClient for MockMcpClient {
-        fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error>> {
+        fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![McpTool {
                 name: "mcp_test_tool".to_string(),
                 description: "A test tool from MCP".to_string(),
@@ -278,7 +284,7 @@ async fn test_mcp_includes_native_tools() {
             _tool_name: &str,
             _args: Value,
             _llm_origin: &str,
-        ) -> Result<Value, Box<dyn std::error::Error>> {
+        ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
             Ok(serde_json::json!({"result": "ok"}))
         }
     }
@@ -286,8 +292,9 @@ async fn test_mcp_includes_native_tools() {
     println!("\n=== MCP Registry Includes Native Tools Test ===");
 
     let mcp_client = Arc::new(MockMcpClient);
-    let registry =
-        ToolRegistry::from_mcp_connection(mcp_client).expect("Should create registry from MCP");
+    let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+    let registry = ToolRegistry::from_mcp_connection(mcp_client, storage)
+        .expect("Should create registry from MCP");
 
     let all_tools = registry.list_tools();
     println!("Total tools in MCP registry: {}", all_tools.len());
@@ -315,7 +322,7 @@ async fn test_mcp_includes_native_tools() {
 
 #[tokio::test]
 async fn test_github_issue_tools_registered() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     println!("\n=== GitHub Issue Tools Registration Test ===");
 

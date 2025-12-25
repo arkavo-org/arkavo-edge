@@ -3,6 +3,7 @@
 pub mod browser;
 pub mod code_analysis;
 pub mod code_review;
+pub mod context_control;
 pub mod filesystem;
 pub mod git;
 pub mod github;
@@ -29,7 +30,8 @@ pub mod web_search;
 pub mod ntp_server;
 
 // Re-export commonly used types
-pub use registry::{DetailLevel, McpClient, McpTool, MinimalToolInfo, ToolInfo, ToolRegistry};
+pub use arkavo_mcp::{McpClient, McpTool};
+pub use registry::{DetailLevel, MinimalToolInfo, ToolInfo, ToolRegistry};
 pub use server::{Tool, ToolSchema};
 
 // Re-export error types

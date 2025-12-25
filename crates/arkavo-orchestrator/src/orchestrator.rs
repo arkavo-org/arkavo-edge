@@ -7,6 +7,7 @@ use crate::types::IssueEvent;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::EventWriter;
 use arkavo_mcp_tools::ToolRegistry;
+use arkavo_memory::MemoryStorage;
 use arkavo_protocol::{
     agent_registry::AgentRegistry,
     task_executor::TaskExecutor,
@@ -47,7 +48,13 @@ impl Orchestrator {
                 .map_err(|e| Error::Other(anyhow::anyhow!("Failed to initialize router: {e}")))?,
         );
 
-        let tool_registry = Arc::new(ToolRegistry::new());
+        let storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .map_err(|e| Error::Other(anyhow::anyhow!("Failed to initialize storage: {e}")))?,
+        );
+
+        let tool_registry = Arc::new(ToolRegistry::new(storage));
 
         let cognitive_engine = Arc::new(CognitiveEngine::new(
             budget_tracker,

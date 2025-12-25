@@ -12,6 +12,8 @@ arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-context = { path = "../arkavo-context", default-features = false, optional = true }
 
 # Async runtime
 async-trait = { workspace = true }
@@ -42,6 +44,8 @@ sha2 = { workspace = true }
 [features]
 default = []
 file-store = []
+llama-cpp = ["arkavo-context/llama-cpp", "dep:arkavo-context"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+rand = { workspace = true }

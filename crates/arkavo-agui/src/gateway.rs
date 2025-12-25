@@ -182,8 +182,10 @@ impl AgUiGateway {
         // Start intelligent health monitor with local LLM
         {
             use arkavo_mcp_tools::registry::ToolRegistry;
+            use arkavo_memory::MemoryStorage;
 
-            let tool_registry = Arc::new(ToolRegistry::new());
+            let storage = Arc::new(MemoryStorage::new().await?);
+            let tool_registry = Arc::new(ToolRegistry::new(storage));
 
             let health_monitor = crate::health_monitor::HealthMonitor::new(tool_registry)
                 .await?
@@ -234,10 +236,18 @@ impl AgUiGateway {
                 interval.tick().await;
 
                 use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_memory::MemoryStorage;
                 use arkavo_observability::health_reporter::HealthRegistry;
                 use arkavo_router::Router;
 
-                let registry = ToolRegistry::new();
+                let storage = match MemoryStorage::new().await {
+                    Ok(s) => Arc::new(s),
+                    Err(e) => {
+                        eprintln!("Failed to initialize storage for health status: {e}");
+                        continue;
+                    }
+                };
+                let registry = ToolRegistry::new(storage);
                 let tools = registry.list_tools();
                 let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
 
@@ -893,9 +903,17 @@ async fn handle_event(
 
                 // Send updated status immediately to reflect new LLM availability
                 use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_memory::MemoryStorage;
                 use arkavo_router::Router;
 
-                let registry = ToolRegistry::new();
+                let storage = match MemoryStorage::new().await {
+                    Ok(s) => Arc::new(s),
+                    Err(e) => {
+                        eprintln!("Failed to initialize storage for status update: {e}");
+                        return Ok(());
+                    }
+                };
+                let registry = ToolRegistry::new(storage);
                 let tools = registry.list_tools();
                 let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
 
@@ -998,10 +1016,18 @@ async fn handle_event(
             println!("AG-UI: Received RequestStatus");
 
             use arkavo_mcp_tools::registry::ToolRegistry;
+            use arkavo_memory::MemoryStorage;
             use arkavo_observability::health_reporter::HealthRegistry;
             use arkavo_router::Router;
 
-            let registry = ToolRegistry::new();
+            let storage = match MemoryStorage::new().await {
+                Ok(s) => Arc::new(s),
+                Err(e) => {
+                    eprintln!("Failed to initialize storage for status request: {e}");
+                    return Ok(());
+                }
+            };
+            let registry = ToolRegistry::new(storage);
             let tools = registry.list_tools();
             let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
 

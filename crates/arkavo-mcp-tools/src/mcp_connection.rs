@@ -10,6 +10,7 @@ use crate::{
     server::Tool,
     state::QueryStateKit,
 };
+use arkavo_memory::MemoryStorage;
 #[allow(unused_imports)]
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -38,7 +39,26 @@ impl std::fmt::Debug for McpConnection {
 }
 
 impl McpConnection {
-    /// Creates a new MCP connection with cross-platform tools
+    /// Creates a new MCP connection asynchronously
+    ///
+    /// This is the preferred constructor when called from an async context.
+    /// Core tools are exposed via `list_tools()` for progressive disclosure.
+    /// Additional tools can be discovered via `search_tools()` which delegates
+    /// to the full `ToolRegistry`.
+    pub async fn new_async() -> Result<Self, Box<dyn std::error::Error>> {
+        let runtime_handle = Handle::current();
+
+        // Create storage for tools that need persistence
+        let storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .map_err(|e| format!("Failed to initialize storage: {e}"))?,
+        );
+
+        Self::build(storage, runtime_handle)
+    }
+
+    /// Creates a new MCP connection synchronously
     ///
     /// Core tools are exposed via `list_tools()` for progressive disclosure.
     /// Additional tools can be discovered via `search_tools()` which delegates
@@ -46,20 +66,31 @@ impl McpConnection {
     ///
     /// # Panics
     ///
-    /// Panics if unable to create a Tokio runtime when no runtime is already active
+    /// Panics if unable to create a Tokio runtime when no runtime is already active.
+    /// Prefer `new_async()` when calling from an async context.
+    #[allow(clippy::disallowed_methods)] // Safe: we create our own runtime here
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        // Create a new runtime for sync initialization
+        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        let runtime_handle = rt.handle().clone();
+
+        // Create storage for tools that need persistence
+        let storage = Arc::new(
+            rt.block_on(MemoryStorage::new())
+                .map_err(|e| format!("Failed to initialize storage: {e}"))?,
+        );
+
+        Self::build(storage, runtime_handle)
+    }
+
+    fn build(
+        storage: Arc<MemoryStorage>,
+        runtime_handle: Handle,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
-        // Get a handle to the current runtime or create one
-        let runtime_handle = Handle::try_current().unwrap_or_else(|_| {
-            Runtime::new()
-                .expect("Failed to create Tokio runtime")
-                .handle()
-                .clone()
-        });
-
         // Create the full registry for discovery and fallback
-        let registry = Arc::new(ToolRegistry::new());
+        let registry = Arc::new(ToolRegistry::new(storage));
 
         // Register core cross-platform tools (progressive disclosure)
         tools.insert("filesystem".to_string(), Arc::new(FileSystemKit::new()));

@@ -57,6 +57,10 @@ pub enum Error {
     #[error("Context strategy failed: {0}")]
     ContextStrategyError(String),
 
+    /// Context ledger error
+    #[error("Context ledger error: {0}")]
+    Context(String),
+
     /// Task was cancelled
     #[error("Task cancelled: {0}")]
     TaskCancelled(Uuid),

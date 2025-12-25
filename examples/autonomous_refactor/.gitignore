@@ -1,0 +1,6 @@
+logs/
+pids/
+demo_workspace/
+setup_chaos
+*.pid
+.arkavo/

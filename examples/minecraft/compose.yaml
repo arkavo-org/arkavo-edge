@@ -1,0 +1,47 @@
+# Minecraft Server + MCP Server for Arkavo Edge
+#
+# Usage:
+#   docker compose up -d        # Start both services
+#   docker compose logs -f      # Watch logs
+#   docker compose down         # Stop everything
+#
+# The MCP server runs via stdio transport. Connect Arkavo Edge to it.
+
+services:
+  minecraft:
+    image: itzg/minecraft-server:latest
+    container_name: arkavo-minecraft
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      ONLINE_MODE: "FALSE"
+      DIFFICULTY: "easy"
+      MODE: "survival"
+      MOTD: "Arkavo Edge MCP Demo"
+      # Supported version for minecraft-mcp-server
+      VERSION: "1.21.8"
+    volumes:
+      - mc-data:/data
+    healthcheck:
+      test: mc-health
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  mcp:
+    image: node:22-alpine
+    container_name: arkavo-minecraft-mcp
+    depends_on:
+      minecraft:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    # Keep container running for on-demand MCP server execution via docker exec
+    command: >
+      sh -c "apk add --no-cache git && tail -f /dev/null"
+    restart: unless-stopped
+
+volumes:
+  mc-data:

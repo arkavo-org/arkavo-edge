@@ -13,7 +13,6 @@ pub mod discovery;
 pub mod error;
 pub mod file_transfer;
 pub mod http;
-pub mod mcp;
 pub mod mcp_registry;
 #[cfg(feature = "mdns")]
 pub mod mdns;

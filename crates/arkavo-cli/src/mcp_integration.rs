@@ -1,5 +1,6 @@
-use crate::mcp_client::McpClient;
+use crate::mcp_client::{JsonRpcNotification, McpClient};
 use serde_json::Value;
+use tokio::sync::broadcast;
 
 #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 use {
@@ -142,14 +143,35 @@ impl McpConnection {
             Self::External(client) => client.call_tool(tool_name, args, llm_origin),
         }
     }
+
+    /// Subscribe to push notifications from this connection
+    /// Returns Some(receiver) for External connections, None for others
+    pub fn subscribe_notifications(&self) -> Option<broadcast::Receiver<JsonRpcNotification>> {
+        match self {
+            Self::External(client) => Some(client.subscribe_notifications()),
+            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            Self::InProcess(_) => None,
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            Self::CrossPlatform(_) => None,
+        }
+    }
 }
 
-/// Implement the McpClient trait from arkavo-mcp-tools for McpConnection
+/// Implement the McpClient trait from arkavo-mcp for McpConnection
 /// This allows McpConnection to be used with ToolRegistry::from_mcp_connection()
 #[cfg(all(unix, feature = "mcp-tools"))]
 impl arkavo_mcp_tools::McpClient for McpConnection {
-    fn list_tools(&self) -> Result<Vec<arkavo_mcp_tools::McpTool>, Box<dyn std::error::Error>> {
-        let protocol_tools = McpConnection::list_tools(self)?;
+    fn list_tools(
+        &self,
+    ) -> Result<Vec<arkavo_mcp_tools::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
+        let protocol_tools = McpConnection::list_tools(self).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            },
+        )?;
         Ok(protocol_tools
             .into_iter()
             .map(|t| arkavo_mcp_tools::McpTool {
@@ -165,7 +187,14 @@ impl arkavo_mcp_tools::McpClient for McpConnection {
         tool_name: &str,
         args: Value,
         llm_origin: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        McpConnection::call_tool(self, tool_name, args, llm_origin)
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        McpConnection::call_tool(self, tool_name, args, llm_origin).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            },
+        )
     }
 }
