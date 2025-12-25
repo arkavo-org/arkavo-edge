@@ -268,7 +268,7 @@ async fn test_mcp_includes_native_tools() {
     struct MockMcpClient;
 
     impl McpClient for MockMcpClient {
-        fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error>> {
+        fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![McpTool {
                 name: "mcp_test_tool".to_string(),
                 description: "A test tool from MCP".to_string(),
@@ -284,7 +284,7 @@ async fn test_mcp_includes_native_tools() {
             _tool_name: &str,
             _args: Value,
             _llm_origin: &str,
-        ) -> Result<Value, Box<dyn std::error::Error>> {
+        ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
             Ok(serde_json::json!({"result": "ok"}))
         }
     }

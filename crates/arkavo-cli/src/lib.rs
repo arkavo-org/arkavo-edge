@@ -4,7 +4,6 @@ pub mod conversation_manager;
 pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
-pub mod mcp_polling;
 pub mod mcp_spawner;
 #[cfg(all(unix, feature = "mcp-tools"))]
 pub mod memory_integration;

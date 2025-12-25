@@ -1073,7 +1073,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
                     // Auto-register pollable tools (read-* pattern with no required args)
                     let poll_count = {
-                        use crate::mcp_polling::PollableEndpoint;
+                        use arkavo_mcp_runtime::polling::PollableEndpoint;
                         let mut count = 0;
                         for tool in &tools {
                             // Only poll read-* tools that have no required arguments
@@ -1114,7 +1114,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
                     // Start polling AFTER subscribing to notifications
                     if poll_count > 0 {
-                        use crate::mcp_polling::PollConfig;
+                        use arkavo_mcp_runtime::polling::PollConfig;
                         client.start_polling(PollConfig::default());
                         println!(
                             "[MCP] Started polling for {} tool(s) on server {}",
