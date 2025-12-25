@@ -766,6 +766,7 @@ name = "arkavo-hrm"
 version = "0.50.4"
 dependencies = [
  "arkavo-budget",
+ "arkavo-context",
  "arkavo-events",
  "arkavo-mcp",
  "arkavo-mcp-tools",

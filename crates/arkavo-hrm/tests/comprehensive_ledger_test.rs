@@ -40,7 +40,11 @@ async fn test_comprehensive_ledger_capabilities() {
 
     let start_time = std::time::Instant::now();
     let pointer = conductor
-        .prepare_context_for_burst(&massive_log, "Server Access Logs", &ContextStrategy::Ledger)
+        .prepare_context_for_burst(
+            &massive_log,
+            Some("Server Access Logs"),
+            &ContextStrategy::Ledger,
+        )
         .await
         .expect("Offload failed");
     let duration = start_time.elapsed();
@@ -115,7 +119,7 @@ async fn test_comprehensive_ledger_capabilities() {
 
     // Test Ledger Strategy
     let res_ledger = conductor_strat
-        .prepare_context_for_burst(text, "Small", &ContextStrategy::Ledger)
+        .prepare_context_for_burst(text, Some("Small"), &ContextStrategy::Ledger)
         .await
         .unwrap();
     assert!(
@@ -125,7 +129,7 @@ async fn test_comprehensive_ledger_capabilities() {
 
     // Test Full Strategy
     let res_full = conductor_strat
-        .prepare_context_for_burst(text, "Small", &ContextStrategy::Full)
+        .prepare_context_for_burst(text, Some("Small"), &ContextStrategy::Full)
         .await
         .unwrap();
     assert_eq!(res_full, text, "Full strategy should keep text as is");
@@ -187,4 +191,86 @@ async fn test_context_restore_tool_with_path() {
 
     // Cleanup
     let _ = std::fs::remove_file(&db_path);
+}
+
+/// Tests auto-summarization when no explicit summary is provided.
+/// Requires a local model to be available (llama-cpp feature enabled).
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[tokio::test]
+#[ignore] // Requires local model - run with: cargo test --features llama-cpp -- --ignored
+async fn test_auto_summarization() {
+    use std::env;
+
+    println!("\n=== Testing Auto-Summarization ===\n");
+
+    // Skip if no model path is set
+    let model_path = match env::var("ARKAVO_TORG_MODEL_PATH") {
+        Ok(path) => path,
+        Err(_) => {
+            eprintln!("Skipping test: ARKAVO_TORG_MODEL_PATH not set");
+            return;
+        }
+    };
+
+    let store = InMemoryTaskStore::new();
+    let memory_storage = MemoryStorage::new_test()
+        .await
+        .expect("Failed to create memory storage");
+
+    // Create conductor with summarizer
+    let conductor = Conductor::new(store)
+        .with_ledger(memory_storage)
+        .with_summarizer(model_path)
+        .await
+        .expect("Failed to create conductor with summarizer");
+
+    // Create a git diff-like content
+    let git_diff = r#"diff --git a/src/auth.rs b/src/auth.rs
+index 1234567..abcdefg 100644
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -10,6 +10,15 @@ use crate::jwt::TokenValidator;
++fn validate_jwt_token(token: &str) -> Result<Claims, AuthError> {
++    let validator = TokenValidator::new();
++    validator.validate(token)
++        .map_err(|e| AuthError::InvalidToken(e.to_string()))
++}
++
+ fn authenticate_user(username: &str, password: &str) -> Result<User, AuthError> {
+     let user = find_user(username)?;
+     verify_password(&user, password)?;
++
++    // Generate JWT token after successful authentication
++    let token = generate_token(&user)?;
++    Ok(user.with_token(token))
+ }
+"#;
+
+    // Call prepare_context_for_burst with None - should auto-summarize
+    let pointer = conductor
+        .prepare_context_for_burst(git_diff, None, &ContextStrategy::Ledger)
+        .await
+        .expect("Failed to auto-summarize and offload");
+
+    println!("Generated Pointer: {}", pointer);
+
+    // Verify the pointer contains a meaningful summary
+    assert!(pointer.contains("[ARCHIVED:"), "Should have archive marker");
+    assert!(pointer.contains("- ID:"), "Should have ID");
+
+    // The summary should be descriptive, not just "Empty content"
+    let summary_part = pointer
+        .strip_prefix("[ARCHIVED: ")
+        .and_then(|s| s.split(" - ID:").next())
+        .unwrap_or("");
+
+    assert!(!summary_part.is_empty(), "Summary should not be empty");
+    assert!(
+        summary_part.len() >= 10,
+        "Summary should be at least 10 characters, got: '{}'",
+        summary_part
+    );
+
+    println!("Auto-generated summary: '{}'", summary_part);
+    println!("Auto-summarization test: PASSED");
 }

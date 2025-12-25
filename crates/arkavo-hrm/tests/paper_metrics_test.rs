@@ -52,7 +52,7 @@ async fn generate_paper_metrics() {
     let pointer = conductor
         .prepare_context_for_burst(
             &haystack,
-            "System Logs (5k lines)",
+            Some("System Logs (5k lines)"),
             &ContextStrategy::Ledger,
         )
         .await

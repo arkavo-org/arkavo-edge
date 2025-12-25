@@ -8,6 +8,7 @@ pub mod error;
 pub mod metrics;
 pub mod pipeline;
 pub mod prompt_enricher;
+pub mod summarizer;
 
 pub use chunker::SemanticChunker;
 pub use compressor::ContextCompressor;
@@ -18,3 +19,4 @@ pub use pipeline::CompressionPipeline;
 pub use prompt_enricher::{
     CodeContext, FileContext, ProblemStatement, PromptEnricher, PromptTemplate,
 };
+pub use summarizer::ContextSummarizer;

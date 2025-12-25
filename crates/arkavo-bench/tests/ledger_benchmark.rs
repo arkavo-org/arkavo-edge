@@ -20,7 +20,7 @@ async fn benchmark_monorepo_context_limit() {
     // 2. Execute Offload
     let start = std::time::Instant::now();
     let ptr = conductor
-        .prepare_context_for_burst(&error_log, "Build Errors", &ContextStrategy::Ledger)
+        .prepare_context_for_burst(&error_log, Some("Build Errors"), &ContextStrategy::Ledger)
         .await
         .expect("Offload failed");
     let duration = start.elapsed();

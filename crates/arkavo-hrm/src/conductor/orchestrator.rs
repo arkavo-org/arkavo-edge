@@ -11,6 +11,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_context::ContextSummarizer;
+
 /// The Conductor orchestrates strategic task decomposition and execution
 ///
 /// Key responsibilities:
@@ -25,6 +28,9 @@ pub struct Conductor<S: TaskStore> {
     context_ledger: Option<ContextLedger>,
     /// Default context strategy for new contracts
     default_context_strategy: ContextStrategy,
+    /// Context summarizer for generating descriptive summaries before offloading
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    context_summarizer: Option<ContextSummarizer>,
 }
 
 impl<S: TaskStore> Conductor<S> {
@@ -35,6 +41,8 @@ impl<S: TaskStore> Conductor<S> {
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            context_summarizer: None,
         }
     }
 
@@ -45,7 +53,19 @@ impl<S: TaskStore> Conductor<S> {
             loop_detector: Arc::new(RwLock::new(LoopDetector::new())),
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            context_summarizer: None,
         }
+    }
+
+    /// Enable context summarization using a local LLM model
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub async fn with_summarizer(mut self, model_path: String) -> Result<Self> {
+        let summarizer = ContextSummarizer::new(model_path)
+            .await
+            .map_err(|e| Error::Context(e.to_string()))?;
+        self.context_summarizer = Some(summarizer);
+        Ok(self)
     }
 
     /// Set the default context strategy
@@ -64,17 +84,24 @@ impl<S: TaskStore> Conductor<S> {
     ///
     /// If the strategy is Ledger and a ledger is available, this will offload
     /// the context to storage and return a semantic pointer.
+    ///
+    /// If `summary` is `None` and a summarizer is configured, a descriptive
+    /// summary will be auto-generated using a local LLM.
     pub async fn prepare_context_for_burst(
         &self,
         context: &str,
-        summary: &str,
+        summary: Option<&str>,
         strategy: &ContextStrategy,
     ) -> Result<String> {
         match strategy {
             ContextStrategy::Ledger => {
                 if let Some(ledger) = &self.context_ledger {
+                    let summary_str = match summary {
+                        Some(s) => s.to_string(),
+                        None => self.generate_summary(context).await?,
+                    };
                     ledger
-                        .offload(context, summary, "hrm_burst_handoff")
+                        .offload(context, &summary_str, "hrm_burst_handoff")
                         .await
                         .map_err(|e| Error::Context(e.to_string()))
                 } else {
@@ -84,6 +111,25 @@ impl<S: TaskStore> Conductor<S> {
             }
             _ => Ok(context.to_string()),
         }
+    }
+
+    /// Generate a descriptive summary of context using the local summarizer.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    async fn generate_summary(&self, content: &str) -> Result<String> {
+        self.context_summarizer
+            .as_ref()
+            .ok_or_else(|| Error::Context("Summarizer not configured".to_string()))?
+            .summarize(content)
+            .await
+            .map_err(|e| Error::Context(e.to_string()))
+    }
+
+    /// Stub for when llama-cpp feature is disabled.
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    async fn generate_summary(&self, _content: &str) -> Result<String> {
+        Err(Error::Context(
+            "Context summarization requires llama-cpp feature".to_string(),
+        ))
     }
 
     /// Create a new task

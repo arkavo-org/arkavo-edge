@@ -19,7 +19,7 @@ async fn test_ledger_context_offloading() {
 
     // 4. Test: Use Ledger Strategy
     let result = conductor
-        .prepare_context_for_burst(&large_context, summary, &ContextStrategy::Ledger)
+        .prepare_context_for_burst(&large_context, Some(summary), &ContextStrategy::Ledger)
         .await
         .expect("Failed to prepare context");
 
@@ -33,7 +33,7 @@ async fn test_ledger_context_offloading() {
 
     // 6. Test: Use Other Strategy (should return original)
     let result_full = conductor
-        .prepare_context_for_burst(&large_context, summary, &ContextStrategy::Full)
+        .prepare_context_for_burst(&large_context, Some(summary), &ContextStrategy::Full)
         .await
         .expect("Failed to prepare context");
 
