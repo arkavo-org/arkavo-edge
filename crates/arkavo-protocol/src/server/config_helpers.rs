@@ -17,6 +17,7 @@ pub struct AgentMetadata {
 /// Simple agent configuration structure for validation
 #[derive(Debug)]
 struct SimpleAgentConfig {
+    #[allow(dead_code)]
     name: String,
     purpose: String,
     model: String,
