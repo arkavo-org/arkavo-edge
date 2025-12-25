@@ -92,9 +92,39 @@ async fn generate_paper_metrics() {
     );
 
     // -----------------------------------------------------------------------
-    // METRIC 3: Integrity (Correctness)
+    // METRIC 3: Context Thrashing (The "Hidden Cost" Analysis)
     // -----------------------------------------------------------------------
-    println!("\n### Metric 3: Data Integrity");
+    println!("\n### Metric 3: Context Thrashing Analysis");
+    
+    // Pricing (Claude 3.5 Sonnet)
+    let price_input_per_m = 3.00;
+    let price_output_per_m = 15.00;
+    
+    let tokens_m = original_tokens as f64 / 1_000_000.0;
+    
+    // Cost to carry context for 1 turn (Passive)
+    let cost_carry = tokens_m * price_input_per_m;
+    
+    // Cost to restore context (Active)
+    // 1. Tool Call (Input) - Negligible
+    // 2. Tool Output (Generation - EXPENSIVE) - The text is "generated" by the tool
+    let cost_restore_action = tokens_m * price_output_per_m;
+    
+    // Ratio: How many "Carry" steps = One "Restore" step?
+    let break_even_steps = cost_restore_action / cost_carry;
+    
+    println!("- Cost to Carry (Passive): ${:.6} / step", cost_carry);
+    println!("- Cost to Restore (Active): ${:.6} / event (High Output Cost)", cost_restore_action);
+    println!("- Break-Even Point: 1 Restore = {:.1} Passive Steps", break_even_steps);
+    
+    let critical_restore_rate = 1.0 / break_even_steps;
+    println!("- Critical Restore Rate: {:.1}%", critical_restore_rate * 100.0);
+    println!("  (If agent restores more than once every {:.0} steps, Active is MORE expensive)", break_even_steps);
+
+    // -----------------------------------------------------------------------
+    // METRIC 4: Integrity (Correctness)
+    // -----------------------------------------------------------------------
+    println!("\n### Metric 4: Data Integrity");
     
     // We can't verify SAT here without the full formal verification engine, 
     // but we can verify bit-perfect memory recall.

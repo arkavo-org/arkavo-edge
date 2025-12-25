@@ -332,7 +332,9 @@ version = "0.50.4"
 dependencies = [
  "arkavo-context",
  "arkavo-gemini",
+ "arkavo-hrm",
  "arkavo-mcp",
+ "arkavo-memory",
  "arkavo-orchestrator",
  "arkavo-router",
  "arkavo-workspace",

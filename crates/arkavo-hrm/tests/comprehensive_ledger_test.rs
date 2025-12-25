@@ -13,20 +13,9 @@ async fn test_comprehensive_ledger_capabilities() {
     // 1. Setup Environment
     let store = InMemoryTaskStore::new();
     let memory_storage = MemoryStorage::new_test().await.expect("Failed to create memory storage");
-    
-    // We need a clone of storage for the tool, but MemoryStorage isn't easily cloneable if it holds a connection pool 
-    // that isn't wrapped in Arc internally (SqlitePool is Arc, so it's fine).
-    // Actually, MemoryStorage implements Clone? Let's check. 
-    // If not, we can re-use the connection string or just use the conductor's ledger.
-    // In this test, we will use the conductor to offload, and a fresh tool instance (which creates its own storage connection) might fail if it points to a different DB.
-    // The `new_test` creates a unique DB file. The tool `ContextRestoreTool` currently initializes a *new* storage in `execute`.
-    // We need to modify the tool to accept storage or point it to the same DB.
-    // For this test, we will verify the *Logic* of the tool using the `ContextLedger` directly, 
-    // or we rely on the fact that `ContextRestoreTool` creates a new connection to the default path, which is NOT our test path.
-    // Ah, `ContextRestoreTool::execute` calls `MemoryStorage::new()`. This uses the default path.
-    // Our test uses `new_test()`, which uses a random temp path.
-    // Limitation: We cannot easily test `ContextRestoreTool` end-to-end with `new_test` storage unless we patch the tool or config.
-    // Workaround: We will test the `ContextLedger::restore` method which the tool wraps. This proves the capability.
+
+    // Note: ContextRestoreTool now supports path injection via `with_path()`.
+    // See test_context_restore_tool_with_path() for end-to-end tool testing.
 
     let conductor = Conductor::new(store).with_ledger(memory_storage);
 
@@ -75,24 +64,7 @@ async fn test_comprehensive_ledger_capabilities() {
     
     println!("Extracted Fragment ID: {}", id_str);
 
-    // We can't use the tool directly due to DB path (see note above), but we use the Ledger directly 
-    // which effectively tests the same logic.
-    // Access the ledger inside conductor? It's private.
-    // We'll create a new Ledger instance connecting to the same Test DB?
-    // MemoryStorage::new_test() creates a random file. We need that instance.
-    // The `conductor` consumed the storage instance. 
-    // We can't easily get it back.
-    
-    // Refactor for test: Let's create storage *outside*, clone it (if possible), or pass it.
-    // MemoryStorage has a `pool` which is cloneable. But `MemoryStorage` struct itself isn't Clone?
-    // Let's check `arkavo-memory/src/storage.rs`. 
-    // It is `pub struct MemoryStorage { pool: SqlitePool, ... }`. It doesn't derive Clone.
-    // But `SqlitePool` is cheap to clone. 
-    
-    // For this test to work robustly, we'll repeat the offload with a `ContextLedger` we control directly first,
-    // then test Conductor.
-    
-    // Let's create a NEW storage for this part of the test to be clean.
+    // Create separate storage for integrity test
     let shared_storage = MemoryStorage::new_test().await.expect("Storage init");
     let ledger = ContextLedger::new(shared_storage); // Ledger consumes storage
     
@@ -133,4 +105,58 @@ async fn test_comprehensive_ledger_capabilities() {
     println!("Strategy Enforcement: PASSED");
 
     println!("\n=== All Integration Tests Passed ===");
+}
+
+/// Tests the ContextRestoreTool with path injection for test isolation.
+/// This verifies the fix for the DB path mismatch issue documented in the handover.
+#[tokio::test]
+async fn test_context_restore_tool_with_path() {
+    use arkavo_mcp_tools::context_control::ContextRestoreTool;
+    use arkavo_mcp_tools::server::Tool;
+
+    println!("\n=== Testing ContextRestoreTool with Path Injection ===\n");
+
+    // Create a unique test DB path
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir();
+    let db_path = temp_dir.join(format!("arkavo_tool_test_{timestamp}.db"));
+
+    // Create storage at that specific path
+    let storage = MemoryStorage::with_path(db_path.clone(), Default::default())
+        .await
+        .expect("Storage creation failed");
+
+    // Offload context using the ledger
+    let ledger = ContextLedger::new(storage);
+    let original_text = "Secret payload for tool test: { key: 'value-42' }";
+    let pointer = ledger
+        .offload(original_text, "Tool Test Data", "integration_test")
+        .await
+        .expect("Offload failed");
+
+    // Extract UUID from pointer
+    let start_idx = pointer.find("ID: ").unwrap() + 4;
+    let end_idx = pointer.find(']').unwrap();
+    let uuid_str = &pointer[start_idx..end_idx];
+    println!("Offloaded with ID: {uuid_str}");
+
+    // Create the tool pointing to the SAME database path
+    let tool = ContextRestoreTool::with_path(Some(db_path.clone()));
+
+    // Execute the tool
+    let params = serde_json::json!({ "id": uuid_str });
+    let result = tool.execute(params).await.expect("Tool execution failed");
+
+    // Verify the restored content
+    let restored = result.get("content").and_then(|v| v.as_str()).unwrap();
+    assert_eq!(restored, original_text, "Tool should restore exact content");
+
+    println!("Tool restored: {restored}");
+    println!("Path injection test: PASSED");
+
+    // Cleanup
+    let _ = std::fs::remove_file(&db_path);
 }

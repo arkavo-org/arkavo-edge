@@ -15,7 +15,8 @@ use crate::types::{
     ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
     FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
     MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
-    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
+    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskProgress, TaskResponse, TaskStatus,
+    UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
@@ -569,6 +570,8 @@ impl A2aRpcServer for A2aRpcImpl {
                             &router,
                             &mcp_registry,
                             task_content,
+                            task_id_clone,
+                            &task_executor,
                         )
                         .await
                         {
@@ -2148,8 +2151,26 @@ async fn execute_with_conductor(
     router: &Arc<arkavo_router::Router>,
     mcp_registry: &Arc<McpRegistry>,
     task_content: String,
+    task_id: uuid::Uuid,
+    task_executor: &Arc<TaskExecutor>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
+
+    // Helper to update progress
+    let update_progress = |msg: &str, pct: u8| {
+        let progress = TaskProgress {
+            message: Some(msg.to_string()),
+            percentage: Some(pct),
+            eta_seconds: None,
+        };
+        let executor = task_executor.clone();
+        let id = task_id;
+        tokio::spawn(async move {
+            let _ = executor.update_task_progress(&id, progress).await;
+        });
+    };
+
+    update_progress("Creating task structure", 10);
 
     // 1. Create HRM task with default budget
     let budget = TaskBudget::default();
@@ -2176,6 +2197,8 @@ async fn execute_with_conductor(
 
     info!("Created contract {} for subtask", contract.id);
 
+    update_progress("Setting up tools", 25);
+
     // 4. Project MCP tools to ToolRegistry for Router
     let mut tool_registry = ToolRegistry::empty();
     let mcp_tools = mcp_registry
@@ -2201,6 +2224,8 @@ async fn execute_with_conductor(
             .collect::<Vec<_>>()
     );
 
+    update_progress("Generating LLM response", 40);
+
     // 5. Execute via Router
     let registry_arc = Arc::new(tool_registry);
     let messages = vec![arkavo_llm::Message {
@@ -2221,11 +2246,15 @@ async fn execute_with_conductor(
 
     info!("LLM response received, {} chars", response.content.len());
 
+    update_progress("Processing response", 60);
+
     // 6. Handle any tool calls returned by the LLM
     let mut final_result = response.content.clone();
 
     if !response.tool_calls.is_empty() {
-        info!("Executing {} tool calls", response.tool_calls.len());
+        let tool_count = response.tool_calls.len();
+        update_progress(&format!("Executing {} tool calls", tool_count), 70);
+        info!("Executing {} tool calls", tool_count);
 
         let mut tool_results = Vec::new();
         for tool_call in &response.tool_calls {
@@ -2264,6 +2293,8 @@ async fn execute_with_conductor(
         .record_result(hrm_task.id, subtask.id, burst_result)
         .await
         .map_err(|e| format!("Failed to record result: {e}"))?;
+
+    update_progress("Finalizing", 95);
 
     info!("Task {} completed via Conductor", hrm_task.id);
 

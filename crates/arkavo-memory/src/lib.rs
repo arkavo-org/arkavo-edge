@@ -15,4 +15,4 @@ pub use orchestrator_state::{
     IssueProcessingStatus, OrchestratorStateStore, OrgStats, ProcessedIssue, RepoState, RepoStatus,
 };
 #[cfg(feature = "vector-search")]
-pub use storage::MemoryStorage;
+pub use storage::{HnswConfig, MemoryStorage};

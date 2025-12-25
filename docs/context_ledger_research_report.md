@@ -13,12 +13,12 @@ The solution implements a "Hide and Restore" pattern using a distributed archite
 *   **`arkavo-memory` (Storage Layer):** 
     *   Uses SQLite for persistent storage of fragments.
     *   Uses HNSW (Hierarchical Navigable Small World) for vector indexing.
-    *   New Capability: `ContextLedger` wrapper for offload/restore operations.
+    *   Capability: `ContextLedger` wrapper for offload/restore operations.
 *   **`arkavo-hrm` (Strategy Layer):**
     *   The `Conductor` now supports a `ContextLedger` integration.
     *   `BurstContract` supports a `Ledger` strategy, allowing dynamic switching between full-context and pointer-based context.
 *   **`arkavo-mcp-tools` (Agent Interface):**
-    *   New `ContextRestoreTool` allows the LLM to autonomously request the restoration of "hidden" fragments when it encounters a pointer.
+    *   `ContextRestoreTool` allows the LLM to autonomously request the restoration of "hidden" fragments when it encounters a pointer.
 
 ## 3. Capabilities Verified
 
