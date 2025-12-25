@@ -1,6 +1,6 @@
 use crate::server::Tool;
-use arkavo_memory::{ContextLedger, HnswConfig, MemoryStorage};
 use arkavo_mcp::ToolSchema;
+use arkavo_memory::{ContextLedger, HnswConfig, MemoryStorage};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -46,18 +46,23 @@ impl ContextRestoreTool {
 #[async_trait]
 impl Tool for ContextRestoreTool {
     async fn execute(&self, params: Value) -> crate::Result<Value> {
-        let id_str = params.get("id").and_then(|v| v.as_str())
+        let id_str = params
+            .get("id")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing 'id'".to_string()))?;
 
         // Use configured path if provided, otherwise use default
         let storage = match &self.db_path {
             Some(path) => MemoryStorage::with_path(path.clone(), HnswConfig::default()).await,
             None => MemoryStorage::new().await,
-        }.map_err(|e| crate::ToolError::Other(e.to_string()))?;
+        }
+        .map_err(|e| crate::ToolError::Other(e.to_string()))?;
 
         let ledger = ContextLedger::new(storage);
 
-        let content = ledger.restore(id_str).await
+        let content = ledger
+            .restore(id_str)
+            .await
             .map_err(|e| crate::ToolError::Other(e.to_string()))?;
 
         Ok(serde_json::json!({ "content": content }))

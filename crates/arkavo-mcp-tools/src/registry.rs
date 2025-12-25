@@ -275,7 +275,7 @@ impl ToolRegistry {
 
         // Code review tool
         self.register("code_review", Box::new(CodeReviewTool::new()));
-        
+
         // Context control tool
         self.register("context_restore", Box::new(ContextRestoreTool::new()));
     }
