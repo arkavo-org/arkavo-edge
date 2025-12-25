@@ -48,7 +48,7 @@ impl McpClient {
             .send_request(
                 "initialize",
                 Some(json!({
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": "2025-11-25",
                     "capabilities": {
                         "roots": { "listChanged": true },
                         "sampling": {}
