@@ -1,4 +1,4 @@
-use arkavo_protocol::{McpConnectionTrait, get_service_ip};
+use arkavo_protocol::get_service_ip;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -1503,7 +1503,7 @@ fn broadcast_agent_mdns_sync(
     Ok(())
 }
 
-// Wrapper to implement McpConnectionTrait for arkavo-cli's McpConnection
+// Wrapper to implement McpClient trait from arkavo-mcp for arkavo-cli's McpConnection
 struct McpConnectionWrapper {
     inner: crate::mcp_integration::McpConnection,
 }
@@ -1514,15 +1514,18 @@ impl McpConnectionWrapper {
     }
 }
 
-impl McpConnectionTrait for McpConnectionWrapper {
+impl arkavo_mcp::McpClient for McpConnectionWrapper {
     fn list_tools(
         &self,
-    ) -> Result<Vec<arkavo_protocol::mcp_registry::Tool>, Box<dyn std::error::Error>> {
-        // Convert from cli Tool to protocol Tool
-        let cli_tools = self.inner.list_tools()?;
+    ) -> Result<Vec<arkavo_mcp::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
+        // Convert from cli Tool to McpTool
+        let cli_tools = self.inner.list_tools().map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
         let protocol_tools = cli_tools
             .into_iter()
-            .map(|t| arkavo_protocol::mcp_registry::Tool {
+            .map(|t| arkavo_mcp::McpTool {
                 name: t.name,
                 description: t.description,
                 input_schema: Some(t.input_schema),
@@ -1536,8 +1539,13 @@ impl McpConnectionTrait for McpConnectionWrapper {
         tool_name: &str,
         arguments: Value,
         llm_provider: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        self.inner.call_tool(tool_name, arguments, llm_provider)
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner
+            .call_tool(tool_name, arguments, llm_provider)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 

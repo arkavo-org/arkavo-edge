@@ -6,6 +6,7 @@
 #![allow(clippy::significant_drop_tightening)]
 
 pub mod client;
+pub mod polling;
 pub mod runtime;
 pub mod server;
 pub mod tools;
@@ -13,10 +14,12 @@ pub mod transport;
 
 // Re-export core types for convenience
 pub use arkavo_mcp::{
-    RpcError, RpcRequest, RpcResponse, Tool, ToolRequest, ToolResponse, ToolSchema, error_codes,
+    McpClient as McpClientTrait, McpTool, RpcError, RpcNotification, RpcRequest, RpcResponse, Tool,
+    ToolRequest, ToolResponse, ToolSchema, error_codes,
 };
 
 pub use client::{ClientHandle, McpClient, McpServerConfig};
+pub use polling::{AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint};
 pub use runtime::{McpRuntime, RuntimeError};
 pub use server::McpServer;
 pub use transport::{

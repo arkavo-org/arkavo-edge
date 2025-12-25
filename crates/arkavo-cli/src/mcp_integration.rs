@@ -157,12 +157,15 @@ impl McpConnection {
     }
 }
 
-/// Implement the McpClient trait from arkavo-mcp-tools for McpConnection
+/// Implement the McpClient trait from arkavo-mcp for McpConnection
 /// This allows McpConnection to be used with ToolRegistry::from_mcp_connection()
 #[cfg(all(unix, feature = "mcp-tools"))]
 impl arkavo_mcp_tools::McpClient for McpConnection {
-    fn list_tools(&self) -> Result<Vec<arkavo_mcp_tools::McpTool>, Box<dyn std::error::Error>> {
-        let protocol_tools = McpConnection::list_tools(self)?;
+    fn list_tools(
+        &self,
+    ) -> Result<Vec<arkavo_mcp_tools::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
+        let protocol_tools =
+            McpConnection::list_tools(self).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) })?;
         Ok(protocol_tools
             .into_iter()
             .map(|t| arkavo_mcp_tools::McpTool {
@@ -178,7 +181,8 @@ impl arkavo_mcp_tools::McpClient for McpConnection {
         tool_name: &str,
         args: Value,
         llm_origin: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         McpConnection::call_tool(self, tool_name, args, llm_origin)
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) })
     }
 }
