@@ -569,6 +569,7 @@ impl A2aRpcServer for A2aRpcImpl {
                             &router,
                             &mcp_registry,
                             task_content,
+                            None,
                         )
                         .await
                         {
@@ -2149,6 +2150,7 @@ async fn execute_with_conductor(
     router: &Arc<arkavo_router::Router>,
     mcp_registry: &Arc<McpRegistry>,
     task_content: String,
+    memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -2267,27 +2269,47 @@ async fn execute_with_conductor(
                 serde_json::to_string(&args).unwrap_or_default()
             );
 
-            // Call the tool via MCP registry
-            match mcp_registry
-                .call_tool(&tool_call.tool_name, args, "hrm")
+            // Call the tool via MCP registry - convert error to String early to avoid Send issues
+            let tool_result = mcp_registry
+                .call_tool(&tool_call.tool_name, args.clone(), "hrm")
                 .await
-            {
+                .map_err(|e| e.to_string());
+
+            match tool_result {
                 Ok(result) => {
                     info!("Tool {} succeeded", tool_call.tool_name);
-                    debug!(
-                        "Tool {} result: {}",
-                        tool_call.tool_name,
-                        serde_json::to_string(&result).unwrap_or_default()
-                    );
+                    let result_str = serde_json::to_string(&result).unwrap_or_default();
+                    debug!("Tool {} result: {}", tool_call.tool_name, result_str);
+
+                    // Record in memory if available
+                    if let Some(mem) = memory {
+                        mem.write()
+                            .await
+                            .add(tool_call.tool_name.clone(), &args, &result_str);
+                    }
+
                     tool_results.push(format!(
                         "## Tool: {}\n{}",
                         tool_call.tool_name,
                         serde_json::to_string_pretty(&result).unwrap_or_default()
                     ));
                 }
-                Err(e) => {
-                    warn!("Tool {} failed: {}", tool_call.tool_name, e);
-                    tool_results.push(format!("## Tool: {} (Error)\n{}", tool_call.tool_name, e));
+                Err(err_str) => {
+                    warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
+
+                    // Record errors in memory too
+                    if let Some(mem) = memory {
+                        mem.write().await.add(
+                            tool_call.tool_name.clone(),
+                            &args,
+                            &format!("ERROR: {err_str}"),
+                        );
+                    }
+
+                    tool_results.push(format!(
+                        "## Tool: {} (Error)\n{}",
+                        tool_call.tool_name, err_str
+                    ));
                 }
             }
         }
@@ -2431,7 +2453,8 @@ async fn run_startup_planning_phase(
     }
 
     // 5. Execute planning through conductor (uses larger model for high-confidence tasks)
-    let result = execute_with_conductor(conductor, router, mcp_registry, planning_prompt).await;
+    let result =
+        execute_with_conductor(conductor, router, mcp_registry, planning_prompt, None).await;
 
     match result {
         Ok(response) => {
@@ -2696,6 +2719,68 @@ pub enum GoalStatus {
     Completed,
 }
 
+/// Sliding window memory for recent tool calls and responses
+#[derive(Debug, Clone, Default)]
+pub struct ToolMemory {
+    entries: std::collections::VecDeque<ToolMemoryEntry>,
+    max_entries: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolMemoryEntry {
+    pub tool_name: String,
+    pub args_summary: String,
+    pub result_summary: String,
+    pub timestamp: std::time::Instant,
+}
+
+impl ToolMemory {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: std::collections::VecDeque::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    pub fn add(&mut self, tool_name: String, args: &serde_json::Value, result: &str) {
+        let args_summary = serde_json::to_string(args)
+            .unwrap_or_default()
+            .chars()
+            .take(100)
+            .collect();
+        let result_summary: String = result.chars().take(200).collect();
+
+        if self.entries.len() >= self.max_entries {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(ToolMemoryEntry {
+            tool_name,
+            args_summary,
+            result_summary,
+            timestamp: std::time::Instant::now(),
+        });
+    }
+
+    pub fn format_for_prompt(&self) -> String {
+        use std::fmt::Write;
+        if self.entries.is_empty() {
+            return String::new();
+        }
+        let mut output = String::from("\n\n## Recent Actions\n");
+        for (i, entry) in self.entries.iter().enumerate() {
+            let _ = writeln!(
+                output,
+                "{}. {} {} → {}",
+                i + 1,
+                entry.tool_name,
+                entry.args_summary,
+                entry.result_summary
+            );
+        }
+        output
+    }
+}
+
 pub struct A2aServer {
     config: ServerConfig,
     buffer_config: BufferConfig,
@@ -2717,6 +2802,8 @@ pub struct A2aServer {
     agent_plan: Arc<tokio::sync::RwLock<AgentPlan>>,
     /// Flag to ensure planning runs only once
     planning_completed: Arc<std::sync::atomic::AtomicBool>,
+    /// Sliding window memory for recent tool calls
+    agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
 }
 
 impl A2aServer {
@@ -2743,6 +2830,7 @@ impl A2aServer {
             )))),
             agent_plan: Arc::new(tokio::sync::RwLock::new(AgentPlan::default())),
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
         }
     }
 
@@ -3218,6 +3306,7 @@ impl A2aServer {
         // Clone planning state for the async task
         let planning_completed = self.planning_completed.clone();
         let agent_plan = self.agent_plan.clone();
+        let agent_memory = self.agent_memory.clone();
 
         eprintln!("[Notifications] Starting push-based notification handler");
 
@@ -3286,9 +3375,18 @@ impl A2aServer {
                         };
                         drop(plan);
 
+                        // Include recent tool call history
+                        let memory = agent_memory.read().await;
+                        let memory_section = memory.format_for_prompt();
+                        drop(memory);
+
                         let prompt = format!(
-                            "{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals when responding. Use tools to take action.",
-                            system_prompt, goals_section, notification.server, event_str
+                            "{}{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
+                            system_prompt,
+                            goals_section,
+                            memory_section,
+                            notification.server,
+                            event_str
                         );
 
                         // Execute through conductor
@@ -3296,8 +3394,14 @@ impl A2aServer {
                             "[Notifications] Processing with LLM: {} chars",
                             prompt.len()
                         );
-                        match execute_with_conductor(&conductor, &router, &mcp_registry, prompt)
-                            .await
+                        match execute_with_conductor(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            prompt,
+                            Some(&agent_memory),
+                        )
+                        .await
                         {
                             Ok(result) => {
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
