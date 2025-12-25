@@ -427,6 +427,7 @@ dependencies = [
  "arkavo-agui",
  "arkavo-budget",
  "arkavo-cef",
+ "arkavo-context",
  "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-device-identity",
