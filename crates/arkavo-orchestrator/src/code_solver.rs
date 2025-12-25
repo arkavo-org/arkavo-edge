@@ -2,6 +2,7 @@ use crate::{Error, Result};
 use arkavo_context::{CodeContext, FileContext, ProblemStatement, PromptEnricher, PromptTemplate};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
+use arkavo_memory::MemoryStorage;
 use arkavo_router::{IssueType, JudgmentResult, Router};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -111,7 +112,12 @@ impl CodeSolver {
 
         debug!("Enriched prompt length: {} chars", enriched_prompt.len());
 
-        let tool_registry = ToolRegistry::default();
+        let storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .map_err(|e| Error::Other(anyhow::anyhow!("Failed to initialize storage: {e}")))?,
+        );
+        let tool_registry = ToolRegistry::new(storage);
 
         let messages = vec![Message::user(enriched_prompt.clone())];
 

@@ -406,11 +406,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize conversation manager
     let mut conversation_manager = ConversationManager::new(memory_storage.clone())?;
 
-    // Initialize context ledger for archiving old messages
-    let context_ledger = {
-        let storage_for_ledger = runtime.block_on(MemoryStorage::new())?;
-        ContextLedger::new(storage_for_ledger)
-    };
+    // Initialize context ledger for archiving old messages (shares storage with conversation manager)
+    let context_ledger = ContextLedger::new(memory_storage.clone());
 
     // Initialize repository context manager
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;

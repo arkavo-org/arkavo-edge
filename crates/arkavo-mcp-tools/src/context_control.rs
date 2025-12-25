@@ -1,31 +1,17 @@
 use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
-use arkavo_memory::{ContextLedger, HnswConfig, MemoryStorage, WorkspaceConfig};
+use arkavo_memory::{ContextLedger, MemoryStorage};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct ContextRestoreTool {
     schema: ToolSchema,
-    db_path: Option<PathBuf>,
-}
-
-impl Default for ContextRestoreTool {
-    fn default() -> Self {
-        Self::new()
-    }
+    storage: Arc<MemoryStorage>,
 }
 
 impl ContextRestoreTool {
-    pub fn new() -> Self {
-        // Use workspace config for consistent cross-process database access
-        let db_path = WorkspaceConfig::get().memory_db_path.clone();
-        Self::with_path(db_path)
-    }
-
-    /// Creates a tool that uses a specific database path.
-    /// Use this in tests or when sharing storage with a Conductor.
-    pub fn with_path(db_path: Option<PathBuf>) -> Self {
+    pub fn new(storage: Arc<MemoryStorage>) -> Self {
         let schema = ToolSchema {
             name: "context_restore".to_string(),
             aliases: Some(vec!["restore_context".to_string()]),
@@ -41,7 +27,7 @@ impl ContextRestoreTool {
                 "required": ["id"]
             }),
         };
-        Self { schema, db_path }
+        Self { schema, storage }
     }
 }
 
@@ -53,14 +39,7 @@ impl Tool for ContextRestoreTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing 'id'".to_string()))?;
 
-        // Use configured path if provided, otherwise use default
-        let storage = match &self.db_path {
-            Some(path) => MemoryStorage::with_path(path.clone(), HnswConfig::default()).await,
-            None => MemoryStorage::new().await,
-        }
-        .map_err(|e| crate::ToolError::Other(e.to_string()))?;
-
-        let ledger = ContextLedger::new(storage);
+        let ledger = ContextLedger::new(self.storage.clone());
 
         let content = ledger
             .restore(id_str)

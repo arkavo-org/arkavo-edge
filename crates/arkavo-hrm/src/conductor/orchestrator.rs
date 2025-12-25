@@ -75,7 +75,7 @@ impl<S: TaskStore> Conductor<S> {
     }
 
     /// Enable the context ledger using the provided memory storage
-    pub fn with_ledger(mut self, storage: MemoryStorage) -> Self {
+    pub fn with_ledger(mut self, storage: std::sync::Arc<MemoryStorage>) -> Self {
         self.context_ledger = Some(ContextLedger::new(storage));
         self
     }

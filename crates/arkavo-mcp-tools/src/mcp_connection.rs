@@ -10,8 +10,9 @@ use crate::{
     server::Tool,
     state::QueryStateKit,
 };
+use arkavo_memory::MemoryStorage;
 #[allow(unused_imports)]
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
@@ -58,8 +59,15 @@ impl McpConnection {
                 .clone()
         });
 
+        // Create storage for tools that need persistence
+        let storage = Arc::new(
+            runtime_handle
+                .block_on(MemoryStorage::new())
+                .map_err(|e| format!("Failed to initialize storage: {e}"))?,
+        );
+
         // Create the full registry for discovery and fallback
-        let registry = Arc::new(ToolRegistry::new());
+        let registry = Arc::new(ToolRegistry::new(storage));
 
         // Register core cross-platform tools (progressive disclosure)
         tools.insert("filesystem".to_string(), Arc::new(FileSystemKit::new()));

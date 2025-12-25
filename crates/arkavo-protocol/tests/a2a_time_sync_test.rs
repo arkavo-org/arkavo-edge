@@ -62,7 +62,7 @@ fn calculate_statistics(latencies: &[f64]) -> (f64, f64, f64, f64) {
 
 #[tokio::test]
 async fn test_a2a_remote_time_query() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let client = A2aClient::with_mcp_bridge(bridge);
 
     let response = client
@@ -79,7 +79,7 @@ async fn test_a2a_remote_time_query() {
 
 #[tokio::test]
 async fn test_a2a_time_query_all_formats() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let client = A2aClient::with_mcp_bridge(bridge);
 
     let formats = vec!["rfc3339", "unix", "iso8601"];
@@ -97,7 +97,7 @@ async fn test_a2a_time_query_all_formats() {
 
 #[tokio::test]
 async fn test_a2a_time_query_with_timezones() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let client = A2aClient::with_mcp_bridge(bridge);
 
     let timezones = vec!["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"];
@@ -130,7 +130,7 @@ async fn test_a2a_multi_agent_time_consistency() {
     let mut agents = Vec::new();
 
     for _ in 0..agent_count {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         agents.push(A2aClient::with_mcp_bridge(bridge));
     }
 
@@ -168,7 +168,7 @@ async fn test_a2a_concurrent_time_requests() {
     let test_start = Instant::now();
 
     let results = run_concurrent_a2a_requests(agent_count, max_concurrency, |i| async move {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         let client = A2aClient::with_mcp_bridge(bridge);
 
         let start = Instant::now();
@@ -225,7 +225,7 @@ async fn test_a2a_concurrent_time_requests() {
 
 #[tokio::test]
 async fn test_a2a_get_time_status() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let client = A2aClient::with_mcp_bridge(bridge);
 
     let response = client
@@ -240,7 +240,7 @@ async fn test_a2a_get_time_status() {
 
 #[tokio::test]
 async fn test_a2a_invalid_tool_request() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let client = A2aClient::with_mcp_bridge(bridge);
 
     let response = client
@@ -255,7 +255,7 @@ async fn test_a2a_invalid_tool_request() {
 
 #[tokio::test]
 async fn test_a2a_tool_latency_overhead() {
-    let bridge = A2aMcpBridge::new();
+    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
 
     let direct_start = Instant::now();
     let _direct_result = bridge
@@ -293,11 +293,11 @@ async fn test_a2a_orchestrator_pattern() {
     println!("Testing orchestrator pattern: querying 10 agents");
 
     let agent_count = 10;
-    let orchestrator = A2aMcpBridge::new();
+    let orchestrator = A2aMcpBridge::new().await.expect("Failed to create bridge");
     let mut agents = Vec::new();
 
     for i in 0..agent_count {
-        let bridge = A2aMcpBridge::new();
+        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
         agents.push((format!("agent-{}", i), A2aClient::with_mcp_bridge(bridge)));
     }
 

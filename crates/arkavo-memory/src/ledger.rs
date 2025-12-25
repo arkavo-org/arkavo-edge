@@ -1,13 +1,14 @@
 use crate::error::{MemoryError, Result};
 use crate::storage::MemoryStorage;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct ContextLedger {
-    storage: MemoryStorage,
+    storage: Arc<MemoryStorage>,
 }
 
 impl ContextLedger {
-    pub fn new(storage: MemoryStorage) -> Self {
+    pub fn new(storage: Arc<MemoryStorage>) -> Self {
         Self { storage }
     }
 

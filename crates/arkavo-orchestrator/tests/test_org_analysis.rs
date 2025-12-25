@@ -10,6 +10,7 @@
 #[cfg(test)]
 mod org_analysis_tests {
     use arkavo_mcp_tools::ToolRegistry;
+    use arkavo_memory::MemoryStorage;
     use arkavo_router::Router;
     use std::sync::Arc;
 
@@ -21,7 +22,8 @@ mod org_analysis_tests {
         // to analyze an entire organization across multiple repositories
 
         let router = Router::new().await.expect("Failed to create router");
-        let tool_registry = Arc::new(ToolRegistry::new());
+        let storage = Arc::new(MemoryStorage::new().await.expect("Failed to create storage"));
+        let tool_registry = Arc::new(ToolRegistry::new(storage));
 
         let task = "Analyze the arkavo-org GitHub organization. \
                     List all repositories and summarize what the organization is building. \
@@ -83,7 +85,8 @@ mod org_analysis_tests {
         // to find patterns (e.g., common bugs, feature requests)
 
         let router = Router::new().await.expect("Failed to create router");
-        let tool_registry = Arc::new(ToolRegistry::new());
+        let storage = Arc::new(MemoryStorage::new().await.expect("Failed to create storage"));
+        let tool_registry = Arc::new(ToolRegistry::new(storage));
 
         let task = "Look at open issues across arkavo-org repositories. \
                     Are there any common themes or patterns? \

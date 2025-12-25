@@ -2,11 +2,18 @@ use arkavo_mcp_tools::{
     Tool, ToolRegistry,
     time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
 };
+use arkavo_memory::MemoryStorage;
 use serde_json::json;
+use std::sync::Arc;
+
+async fn create_test_registry() -> ToolRegistry {
+    let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+    ToolRegistry::new(storage)
+}
 
 #[tokio::test]
 async fn test_time_tools_registered() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     assert!(registry.get("get_agent_time").is_some());
     assert!(registry.get("sync_agent_time").is_some());
@@ -15,7 +22,7 @@ async fn test_time_tools_registered() {
 
 #[tokio::test]
 async fn test_time_tools_categorized() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
     let categories = registry.list_by_category();
 
     assert!(categories.contains_key("System"));
@@ -34,7 +41,7 @@ async fn test_time_tools_categorized() {
 
 #[tokio::test]
 async fn test_get_agent_time_execution() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
     let tool = registry.get("get_agent_time").unwrap();
 
     let result = tool
@@ -138,7 +145,7 @@ async fn test_get_time_status_initial() {
 
 #[tokio::test]
 async fn test_end_to_end_workflow() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
 
     let get_time = registry.get("get_agent_time").unwrap();
     let sync_time = registry.get("sync_agent_time").unwrap();
@@ -220,7 +227,7 @@ async fn test_timezone_support() {
 
 #[tokio::test]
 async fn test_tool_schemas() {
-    let registry = ToolRegistry::new();
+    let registry = create_test_registry().await;
     let tools = registry.list_tools();
 
     let time_tools: Vec<_> = tools

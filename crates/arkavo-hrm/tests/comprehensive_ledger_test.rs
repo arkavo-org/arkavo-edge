@@ -1,5 +1,6 @@
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::{ContextLedger, MemoryStorage};
+use std::sync::Arc;
 
 /// Helper to estimate tokens (rough approximation: 4 chars per token)
 fn estimate_tokens(text: &str) -> usize {
@@ -16,10 +17,10 @@ async fn test_comprehensive_ledger_capabilities() {
         .await
         .expect("Failed to create memory storage");
 
-    // Note: ContextRestoreTool now supports path injection via `with_path()`.
+    // Note: ContextRestoreTool now requires Arc<MemoryStorage> injection.
     // See test_context_restore_tool_with_path() for end-to-end tool testing.
 
-    let conductor = Conductor::new(store).with_ledger(memory_storage);
+    let conductor = Conductor::new(store).with_ledger(Arc::new(memory_storage));
 
     // ==================================================================================
     // CAPABILITY 1: MASSIVE CONTEXT REDUCTION
@@ -81,8 +82,8 @@ async fn test_comprehensive_ledger_capabilities() {
     println!("Extracted Fragment ID: {}", id_str);
 
     // Create separate storage for integrity test
-    let shared_storage = MemoryStorage::new_test().await.expect("Storage init");
-    let ledger = ContextLedger::new(shared_storage); // Ledger consumes storage
+    let shared_storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+    let ledger = ContextLedger::new(shared_storage); // Ledger shares storage
 
     let original_text = "Critical configuration data: { 'secret': 'XY-99' }";
     let summary = "Config Secret";
@@ -111,7 +112,7 @@ async fn test_comprehensive_ledger_capabilities() {
     // ==================================================================================
     println!("\n--- Testing Capability: Strategy Enforcement ---");
     // Re-create conductor with new storage
-    let storage_for_conductor = MemoryStorage::new_test().await.expect("Storage 3");
+    let storage_for_conductor = Arc::new(MemoryStorage::new_test().await.expect("Storage 3"));
     let conductor_strat =
         Conductor::new(InMemoryTaskStore::new()).with_ledger(storage_for_conductor);
 
@@ -139,14 +140,14 @@ async fn test_comprehensive_ledger_capabilities() {
     println!("\n=== All Integration Tests Passed ===");
 }
 
-/// Tests the ContextRestoreTool with path injection for test isolation.
-/// This verifies the fix for the DB path mismatch issue documented in the handover.
+/// Tests the ContextRestoreTool with shared storage injection for test isolation.
+/// This verifies that the tool correctly shares storage with the ledger.
 #[tokio::test]
-async fn test_context_restore_tool_with_path() {
+async fn test_context_restore_tool_with_storage() {
     use arkavo_mcp_tools::context_control::ContextRestoreTool;
     use arkavo_mcp_tools::server::Tool;
 
-    println!("\n=== Testing ContextRestoreTool with Path Injection ===\n");
+    println!("\n=== Testing ContextRestoreTool with Storage Injection ===\n");
 
     // Create a unique test DB path
     let timestamp = std::time::SystemTime::now()
@@ -157,12 +158,14 @@ async fn test_context_restore_tool_with_path() {
     let db_path = temp_dir.join(format!("arkavo_tool_test_{timestamp}.db"));
 
     // Create storage at that specific path
-    let storage = MemoryStorage::with_path(db_path.clone(), Default::default())
-        .await
-        .expect("Storage creation failed");
+    let storage = Arc::new(
+        MemoryStorage::with_path(db_path.clone(), Default::default())
+            .await
+            .expect("Storage creation failed"),
+    );
 
     // Offload context using the ledger
-    let ledger = ContextLedger::new(storage);
+    let ledger = ContextLedger::new(storage.clone());
     let original_text = "Secret payload for tool test: { key: 'value-42' }";
     let pointer = ledger
         .offload(original_text, "Tool Test Data", "integration_test")
@@ -175,8 +178,8 @@ async fn test_context_restore_tool_with_path() {
     let uuid_str = &pointer[start_idx..end_idx];
     println!("Offloaded with ID: {uuid_str}");
 
-    // Create the tool pointing to the SAME database path
-    let tool = ContextRestoreTool::with_path(Some(db_path.clone()));
+    // Create the tool with the SAME shared storage
+    let tool = ContextRestoreTool::new(storage.clone());
 
     // Execute the tool
     let params = serde_json::json!({ "id": uuid_str });
@@ -213,9 +216,11 @@ async fn test_auto_summarization() {
     };
 
     let store = InMemoryTaskStore::new();
-    let memory_storage = MemoryStorage::new_test()
-        .await
-        .expect("Failed to create memory storage");
+    let memory_storage = Arc::new(
+        MemoryStorage::new_test()
+            .await
+            .expect("Failed to create memory storage"),
+    );
 
     // Create conductor with summarizer
     let conductor = Conductor::new(store)

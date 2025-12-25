@@ -55,7 +55,8 @@ pub async fn process_with_tools(
 
     let router = Arc::new(Router::new().await?);
 
-    let mut tool_registry = ToolRegistry::from_mcp_or_default(mcp_client);
+    let storage = Arc::new(arkavo_memory::MemoryStorage::new().await?);
+    let mut tool_registry = ToolRegistry::from_mcp_or_default(mcp_client, storage);
 
     // Register tools from each crate
     arkavo_router::tools::register_tools(&mut tool_registry, router.clone());

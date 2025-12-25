@@ -1,7 +1,8 @@
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::MemoryStorage;
 use rand::distributions::Alphanumeric;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
+use std::sync::Arc;
 
 /// Estimate tokens (approx 4 chars/token)
 fn tokens(text: &str) -> usize {
@@ -33,7 +34,7 @@ async fn generate_paper_metrics() {
 
     // Setup
     let store = InMemoryTaskStore::new();
-    let memory = MemoryStorage::new_test().await.expect("Memory init");
+    let memory = Arc::new(MemoryStorage::new_test().await.expect("Memory init"));
     let conductor = Conductor::new(store).with_ledger(memory);
 
     // -----------------------------------------------------------------------

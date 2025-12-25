@@ -1,5 +1,6 @@
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::MemoryStorage;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn benchmark_monorepo_context_limit() {
@@ -14,7 +15,7 @@ async fn benchmark_monorepo_context_limit() {
     println!("Generated Error Log: {} bytes", original_len);
 
     let store = InMemoryTaskStore::new();
-    let memory = MemoryStorage::new_test().await.expect("Memory init");
+    let memory = Arc::new(MemoryStorage::new_test().await.expect("Memory init"));
     let conductor = Conductor::new(store).with_ledger(memory);
 
     // 2. Execute Offload

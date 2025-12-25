@@ -2700,7 +2700,14 @@ impl A2aServer {
     /// Build tool registry from MCP connections
     async fn build_tool_registry(&self) {
         info!("Building tool registry from MCP connections");
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new();
+        let storage = match arkavo_memory::MemoryStorage::new().await {
+            Ok(s) => std::sync::Arc::new(s),
+            Err(e) => {
+                error!(error = %e, "Failed to initialize storage for tool registry");
+                return;
+            }
+        };
+        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
 
         // Get all tools from MCP registry
         match self.mcp_registry.list_all_tools().await {

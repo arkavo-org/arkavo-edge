@@ -1,13 +1,16 @@
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::MemoryStorage;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_ledger_context_offloading() {
     // 1. Setup
     let store = InMemoryTaskStore::new();
-    let memory_storage = MemoryStorage::new_test()
-        .await
-        .expect("Failed to create memory storage");
+    let memory_storage = Arc::new(
+        MemoryStorage::new_test()
+            .await
+            .expect("Failed to create memory storage"),
+    );
 
     // 2. Initialize Conductor with Ledger
     let conductor = Conductor::new(store).with_ledger(memory_storage);

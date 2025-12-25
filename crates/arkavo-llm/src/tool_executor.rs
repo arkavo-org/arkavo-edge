@@ -1,4 +1,5 @@
 use arkavo_mcp_tools::registry::ToolRegistry;
+use arkavo_memory::MemoryStorage;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -34,9 +35,9 @@ pub struct ToolExecutor {
 }
 
 impl ToolExecutor {
-    pub fn new() -> Self {
+    pub fn new(storage: Arc<MemoryStorage>) -> Self {
         Self {
-            registry: Arc::new(ToolRegistry::new()),
+            registry: Arc::new(ToolRegistry::new(storage)),
         }
     }
 
@@ -115,27 +116,28 @@ impl ToolExecutor {
     }
 }
 
-impl Default for ToolExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default cannot be implemented for ToolExecutor since it requires async storage initialization.
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
+    async fn create_test_executor() -> ToolExecutor {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
+        ToolExecutor::new(storage)
+    }
+
     #[tokio::test]
     async fn test_executor_creation() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let tools = executor.available_tools();
         assert!(!tools.is_empty(), "Should have MCP tools registered");
     }
 
     #[tokio::test]
     async fn test_has_tool() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let tools = executor.available_tools();
         if let Some(first_tool) = tools.first() {
             assert!(executor.has_tool(first_tool));
@@ -145,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_nonexistent_tool() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let call = ParsedToolCall {
             tool_name: "nonexistent_tool".to_string(),
             arguments: json!({}),
@@ -164,14 +166,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_batch_empty() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let results = executor.execute_batch(&[]).await;
         assert!(results.is_empty());
     }
 
     #[tokio::test]
     async fn test_execute_batch_with_errors() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let calls = vec![
             ParsedToolCall {
                 tool_name: "nonexistent_1".to_string(),
@@ -195,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_registry_access() {
-        let executor = ToolExecutor::new();
+        let executor = create_test_executor().await;
         let registry = executor.registry();
         let tools = registry.list_tools();
         assert!(!tools.is_empty());

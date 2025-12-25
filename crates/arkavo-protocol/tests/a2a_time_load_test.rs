@@ -138,7 +138,7 @@ async fn load_test_1000_a2a_time_requests() {
         move |i| {
             let progress = Arc::clone(&progress);
             async move {
-                let bridge = A2aMcpBridge::new();
+                let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
                 let client = A2aClient::with_mcp_bridge(bridge);
 
                 let op_start = Instant::now();
@@ -222,7 +222,7 @@ async fn load_test_10k_a2a_requests() {
         let round_start = Instant::now();
 
         let results = run_concurrent_a2a_requests(requests_per_round, 250, move |i| async move {
-            let bridge = A2aMcpBridge::new();
+            let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
             let client = A2aClient::with_mcp_bridge(bridge);
 
             let start = Instant::now();
@@ -306,7 +306,7 @@ async fn load_test_rapid_fire_a2a() {
         move |i| {
             let progress = Arc::clone(&progress);
             async move {
-                let bridge = A2aMcpBridge::new();
+                let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
                 let client = A2aClient::with_mcp_bridge(bridge);
 
                 let op_start = Instant::now();
