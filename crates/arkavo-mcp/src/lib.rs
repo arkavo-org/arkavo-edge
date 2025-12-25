@@ -91,6 +91,51 @@ pub struct RpcError {
     pub data: Option<Value>,
 }
 
+/// JSON-RPC notification structure (request without id)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RpcNotification {
+    /// JSON-RPC version (should be "2.0")
+    pub jsonrpc: String,
+    /// Method name
+    pub method: String,
+    /// Method parameters
+    pub params: Option<Value>,
+}
+
+/// MCP Tool definition for remote tool discovery
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    /// Tool name
+    pub name: String,
+    /// Human-readable description
+    pub description: String,
+    /// JSON Schema for input parameters
+    #[serde(rename = "inputSchema", skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+}
+
+/// Trait for MCP client abstraction
+///
+/// This trait provides a unified interface for communicating with MCP servers,
+/// whether via subprocess, HTTP, or other transports.
+pub trait McpClient: Send + Sync {
+    /// List all tools available from the MCP server
+    fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Call a tool on the MCP server
+    ///
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to call
+    /// * `args` - JSON arguments for the tool
+    /// * `llm_origin` - Identifier for the LLM making the call (for logging/auditing)
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        args: Value,
+        llm_origin: &str,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
+}
+
 /// Standard JSON-RPC error codes
 pub mod error_codes {
     pub const PARSE_ERROR: i32 = -32700;

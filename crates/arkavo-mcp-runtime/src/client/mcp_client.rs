@@ -1,6 +1,7 @@
 use super::config::McpServerConfig;
 use crate::ToolSchema;
 use crate::transport::{Transport, TransportError, create_transport};
+use arkavo_mcp::McpTool;
 use serde_json::{Value, json};
 use tracing::{debug, info};
 
@@ -47,7 +48,7 @@ impl McpClient {
             .send_request(
                 "initialize",
                 Some(json!({
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": "2025-11-25",
                     "capabilities": {
                         "roots": { "listChanged": true },
                         "sampling": {}
@@ -187,5 +188,44 @@ impl McpClient {
     /// Close the connection
     pub async fn close(&self) -> Result<(), TransportError> {
         self.transport.close().await
+    }
+
+    /// Convert cached ToolSchema to McpTool for trait compatibility
+    fn tools_as_mcp(&self) -> Vec<McpTool> {
+        self.tools
+            .iter()
+            .map(|t| McpTool {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                input_schema: Some(t.parameters.clone()),
+            })
+            .collect()
+    }
+}
+
+/// Implementation of the unified McpClient trait from arkavo_mcp
+///
+/// This provides a sync interface over the async McpClient, enabling
+/// use with synchronous registries and tool catalogs.
+impl arkavo_mcp::McpClient for McpClient {
+    fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.tools_as_mcp())
+    }
+
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        args: Value,
+        _llm_origin: &str,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        // Use the current tokio runtime to execute the async call
+        #[allow(clippy::disallowed_methods)]
+        let handle = tokio::runtime::Handle::current();
+        #[allow(clippy::disallowed_methods)]
+        handle.block_on(self.call_tool(tool_name, args)).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::other(e.to_string()))
+            },
+        )
     }
 }

@@ -1,5 +1,5 @@
 use crate::types::{AgentCard, AgentStatus};
-use arkavo_mcp::ToolSchema;
+use arkavo_mcp::{McpClient, McpTool, ToolSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,25 +15,12 @@ pub struct McpNotification {
     pub params: Option<Value>,
 }
 
-/// Tool information structure matching MCP protocol
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Tool {
-    pub name: String,
-    pub description: String,
-    #[serde(rename = "inputSchema")]
-    pub input_schema: Option<Value>,
-}
+/// Type alias for backward compatibility
+pub type Tool = McpTool;
 
-/// Trait for MCP connections that can be registered
-pub trait McpConnectionTrait: Send + Sync {
-    fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>>;
-    fn call_tool(
-        &self,
-        tool_name: &str,
-        arguments: Value,
-        llm_provider: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>>;
-}
+/// Trait alias for MCP connections (re-export from arkavo_mcp)
+pub trait McpConnectionTrait: McpClient {}
+impl<T: McpClient> McpConnectionTrait for T {}
 
 /// Registered connection with cached tools
 struct RegisteredConnection {
@@ -102,7 +89,10 @@ impl McpRegistry {
     }
 
     /// Refresh cached tools for a specific server
-    pub async fn refresh_tools(&self, server_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn refresh_tools(
+        &self,
+        server_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut connections = self.connections.write().await;
         if let Some(registered) = connections.get_mut(server_name) {
             let tools = registered.connection.list_tools()?;
@@ -119,7 +109,9 @@ impl McpRegistry {
     }
 
     /// List all available tools from all connections (uses cached tools)
-    pub async fn list_all_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
+    pub async fn list_all_tools(
+        &self,
+    ) -> Result<Vec<Tool>, Box<dyn std::error::Error + Send + Sync>> {
         let mut all_tools = Vec::new();
 
         {
@@ -156,7 +148,7 @@ impl McpRegistry {
         tool_name: &str,
         arguments: Value,
         llm_provider: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         debug!(
             tool = %tool_name,
             provider = %llm_provider,
@@ -230,7 +222,7 @@ impl McpRegistry {
         tool_name: &str,
         arguments: Value,
         llm_provider: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         match connection.call_tool(tool_name, arguments, llm_provider) {
             Ok(result) => {
                 debug!(
@@ -287,7 +279,10 @@ impl McpRegistry {
     }
 
     /// Disconnect and remove a server
-    pub async fn disconnect(&self, server_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn disconnect(
+        &self,
+        server_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.connections.write().await.remove(server_name);
         Ok(())
     }
@@ -296,7 +291,7 @@ impl McpRegistry {
     pub async fn get_tool_schemas(
         &self,
         server_name: &str,
-    ) -> Result<Vec<ToolSchema>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ToolSchema>, Box<dyn std::error::Error + Send + Sync>> {
         let connections = self.connections.read().await;
 
         if let Some(registered) = connections.get(server_name) {
@@ -325,7 +320,7 @@ impl McpRegistry {
         &self,
         server_name: &str,
         aliases: HashMap<String, HashMap<String, String>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut connections = self.connections.write().await;
 
         if let Some(registered) = connections.get_mut(server_name) {

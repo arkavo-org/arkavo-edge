@@ -1,3 +1,10 @@
+//! Adaptive polling infrastructure for MCP clients
+//!
+//! This module provides intelligent polling with:
+//! - Dual-signal adaptive backoff (empty results + latency monitoring)
+//! - Rate limiting with jitter to prevent thundering herd
+//! - Configurable warmup and baseline window for latency analysis
+
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,7 +47,7 @@ impl Default for PollConfig {
     }
 }
 
-/// Endpoint registered for polling (must be Clone for snapshot pattern)
+/// Endpoint registered for polling
 #[derive(Clone, Debug)]
 pub struct PollableEndpoint {
     /// MCP method to call (e.g., "tools/call")
@@ -65,6 +72,10 @@ pub struct PollResultParams {
 }
 
 /// Adaptive backoff manager using dual-signal approach
+///
+/// Uses two independent signals to determine polling rate:
+/// 1. Empty results: Backs off when consecutive polls return no data
+/// 2. Latency monitoring: Backs off when server response times increase
 pub struct AdaptiveBackoff {
     config: PollConfig,
     current_interval: Duration,
@@ -76,6 +87,7 @@ pub struct AdaptiveBackoff {
 }
 
 impl AdaptiveBackoff {
+    /// Create a new adaptive backoff manager with the given configuration
     pub fn new(config: PollConfig) -> Self {
         let min_interval = config.min_interval;
         Self {
@@ -136,6 +148,16 @@ impl AdaptiveBackoff {
         Duration::from_secs_f32(1.0 / self.config.max_polls_per_second)
     }
 
+    /// Reset backoff state (e.g., after successful reconnection)
+    pub fn reset(&mut self) {
+        self.current_interval = self.config.min_interval;
+        self.consecutive_empty = 0;
+        self.latency_backoff_interval = self.config.min_interval;
+        self.baseline_samples.clear();
+        self.baseline_response_time = None;
+        self.poll_count = 0;
+    }
+
     fn update_latency_baseline(&mut self, latency: Duration) {
         // Add to rolling window
         self.baseline_samples.push_back(latency);
@@ -171,11 +193,10 @@ impl AdaptiveBackoff {
         let mut sorted: Vec<Duration> = self.baseline_samples.iter().copied().collect();
         sorted.sort();
         let mid = sorted.len() / 2;
-        if sorted.len().is_multiple_of(2) {
-            Duration::from_secs_f32(f32::midpoint(
-                sorted[mid - 1].as_secs_f32(),
-                sorted[mid].as_secs_f32(),
-            ))
+        if sorted.len() % 2 == 0 {
+            Duration::from_secs_f32(
+                (sorted[mid - 1].as_secs_f32() + sorted[mid].as_secs_f32()) / 2.0,
+            )
         } else {
             sorted[mid]
         }
@@ -273,5 +294,24 @@ mod tests {
         // Use approximate comparison due to floating point imprecision
         assert!(cycle_time >= Duration::from_millis(199));
         assert!(cycle_time <= Duration::from_millis(201));
+    }
+
+    #[test]
+    fn test_reset() {
+        let config = PollConfig {
+            backoff_threshold: 1,
+            ..Default::default()
+        };
+        let mut backoff = AdaptiveBackoff::new(config);
+
+        // Trigger backoff
+        backoff.record(Duration::from_millis(50), false);
+        assert!(backoff.current_interval > Duration::from_millis(100));
+
+        // Reset
+        backoff.reset();
+        assert_eq!(backoff.current_interval, Duration::from_millis(100));
+        assert_eq!(backoff.consecutive_empty, 0);
+        assert_eq!(backoff.poll_count, 0);
     }
 }
