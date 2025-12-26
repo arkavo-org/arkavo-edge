@@ -287,7 +287,9 @@ impl LearningModule {
 
         // Normal Thompson Sampling selection
         let ranked = self.rank_agents(agent_ids, category).await;
-        ranked.first().map(|(id, score)| (id.clone(), *score, false))
+        ranked
+            .first()
+            .map(|(id, score)| (id.clone(), *score, false))
     }
 }
 

@@ -954,10 +954,7 @@ fn parse_yaml_properties(
                 .trim_matches('"')
                 .to_string();
         } else if trimmed.starts_with("purpose:") {
-            let value = trimmed
-                .strip_prefix("purpose:")
-                .unwrap_or("")
-                .trim();
+            let value = trimmed.strip_prefix("purpose:").unwrap_or("").trim();
             if value == "|" || value == "|-" || value == "|+" {
                 // Start multi-line YAML string
                 *in_purpose_multiline = true;

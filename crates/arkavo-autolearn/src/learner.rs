@@ -527,7 +527,8 @@ impl<C: CostFunction> AutoLearner<C> {
             // Permit is held for the duration of synthesis (RAII)
             let _permit = permit;
 
-            let result = run_synthesis_pipeline(signal, synthesizer, verifier, network, config).await;
+            let result =
+                run_synthesis_pipeline(signal, synthesizer, verifier, network, config).await;
 
             // Send result back (ignore error if receiver dropped)
             let _ = result_tx.send(result).await;
