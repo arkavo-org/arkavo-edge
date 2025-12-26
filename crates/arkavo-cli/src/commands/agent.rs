@@ -1064,19 +1064,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let server = A2aServer::new(server_config);
 
-    // Set agent metadata
-    server
-        .set_agent_metadata(
-            config.name.clone(),
-            config.purpose.clone(),
-            config.model.clone(),
-        )
-        .await;
-
-    // Set API keys in the server
-    server.set_api_keys(config.api_keys.clone()).await;
-
-    // Initialize LearningBus for gossip-based learning propagation
+    // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
         let keypair = Arc::new(AgentKeypair::generate());
         let gossip_config = GossipConfig::default();
@@ -1088,6 +1076,18 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         ))
     };
     server.set_learning_bus(learning_bus.clone()).await;
+
+    // Set agent metadata (this initializes the router which will be set on learning bus)
+    server
+        .set_agent_metadata(
+            config.name.clone(),
+            config.purpose.clone(),
+            config.model.clone(),
+        )
+        .await;
+
+    // Set API keys in the server
+    server.set_api_keys(config.api_keys.clone()).await;
 
     // Initialize MCP connections from agent config only.
     // Built-in tools are not registered - agents use only their configured MCP servers.

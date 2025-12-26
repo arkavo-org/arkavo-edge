@@ -113,8 +113,8 @@ pub struct LearningBus {
     policy_cache: Arc<RwLock<PolicyCache>>,
     /// Buffer for accumulating observations and episodes
     episode_buffer: Arc<RwLock<EpisodeBuffer>>,
-    /// Router for LLM calls during synthesis
-    router: Option<Arc<Router>>,
+    /// Router for LLM calls during synthesis (interior mutability for Arc usage)
+    router: Arc<RwLock<Option<Arc<Router>>>>,
     /// Observer for capturing tool call patterns
     tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
 }
@@ -173,7 +173,7 @@ impl LearningBus {
                 learning_config.observation_threshold,
                 learning_config.episode_threshold,
             ))),
-            router: None,
+            router: Arc::new(RwLock::new(None)),
             tool_pattern_observer: Arc::new(RwLock::new(ToolPatternObserver::new(
                 "unknown".to_string(),
             ))),
@@ -181,8 +181,8 @@ impl LearningBus {
     }
 
     /// Set the router for LLM-based synthesis
-    pub fn set_router(&mut self, router: Arc<Router>) {
-        self.router = Some(router);
+    pub async fn set_router(&self, router: Arc<Router>) {
+        *self.router.write().await = Some(router);
     }
 
     /// Get agent ID
@@ -439,7 +439,8 @@ impl LearningBus {
         observations: &[ToolObservation],
         category: &str,
     ) -> Result<Episode, String> {
-        let router = self.router.as_ref().ok_or("Router not configured")?;
+        let router_guard = self.router.read().await;
+        let router = router_guard.as_ref().ok_or("Router not configured")?;
         synthesis::synthesize_episode(
             router,
             &self.agent_id,
@@ -456,7 +457,8 @@ impl LearningBus {
         episodes: &[Episode],
         category: &str,
     ) -> Result<Option<Lesson>, String> {
-        let router = self.router.as_ref().ok_or("Router not configured")?;
+        let router_guard = self.router.read().await;
+        let router = router_guard.as_ref().ok_or("Router not configured")?;
         synthesis::synthesize_lesson(
             router,
             &self.agent_id,

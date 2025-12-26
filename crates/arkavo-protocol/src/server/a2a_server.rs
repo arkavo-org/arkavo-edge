@@ -356,8 +356,15 @@ impl A2aServer {
         info!("Initializing router for dynamic model selection");
         match arkavo_router::Router::new().await {
             Ok(router) => {
-                *self.router.write().await = Some(Arc::new(router));
+                let router = Arc::new(router);
+                *self.router.write().await = Some(router.clone());
                 info!("✓ Successfully initialized router");
+
+                // Set router on learning bus for LLM-based synthesis
+                if let Some(bus) = self.learning_bus.read().await.as_ref() {
+                    bus.set_router(router.clone()).await;
+                    info!("✓ Router configured for learning synthesis");
+                }
             }
             Err(e) => {
                 error!(error = %e, "✗ Failed to initialize router");
