@@ -83,9 +83,12 @@ impl LearningModule {
     }
 
     /// Get raw Thompson sample for an agent (for ranking)
+    ///
+    /// Uses blended sampling to adapt to concept drift: blends global prior
+    /// with windowed prior for faster response to performance changes.
     pub async fn thompson_sample(&self, agent_id: &str, category: Option<&str>) -> f64 {
         let utility = self.get_or_create_agent(agent_id).await;
-        utility.sample(category)
+        utility.sample_blended(category)
     }
 
     /// Immediate update: Record burst-level feedback
@@ -236,6 +239,56 @@ impl LearningModule {
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored
     }
+
+    /// Select an agent with guaranteed probationary budget allocation
+    ///
+    /// Ensures probationary agents receive at least `probationary_budget_ratio`
+    /// portion of selections, enabling exploration of new/unknown agents.
+    ///
+    /// Returns `(agent_id, score, was_probation_selected)` where `was_probation_selected`
+    /// is true if a probationary agent was force-selected for exploration.
+    pub async fn select_with_probation_guarantee(
+        &self,
+        agent_ids: &[String],
+        category: Option<&str>,
+    ) -> Option<(String, f64, bool)> {
+        if agent_ids.is_empty() {
+            return None;
+        }
+
+        let agents = self.agents.read().await;
+
+        // Collect probationary agents
+        let probationary: Vec<_> = agent_ids
+            .iter()
+            .filter(|id| agents.get(*id).map(|u| u.probationary).unwrap_or(true))
+            .collect();
+
+        drop(agents);
+
+        // With probability probationary_budget_ratio, select a probationary agent
+        if !probationary.is_empty() {
+            use rand::Rng;
+            // Generate random values before any await points to avoid Send issues
+            let (should_select_probationary, idx) = {
+                let mut rng = rand::thread_rng();
+                let should = rng.r#gen::<f64>() < self.config.probationary_budget_ratio;
+                let idx = rng.gen_range(0..probationary.len());
+                (should, idx)
+            };
+
+            if should_select_probationary {
+                // Force selection of a random probationary agent
+                let agent_id = probationary[idx].clone();
+                let score = self.thompson_sample(&agent_id, category).await;
+                return Some((agent_id, score, true));
+            }
+        }
+
+        // Normal Thompson Sampling selection
+        let ranked = self.rank_agents(agent_ids, category).await;
+        ranked.first().map(|(id, score)| (id.clone(), *score, false))
+    }
 }
 
 impl Default for LearningModule {
@@ -385,6 +438,77 @@ mod tests {
         assert!(
             good_first > 15,
             "Good agent should be ranked first most of the time"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_probation_guarantee_selects_new_agents() {
+        let config = LearningConfig {
+            probationary_budget_ratio: 1.0, // Force probation selection
+            ..Default::default()
+        };
+        let module = LearningModule::with_config(config);
+
+        // Create one established agent (50+ observations)
+        for _ in 0..50 {
+            module
+                .immediate_update(
+                    "established",
+                    &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+
+        // Select from pool including a new agent
+        let result = module
+            .select_with_probation_guarantee(
+                &["established".to_string(), "new-agent".to_string()],
+                None,
+            )
+            .await;
+
+        let (selected, _, was_probation) = result.unwrap();
+        assert_eq!(selected, "new-agent");
+        assert!(was_probation);
+    }
+
+    #[tokio::test]
+    async fn test_probation_guarantee_zero_ratio_uses_thompson() {
+        let config = LearningConfig {
+            probationary_budget_ratio: 0.0, // Never force probation
+            ..Default::default()
+        };
+        let module = LearningModule::with_config(config);
+
+        // Create a high-performing agent
+        for _ in 0..20 {
+            module
+                .immediate_update(
+                    "good-agent",
+                    &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+
+        // Select should usually pick good-agent via Thompson Sampling
+        let mut good_selected = 0;
+        for _ in 0..10 {
+            if let Some((id, _, was_probation)) = module
+                .select_with_probation_guarantee(
+                    &["good-agent".to_string(), "unknown".to_string()],
+                    None,
+                )
+                .await
+            {
+                if id == "good-agent" {
+                    good_selected += 1;
+                }
+                assert!(!was_probation); // Never forced
+            }
+        }
+        assert!(
+            good_selected >= 5,
+            "Good agent should be selected most times"
         );
     }
 }

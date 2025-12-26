@@ -134,6 +134,8 @@ pub struct AgentUtility {
     pub window_successes: u64,
     /// Windowed failures (for concept drift)
     pub window_failures: u64,
+    /// Windowed prior for fast concept drift adaptation
+    pub window_prior: BetaPrior,
     /// Task category performance (category -> BetaPrior)
     pub category_priors: HashMap<String, BetaPrior>,
     /// When the agent was first seen
@@ -162,6 +164,7 @@ impl AgentUtility {
             total_failures: 0,
             window_successes: 0,
             window_failures: 0,
+            window_prior: BetaPrior::cold_start(),
             category_priors: HashMap::new(),
             created_at: Utc::now(),
             probationary: true,
@@ -177,10 +180,12 @@ impl AgentUtility {
     pub fn record_outcome(&mut self, feedback: &BurstFeedback, max_recent: usize) {
         if feedback.success {
             self.prior.record_success();
+            self.window_prior.record_success();
             self.total_successes += 1;
             self.window_successes += 1;
         } else {
             self.prior.record_failure();
+            self.window_prior.record_failure();
             self.total_failures += 1;
             self.window_failures += 1;
         }
@@ -227,6 +232,28 @@ impl AgentUtility {
         self.get_prior(category).sample_default()
     }
 
+    /// Sample blending global and windowed priors for concept drift adaptation
+    ///
+    /// Uses weighted average: `(1 - window_weight) * global + window_weight * windowed`
+    /// The `window_weight` increases as windowed observations accumulate.
+    pub fn sample_blended(&self, category: Option<&str>) -> f64 {
+        let global_prior = self.get_prior(category);
+
+        // Weight windowed prior by its observation count relative to a threshold
+        let window_obs = (self.window_successes + self.window_failures) as f64;
+        let window_weight = (window_obs / 20.0).min(0.5); // Max 50% weight at 20+ observations
+
+        if window_weight < 0.01 {
+            // Not enough windowed data, use global only
+            return global_prior.sample_default();
+        }
+
+        let global_sample = global_prior.sample_default();
+        let window_sample = self.window_prior.sample_default();
+
+        global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+    }
+
     /// Total observations for this agent
     pub fn total_observations(&self) -> u64 {
         self.total_successes + self.total_failures
@@ -239,10 +266,11 @@ impl AgentUtility {
         }
     }
 
-    /// Decay window counts for concept drift adaptation
+    /// Decay window counts and prior for concept drift adaptation
     pub fn decay_window(&mut self, factor: f64) {
         self.window_successes = (self.window_successes as f64 * factor) as u64;
         self.window_failures = (self.window_failures as f64 * factor) as u64;
+        self.window_prior.decay(factor);
     }
 }
 
@@ -460,5 +488,35 @@ mod tests {
         utility.total_successes += 1;
         utility.check_graduation(50);
         assert!(!utility.probationary);
+    }
+
+    #[test]
+    fn test_sample_blended_adapts_to_recent_failures() {
+        let mut utility = AgentUtility::new("test".to_string());
+
+        // Add 50 global successes (high performing historically)
+        for _ in 0..50 {
+            utility.prior.record_success();
+            utility.total_successes += 1;
+        }
+
+        // Now add 20 windowed failures (recent poor performance)
+        for _ in 0..20 {
+            utility.window_prior.record_failure();
+            utility.window_failures += 1;
+        }
+
+        // Blended sample should be lower than pure global sample
+        let mut blended_sum = 0.0;
+        let mut global_sum = 0.0;
+        for _ in 0..100 {
+            blended_sum += utility.sample_blended(None);
+            global_sum += utility.prior.sample_default();
+        }
+
+        assert!(
+            blended_sum / 100.0 < global_sum / 100.0,
+            "Blended sample should reflect recent failures"
+        );
     }
 }
