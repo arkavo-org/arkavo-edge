@@ -52,6 +52,8 @@ pub struct LearningBus {
     keypair: Arc<AgentKeypair>,
     /// Channel for outgoing gossip messages (peer_id, message)
     gossip_out_tx: broadcast::Sender<(String, GossipMessage)>,
+    /// Peer addresses for RPC calls (peer_id -> address)
+    peer_addresses: Arc<RwLock<std::collections::HashMap<String, String>>>,
 }
 
 impl LearningBus {
@@ -86,6 +88,7 @@ impl LearningBus {
             learning,
             keypair,
             gossip_out_tx,
+            peer_addresses: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
@@ -129,10 +132,16 @@ impl LearningBus {
     }
 
     /// Add a peer to gossip protocol (local mDNS discovery, key exchange deferred)
-    pub async fn add_peer_discovered(&self, peer_id: String) {
-        tracing::info!("Adding discovered peer to gossip: {}", peer_id);
+    pub async fn add_peer_discovered(&self, peer_id: String, address: Option<String>) {
+        tracing::info!("Adding discovered peer to gossip: {} (addr: {:?})", peer_id, address);
         let gossip = self.gossip.write().await;
-        gossip.add_peer(peer_id).await;
+        gossip.add_peer(peer_id.clone()).await;
+        drop(gossip);
+
+        // Store address if provided
+        if let Some(addr) = address {
+            self.peer_addresses.write().await.insert(peer_id, addr);
+        }
     }
 
     /// Remove a peer from gossip protocol
@@ -140,6 +149,20 @@ impl LearningBus {
         tracing::info!("Removing peer from gossip: {}", peer_id);
         let gossip = self.gossip.write().await;
         gossip.remove_peer(peer_id).await;
+        drop(gossip);
+
+        // Remove address
+        self.peer_addresses.write().await.remove(peer_id);
+    }
+
+    /// Get address for a peer
+    pub async fn get_peer_address(&self, peer_id: &str) -> Option<String> {
+        self.peer_addresses.read().await.get(peer_id).cloned()
+    }
+
+    /// Get all peer addresses
+    pub async fn get_all_peer_addresses(&self) -> std::collections::HashMap<String, String> {
+        self.peer_addresses.read().await.clone()
     }
 
     /// Get the number of connected peers

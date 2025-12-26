@@ -1311,7 +1311,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     }
 
     // Channel for peer discovery events (bridges sync mDNS thread to async LearningBus)
-    let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<(String, bool)>(100); // (peer_id, is_add)
+    // Tuple: (peer_id, is_add, address)
+    let (peer_tx, mut peer_rx) =
+        tokio::sync::mpsc::channel::<(String, bool, Option<String>)>(100);
 
     // Start mDNS broadcasting if enabled
     let mdns_thread_handle = if config.mdns_enabled {
@@ -1345,26 +1347,87 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     let mut gossip_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     if config.a2a_enabled {
-        // Start anti-entropy background task (30s interval)
+        // Start anti-entropy background task (5s interval)
         let learning_bus_ae = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            start_anti_entropy_loop(learning_bus_ae, Duration::from_secs(30)).await;
+            start_anti_entropy_loop(learning_bus_ae, Duration::from_secs(5)).await;
         }));
 
-        // Start lesson propagation background task (60s interval)
+        // Start lesson propagation background task (15s interval)
         let learning_bus_lp = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(60)).await;
+            start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(15)).await;
         }));
 
         // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
         let learning_bus_peers = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            while let Some((peer_id, is_add)) = peer_rx.recv().await {
+            while let Some((peer_id, is_add, address)) = peer_rx.recv().await {
                 if is_add {
-                    learning_bus_peers.add_peer_discovered(peer_id).await;
+                    learning_bus_peers.add_peer_discovered(peer_id, address).await;
                 } else {
                     learning_bus_peers.remove_peer(&peer_id).await;
+                }
+            }
+        }));
+
+        // Start gossip message transport (sends outgoing messages to peers via A2A)
+        let learning_bus_transport = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            use arkavo_protocol::http::HttpTransport;
+            use arkavo_protocol::transport::{A2aEndpoint, A2aRequest, A2aTransport, TransportConfig};
+
+            let mut rx = learning_bus_transport.subscribe_gossip_out();
+            loop {
+                match rx.recv().await {
+                    Ok((peer_id, message)) => {
+                        // Look up peer address
+                        if let Some(addr) = learning_bus_transport.get_peer_address(&peer_id).await
+                        {
+                            // Create JSON-RPC request for gossip/message
+                            // jsonrpsee expects params as {"message": <value>}
+                            let params = serde_json::json!({
+                                "message": message
+                            });
+                            let request = A2aRequest::new("gossip/message", params);
+
+                            // Create transport and send (allow non-TLS for local mDNS discovery)
+                            let mut config = TransportConfig::default();
+                            config.tls_config.require_tls = false;
+                            let transport = match HttpTransport::new(config) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    tracing::warn!("Failed to create transport: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            let endpoint = A2aEndpoint {
+                                url: addr.clone(),
+                                agent_id: peer_id.clone(),
+                                public_key: None,
+                            };
+                            if let Err(e) = transport.connect(&endpoint).await {
+                                tracing::warn!("Failed to connect to {}: {}", peer_id, e);
+                                continue;
+                            }
+
+                            match transport.send_request(request).await {
+                                Ok(_response) => {
+                                    tracing::debug!("Gossip sent to {}", peer_id);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to send gossip to {}: {}", peer_id, e);
+                                }
+                            }
+                        } else {
+                            tracing::debug!("No address for peer {}, skipping gossip", peer_id);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Gossip transport lagged {} messages", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         }));
@@ -1438,7 +1501,7 @@ fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
-    #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool)>,
+    #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool, Option<String>)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -1493,13 +1556,20 @@ fn broadcast_agent_mdns_sync(
                                 if let Some(purpose) = info.get_property_val_str("purpose") {
                                     println!("  - Purpose: {purpose}");
                                 }
-                                if let Some(addr) = info.get_addresses().iter().next() {
-                                    println!("  - Address: {}:{}", addr, info.get_port());
+                                // Get peer address
+                                let peer_addr = info
+                                    .get_addresses()
+                                    .iter()
+                                    .next()
+                                    .map(|addr| format!("http://{}:{}", addr, info.get_port()));
+
+                                if let Some(ref addr) = peer_addr {
+                                    println!("  - Address: {}", addr);
                                 }
 
                                 // Notify LearningBus of new peer (only once per agent_id)
                                 if discovered_peers.insert(agent_id.to_string()) {
-                                    let _ = peer_tx.blocking_send((agent_id.to_string(), true));
+                                    let _ = peer_tx.blocking_send((agent_id.to_string(), true, peer_addr));
                                 }
                             }
                         }
@@ -1508,7 +1578,7 @@ fn broadcast_agent_mdns_sync(
                             // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
                             if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next() {
                                 if discovered_peers.remove(agent_id) {
-                                    let _ = peer_tx.blocking_send((agent_id.to_string(), false));
+                                    let _ = peer_tx.blocking_send((agent_id.to_string(), false, None));
                                 }
                             }
                         }

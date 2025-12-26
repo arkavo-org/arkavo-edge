@@ -710,6 +710,7 @@ impl A2aServer {
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,
+            learning_bus: self.learning_bus.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

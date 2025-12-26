@@ -179,6 +179,13 @@ pub trait A2aRpc {
         &self,
         device_id: String,
     ) -> RpcResult<crate::registration::RegistrationStatus>;
+
+    /// Handle incoming gossip message from peer
+    #[method(name = "gossip/message")]
+    async fn gossip_message(
+        &self,
+        message: arkavo_gossip::GossipMessage,
+    ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>>;
 }
 
 pub struct A2aRpcImpl {
@@ -199,6 +206,8 @@ pub struct A2aRpcImpl {
     conductor: Arc<Conductor<InMemoryTaskStore>>,
     /// Router for LLM calls during HRM task execution
     router: Option<Arc<arkavo_router::Router>>,
+    /// Learning bus for gossip-based learning propagation
+    learning_bus: Option<Arc<LearningBus>>,
 }
 
 #[async_trait]
@@ -549,5 +558,38 @@ impl A2aRpcServer for A2aRpcImpl {
             device_id,
         )
         .await
+    }
+
+    async fn gossip_message(
+        &self,
+        message: arkavo_gossip::GossipMessage,
+    ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>> {
+        let timer = RpcTimer::new("gossip_message".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Handle gossip message via LearningBus
+        match &self.learning_bus {
+            Some(bus) => {
+                let responses = bus.handle_gossip(message).await;
+                tracing::debug!("Gossip message processed, {} responses", responses.len());
+                timer.success();
+                Ok(responses)
+            }
+            None => {
+                tracing::warn!("Gossip message received but LearningBus not configured");
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "LearningBus not configured",
+                    None::<()>,
+                ))
+            }
+        }
     }
 }
