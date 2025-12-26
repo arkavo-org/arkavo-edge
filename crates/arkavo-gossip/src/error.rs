@@ -26,6 +26,10 @@ pub enum GossipError {
     #[error("Patch not found: {0}")]
     PatchNotFound(Uuid),
 
+    /// Lesson not found
+    #[error("Lesson not found: {0}")]
+    LessonNotFound(Uuid),
+
     /// Consensus timed out
     #[error("Consensus timed out for patch {0}")]
     ConsensusTimeout(Uuid),

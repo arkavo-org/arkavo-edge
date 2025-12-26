@@ -8,6 +8,7 @@ use arkavo_crypto::{AgentKeypair, AgentPublicKey};
 use sha2::{Digest, Sha256};
 
 use crate::error::{GossipError, GossipResult};
+use crate::learning_message::{LessonAnnouncement, LessonVote};
 use crate::message::{PatchAnnouncement, PatchVote};
 
 /// Registry of known public keys for verification
@@ -118,6 +119,36 @@ impl PatchVerifier {
         Ok(())
     }
 
+    /// Verify a lesson announcement signature
+    pub fn verify_lesson_announcement(&self, announcement: &LessonAnnouncement) -> GossipResult<()> {
+        let pubkey = self
+            .registry
+            .get(&announcement.originator)
+            .ok_or_else(|| GossipError::UnknownOriginator(announcement.originator.clone()))?;
+
+        let content = announcement.content_to_sign();
+        pubkey
+            .verify(&content, &announcement.signature)
+            .map_err(GossipError::SignatureVerification)?;
+
+        Ok(())
+    }
+
+    /// Verify a lesson vote signature
+    pub fn verify_lesson_vote(&self, vote: &LessonVote) -> GossipResult<()> {
+        let pubkey = self
+            .registry
+            .get(&vote.voter)
+            .ok_or_else(|| GossipError::UnknownOriginator(vote.voter.clone()))?;
+
+        let content = vote.content_to_sign();
+        pubkey
+            .verify(&content, &vote.signature)
+            .map_err(GossipError::SignatureVerification)?;
+
+        Ok(())
+    }
+
     /// Get the underlying key registry
     #[must_use]
     pub fn registry(&self) -> &KeyRegistry {
@@ -143,6 +174,25 @@ pub fn sign_announcement(
 
 /// Sign a patch vote
 pub fn sign_vote(vote: &mut PatchVote, keypair: &AgentKeypair) -> GossipResult<()> {
+    let content = vote.content_to_sign();
+    let signature = keypair.sign(&content);
+    vote.signature = signature;
+    Ok(())
+}
+
+/// Sign a lesson announcement
+pub fn sign_lesson_announcement(
+    announcement: &mut LessonAnnouncement,
+    keypair: &AgentKeypair,
+) -> GossipResult<()> {
+    let content = announcement.content_to_sign();
+    let signature = keypair.sign(&content);
+    announcement.signature = signature;
+    Ok(())
+}
+
+/// Sign a lesson vote
+pub fn sign_lesson_vote(vote: &mut LessonVote, keypair: &AgentKeypair) -> GossipResult<()> {
     let content = vote.content_to_sign();
     let signature = keypair.sign(&content);
     vote.signature = signature;

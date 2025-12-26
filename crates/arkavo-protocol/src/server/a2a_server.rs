@@ -17,6 +17,7 @@ use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 
 use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
+use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
 use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
@@ -40,6 +41,8 @@ pub struct A2aServer {
     agent_plan: Arc<tokio::sync::RwLock<AgentPlan>>,
     planning_completed: Arc<std::sync::atomic::AtomicBool>,
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
+    /// Learning bus for gossip-based learning propagation
+    learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
 }
 
 impl A2aServer {
@@ -67,11 +70,22 @@ impl A2aServer {
             agent_plan: Arc::new(tokio::sync::RwLock::new(AgentPlan::default())),
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
+            learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
         self.mcp_registry.clone()
+    }
+
+    /// Set the learning bus for gossip-based learning
+    pub async fn set_learning_bus(&self, bus: Arc<LearningBus>) {
+        *self.learning_bus.write().await = Some(bus);
+    }
+
+    /// Get the learning bus reference
+    pub async fn learning_bus(&self) -> Option<Arc<LearningBus>> {
+        self.learning_bus.read().await.clone()
     }
 
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {

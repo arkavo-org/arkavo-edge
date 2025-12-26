@@ -1024,9 +1024,15 @@ fn parse_yaml_properties(
 #[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
+    use arkavo_crypto::AgentKeypair;
+    use arkavo_gossip::GossipConfig;
+    use arkavo_protocol::server::{
+        start_anti_entropy_loop, start_lesson_propagation_loop, LearningBus,
+    };
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
@@ -1069,6 +1075,19 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
+
+    // Initialize LearningBus for gossip-based learning propagation
+    let learning_bus = {
+        let keypair = Arc::new(AgentKeypair::generate());
+        let gossip_config = GossipConfig::default();
+        Arc::new(LearningBus::new(
+            config.name.clone(),
+            "default-swarm".to_string(),
+            keypair,
+            gossip_config,
+        ))
+    };
+    server.set_learning_bus(learning_bus.clone()).await;
 
     // Initialize MCP connections from agent config only.
     // Built-in tools are not registered - agents use only their configured MCP servers.
@@ -1313,7 +1332,8 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         None
     };
 
-    // Connect to peer agents if configured
+    // Connect to peer agents if configured and start gossip background tasks
+    let mut gossip_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     if config.a2a_enabled && !config.peers.is_empty() {
         use crate::peer_manager::PeerManager;
 
@@ -1335,6 +1355,46 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         if !quiet && peer_manager.has_peers() {
             println!("Connected to {} peer(s)", peer_manager.peer_count());
         }
+
+        // Start gossip transport background task
+        // Note: For now, we skip the gossip transport as PeerManager uses std::sync::RwLock
+        // which doesn't work well with async. In the future, we may need to use
+        // tokio::sync::RwLock in PeerManager or use a message queue pattern.
+        let learning_bus_transport = learning_bus.clone();
+        let _peer_manager_transport = peer_manager.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            // Placeholder: gossip transport will be implemented when PeerManager
+            // is refactored to use async-compatible locks
+            let mut rx = learning_bus_transport.subscribe_gossip_out();
+            loop {
+                match rx.recv().await {
+                    Ok((peer_id, _message)) => {
+                        // TODO: Route message to peer when PeerManager supports async
+                        tracing::debug!("Gossip message queued for peer: {}", peer_id);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Gossip transport lagged {} messages", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }));
+
+        // Start anti-entropy background task
+        let learning_bus_ae = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            start_anti_entropy_loop(learning_bus_ae, Duration::from_secs(30)).await;
+        }));
+
+        // Start lesson propagation background task
+        let learning_bus_lp = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(60)).await;
+        }));
+
+        if !quiet {
+            println!("Gossip learning: started with {} peer(s)", peer_manager.peer_count());
+        }
     }
 
     // Start push-based notification handler (always on by default)
@@ -1355,6 +1415,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Stop notification handler if running
     if let Some(handle) = notification_handle {
+        handle.abort();
+    }
+
+    // Stop gossip background tasks
+    for handle in gossip_handles {
         handle.abort();
     }
 

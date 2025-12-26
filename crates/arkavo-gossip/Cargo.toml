@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Gossip protocol for decentralized patch propagation"
+description = "Gossip protocol for decentralized patch and lesson propagation"
 
 [dependencies]
 arkavo-crypto = { path = "../arkavo-crypto" }

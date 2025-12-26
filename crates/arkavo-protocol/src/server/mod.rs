@@ -1,7 +1,9 @@
 mod a2a_server;
 mod conductor;
 mod config_helpers;
+mod gossip_transport;
 mod handlers;
+mod learning_bus;
 mod mcp_bridge;
 mod startup;
 mod tool_memory;
@@ -9,6 +11,10 @@ mod tool_memory;
 pub use a2a_server::A2aServer;
 pub use conductor::execute_with_conductor;
 pub use config_helpers::AgentMetadata;
+pub use gossip_transport::{
+    start_anti_entropy_loop, start_gossip_transport, start_lesson_propagation_loop,
+};
+pub use learning_bus::{LearningBus, LearningEvent};
 pub use mcp_bridge::McpBridgeTool;
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};

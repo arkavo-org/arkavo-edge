@@ -53,6 +53,7 @@ arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }

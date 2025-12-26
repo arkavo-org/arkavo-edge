@@ -1,6 +1,6 @@
 //! Gossip protocol implementation
 //!
-//! Implements epidemic-style gossip for patch propagation across agents.
+//! Implements epidemic-style gossip for patch and lesson propagation across agents.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 use crate::consensus::{ConsensusState, ConsensusStatus, QuorumConfig};
 use crate::error::{GossipError, GossipResult};
+use crate::learning_message::{LessonAnnouncement, LessonStatus};
+use crate::lesson_consensus::LessonConsensusState;
 use crate::message::{
     AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
     PatchRequest, PatchStatus, PatchVote,
@@ -60,20 +62,37 @@ struct PatchState {
     content: Option<Vec<u8>>,
 }
 
+/// State for a tracked lesson
+#[derive(Debug, Clone)]
+pub(crate) struct LessonState {
+    /// The announcement
+    pub(crate) announcement: LessonAnnouncement,
+    /// Current status
+    pub(crate) status: LessonStatus,
+    /// Consensus state for voting
+    pub(crate) consensus: LessonConsensusState,
+    /// Lesson content if received
+    pub(crate) content: Option<Vec<u8>>,
+}
+
 /// The gossip protocol handler
 pub struct GossipProtocol {
     /// Our agent ID
-    agent_id: String,
+    pub(crate) agent_id: String,
     /// Protocol configuration
-    config: GossipConfig,
+    pub(crate) config: GossipConfig,
     /// Known peers
-    peers: Arc<RwLock<HashSet<String>>>,
+    pub(crate) peers: Arc<RwLock<HashSet<String>>>,
     /// Tracked patches
     patches: Arc<RwLock<HashMap<Uuid, PatchState>>>,
+    /// Tracked lessons
+    pub(crate) lessons: Arc<RwLock<HashMap<Uuid, LessonState>>>,
     /// Message verifier
-    verifier: Arc<RwLock<PatchVerifier>>,
-    /// Seen message IDs (for deduplication)
+    pub(crate) verifier: Arc<RwLock<PatchVerifier>>,
+    /// Seen patch IDs (for deduplication)
     seen_messages: Arc<RwLock<HashSet<Uuid>>>,
+    /// Seen lesson IDs (for deduplication)
+    pub(crate) seen_lesson_ids: Arc<RwLock<HashSet<Uuid>>>,
 }
 
 impl GossipProtocol {
@@ -84,8 +103,10 @@ impl GossipProtocol {
             config,
             peers: Arc::new(RwLock::new(HashSet::new())),
             patches: Arc::new(RwLock::new(HashMap::new())),
+            lessons: Arc::new(RwLock::new(HashMap::new())),
             verifier: Arc::new(RwLock::new(PatchVerifier::new(key_registry))),
             seen_messages: Arc::new(RwLock::new(HashSet::new())),
+            seen_lesson_ids: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -114,15 +135,11 @@ impl GossipProtocol {
             GossipMessage::PatchRequest(request) => self.handle_request(request).await,
             GossipMessage::PatchDelivery(delivery) => self.handle_delivery(delivery).await,
             GossipMessage::AntiEntropy(digest) => self.handle_anti_entropy(digest).await,
-
-            // Learning messages - propagate for now, full handling in LearningModule
-            GossipMessage::LessonAnnounce(ann) => Ok(vec![GossipMessage::LessonAnnounce(ann)]),
-            GossipMessage::LessonVote(vote) => Ok(vec![GossipMessage::LessonVote(vote)]),
-            GossipMessage::LessonRequest(req) => Ok(vec![GossipMessage::LessonRequest(req)]),
-            GossipMessage::LessonDelivery(_) | GossipMessage::LessonDigest(_) => {
-                // No propagation needed for delivery/digest
-                Ok(vec![])
-            }
+            GossipMessage::LessonAnnounce(ann) => self.handle_lesson_announce(ann).await,
+            GossipMessage::LessonVote(vote) => self.handle_lesson_vote(vote).await,
+            GossipMessage::LessonRequest(req) => self.handle_lesson_request(req).await,
+            GossipMessage::LessonDelivery(delivery) => self.handle_lesson_delivery(delivery).await,
+            GossipMessage::LessonDigest(digest) => self.handle_lesson_digest(digest).await,
         }
     }
 
