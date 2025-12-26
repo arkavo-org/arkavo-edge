@@ -965,7 +965,7 @@ fn parse_yaml_properties(
             }
         } else if *in_purpose_multiline {
             // Collect multi-line purpose content
-            if line.starts_with("  ") || line.starts_with("\t") {
+            if line.starts_with("  ") || line.starts_with('\t') {
                 // Indented line - part of multi-line value
                 purpose_lines.push(line.trim().to_string());
             } else if trimmed.is_empty() {
@@ -1438,27 +1438,25 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                             Ok(response) => {
                                 use arkavo_protocol::transport::A2aResponse;
                                 // Parse the response to get their public key
-                                if let A2aResponse::Success { result, .. } = response {
-                                    if let Some(their_key_b64) = result.as_str() {
-                                        match arkavo_crypto::AgentPublicKey::from_base64(
-                                            their_key_b64,
-                                        ) {
-                                            Ok(their_key) => {
-                                                learning_bus_peers
-                                                    .register_peer_key(peer_id.clone(), their_key)
-                                                    .await;
-                                                tracing::info!(
-                                                    "Key exchange completed with peer: {}",
-                                                    peer_id
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    "Invalid public key from {}: {}",
-                                                    peer_id,
-                                                    e
-                                                );
-                                            }
+                                if let A2aResponse::Success { result, .. } = response
+                                    && let Some(their_key_b64) = result.as_str()
+                                {
+                                    match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64) {
+                                        Ok(their_key) => {
+                                            learning_bus_peers
+                                                .register_peer_key(peer_id.clone(), their_key)
+                                                .await;
+                                            tracing::info!(
+                                                "Key exchange completed with peer: {}",
+                                                peer_id
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Invalid public key from {}: {}",
+                                                peer_id,
+                                                e
+                                            );
                                         }
                                     }
                                 }
@@ -1669,7 +1667,7 @@ fn broadcast_agent_mdns_sync(
                                     .map(|addr| format!("http://{}:{}", addr, info.get_port()));
 
                                 if let Some(ref addr) = peer_addr {
-                                    println!("  - Address: {}", addr);
+                                    println!("  - Address: {addr}");
                                 }
 
                                 // Notify LearningBus of new peer (only once per agent_id)
@@ -1685,11 +1683,11 @@ fn broadcast_agent_mdns_sync(
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             println!("Agent disconnected: {fullname}");
                             // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
-                            if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next() {
-                                if discovered_peers.remove(agent_id) {
-                                    let _ =
-                                        peer_tx.blocking_send((agent_id.to_string(), false, None));
-                                }
+                            if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next()
+                                && discovered_peers.remove(agent_id)
+                            {
+                                let _ =
+                                    peer_tx.blocking_send((agent_id.to_string(), false, None));
                             }
                         }
                         _ => {}
@@ -1797,10 +1795,8 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
     ) -> Result<Vec<arkavo_mcp::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
         // Convert from cli Tool to McpTool
         let cli_tools = self.inner.list_tools().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
         let protocol_tools = cli_tools
             .into_iter()
@@ -1822,10 +1818,8 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
         self.inner
             .call_tool(tool_name, arguments, llm_provider)
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }

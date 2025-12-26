@@ -624,7 +624,7 @@ impl A2aServer {
                                     let event = super::learning_bus::LearningEvent::ToolCall {
                                         tool_name: notification.method.clone(),
                                         args: notification.params.clone().unwrap_or_default(),
-                                        result: format!("Error: {}", e),
+                                        result: format!("Error: {e}"),
                                         success: false,
                                         latency_ms,
                                     };

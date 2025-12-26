@@ -626,7 +626,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.error();
                 return Err(ErrorObjectOwned::owned(
                     -32602,
-                    format!("Invalid public key: {}", e),
+                    format!("Invalid public key: {e}"),
                     None::<()>,
                 ));
             }

@@ -193,10 +193,11 @@ impl AdaptiveBackoff {
         let mut sorted: Vec<Duration> = self.baseline_samples.iter().copied().collect();
         sorted.sort();
         let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 {
-            Duration::from_secs_f32(
-                (sorted[mid - 1].as_secs_f32() + sorted[mid].as_secs_f32()) / 2.0,
-            )
+        if sorted.len().is_multiple_of(2) {
+            Duration::from_secs_f32(f32::midpoint(
+                sorted[mid - 1].as_secs_f32(),
+                sorted[mid].as_secs_f32(),
+            ))
         } else {
             sorted[mid]
         }
