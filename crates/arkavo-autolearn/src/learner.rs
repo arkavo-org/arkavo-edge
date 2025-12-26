@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -264,15 +264,17 @@ impl<C: CostFunction> AutoLearner<C> {
                     tracing::warn!("Failed to process signal: {}", e);
                 }
             } else {
-                // Concurrent mode: spawn synthesis tasks until semaphore is full
-                while self.synthesis_semaphore.available_permits() > 0 {
+                // Concurrent mode: acquire permit BEFORE spawn to enforce backpressure
+                while let Ok(permit) = self.synthesis_semaphore.clone().try_acquire_owned() {
                     let Some(signal) = self.aggregator.next_signal() else {
+                        drop(permit); // Return permit if no signals
                         break;
                     };
                     if signal.severity >= self.config.synthesis_threshold {
-                        self.spawn_synthesis(signal);
+                        self.spawn_synthesis_with_permit(signal, permit);
+                    } else {
+                        drop(permit); // Return permit for below-threshold signals
                     }
-                    // Signals below threshold are dropped (lowest priority evicted)
                 }
             }
 
@@ -495,7 +497,9 @@ impl<C: CostFunction> AutoLearner<C> {
                 continue;
             }
 
-            let graph = &self.ensemble.production().graph;
+            // Use the graph that was actually probed, not current production
+            // (production may have changed between enqueue and result)
+            let graph = &result.task.graph;
             for probe in result.probes {
                 tracing::debug!(
                     "Probe found boundary at output {}, distance {}",
@@ -508,12 +512,11 @@ impl<C: CostFunction> AutoLearner<C> {
         }
     }
 
-    /// Spawn a concurrent synthesis task
+    /// Spawn a concurrent synthesis task with pre-acquired permit
     ///
-    /// The task acquires a semaphore permit and runs the synthesis pipeline.
-    /// Results are sent back via the synthesis result channel.
-    fn spawn_synthesis(&self, signal: PainSignal) {
-        let semaphore = self.synthesis_semaphore.clone();
+    /// The permit is acquired BEFORE spawn to enforce backpressure and prevent
+    /// spawning more tasks than max_concurrent_synthesis.
+    fn spawn_synthesis_with_permit(&self, signal: PainSignal, permit: OwnedSemaphorePermit) {
         let synthesizer = self.synthesizer.clone();
         let verifier = self.verifier.clone();
         let network = self.network.clone();
@@ -521,14 +524,8 @@ impl<C: CostFunction> AutoLearner<C> {
         let result_tx = self.synthesis_result_tx.clone();
 
         tokio::spawn(async move {
-            // Acquire semaphore permit (limits concurrency)
-            let _permit = match semaphore.acquire().await {
-                Ok(permit) => permit,
-                Err(_) => {
-                    tracing::warn!("Semaphore closed, synthesis cancelled");
-                    return;
-                }
-            };
+            // Permit is held for the duration of synthesis (RAII)
+            let _permit = permit;
 
             let result = run_synthesis_pipeline(signal, synthesizer, verifier, network, config).await;
 
