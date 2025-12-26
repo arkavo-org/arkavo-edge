@@ -81,7 +81,17 @@ impl GossipProtocol {
             // Update status based on consensus
             match state.consensus.status {
                 LessonConsensusStatus::Approved => {
-                    state.status = LessonStatus::Approved;
+                    if state.status != LessonStatus::Approved {
+                        state.status = LessonStatus::Approved;
+                        // Emit lesson approval notification
+                        if let Some(tx) = &self.lesson_approved_tx {
+                            let _ = tx.send(state.announcement.clone());
+                            tracing::info!(
+                                "Lesson {} approved by quorum, notifying subscribers",
+                                vote.lesson_id
+                            );
+                        }
+                    }
                 }
                 LessonConsensusStatus::Rejected | LessonConsensusStatus::TimedOut => {
                     state.status = LessonStatus::Rejected;

@@ -120,7 +120,10 @@ impl PatchVerifier {
     }
 
     /// Verify a lesson announcement signature
-    pub fn verify_lesson_announcement(&self, announcement: &LessonAnnouncement) -> GossipResult<()> {
+    pub fn verify_lesson_announcement(
+        &self,
+        announcement: &LessonAnnouncement,
+    ) -> GossipResult<()> {
         let pubkey = self
             .registry
             .get(&announcement.originator)

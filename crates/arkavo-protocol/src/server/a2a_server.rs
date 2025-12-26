@@ -504,6 +504,7 @@ impl A2aServer {
         let planning_completed = self.planning_completed.clone();
         let agent_plan = self.agent_plan.clone();
         let agent_memory = self.agent_memory.clone();
+        let learning_bus = self.learning_bus.read().await.clone();
 
         eprintln!("[Notifications] Starting push-based notification handler");
 
@@ -582,6 +583,7 @@ impl A2aServer {
                             "[Notifications] Processing with LLM: {} chars",
                             prompt.len()
                         );
+                        let start_time = std::time::Instant::now();
                         match execute_with_conductor(
                             &conductor,
                             &router,
@@ -593,15 +595,41 @@ impl A2aServer {
                         .await
                         {
                             Ok(result) => {
+                                let latency_ms = start_time.elapsed().as_millis() as u64;
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
                                 if !result.is_empty() {
                                     info!("Notification processed: {} chars", result.len());
                                     debug!("Notification result: {}", result);
                                 }
+
+                                // Emit learning event for successful tool execution
+                                if let Some(bus) = &learning_bus {
+                                    let event = super::learning_bus::LearningEvent::ToolCall {
+                                        tool_name: notification.method.clone(),
+                                        args: notification.params.clone().unwrap_or_default(),
+                                        result: result.clone(),
+                                        success: true,
+                                        latency_ms,
+                                    };
+                                    let _ = bus.sender().send(event).await;
+                                }
                             }
                             Err(e) => {
+                                let latency_ms = start_time.elapsed().as_millis() as u64;
                                 eprintln!("[Notifications] Processing failed: {e}");
                                 warn!("Notification processing failed: {}", e);
+
+                                // Emit learning event for failed tool execution
+                                if let Some(bus) = &learning_bus {
+                                    let event = super::learning_bus::LearningEvent::ToolCall {
+                                        tool_name: notification.method.clone(),
+                                        args: notification.params.clone().unwrap_or_default(),
+                                        result: format!("Error: {}", e),
+                                        success: false,
+                                        latency_ms,
+                                    };
+                                    let _ = bus.sender().send(event).await;
+                                }
                             }
                         }
                     }

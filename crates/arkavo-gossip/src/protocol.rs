@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
 use crate::consensus::{ConsensusState, ConsensusStatus, QuorumConfig};
@@ -93,6 +93,8 @@ pub struct GossipProtocol {
     seen_messages: Arc<RwLock<HashSet<Uuid>>>,
     /// Seen lesson IDs (for deduplication)
     pub(crate) seen_lesson_ids: Arc<RwLock<HashSet<Uuid>>>,
+    /// Broadcast channel for lesson approval notifications
+    pub(crate) lesson_approved_tx: Option<broadcast::Sender<LessonAnnouncement>>,
 }
 
 impl GossipProtocol {
@@ -107,7 +109,18 @@ impl GossipProtocol {
             verifier: Arc::new(RwLock::new(PatchVerifier::new(key_registry))),
             seen_messages: Arc::new(RwLock::new(HashSet::new())),
             seen_lesson_ids: Arc::new(RwLock::new(HashSet::new())),
+            lesson_approved_tx: None,
         }
+    }
+
+    /// Set the broadcast channel for lesson approval notifications
+    pub fn set_lesson_approved_callback(&mut self, tx: broadcast::Sender<LessonAnnouncement>) {
+        self.lesson_approved_tx = Some(tx);
+    }
+
+    /// Subscribe to lesson approval notifications
+    pub fn subscribe_lesson_approvals(&self) -> Option<broadcast::Receiver<LessonAnnouncement>> {
+        self.lesson_approved_tx.as_ref().map(|tx| tx.subscribe())
     }
 
     /// Add a peer to the known peers list

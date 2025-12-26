@@ -59,10 +59,7 @@ pub async fn start_anti_entropy_loop(learning_bus: Arc<LearningBus>, interval: D
         ticker.tick().await;
 
         let peer_count = learning_bus.peer_count().await;
-        tracing::debug!(
-            "Anti-entropy tick: {} peers connected",
-            peer_count
-        );
+        tracing::debug!("Anti-entropy tick: {} peers connected", peer_count);
 
         if let Err(e) = learning_bus.run_anti_entropy().await {
             tracing::debug!("Anti-entropy cycle error: {}", e);

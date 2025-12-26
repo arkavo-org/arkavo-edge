@@ -1,8 +1,7 @@
 //! Gossip message types for patch propagation and learning
 
 use crate::learning_message::{
-    LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest,
-    LessonVote as LearningVote,
+    LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest, LessonVote as LearningVote,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

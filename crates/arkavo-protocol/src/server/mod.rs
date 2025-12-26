@@ -14,7 +14,10 @@ pub use config_helpers::AgentMetadata;
 pub use gossip_transport::{
     start_anti_entropy_loop, start_gossip_transport, start_lesson_propagation_loop,
 };
-pub use learning_bus::{LearningBus, LearningEvent};
+pub use learning_bus::{
+    BehaviorAdvice, EpisodeBuffer, LearningBus, LearningEvent, ToolObservation,
+    start_event_processing_loop, start_lesson_application_loop,
+};
 pub use mcp_bridge::McpBridgeTool;
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
@@ -189,11 +192,11 @@ pub trait A2aRpc {
 
     /// Exchange public keys with peer for signature verification
     #[method(name = "agent/exchangeKeys")]
-    async fn exchange_keys(
-        &self,
-        peer_id: String,
-        public_key: String,
-    ) -> RpcResult<String>;
+    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String>;
+
+    /// Check behavior policy for a sector based on learned lessons
+    #[method(name = "learning/checkPolicy")]
+    async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice>;
 }
 
 pub struct A2aRpcImpl {
@@ -643,6 +646,31 @@ impl A2aRpcServer for A2aRpcImpl {
                     "LearningBus not configured",
                     None::<()>,
                 ))
+            }
+        }
+    }
+
+    async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice> {
+        let timer = RpcTimer::new("check_policy".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        match &self.learning_bus {
+            Some(bus) => {
+                let advice = bus.check_behavior_policy(&sector_id).await;
+                tracing::debug!("Policy check for sector {}: {:?}", sector_id, advice);
+                timer.success();
+                Ok(advice)
+            }
+            None => {
+                tracing::debug!("Policy check: LearningBus not configured, returning default");
+                timer.success();
+                Ok(learning_bus::BehaviorAdvice::Default)
             }
         }
     }

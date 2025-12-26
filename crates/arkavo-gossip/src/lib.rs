@@ -13,15 +13,15 @@
 
 mod consensus;
 mod error;
+pub mod learning_message;
 mod lesson_consensus;
 mod lesson_handlers;
-pub mod learning_message;
 mod message;
 mod protocol;
 mod verification;
 
 pub use consensus::{
-    ConsensusState, ConsensusStatus, QuorumConfig, DEFAULT_QUORUM_THRESHOLD, DEFAULT_VOTE_TIMEOUT,
+    ConsensusState, ConsensusStatus, DEFAULT_QUORUM_THRESHOLD, DEFAULT_VOTE_TIMEOUT, QuorumConfig,
 };
 pub use error::{GossipError, GossipResult};
 pub use learning_message::{
@@ -33,8 +33,8 @@ pub use message::{
     AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
     PatchRequest, PatchStatus, PatchVote,
 };
-pub use protocol::{GossipConfig, GossipProtocol, DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT};
+pub use protocol::{DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT, GossipConfig, GossipProtocol};
 pub use verification::{
-    compute_content_hash, sign_announcement, sign_lesson_announcement, sign_lesson_vote,
-    sign_vote, KeyRegistry, PatchVerifier,
+    KeyRegistry, PatchVerifier, compute_content_hash, sign_announcement, sign_lesson_announcement,
+    sign_lesson_vote, sign_vote,
 };
