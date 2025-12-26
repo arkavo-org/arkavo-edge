@@ -126,20 +126,20 @@ impl LearningModule {
             return;
         }
 
-        let n = contributions.len();
+        // Find max position to calculate discounts correctly (handles unsorted contributions)
+        let max_position = contributions.iter().map(|c| c.position).max().unwrap_or(0);
         let mut agents = self.agents.write().await;
 
-        // Apply discounted rewards backward (later agents get more credit)
-        for (i, contribution) in contributions.iter().enumerate() {
+        // Apply discounted rewards based on actual position (later agents get more credit)
+        for contribution in contributions {
             let utility = agents
                 .entry(contribution.agent_id.clone())
                 .or_insert_with(|| AgentUtility::new(contribution.agent_id.clone()));
 
-            // Discount factor raised to position from end
-            // Last agent (i = n-1) gets γ^0 = 1.0
-            // First agent (i = 0) gets γ^(n-1)
-            let position_from_end = n - 1 - i;
-            // Position is bounded by contribution list size, safe to cast
+            // Discount factor raised to position from end (using actual position)
+            // Last agent (position = max_position) gets γ^0 = 1.0
+            // First agent (position = 0) gets γ^max_position
+            let position_from_end = max_position - contribution.position;
             #[allow(clippy::cast_possible_wrap)]
             let discount = self.config.discount_factor.powi(position_from_end as i32);
 
@@ -381,6 +381,56 @@ mod tests {
         let ev1 = module.expected_value("agent-1", None).await;
         let ev3 = module.expected_value("agent-3", None).await;
         assert!(ev3 > ev1, "Last agent should have higher expected value");
+    }
+
+    #[tokio::test]
+    async fn test_retrospective_update_unsorted_contributions() {
+        let module = LearningModule::new();
+
+        // Create agents with baseline
+        for agent in ["agent-first", "agent-mid", "agent-last"] {
+            let feedback = BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100);
+            module.immediate_update(agent, &feedback).await;
+        }
+
+        // Contributions in WRONG vector order (position 2, 0, 1)
+        // This tests that we use contribution.position, not vector index
+        let report = FinalTaskReport::success(
+            Uuid::new_v4(),
+            vec![
+                AgentContribution {
+                    agent_id: "agent-last".to_string(),
+                    position: 2, // Last in sequence
+                    immediate_reward: 0.5,
+                },
+                AgentContribution {
+                    agent_id: "agent-first".to_string(),
+                    position: 0, // First in sequence
+                    immediate_reward: 0.5,
+                },
+                AgentContribution {
+                    agent_id: "agent-mid".to_string(),
+                    position: 1, // Middle
+                    immediate_reward: 0.5,
+                },
+            ],
+        );
+
+        module.retrospective_update(&report).await;
+
+        // agent-last (position=2) should have highest EV despite being first in vector
+        let ev_first = module.expected_value("agent-first", None).await;
+        let ev_mid = module.expected_value("agent-mid", None).await;
+        let ev_last = module.expected_value("agent-last", None).await;
+
+        assert!(
+            ev_last > ev_mid,
+            "Last position agent should have higher EV than middle"
+        );
+        assert!(
+            ev_mid > ev_first,
+            "Middle position agent should have higher EV than first"
+        );
     }
 
     #[tokio::test]
