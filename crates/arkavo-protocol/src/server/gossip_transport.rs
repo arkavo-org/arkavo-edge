@@ -48,10 +48,21 @@ where
 
 /// Start periodic anti-entropy synchronization with peers
 pub async fn start_anti_entropy_loop(learning_bus: Arc<LearningBus>, interval: Duration) {
+    tracing::info!(
+        "Starting anti-entropy loop for agent {} (interval: {:?})",
+        learning_bus.agent_id(),
+        interval
+    );
     let mut ticker = tokio::time::interval(interval);
 
     loop {
         ticker.tick().await;
+
+        let peer_count = learning_bus.peer_count().await;
+        tracing::debug!(
+            "Anti-entropy tick: {} peers connected",
+            peer_count
+        );
 
         if let Err(e) = learning_bus.run_anti_entropy().await {
             tracing::debug!("Anti-entropy cycle error: {}", e);
@@ -61,10 +72,17 @@ pub async fn start_anti_entropy_loop(learning_bus: Arc<LearningBus>, interval: D
 
 /// Start periodic lesson synthesis and propagation
 pub async fn start_lesson_propagation_loop(learning_bus: Arc<LearningBus>, interval: Duration) {
+    tracing::info!(
+        "Starting lesson propagation loop for agent {} (interval: {:?})",
+        learning_bus.agent_id(),
+        interval
+    );
     let mut ticker = tokio::time::interval(interval);
 
     loop {
         ticker.tick().await;
+
+        tracing::debug!("Lesson propagation tick");
 
         if let Err(e) = learning_bus.synthesize_and_propagate_lessons().await {
             tracing::debug!("Lesson propagation error: {}", e);

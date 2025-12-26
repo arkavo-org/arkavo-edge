@@ -1310,16 +1310,24 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         println!("{}", "=".repeat(60));
     }
 
+    // Channel for peer discovery events (bridges sync mDNS thread to async LearningBus)
+    let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<(String, bool)>(100); // (peer_id, is_add)
+
     // Start mDNS broadcasting if enabled
     let mdns_thread_handle = if config.mdns_enabled {
         let config_clone = config.clone();
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let peer_tx_clone = peer_tx.clone();
 
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
-            if let Err(e) = broadcast_agent_mdns_sync(&config_clone, shutdown_flag_clone, Some(tx))
-            {
+            if let Err(e) = broadcast_agent_mdns_sync(
+                &config_clone,
+                shutdown_flag_clone,
+                Some(tx),
+                peer_tx_clone,
+            ) {
                 eprintln!("mDNS broadcast error: {e}");
             }
         });
@@ -1332,68 +1340,37 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         None
     };
 
-    // Connect to peer agents if configured and start gossip background tasks
+    // Start gossip learning background tasks when A2A is enabled
+    // Peers are added dynamically via mDNS discovery
     let mut gossip_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    if config.a2a_enabled && !config.peers.is_empty() {
-        use crate::peer_manager::PeerManager;
 
-        let peer_manager = Arc::new(PeerManager::new(config.name.clone()));
-
-        if !quiet {
-            println!("Connecting to {} peer(s)...", config.peers.len());
-        }
-
-        // Give mDNS time to register before connecting to peers
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await
-            && !quiet
-        {
-            eprintln!("Warning: Failed to connect to some peers: {e}");
-        }
-
-        if !quiet && peer_manager.has_peers() {
-            println!("Connected to {} peer(s)", peer_manager.peer_count());
-        }
-
-        // Start gossip transport background task
-        // Note: For now, we skip the gossip transport as PeerManager uses std::sync::RwLock
-        // which doesn't work well with async. In the future, we may need to use
-        // tokio::sync::RwLock in PeerManager or use a message queue pattern.
-        let learning_bus_transport = learning_bus.clone();
-        let _peer_manager_transport = peer_manager.clone();
-        gossip_handles.push(tokio::spawn(async move {
-            // Placeholder: gossip transport will be implemented when PeerManager
-            // is refactored to use async-compatible locks
-            let mut rx = learning_bus_transport.subscribe_gossip_out();
-            loop {
-                match rx.recv().await {
-                    Ok((peer_id, _message)) => {
-                        // TODO: Route message to peer when PeerManager supports async
-                        tracing::debug!("Gossip message queued for peer: {}", peer_id);
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!("Gossip transport lagged {} messages", n);
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        }));
-
-        // Start anti-entropy background task
+    if config.a2a_enabled {
+        // Start anti-entropy background task (30s interval)
         let learning_bus_ae = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             start_anti_entropy_loop(learning_bus_ae, Duration::from_secs(30)).await;
         }));
 
-        // Start lesson propagation background task
+        // Start lesson propagation background task (60s interval)
         let learning_bus_lp = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(60)).await;
         }));
 
+        // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
+        let learning_bus_peers = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            while let Some((peer_id, is_add)) = peer_rx.recv().await {
+                if is_add {
+                    learning_bus_peers.add_peer_discovered(peer_id).await;
+                } else {
+                    learning_bus_peers.remove_peer(&peer_id).await;
+                }
+            }
+        }));
+
         if !quiet {
-            println!("Gossip learning: started with {} peer(s)", peer_manager.peer_count());
+            println!("Gossip learning: background tasks started");
         }
     }
 
@@ -1461,6 +1438,7 @@ fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
+    #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -1492,7 +1470,11 @@ fn broadcast_agent_mdns_sync(
         // Spawn a thread to handle discovered services
         let discovery_thread = thread::spawn(move || {
             use mdns_sd::ServiceEvent;
+            use std::collections::HashSet;
             println!("Starting discovery of other agents...");
+
+            // Track discovered peers to avoid duplicates
+            let mut discovered_peers: HashSet<String> = HashSet::new();
 
             loop {
                 match receiver.recv_timeout(Duration::from_secs(1)) {
@@ -1514,10 +1496,21 @@ fn broadcast_agent_mdns_sync(
                                 if let Some(addr) = info.get_addresses().iter().next() {
                                     println!("  - Address: {}:{}", addr, info.get_port());
                                 }
+
+                                // Notify LearningBus of new peer (only once per agent_id)
+                                if discovered_peers.insert(agent_id.to_string()) {
+                                    let _ = peer_tx.blocking_send((agent_id.to_string(), true));
+                                }
                             }
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             println!("Agent disconnected: {fullname}");
+                            // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
+                            if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next() {
+                                if discovered_peers.remove(agent_id) {
+                                    let _ = peer_tx.blocking_send((agent_id.to_string(), false));
+                                }
+                            }
                         }
                         _ => {}
                     },

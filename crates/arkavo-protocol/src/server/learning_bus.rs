@@ -121,15 +121,23 @@ impl LearningBus {
         }
     }
 
-    /// Add a peer to gossip protocol
+    /// Add a peer to gossip protocol with their public key
     pub async fn add_peer(&self, peer_id: String, public_key: arkavo_crypto::AgentPublicKey) {
         let gossip = self.gossip.write().await;
         gossip.add_peer(peer_id.clone()).await;
         gossip.register_key(peer_id, public_key).await;
     }
 
+    /// Add a peer to gossip protocol (local mDNS discovery, key exchange deferred)
+    pub async fn add_peer_discovered(&self, peer_id: String) {
+        tracing::info!("Adding discovered peer to gossip: {}", peer_id);
+        let gossip = self.gossip.write().await;
+        gossip.add_peer(peer_id).await;
+    }
+
     /// Remove a peer from gossip protocol
     pub async fn remove_peer(&self, peer_id: &str) {
+        tracing::info!("Removing peer from gossip: {}", peer_id);
         let gossip = self.gossip.write().await;
         gossip.remove_peer(peer_id).await;
     }
