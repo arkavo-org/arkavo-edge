@@ -245,6 +245,8 @@ pub struct LessonPattern {
     pub expected_outcome: String,
     /// Optional link to a safety invariant
     pub invariant_hash: Option<[u8; 32]>,
+    /// Flexible metadata for lesson-type-specific data (tool formats, aliases, etc.)
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl LessonPattern {
@@ -255,12 +257,19 @@ impl LessonPattern {
             action,
             expected_outcome,
             invariant_hash: None,
+            metadata: None,
         }
     }
 
     /// Set invariant hash
     pub fn with_invariant(mut self, hash: [u8; 32]) -> Self {
         self.invariant_hash = Some(hash);
+        self
+    }
+
+    /// Set metadata for lesson-type-specific data
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 }

@@ -1,11 +1,14 @@
-//! Policy cache for fast lesson lookup by sector
+//! Policy cache for fast lesson lookup by sector and category
 //!
-//! Indexes lessons by sector ID for behavior policy checks.
+//! Indexes lessons by sector ID for behavior policy checks,
+//! and by category for tool format lessons.
 
 use std::collections::HashMap;
 
 use arkavo_router::learning::Lesson;
 use uuid::Uuid;
+
+use super::tool_pattern_observer::TOOL_FORMAT_CATEGORY;
 
 /// Cache of lessons indexed by sector for fast policy lookup
 pub struct PolicyCache {
@@ -13,6 +16,8 @@ pub struct PolicyCache {
     lessons_by_sector: HashMap<String, Vec<Lesson>>,
     /// All lessons by ID for quick lookup
     lessons_by_id: HashMap<Uuid, Lesson>,
+    /// Tool format lessons indexed by tool name
+    tool_format_lessons: HashMap<String, Lesson>,
 }
 
 impl Default for PolicyCache {
@@ -27,32 +32,69 @@ impl PolicyCache {
         Self {
             lessons_by_sector: HashMap::new(),
             lessons_by_id: HashMap::new(),
+            tool_format_lessons: HashMap::new(),
         }
     }
 
     /// Add a lesson to the cache
     pub fn add_lesson(&mut self, lesson: Lesson) {
-        // Extract sector from condition (simple parsing)
-        let sector_id = Self::extract_sector(&lesson.pattern.condition);
+        // Handle tool_format lessons specially
+        if lesson.category == TOOL_FORMAT_CATEGORY {
+            if let Some(tool_name) = Self::extract_tool_name(&lesson) {
+                // Only keep the best lesson per tool
+                if let Some(existing) = self.tool_format_lessons.get(&tool_name)
+                    && lesson.confidence <= existing.confidence
+                    && lesson.episode_count <= existing.episode_count
+                {
+                    tracing::debug!(
+                        tool = %tool_name,
+                        "Skipping tool_format lesson (not better than existing)"
+                    );
+                    return;
+                }
 
-        if let Some(ref sector) = sector_id {
-            self.lessons_by_sector
-                .entry(sector.clone())
-                .or_default()
-                .push(lesson.clone());
+                tracing::info!(
+                    lesson_id = %lesson.id,
+                    tool = %tool_name,
+                    confidence = lesson.confidence,
+                    "Tool format lesson added to policy cache"
+                );
+                self.tool_format_lessons.insert(tool_name, lesson.clone());
+            }
+        } else {
+            // Extract sector from condition (simple parsing)
+            let sector_id = Self::extract_sector(&lesson.pattern.condition);
+
+            if let Some(ref sector) = sector_id {
+                self.lessons_by_sector
+                    .entry(sector.clone())
+                    .or_default()
+                    .push(lesson.clone());
+            }
+
+            tracing::info!(
+                lesson_id = %lesson.id,
+                category = %lesson.category,
+                action = %lesson.pattern.action,
+                condition = %lesson.pattern.condition,
+                sector = ?sector_id,
+                total_cached = self.lessons_by_id.len() + 1,
+                "Lesson added to policy cache"
+            );
         }
 
-        tracing::info!(
-            lesson_id = %lesson.id,
-            category = %lesson.category,
-            action = %lesson.pattern.action,
-            condition = %lesson.pattern.condition,
-            sector = ?sector_id,
-            total_cached = self.lessons_by_id.len() + 1,
-            "Lesson added to policy cache"
-        );
-
         self.lessons_by_id.insert(lesson.id, lesson);
+    }
+
+    /// Extract tool name from a tool_format lesson's metadata
+    fn extract_tool_name(lesson: &Lesson) -> Option<String> {
+        lesson
+            .pattern
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("tool_name"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
     }
 
     /// Check if there's a slowdown lesson for a sector
@@ -114,6 +156,46 @@ impl PolicyCache {
     /// Check if cache is empty
     pub fn is_empty(&self) -> bool {
         self.lessons_by_id.is_empty()
+    }
+
+    /// Get tool format lessons for specific tools
+    pub fn get_tool_format_lessons(&self, tool_names: &[String]) -> Vec<&Lesson> {
+        tool_names
+            .iter()
+            .filter_map(|name| self.tool_format_lessons.get(name))
+            .collect()
+    }
+
+    /// Get few-shot examples for prompt injection based on learned tool patterns
+    pub fn get_few_shot_examples(&self, tool_names: &[String]) -> String {
+        let lessons = self.get_tool_format_lessons(tool_names);
+        if lessons.is_empty() {
+            return String::new();
+        }
+
+        let mut examples = Vec::new();
+        for lesson in lessons {
+            // Get example_invocation from metadata
+            if let Some(meta) = &lesson.pattern.metadata
+                && let Some(serde_json::Value::String(example)) = meta.get("example_invocation")
+            {
+                examples.push(example.clone());
+            }
+        }
+
+        if examples.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "Here are examples of successful tool calls:\n\n{}\n",
+                examples.join("\n\n")
+            )
+        }
+    }
+
+    /// Get the number of cached tool format lessons
+    pub fn tool_format_lesson_count(&self) -> usize {
+        self.tool_format_lessons.len()
     }
 
     /// Extract sector ID from a condition string

@@ -10,7 +10,7 @@ use arkavo_gossip::{
     GossipConfig, GossipMessage, GossipProtocol, KeyRegistry, LessonAnnouncement, LessonDigest,
     sign_lesson_announcement,
 };
-use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson};
+use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
@@ -19,6 +19,7 @@ use uuid::Uuid;
 use super::episode_buffer::{EpisodeBuffer, ToolObservation};
 use super::policy_cache::PolicyCache;
 use super::synthesis;
+use super::tool_pattern_observer::ToolPatternObserver;
 
 /// Configuration for learning thresholds and channel capacities
 #[derive(Debug, Clone)]
@@ -114,6 +115,8 @@ pub struct LearningBus {
     episode_buffer: Arc<RwLock<EpisodeBuffer>>,
     /// Router for LLM calls during synthesis
     router: Option<Arc<Router>>,
+    /// Observer for capturing tool call patterns
+    tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
 }
 
 impl LearningBus {
@@ -171,6 +174,9 @@ impl LearningBus {
                 learning_config.episode_threshold,
             ))),
             router: None,
+            tool_pattern_observer: Arc::new(RwLock::new(ToolPatternObserver::new(
+                "unknown".to_string(),
+            ))),
         }
     }
 
@@ -465,6 +471,56 @@ impl LearningBus {
     /// Get the learning configuration
     pub fn config(&self) -> &LearningConfig {
         &self.config
+    }
+
+    /// Get the tool pattern observer reference
+    pub fn tool_pattern_observer(&self) -> &Arc<RwLock<ToolPatternObserver>> {
+        &self.tool_pattern_observer
+    }
+
+    /// Record a successful tool call pattern
+    pub async fn record_tool_pattern_success(
+        &self,
+        tool_name: &str,
+        format: ToolCallFormat,
+        raw_invocation: &str,
+        args: &serde_json::Value,
+    ) {
+        let mut observer = self.tool_pattern_observer.write().await;
+        observer.record_success(tool_name, format, raw_invocation, args);
+    }
+
+    /// Add a tool pattern lesson to the policy cache
+    pub async fn add_tool_pattern_to_cache(&self, lesson: Lesson) {
+        let mut cache = self.policy_cache.write().await;
+        cache.add_lesson(lesson);
+    }
+
+    /// Get few-shot examples for prompt injection from policy cache
+    pub async fn get_few_shot_examples(
+        &self,
+        tool_names: &[String],
+        _format: ToolCallFormat,
+    ) -> String {
+        let cache = self.policy_cache.read().await;
+        cache.get_few_shot_examples(tool_names)
+    }
+
+    /// Update the model name for pattern attribution
+    pub async fn set_model_name(&self, model_name: String) {
+        let mut observer = self.tool_pattern_observer.write().await;
+        observer.set_model_name(model_name);
+    }
+
+    /// Check if there are patterns ready for lesson synthesis
+    pub async fn has_ready_patterns(&self) -> bool {
+        let observer = self.tool_pattern_observer.read().await;
+        observer.has_ready_patterns()
+    }
+
+    /// Get the number of cached tool format lessons
+    pub async fn cached_tool_pattern_count(&self) -> usize {
+        self.policy_cache.read().await.tool_format_lesson_count()
     }
 }
 
