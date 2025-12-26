@@ -201,25 +201,76 @@ async fn inject_hazard_handler(
 }
 
 /// MCP proxy mode - forwards tool calls to HTTP server
+/// Also emits periodic patrol tick notifications to trigger agent behavior
 async fn run_mcp_proxy(server_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::time::{interval, Duration};
+
     let client = reqwest::Client::new();
     let base_url = server_url.trim_end_matches('/').to_string();
 
     eprintln!("Fleet Environment MCP Proxy connecting to {base_url}");
 
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let reader = io::BufReader::new(stdin);
+    // Shared state for notifications
+    let initialized = Arc::new(AtomicBool::new(false));
+    let current_sector = Arc::new(AtomicU8::new(1)); // Start at sector 1
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("Error reading input: {e}");
-                continue;
+    // Stdout writer shared between tasks
+    let stdout = Arc::new(tokio::sync::Mutex::new(tokio::io::stdout()));
+
+    // Spawn notification emitter task
+    let stdout_notif = stdout.clone();
+    let initialized_notif = initialized.clone();
+    let sector_notif = current_sector.clone();
+    tokio::spawn(async move {
+        // Wait for initialization
+        while !initialized_notif.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Wait a bit after init before starting patrol
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let mut tick_interval = interval(Duration::from_secs(10));
+        loop {
+            tick_interval.tick().await;
+
+            let sector = sector_notif.load(Ordering::SeqCst);
+            let notification = json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/patrol_tick",
+                "params": {
+                    "event": "patrol_tick",
+                    "current_sector": sector,
+                    "instruction": format!("Check sector {} for hazards using get_sector tool", sector)
+                }
+            });
+
+            let notif_str = serde_json::to_string(&notification).unwrap();
+            let mut out = stdout_notif.lock().await;
+            if let Err(e) = out.write_all(format!("{notif_str}\n").as_bytes()).await {
+                eprintln!("Failed to write notification: {e}");
+                break;
             }
-        };
+            if let Err(e) = out.flush().await {
+                eprintln!("Failed to flush notification: {e}");
+                break;
+            }
 
+            // Advance to next sector (1-4 cycle)
+            let next = if sector >= 4 { 1 } else { sector + 1 };
+            sector_notif.store(next, Ordering::SeqCst);
+        }
+    });
+
+    // Main request handling loop
+    let stdin = tokio::io::stdin();
+    let reader = BufReader::new(stdin);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
             continue;
         }
@@ -239,15 +290,18 @@ async fn run_mcp_proxy(server_url: &str) -> Result<(), Box<dyn std::error::Error
         let request_id = request.id.unwrap();
 
         let response = match request.method.as_str() {
-            "initialize" => success_response(
-                request_id,
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": { "name": "fleet-env-proxy", "version": "0.1.0" },
-                    "capabilities": { "tools": {} },
-                    "instructions": "Fleet environment proxy. Use get_sector and inject_hazard tools."
-                }),
-            ),
+            "initialize" => {
+                initialized.store(true, Ordering::SeqCst);
+                success_response(
+                    request_id,
+                    json!({
+                        "protocolVersion": "2024-11-05",
+                        "serverInfo": { "name": "fleet-env-proxy", "version": "0.1.0" },
+                        "capabilities": { "tools": {} },
+                        "instructions": "Fleet environment proxy. Use get_sector and inject_hazard tools."
+                    }),
+                )
+            }
 
             "tools/list" => success_response(
                 request_id,
@@ -330,8 +384,9 @@ async fn run_mcp_proxy(server_url: &str) -> Result<(), Box<dyn std::error::Error
         };
 
         let response_str = serde_json::to_string(&response)?;
-        writeln!(stdout, "{response_str}")?;
-        stdout.flush()?;
+        let mut out = stdout.lock().await;
+        out.write_all(format!("{response_str}\n").as_bytes()).await?;
+        out.flush().await?;
     }
 
     Ok(())

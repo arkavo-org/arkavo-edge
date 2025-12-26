@@ -1,17 +1,35 @@
 mod a2a_server;
 mod conductor;
 mod config_helpers;
+mod episode_buffer;
+mod event_loop;
+mod gossip_transport;
 mod handlers;
+mod learning_bus;
 mod mcp_bridge;
+mod policy_cache;
 mod startup;
+mod synthesis;
 mod tool_memory;
+mod tool_pattern_cache;
+mod tool_pattern_observer;
 
 pub use a2a_server::A2aServer;
-pub use conductor::execute_with_conductor;
+pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
 pub use config_helpers::AgentMetadata;
+pub use episode_buffer::{EpisodeBuffer, ToolObservation};
+pub use event_loop::{start_event_processing_loop, start_lesson_application_loop};
+pub use gossip_transport::{
+    start_anti_entropy_loop, start_cleanup_loop, start_gossip_transport,
+    start_lesson_propagation_loop,
+};
+pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
 pub use mcp_bridge::McpBridgeTool;
+pub use policy_cache::PolicyCache;
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
+pub use tool_pattern_cache::ToolPatternCache;
+pub use tool_pattern_observer::ToolPatternObserver;
 
 use crate::auth::AuthBackend;
 use crate::mcp_registry::McpRegistry;
@@ -173,6 +191,21 @@ pub trait A2aRpc {
         &self,
         device_id: String,
     ) -> RpcResult<crate::registration::RegistrationStatus>;
+
+    /// Handle incoming gossip message from peer
+    #[method(name = "gossip/message")]
+    async fn gossip_message(
+        &self,
+        message: arkavo_gossip::GossipMessage,
+    ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>>;
+
+    /// Exchange public keys with peer for signature verification
+    #[method(name = "agent/exchangeKeys")]
+    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String>;
+
+    /// Check behavior policy for a sector based on learned lessons
+    #[method(name = "learning/checkPolicy")]
+    async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice>;
 }
 
 pub struct A2aRpcImpl {
@@ -193,6 +226,8 @@ pub struct A2aRpcImpl {
     conductor: Arc<Conductor<InMemoryTaskStore>>,
     /// Router for LLM calls during HRM task execution
     router: Option<Arc<arkavo_router::Router>>,
+    /// Learning bus for gossip-based learning propagation
+    learning_bus: Option<Arc<LearningBus>>,
 }
 
 #[async_trait]
@@ -338,6 +373,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.mcp_registry,
             &self.conductor,
             self.router.as_ref(),
+            self.learning_bus.as_ref(),
             request,
         )
         .await
@@ -543,5 +579,109 @@ impl A2aRpcServer for A2aRpcImpl {
             device_id,
         )
         .await
+    }
+
+    async fn gossip_message(
+        &self,
+        message: arkavo_gossip::GossipMessage,
+    ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>> {
+        let timer = RpcTimer::new("gossip_message".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Handle gossip message via LearningBus
+        match &self.learning_bus {
+            Some(bus) => {
+                let responses = bus.handle_gossip(message).await;
+                tracing::debug!("Gossip message processed, {} responses", responses.len());
+                timer.success();
+                Ok(responses)
+            }
+            None => {
+                tracing::warn!("Gossip message received but LearningBus not configured");
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "LearningBus not configured",
+                    None::<()>,
+                ))
+            }
+        }
+    }
+
+    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String> {
+        let timer = RpcTimer::new("exchange_keys".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Parse incoming public key from base64
+        let peer_key = match arkavo_crypto::AgentPublicKey::from_base64(&public_key) {
+            Ok(key) => key,
+            Err(e) => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32602,
+                    format!("Invalid public key: {e}"),
+                    None::<()>,
+                ));
+            }
+        };
+
+        // Register peer's key in LearningBus
+        match &self.learning_bus {
+            Some(bus) => {
+                bus.register_peer_key(peer_id.clone(), peer_key).await;
+
+                // Return our public key
+                let our_key = bus.keypair().public_key().to_base64();
+                tracing::info!("Key exchange completed with peer: {}", peer_id);
+                timer.success();
+                Ok(our_key)
+            }
+            None => {
+                tracing::warn!("Key exchange attempted but LearningBus not configured");
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "LearningBus not configured",
+                    None::<()>,
+                ))
+            }
+        }
+    }
+
+    async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice> {
+        let timer = RpcTimer::new("check_policy".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        match &self.learning_bus {
+            Some(bus) => {
+                let advice = bus.check_behavior_policy(&sector_id).await;
+                tracing::debug!("Policy check for sector {}: {:?}", sector_id, advice);
+                timer.success();
+                Ok(advice)
+            }
+            None => {
+                tracing::debug!("Policy check: LearningBus not configured, returning default");
+                timer.success();
+                Ok(learning_bus::BehaviorAdvice::Default)
+            }
+        }
     }
 }

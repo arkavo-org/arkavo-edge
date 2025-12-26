@@ -4,7 +4,7 @@
 //! Natural Language → Qwen3 + Constrained Decoding → TØR-G Graph → evaluate()
 //!
 //! Run with: `cargo test -p arkavo-torg -- --ignored`
-//! Requires model at ~/.cache/arkavo/models/qwen3-0.6b.gguf
+//! Uses models from HuggingFace hub cache (~/.cache/huggingface/hub)
 //! Override with: ARKAVO_TORG_MODEL_PATH=/path/to/model.gguf
 
 #![cfg(not(target_env = "musl"))]

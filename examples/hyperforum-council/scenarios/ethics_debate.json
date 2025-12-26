@@ -1,0 +1,27 @@
+{
+  "name": "Ethics Debate Scenario",
+  "description": "Test council deliberation on an ethical question",
+  "message": {
+    "id": "test-001",
+    "sender_name": "Alice",
+    "content": "I believe we should implement mandatory AI content labeling for all generated text. This would help users distinguish between human and AI-written content, improving transparency and trust.",
+    "timestamp": "2025-01-01T12:00:00Z"
+  },
+  "expected_specialists": [
+    "Critical Analyst",
+    "Researcher",
+    "Synthesizer",
+    "Devil's Advocate",
+    "Facilitator"
+  ],
+  "validation": {
+    "critic_must_check": [
+      "argument_structure",
+      "evidence_support"
+    ],
+    "synthesis_must_include": [
+      "attribution",
+      "remaining_questions"
+    ]
+  }
+}

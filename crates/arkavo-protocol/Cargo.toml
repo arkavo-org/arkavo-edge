@@ -79,6 +79,9 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 # HRM for task orchestration
 arkavo-hrm = { path = "../arkavo-hrm" }
 
+# Gossip protocol for learning propagation
+arkavo-gossip = { path = "../arkavo-gossip" }
+
 # Additional utilities for registration
 rand = { workspace = true }
 base64 = { workspace = true }

@@ -60,6 +60,9 @@ echo "[FLEET ] Starting rovers..."
 echo ""
 
 # Start rovers as arkavo agents (each from its own directory for separate databases)
+# RUST_LOG enables tracing output for gossip learning visibility
+export RUST_LOG="${RUST_LOG:-info}"
+
 (cd "$SCRIPT_DIR/rover-alpha" && "$ARKAVO_BIN" agent --config AGENTS.md > "$SCRIPT_DIR/logs/alpha.log" 2>&1) &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid

@@ -1,7 +1,7 @@
-//! Gossip message types for patch propagation
+//! Gossip message types for patch propagation and learning
 
 use crate::learning_message::{
-    LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest, LessonVote,
+    LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest, LessonVote as LearningVote,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -21,12 +21,10 @@ pub enum GossipMessage {
     PatchDelivery(PatchDelivery),
     /// Anti-entropy digest for consistency
     AntiEntropy(AntiEntropyDigest),
-
-    // Learning message variants
     /// Announce a new lesson to the swarm
     LessonAnnounce(LessonAnnouncement),
     /// Vote on a lesson
-    LessonVote(LessonVote),
+    LessonVote(LearningVote),
     /// Request a specific lesson
     LessonRequest(LessonRequest),
     /// Deliver the full lesson content

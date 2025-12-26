@@ -15,6 +15,11 @@ purpose: |
   - Broadcast lessons to fleet peers via A2A protocol
   - Evaluate lessons received from peers and apply if valid
 
+  Tool Call Format (use fenced code blocks):
+  ```get_sector
+  id: 4
+  ```
+
 ## Model Configuration
 
 model: ministral-3b

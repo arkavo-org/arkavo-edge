@@ -17,6 +17,7 @@ use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 
 use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
+use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
 use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
@@ -40,6 +41,8 @@ pub struct A2aServer {
     agent_plan: Arc<tokio::sync::RwLock<AgentPlan>>,
     planning_completed: Arc<std::sync::atomic::AtomicBool>,
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
+    /// Learning bus for gossip-based learning propagation
+    learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
 }
 
 impl A2aServer {
@@ -67,11 +70,22 @@ impl A2aServer {
             agent_plan: Arc::new(tokio::sync::RwLock::new(AgentPlan::default())),
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
+            learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
         self.mcp_registry.clone()
+    }
+
+    /// Set the learning bus for gossip-based learning
+    pub async fn set_learning_bus(&self, bus: Arc<LearningBus>) {
+        *self.learning_bus.write().await = Some(bus);
+    }
+
+    /// Get the learning bus reference
+    pub async fn learning_bus(&self) -> Option<Arc<LearningBus>> {
+        self.learning_bus.read().await.clone()
     }
 
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
@@ -82,11 +96,14 @@ impl A2aServer {
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
         drop(metadata);
 
-        if model.is_empty() {
-            info!("Model is empty, initializing router for dynamic model selection");
-            self.initialize_router().await;
-            self.build_tool_registry().await;
-        } else {
+        // Always initialize router for task execution via HRM conductor
+        // Router is required by execute_with_conductor regardless of model
+        info!("Initializing router for task execution");
+        self.initialize_router().await;
+        self.build_tool_registry().await;
+
+        // Also create LLM adapter if model is specified
+        if !model.is_empty() {
             self.recreate_llm_adapter().await;
         }
     }
@@ -339,8 +356,15 @@ impl A2aServer {
         info!("Initializing router for dynamic model selection");
         match arkavo_router::Router::new().await {
             Ok(router) => {
-                *self.router.write().await = Some(Arc::new(router));
+                let router = Arc::new(router);
+                *self.router.write().await = Some(router.clone());
                 info!("✓ Successfully initialized router");
+
+                // Set router on learning bus for LLM-based synthesis
+                if let Some(bus) = self.learning_bus.read().await.as_ref() {
+                    bus.set_router(router.clone()).await;
+                    info!("✓ Router configured for learning synthesis");
+                }
             }
             Err(e) => {
                 error!(error = %e, "✗ Failed to initialize router");
@@ -490,6 +514,7 @@ impl A2aServer {
         let planning_completed = self.planning_completed.clone();
         let agent_plan = self.agent_plan.clone();
         let agent_memory = self.agent_memory.clone();
+        let learning_bus = self.learning_bus.read().await.clone();
 
         eprintln!("[Notifications] Starting push-based notification handler");
 
@@ -568,6 +593,7 @@ impl A2aServer {
                             "[Notifications] Processing with LLM: {} chars",
                             prompt.len()
                         );
+                        let start_time = std::time::Instant::now();
                         match execute_with_conductor(
                             &conductor,
                             &router,
@@ -579,15 +605,41 @@ impl A2aServer {
                         .await
                         {
                             Ok(result) => {
+                                let latency_ms = start_time.elapsed().as_millis() as u64;
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
                                 if !result.is_empty() {
                                     info!("Notification processed: {} chars", result.len());
                                     debug!("Notification result: {}", result);
                                 }
+
+                                // Emit learning event for successful tool execution
+                                if let Some(bus) = &learning_bus {
+                                    let event = super::learning_bus::LearningEvent::ToolCall {
+                                        tool_name: notification.method.clone(),
+                                        args: notification.params.clone().unwrap_or_default(),
+                                        result: result.clone(),
+                                        success: true,
+                                        latency_ms,
+                                    };
+                                    let _ = bus.sender().send(event).await;
+                                }
                             }
                             Err(e) => {
+                                let latency_ms = start_time.elapsed().as_millis() as u64;
                                 eprintln!("[Notifications] Processing failed: {e}");
                                 warn!("Notification processing failed: {}", e);
+
+                                // Emit learning event for failed tool execution
+                                if let Some(bus) = &learning_bus {
+                                    let event = super::learning_bus::LearningEvent::ToolCall {
+                                        tool_name: notification.method.clone(),
+                                        args: notification.params.clone().unwrap_or_default(),
+                                        result: format!("Error: {e}"),
+                                        success: false,
+                                        latency_ms,
+                                    };
+                                    let _ = bus.sender().send(event).await;
+                                }
                             }
                         }
                     }
@@ -696,6 +748,7 @@ impl A2aServer {
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,
+            learning_bus: self.learning_bus.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

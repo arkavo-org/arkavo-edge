@@ -965,7 +965,7 @@ fn parse_yaml_properties(
             }
         } else if *in_purpose_multiline {
             // Collect multi-line purpose content
-            if line.starts_with("  ") || line.starts_with("\t") {
+            if line.starts_with("  ") || line.starts_with('\t') {
                 // Indented line - part of multi-line value
                 purpose_lines.push(line.trim().to_string());
             } else if trimmed.is_empty() {
@@ -1024,9 +1024,15 @@ fn parse_yaml_properties(
 #[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
+    use arkavo_crypto::AgentKeypair;
+    use arkavo_gossip::GossipConfig;
+    use arkavo_protocol::server::{
+        LearningBus, start_anti_entropy_loop, start_lesson_propagation_loop,
+    };
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
@@ -1058,7 +1064,20 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let server = A2aServer::new(server_config);
 
-    // Set agent metadata
+    // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
+    let learning_bus = {
+        let keypair = Arc::new(AgentKeypair::generate());
+        let gossip_config = GossipConfig::default();
+        Arc::new(LearningBus::new(
+            config.name.clone(),
+            "default-swarm".to_string(),
+            keypair,
+            gossip_config,
+        ))
+    };
+    server.set_learning_bus(learning_bus.clone()).await;
+
+    // Set agent metadata (this initializes the router which will be set on learning bus)
     server
         .set_agent_metadata(
             config.name.clone(),
@@ -1291,16 +1310,25 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         println!("{}", "=".repeat(60));
     }
 
+    // Channel for peer discovery events (bridges sync mDNS thread to async LearningBus)
+    // Tuple: (peer_id, is_add, address)
+    let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<(String, bool, Option<String>)>(100);
+
     // Start mDNS broadcasting if enabled
     let mdns_thread_handle = if config.mdns_enabled {
         let config_clone = config.clone();
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let peer_tx_clone = peer_tx.clone();
 
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
-            if let Err(e) = broadcast_agent_mdns_sync(&config_clone, shutdown_flag_clone, Some(tx))
-            {
+            if let Err(e) = broadcast_agent_mdns_sync(
+                &config_clone,
+                shutdown_flag_clone,
+                Some(tx),
+                peer_tx_clone,
+            ) {
                 eprintln!("mDNS broadcast error: {e}");
             }
         });
@@ -1313,27 +1341,203 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         None
     };
 
-    // Connect to peer agents if configured
-    if config.a2a_enabled && !config.peers.is_empty() {
-        use crate::peer_manager::PeerManager;
+    // Start gossip learning background tasks when A2A is enabled
+    // Peers are added dynamically via mDNS discovery
+    let mut gossip_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
-        let peer_manager = Arc::new(PeerManager::new(config.name.clone()));
+    if config.a2a_enabled {
+        // Start anti-entropy background task (5s interval)
+        let learning_bus_ae = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            start_anti_entropy_loop(learning_bus_ae, Duration::from_secs(5)).await;
+        }));
+
+        // Start lesson propagation background task (15s interval)
+        let learning_bus_lp = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(15)).await;
+        }));
+
+        // Start lesson application loop (processes approved lessons, adds to policy cache)
+        let learning_bus_apply = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            if let Some(rx) = learning_bus_apply.subscribe_lesson_approvals().await {
+                arkavo_protocol::server::start_lesson_application_loop(learning_bus_apply, rx)
+                    .await;
+            } else {
+                tracing::warn!("Lesson application loop: could not subscribe to approvals");
+            }
+        }));
+
+        // Start event processing loop (converts observations to episodes to lessons)
+        let learning_bus_events = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            if let Some(rx) = learning_bus_events.take_event_receiver().await {
+                arkavo_protocol::server::start_event_processing_loop(learning_bus_events, rx).await;
+            } else {
+                tracing::warn!("Event processing loop: event receiver already taken");
+            }
+        }));
+
+        // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
+        let learning_bus_peers = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            use arkavo_protocol::http::HttpTransport;
+            use arkavo_protocol::transport::{
+                A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
+            };
+
+            while let Some((peer_id, is_add, address)) = peer_rx.recv().await {
+                if is_add {
+                    learning_bus_peers
+                        .add_peer_discovered(peer_id.clone(), address.clone())
+                        .await;
+
+                    // Initiate key exchange with the peer
+                    if let Some(addr) = address {
+                        let our_public_key = learning_bus_peers.keypair().public_key().to_base64();
+                        let our_agent_id = learning_bus_peers.agent_id().to_string();
+
+                        let request = A2aRequest::new(
+                            "agent/exchangeKeys",
+                            serde_json::json!({
+                                "peer_id": our_agent_id,
+                                "public_key": our_public_key
+                            }),
+                        );
+
+                        let mut config = TransportConfig::default();
+                        config.tls_config.require_tls = false;
+                        let transport = match HttpTransport::new(config) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to create transport for key exchange: {}",
+                                    e
+                                );
+                                continue;
+                            }
+                        };
+
+                        let endpoint = A2aEndpoint {
+                            url: addr.clone(),
+                            agent_id: peer_id.clone(),
+                            public_key: None,
+                        };
+
+                        if let Err(e) = transport.connect(&endpoint).await {
+                            tracing::warn!(
+                                "Failed to connect for key exchange with {}: {}",
+                                peer_id,
+                                e
+                            );
+                            continue;
+                        }
+
+                        match transport.send_request(request).await {
+                            Ok(response) => {
+                                use arkavo_protocol::transport::A2aResponse;
+                                // Parse the response to get their public key
+                                if let A2aResponse::Success { result, .. } = response
+                                    && let Some(their_key_b64) = result.as_str()
+                                {
+                                    match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64)
+                                    {
+                                        Ok(their_key) => {
+                                            learning_bus_peers
+                                                .register_peer_key(peer_id.clone(), their_key)
+                                                .await;
+                                            tracing::info!(
+                                                "Key exchange completed with peer: {}",
+                                                peer_id
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Invalid public key from {}: {}",
+                                                peer_id,
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Key exchange failed with {}: {}", peer_id, e);
+                            }
+                        }
+                    }
+                } else {
+                    learning_bus_peers.remove_peer(&peer_id).await;
+                }
+            }
+        }));
+
+        // Start gossip message transport (sends outgoing messages to peers via A2A)
+        let learning_bus_transport = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            use arkavo_protocol::http::HttpTransport;
+            use arkavo_protocol::transport::{
+                A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
+            };
+
+            let mut rx = learning_bus_transport.subscribe_gossip_out();
+            loop {
+                match rx.recv().await {
+                    Ok((peer_id, message)) => {
+                        // Look up peer address
+                        if let Some(addr) = learning_bus_transport.get_peer_address(&peer_id).await
+                        {
+                            // Create JSON-RPC request for gossip/message
+                            // jsonrpsee expects params as {"message": <value>}
+                            let params = serde_json::json!({
+                                "message": message
+                            });
+                            let request = A2aRequest::new("gossip/message", params);
+
+                            // Create transport and send (allow non-TLS for local mDNS discovery)
+                            let mut config = TransportConfig::default();
+                            config.tls_config.require_tls = false;
+                            let transport = match HttpTransport::new(config) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    tracing::warn!("Failed to create transport: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            let endpoint = A2aEndpoint {
+                                url: addr.clone(),
+                                agent_id: peer_id.clone(),
+                                public_key: None,
+                            };
+                            if let Err(e) = transport.connect(&endpoint).await {
+                                tracing::warn!("Failed to connect to {}: {}", peer_id, e);
+                                continue;
+                            }
+
+                            match transport.send_request(request).await {
+                                Ok(_response) => {
+                                    tracing::debug!("Gossip sent to {}", peer_id);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to send gossip to {}: {}", peer_id, e);
+                                }
+                            }
+                        } else {
+                            tracing::debug!("No address for peer {}, skipping gossip", peer_id);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Gossip transport lagged {} messages", n);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }));
 
         if !quiet {
-            println!("Connecting to {} peer(s)...", config.peers.len());
-        }
-
-        // Give mDNS time to register before connecting to peers
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        if let Err(e) = peer_manager.connect_to_peers(&config.peers).await
-            && !quiet
-        {
-            eprintln!("Warning: Failed to connect to some peers: {e}");
-        }
-
-        if !quiet && peer_manager.has_peers() {
-            println!("Connected to {} peer(s)", peer_manager.peer_count());
+            println!("Gossip learning: background tasks started");
         }
     }
 
@@ -1355,6 +1559,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Stop notification handler if running
     if let Some(handle) = notification_handle {
+        handle.abort();
+    }
+
+    // Stop gossip background tasks
+    for handle in gossip_handles {
         handle.abort();
     }
 
@@ -1396,6 +1605,7 @@ fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
+    #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool, Option<String>)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -1427,7 +1637,11 @@ fn broadcast_agent_mdns_sync(
         // Spawn a thread to handle discovered services
         let discovery_thread = thread::spawn(move || {
             use mdns_sd::ServiceEvent;
+            use std::collections::HashSet;
             println!("Starting discovery of other agents...");
+
+            // Track discovered peers to avoid duplicates
+            let mut discovered_peers: HashSet<String> = HashSet::new();
 
             loop {
                 match receiver.recv_timeout(Duration::from_secs(1)) {
@@ -1446,13 +1660,35 @@ fn broadcast_agent_mdns_sync(
                                 if let Some(purpose) = info.get_property_val_str("purpose") {
                                     println!("  - Purpose: {purpose}");
                                 }
-                                if let Some(addr) = info.get_addresses().iter().next() {
-                                    println!("  - Address: {}:{}", addr, info.get_port());
+                                // Get peer address
+                                let peer_addr = info
+                                    .get_addresses()
+                                    .iter()
+                                    .next()
+                                    .map(|addr| format!("http://{}:{}", addr, info.get_port()));
+
+                                if let Some(ref addr) = peer_addr {
+                                    println!("  - Address: {addr}");
+                                }
+
+                                // Notify LearningBus of new peer (only once per agent_id)
+                                if discovered_peers.insert(agent_id.to_string()) {
+                                    let _ = peer_tx.blocking_send((
+                                        agent_id.to_string(),
+                                        true,
+                                        peer_addr,
+                                    ));
                                 }
                             }
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             println!("Agent disconnected: {fullname}");
+                            // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
+                            if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next()
+                                && discovered_peers.remove(agent_id)
+                            {
+                                let _ = peer_tx.blocking_send((agent_id.to_string(), false, None));
+                            }
                         }
                         _ => {}
                     },
@@ -1559,10 +1795,8 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
     ) -> Result<Vec<arkavo_mcp::McpTool>, Box<dyn std::error::Error + Send + Sync>> {
         // Convert from cli Tool to McpTool
         let cli_tools = self.inner.list_tools().map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
         let protocol_tools = cli_tools
             .into_iter()
@@ -1584,10 +1818,8 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
         self.inner
             .call_tool(tool_name, arguments, llm_provider)
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }

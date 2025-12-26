@@ -1,0 +1,58 @@
+# Discourse Quality Policy Configuration
+name: discourse_quality_v1
+version: "1.0"
+
+prohibited:
+  content_types:
+    - personal_attacks
+    - ad_hominem
+    - harassment
+    - threats
+    - discrimination
+    - doxxing
+  reasoning_patterns:
+    - circular_reasoning
+    - appeal_to_violence
+    - conspiracy_without_evidence
+
+warnings:
+  - unsubstantiated_claims
+  - emotional_manipulation
+  - false_equivalence
+  - appeal_to_popularity
+  - hasty_generalization
+
+required:
+  - argument_structure: true
+  - evidence_support: true
+  - perspective_acknowledgment: true
+
+fallacy_rules:
+  - id: no_ad_hominem
+    description: "Attacks must target ideas, not people"
+    forbidden_patterns:
+      - "you're stupid"
+      - "you're lying"
+      - "you're biased"
+      - "you people"
+    severity: critical
+
+  - id: evidence_required
+    description: "Strong claims require evidence"
+    trigger_phrases:
+      - "everyone knows"
+      - "obviously"
+      - "it's clear that"
+      - "studies show"  # without citation
+    severity: warning
+
+  - id: no_strawman
+    description: "Arguments must represent opposing views fairly"
+    detection_heuristic: "misrepresentation_score > 0.7"
+    severity: error
+
+quality_thresholds:
+  min_argument_coherence: 0.6
+  min_evidence_support: 0.5
+  min_perspective_diversity: 0.4
+  max_repetition_rate: 0.3

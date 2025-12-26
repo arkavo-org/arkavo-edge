@@ -26,6 +26,10 @@ pub enum GossipError {
     #[error("Patch not found: {0}")]
     PatchNotFound(Uuid),
 
+    /// Lesson not found
+    #[error("Lesson not found: {0}")]
+    LessonNotFound(Uuid),
+
     /// Consensus timed out
     #[error("Consensus timed out for patch {0}")]
     ConsensusTimeout(Uuid),
@@ -41,6 +45,10 @@ pub enum GossipError {
     /// Serialization error
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    /// Peer rate limited
+    #[error("Rate limited: peer {0} exceeded message limit")]
+    RateLimited(String),
 }
 
 /// Result type alias for gossip operations

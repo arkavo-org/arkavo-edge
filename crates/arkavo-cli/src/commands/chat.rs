@@ -1157,7 +1157,7 @@ Q: \"Recent commits?\" → A: @git_status
                     let has_system = messages
                         .first()
                         .is_some_and(|m| matches!(m.role, arkavo_llm::Role::System));
-                    let start_idx = if has_system { 1 } else { 0 };
+                    let start_idx = usize::from(has_system);
                     let end_idx = start_idx + offload_count.min(messages.len() - start_idx);
 
                     if end_idx > start_idx {

@@ -100,25 +100,6 @@ impl A2aTransport for HttpTransport {
 
         self.validate_endpoint(endpoint)?;
 
-        let health_check_url = format!("{}/health", endpoint.url.trim_end_matches('/'));
-        let response = self.client.get(&health_check_url).send().await;
-
-        match response {
-            Ok(resp) if resp.status().is_success() => {
-                debug!("Health check successful for {}", endpoint.url);
-            }
-            Ok(resp) => {
-                warn!(
-                    "Health check returned status {} for {}",
-                    resp.status(),
-                    endpoint.url
-                );
-            }
-            Err(e) => {
-                debug!("Health check failed for {}: {}", endpoint.url, e);
-            }
-        }
-
         {
             let mut endpoint_guard = self.endpoint.write().unwrap();
             *endpoint_guard = Some(endpoint.clone());
