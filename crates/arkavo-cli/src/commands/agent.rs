@@ -1362,9 +1362,83 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
         let learning_bus_peers = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
+            use arkavo_protocol::http::HttpTransport;
+            use arkavo_protocol::transport::{A2aEndpoint, A2aRequest, A2aTransport, TransportConfig};
+
             while let Some((peer_id, is_add, address)) = peer_rx.recv().await {
                 if is_add {
-                    learning_bus_peers.add_peer_discovered(peer_id, address).await;
+                    learning_bus_peers
+                        .add_peer_discovered(peer_id.clone(), address.clone())
+                        .await;
+
+                    // Initiate key exchange with the peer
+                    if let Some(addr) = address {
+                        let our_public_key =
+                            learning_bus_peers.keypair().public_key().to_base64();
+                        let our_agent_id = learning_bus_peers.agent_id().to_string();
+
+                        let request = A2aRequest::new(
+                            "agent/exchangeKeys",
+                            serde_json::json!({
+                                "peer_id": our_agent_id,
+                                "public_key": our_public_key
+                            }),
+                        );
+
+                        let mut config = TransportConfig::default();
+                        config.tls_config.require_tls = false;
+                        let transport = match HttpTransport::new(config) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                tracing::warn!("Failed to create transport for key exchange: {}", e);
+                                continue;
+                            }
+                        };
+
+                        let endpoint = A2aEndpoint {
+                            url: addr.clone(),
+                            agent_id: peer_id.clone(),
+                            public_key: None,
+                        };
+
+                        if let Err(e) = transport.connect(&endpoint).await {
+                            tracing::warn!("Failed to connect for key exchange with {}: {}", peer_id, e);
+                            continue;
+                        }
+
+                        match transport.send_request(request).await {
+                            Ok(response) => {
+                                use arkavo_protocol::transport::A2aResponse;
+                                // Parse the response to get their public key
+                                if let A2aResponse::Success { result, .. } = response {
+                                    if let Some(their_key_b64) = result.as_str() {
+                                        match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64)
+                                        {
+                                            Ok(their_key) => {
+                                                learning_bus_peers
+                                                    .register_peer_key(peer_id.clone(), their_key)
+                                                    .await;
+                                                tracing::info!(
+                                                    "Key exchange completed with peer: {}",
+                                                    peer_id
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "Invalid public key from {}: {}",
+                                                    peer_id,
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Key exchange failed with {}: {}", peer_id, e);
+                            }
+                        }
+                    }
                 } else {
                     learning_bus_peers.remove_peer(&peer_id).await;
                 }

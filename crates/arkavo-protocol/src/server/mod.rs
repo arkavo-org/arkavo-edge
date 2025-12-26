@@ -186,6 +186,14 @@ pub trait A2aRpc {
         &self,
         message: arkavo_gossip::GossipMessage,
     ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>>;
+
+    /// Exchange public keys with peer for signature verification
+    #[method(name = "agent/exchangeKeys")]
+    async fn exchange_keys(
+        &self,
+        peer_id: String,
+        public_key: String,
+    ) -> RpcResult<String>;
 }
 
 pub struct A2aRpcImpl {
@@ -583,6 +591,52 @@ impl A2aRpcServer for A2aRpcImpl {
             }
             None => {
                 tracing::warn!("Gossip message received but LearningBus not configured");
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "LearningBus not configured",
+                    None::<()>,
+                ))
+            }
+        }
+    }
+
+    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String> {
+        let timer = RpcTimer::new("exchange_keys".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Parse incoming public key from base64
+        let peer_key = match arkavo_crypto::AgentPublicKey::from_base64(&public_key) {
+            Ok(key) => key,
+            Err(e) => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32602,
+                    format!("Invalid public key: {}", e),
+                    None::<()>,
+                ));
+            }
+        };
+
+        // Register peer's key in LearningBus
+        match &self.learning_bus {
+            Some(bus) => {
+                bus.register_peer_key(peer_id.clone(), peer_key).await;
+
+                // Return our public key
+                let our_key = bus.keypair().public_key().to_base64();
+                tracing::info!("Key exchange completed with peer: {}", peer_id);
+                timer.success();
+                Ok(our_key)
+            }
+            None => {
+                tracing::warn!("Key exchange attempted but LearningBus not configured");
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32603,

@@ -4,9 +4,10 @@
 
 use std::sync::Arc;
 
-use arkavo_crypto::AgentKeypair;
+use arkavo_crypto::{AgentKeypair, AgentPublicKey};
 use arkavo_gossip::{
-    GossipConfig, GossipMessage, GossipProtocol, KeyRegistry, LessonAnnouncement, LessonDigest,
+    sign_lesson_announcement, GossipConfig, GossipMessage, GossipProtocol, KeyRegistry,
+    LessonAnnouncement, LessonDigest,
 };
 use arkavo_router::learning::{AgentContribution, LearningModule};
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,13 @@ impl LearningBus {
         self.peer_addresses.read().await.clone()
     }
 
+    /// Register a peer's public key for signature verification
+    pub async fn register_peer_key(&self, peer_id: String, public_key: AgentPublicKey) {
+        let gossip = self.gossip.write().await;
+        gossip.register_key(peer_id.clone(), public_key).await;
+        tracing::info!("Registered public key for peer: {}", peer_id);
+    }
+
     /// Get the number of connected peers
     pub async fn peer_count(&self) -> usize {
         self.gossip.read().await.peer_count().await
@@ -225,12 +233,20 @@ impl LearningBus {
         Ok(())
     }
 
-    /// Announce a lesson to the gossip network
-    pub async fn announce_lesson(&self, announcement: LessonAnnouncement) -> Result<(), String> {
+    /// Announce a lesson to the gossip network (signs before sending)
+    pub async fn announce_lesson(
+        &self,
+        mut announcement: LessonAnnouncement,
+    ) -> Result<(), String> {
+        // Sign the announcement with our keypair
+        sign_lesson_announcement(&mut announcement, &self.keypair)
+            .map_err(|e| format!("Failed to sign lesson: {}", e))?;
+
         let gossip = self.gossip.read().await;
         let peers = gossip.select_propagation_peers(None).await;
         drop(gossip);
 
+        let peer_count = peers.len();
         for peer_id in peers {
             let _ = self.gossip_out_tx.send((
                 peer_id,
@@ -238,6 +254,7 @@ impl LearningBus {
             ));
         }
 
+        tracing::debug!("Announced signed lesson {} to {} peers", announcement.lesson_id, peer_count);
         Ok(())
     }
 
