@@ -135,6 +135,7 @@ pub struct AgentUtility {
     /// Windowed failures (for concept drift)
     pub window_failures: u64,
     /// Windowed prior for fast concept drift adaptation
+    #[serde(default)]
     pub window_prior: BetaPrior,
     /// Task category performance (category -> BetaPrior)
     pub category_priors: HashMap<String, BetaPrior>,
