@@ -7,30 +7,59 @@
 
 use arkavo_llm::{LlamaCppProvider, Message, Provider, Role};
 use arkavo_router::deliberation::{DeliberationConfig, Deliberator};
+use arkavo_router::model_discovery;
 use std::sync::Arc;
 
-const MINISTRAL_MODEL_PATH: &str = "/Users/paul/.cache/huggingface/hub/models--mistralai--Ministral-3-3B-Reasoning-2512-GGUF/snapshots/3b993f103009368df16c58fef4ad589cedf1bf24/Ministral-3-3B-Reasoning-2512-Q4_K_M.gguf";
+/// Find Ministral 3B model dynamically from HuggingFace cache
+async fn find_ministral_model() -> Option<String> {
+    // Try Instruct variant first, then Reasoning variant
+    if let Ok(path) = model_discovery::find_gguf_model(
+        "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+        "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+    )
+    .await
+    {
+        return Some(path.to_string_lossy().to_string());
+    }
+    if let Ok(path) = model_discovery::find_gguf_model(
+        "mistralai/Ministral-3-3B-Reasoning-2512-GGUF",
+        "Ministral-3-3B-Reasoning-2512-Q4_K_M.gguf",
+    )
+    .await
+    {
+        return Some(path.to_string_lossy().to_string());
+    }
+    None
+}
 
-const QWEN3_MODEL_PATH: &str = "/Volumes/SSD/huggingface/hub/models--Qwen--Qwen3-0.6B-GGUF/snapshots/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf";
+/// Find Qwen3 model dynamically from HuggingFace cache
+async fn find_qwen3_model() -> Option<String> {
+    if let Ok(path) =
+        model_discovery::find_gguf_model("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf").await
+    {
+        return Some(path.to_string_lossy().to_string());
+    }
+    None
+}
 
 #[tokio::test]
 #[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test -- --ignored --nocapture
 async fn test_deliberation_with_ministral_3b() {
-    // Check if model exists
-    if !std::path::Path::new(MINISTRAL_MODEL_PATH).exists() {
-        eprintln!("Ministral 3B model not found at: {}", MINISTRAL_MODEL_PATH);
-        eprintln!(
-            "Download with: huggingface-cli download mistralai/Ministral-3-3B-Reasoning-2512-GGUF"
-        );
-        return;
-    }
+    // Find model dynamically from HuggingFace cache
+    let model_path = match find_ministral_model().await {
+        Some(path) => path,
+        None => {
+            eprintln!("Ministral 3B model not found in HuggingFace cache");
+            eprintln!(
+                "Download with: huggingface-cli download mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+            );
+            return;
+        }
+    };
 
-    println!("Loading Ministral 3B Reasoning model...");
-    let provider = LlamaCppProvider::new(
-        "ministral-3b-reasoning".to_string(),
-        MINISTRAL_MODEL_PATH.to_string(),
-    )
-    .expect("Failed to load Ministral 3B model");
+    println!("Loading Ministral 3B model from: {}", model_path);
+    let provider = LlamaCppProvider::new("ministral-3b".to_string(), model_path)
+        .expect("Failed to load Ministral 3B model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);
 
@@ -83,17 +112,17 @@ async fn test_deliberation_with_ministral_3b() {
 #[tokio::test]
 #[ignore]
 async fn test_deliberation_tool_error_scenario() {
-    if !std::path::Path::new(MINISTRAL_MODEL_PATH).exists() {
-        eprintln!("Ministral 3B model not found, skipping test");
-        return;
-    }
+    let model_path = match find_ministral_model().await {
+        Some(path) => path,
+        None => {
+            eprintln!("Ministral 3B model not found, skipping test");
+            return;
+        }
+    };
 
-    println!("Loading Ministral 3B Reasoning model...");
-    let provider = LlamaCppProvider::new(
-        "ministral-3b-reasoning".to_string(),
-        MINISTRAL_MODEL_PATH.to_string(),
-    )
-    .expect("Failed to load Ministral 3B model");
+    println!("Loading Ministral 3B model from: {}", model_path);
+    let provider = LlamaCppProvider::new("ministral-3b".to_string(), model_path)
+        .expect("Failed to load Ministral 3B model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);
 
@@ -143,14 +172,17 @@ async fn test_deliberation_tool_error_scenario() {
 #[tokio::test]
 #[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test test_qwen3 -- --ignored --nocapture
 async fn test_qwen3_math() {
-    if !std::path::Path::new(QWEN3_MODEL_PATH).exists() {
-        eprintln!("Qwen3-0.6B model not found at: {}", QWEN3_MODEL_PATH);
-        eprintln!("Download with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
-        return;
-    }
+    let model_path = match find_qwen3_model().await {
+        Some(path) => path,
+        None => {
+            eprintln!("Qwen3-0.6B model not found in HuggingFace cache");
+            eprintln!("Download with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
+            return;
+        }
+    };
 
-    println!("Loading Qwen3-0.6B model...");
-    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), QWEN3_MODEL_PATH.to_string())
+    println!("Loading Qwen3-0.6B model from: {}", model_path);
+    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);
@@ -193,13 +225,16 @@ async fn test_qwen3_math() {
 #[tokio::test]
 #[ignore]
 async fn test_qwen3_coding() {
-    if !std::path::Path::new(QWEN3_MODEL_PATH).exists() {
-        eprintln!("Qwen3-0.6B model not found, skipping test");
-        return;
-    }
+    let model_path = match find_qwen3_model().await {
+        Some(path) => path,
+        None => {
+            eprintln!("Qwen3-0.6B model not found, skipping test");
+            return;
+        }
+    };
 
-    println!("Loading Qwen3-0.6B model...");
-    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), QWEN3_MODEL_PATH.to_string())
+    println!("Loading Qwen3-0.6B model from: {}", model_path);
+    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);
