@@ -35,32 +35,62 @@ impl PolicyCache {
         // Extract sector from condition (simple parsing)
         let sector_id = Self::extract_sector(&lesson.pattern.condition);
 
-        if let Some(sector) = sector_id {
+        if let Some(ref sector) = sector_id {
             self.lessons_by_sector
-                .entry(sector)
+                .entry(sector.clone())
                 .or_default()
                 .push(lesson.clone());
         }
+
+        tracing::info!(
+            lesson_id = %lesson.id,
+            category = %lesson.category,
+            action = %lesson.pattern.action,
+            condition = %lesson.pattern.condition,
+            sector = ?sector_id,
+            total_cached = self.lessons_by_id.len() + 1,
+            "Lesson added to policy cache"
+        );
 
         self.lessons_by_id.insert(lesson.id, lesson);
     }
 
     /// Check if there's a slowdown lesson for a sector
     pub fn should_slowdown(&self, sector_id: &str) -> Option<&Lesson> {
-        self.lessons_by_sector.get(sector_id).and_then(|lessons| {
+        let result = self.lessons_by_sector.get(sector_id).and_then(|lessons| {
             lessons
                 .iter()
                 .find(|l| l.pattern.action.to_lowercase().contains("slow"))
-        })
+        });
+
+        if result.is_some() {
+            tracing::debug!(
+                sector_id = %sector_id,
+                advice = "slowdown",
+                "Policy check: slowdown advised"
+            );
+        }
+
+        result
     }
 
     /// Check if there's an avoid lesson for a sector
     pub fn should_avoid(&self, sector_id: &str) -> Option<&Lesson> {
-        self.lessons_by_sector.get(sector_id).and_then(|lessons| {
+        let result = self.lessons_by_sector.get(sector_id).and_then(|lessons| {
             lessons
                 .iter()
                 .find(|l| l.pattern.action.to_lowercase().contains("avoid"))
-        })
+        });
+
+        if result.is_some() {
+            tracing::debug!(
+                sector_id = %sector_id,
+                advice = "avoid",
+                "Policy check: avoidance advised"
+            );
+        }
+
+        result
     }
 
     /// Get a lesson by ID

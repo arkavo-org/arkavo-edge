@@ -1,3 +1,4 @@
+use super::learning_bus::{LearningBus, LearningEvent};
 use super::mcp_bridge::McpBridgeTool;
 use crate::mcp_registry::McpRegistry;
 use crate::task_executor::TaskExecutor;
@@ -15,6 +16,30 @@ pub async fn execute_with_conductor(
     task_content: String,
     task_id: Option<uuid::Uuid>,
     task_executor: Option<&Arc<TaskExecutor>>,
+) -> std::result::Result<String, String> {
+    execute_with_conductor_and_learning(
+        conductor,
+        router,
+        mcp_registry,
+        task_content,
+        task_id,
+        task_executor,
+        None,
+    )
+    .await
+}
+
+/// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
+/// Optionally emits learning events for tool calls
+#[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
+pub async fn execute_with_conductor_and_learning(
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    router: &Arc<arkavo_router::Router>,
+    mcp_registry: &Arc<McpRegistry>,
+    task_content: String,
+    task_id: Option<uuid::Uuid>,
+    task_executor: Option<&Arc<TaskExecutor>>,
+    learning_bus: Option<&Arc<LearningBus>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -158,6 +183,8 @@ pub async fn execute_with_conductor(
                 serde_json::to_string(&args).unwrap_or_default()
             );
 
+            let start_time = std::time::Instant::now();
+
             // Call the tool via MCP registry - convert error to String early to avoid Send issues
             let tool_result = mcp_registry
                 .call_tool(&tool_call.tool_name, args.clone(), "hrm")
@@ -166,9 +193,22 @@ pub async fn execute_with_conductor(
 
             match tool_result {
                 Ok(result) => {
+                    let latency_ms = start_time.elapsed().as_millis() as u64;
                     info!("Tool {} succeeded", tool_call.tool_name);
                     let result_str = serde_json::to_string(&result).unwrap_or_default();
                     debug!("Tool {} result: {}", tool_call.tool_name, result_str);
+
+                    // Emit learning event for successful tool call
+                    if let Some(bus) = learning_bus {
+                        let event = LearningEvent::ToolCall {
+                            tool_name: tool_call.tool_name.clone(),
+                            args: args.clone(),
+                            result: result_str.clone(),
+                            success: true,
+                            latency_ms,
+                        };
+                        let _ = bus.sender().send(event).await;
+                    }
 
                     tool_results.push(format!(
                         "## Tool: {}\n{}",
@@ -177,7 +217,20 @@ pub async fn execute_with_conductor(
                     ));
                 }
                 Err(err_str) => {
+                    let latency_ms = start_time.elapsed().as_millis() as u64;
                     warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
+
+                    // Emit learning event for failed tool call
+                    if let Some(bus) = learning_bus {
+                        let event = LearningEvent::ToolCall {
+                            tool_name: tool_call.tool_name.clone(),
+                            args: args.clone(),
+                            result: format!("Error: {err_str}"),
+                            success: false,
+                            latency_ms,
+                        };
+                        let _ = bus.sender().send(event).await;
+                    }
 
                     tool_results.push(format!(
                         "## Tool: {} (Error)\n{}",

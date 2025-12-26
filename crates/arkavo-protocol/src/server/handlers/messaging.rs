@@ -14,7 +14,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::config_helpers::AgentMetadata;
-use super::super::execute_with_conductor;
+use super::super::execute_with_conductor_and_learning;
+use super::super::LearningBus;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(
@@ -25,6 +26,7 @@ pub async fn handle_message_send(
     mcp_registry: &Arc<McpRegistry>,
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: Option<&Arc<arkavo_router::Router>>,
+    learning_bus: Option<&Arc<LearningBus>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -55,6 +57,7 @@ pub async fn handle_message_send(
                 let task_executor = task_executor.clone();
                 let task_store = task_store.clone();
                 let task_id_clone = task_id;
+                let learning_bus = learning_bus.cloned();
 
                 tokio::spawn(async move {
                     if let Err(e) = task_executor
@@ -67,13 +70,14 @@ pub async fn handle_message_send(
 
                     info!("Executing task {} via HRM Conductor", task_id_clone);
 
-                    match execute_with_conductor(
+                    match execute_with_conductor_and_learning(
                         &conductor,
                         &router,
                         &mcp_registry,
                         task_content,
                         Some(task_id_clone),
                         Some(&task_executor),
+                        learning_bus.as_ref(),
                     )
                     .await
                     {

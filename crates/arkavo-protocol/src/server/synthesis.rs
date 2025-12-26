@@ -36,6 +36,14 @@ pub(super) async fn synthesize_episode(
     let has_failure = observations.iter().any(|o| !o.success);
     let total_latency: u64 = observations.iter().map(|o| o.latency_ms).sum();
 
+    tracing::info!(
+        agent_id = %agent_id,
+        category = %category,
+        observation_count = observations.len(),
+        has_failure = has_failure,
+        "Starting episode synthesis"
+    );
+
     let prompt = format!(
         r#"Analyze these tool call observations and summarize as a structured episode.
 
@@ -77,6 +85,15 @@ Respond with a JSON object:
 
     // Parse LLM response - extract quality score if present
     let quality_score = extract_quality_score(&response.content);
+
+    tracing::info!(
+        agent_id = %agent_id,
+        category = %category,
+        quality_score = quality_score,
+        has_failure = has_failure,
+        latency_ms = total_latency,
+        "Episode synthesized successfully"
+    );
 
     // Create episode
     let observation = Observation::new(
@@ -129,6 +146,15 @@ pub(super) async fn synthesize_lesson(
     let failure_count = episodes.iter().filter(|e| !e.outcome.success).count();
     let success_count = episodes.iter().filter(|e| e.outcome.success).count();
 
+    tracing::info!(
+        agent_id = %agent_id,
+        category = %category,
+        episode_count = episodes.len(),
+        success_count = success_count,
+        failure_count = failure_count,
+        "Starting lesson synthesis"
+    );
+
     let prompt = format!(
         r#"Analyze these episodes and extract a reusable lesson pattern.
 
@@ -173,6 +199,16 @@ If no clear pattern, respond with: NO_LESSON"#,
 
     // Parse the lesson pattern from response
     let pattern = parse_lesson_pattern(&response.content)?;
+
+    tracing::info!(
+        agent_id = %agent_id,
+        category = %category,
+        condition = %pattern.0,
+        action = %pattern.1,
+        confidence = pattern.2,
+        expected_outcome = %pattern.3,
+        "Lesson pattern extracted"
+    );
 
     // Validate confidence
     if pattern.2 < min_confidence {

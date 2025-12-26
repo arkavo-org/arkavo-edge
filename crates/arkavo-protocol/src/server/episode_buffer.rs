@@ -67,20 +67,40 @@ impl EpisodeBuffer {
     pub fn add_observation(&mut self, obs: ToolObservation) {
         // Infer category from tool name
         let category = Self::infer_category(&obs.tool_name);
-        self.observations
-            .entry(category)
-            .or_default()
-            .push_back(obs);
+        let tool_name = obs.tool_name.clone();
+        let success = obs.success;
+        let entry = self.observations.entry(category.clone()).or_default();
+        entry.push_back(obs);
+
+        tracing::debug!(
+            category = %category,
+            tool_name = %tool_name,
+            success = success,
+            buffer_size = entry.len(),
+            threshold = self.observation_threshold,
+            "Observation buffered"
+        );
     }
 
     /// Check if any category has enough observations for episode synthesis
     pub fn ready_for_episode_synthesis(&self) -> Option<String> {
         for (category, obs) in &self.observations {
             if obs.len() >= self.observation_threshold {
+                tracing::info!(
+                    category = %category,
+                    observation_count = obs.len(),
+                    threshold = self.observation_threshold,
+                    "Observation threshold reached - ready for episode synthesis"
+                );
                 return Some(category.clone());
             }
             // Also trigger on failure for immediate learning
             if obs.back().is_some_and(|o| !o.success) {
+                tracing::info!(
+                    category = %category,
+                    observation_count = obs.len(),
+                    "Failure detected - triggering immediate episode synthesis"
+                );
                 return Some(category.clone());
             }
         }
@@ -98,13 +118,29 @@ impl EpisodeBuffer {
     /// Add an episode to the buffer
     pub fn add_episode(&mut self, episode: Episode) {
         let category = episode.task_category.clone();
-        self.episodes.entry(category).or_default().push(episode);
+        let success = episode.outcome.success;
+        let entry = self.episodes.entry(category.clone()).or_default();
+        entry.push(episode);
+
+        tracing::debug!(
+            category = %category,
+            success = success,
+            episode_count = entry.len(),
+            threshold = self.episode_threshold,
+            "Episode added to buffer"
+        );
     }
 
     /// Check if any category has enough episodes for lesson synthesis
     pub fn ready_for_lesson_synthesis(&self) -> Option<String> {
         for (category, eps) in &self.episodes {
             if eps.len() >= self.episode_threshold {
+                tracing::info!(
+                    category = %category,
+                    episode_count = eps.len(),
+                    threshold = self.episode_threshold,
+                    "Episode threshold reached - ready for lesson synthesis"
+                );
                 return Some(category.clone());
             }
         }

@@ -13,7 +13,7 @@ mod synthesis;
 mod tool_memory;
 
 pub use a2a_server::A2aServer;
-pub use conductor::execute_with_conductor;
+pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
 pub use config_helpers::AgentMetadata;
 pub use episode_buffer::{EpisodeBuffer, ToolObservation};
 pub use event_loop::{start_event_processing_loop, start_lesson_application_loop};
@@ -369,6 +369,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.mcp_registry,
             &self.conductor,
             self.router.as_ref(),
+            self.learning_bus.as_ref(),
             request,
         )
         .await

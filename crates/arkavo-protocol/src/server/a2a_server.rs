@@ -96,11 +96,14 @@ impl A2aServer {
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
         drop(metadata);
 
-        if model.is_empty() {
-            info!("Model is empty, initializing router for dynamic model selection");
-            self.initialize_router().await;
-            self.build_tool_registry().await;
-        } else {
+        // Always initialize router for task execution via HRM conductor
+        // Router is required by execute_with_conductor regardless of model
+        info!("Initializing router for task execution");
+        self.initialize_router().await;
+        self.build_tool_registry().await;
+
+        // Also create LLM adapter if model is specified
+        if !model.is_empty() {
             self.recreate_llm_adapter().await;
         }
     }

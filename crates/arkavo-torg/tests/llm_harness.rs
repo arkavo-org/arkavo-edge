@@ -19,17 +19,88 @@ use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler,
 use torg_core::Graph;
 use torg_mask::TokenMapping;
 
-const DEFAULT_MODEL_PATH: &str = ".cache/arkavo/models/qwen3-0.6b.gguf";
-
-/// Get the model path from environment or default location
+/// Get the model path from environment or HuggingFace hub cache
 pub fn model_path() -> PathBuf {
-    std::env::var("ARKAVO_TORG_MODEL_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("Could not find home directory")
-                .join(DEFAULT_MODEL_PATH)
-        })
+    // First check environment override
+    if let Ok(path) = std::env::var("ARKAVO_TORG_MODEL_PATH") {
+        return PathBuf::from(path);
+    }
+
+    // Use HuggingFace hub cache (same logic as model_discovery.rs)
+    if let Some(path) = find_any_gguf_sync() {
+        return path;
+    }
+
+    // Fallback: return a non-existent path that will trigger helpful error
+    dirs::home_dir()
+        .expect("Could not find home directory")
+        .join(".cache/huggingface/hub/NO_MODEL_FOUND.gguf")
+}
+
+/// Synchronously scan HF cache for any GGUF model (for test harness)
+fn find_any_gguf_sync() -> Option<PathBuf> {
+    let cache = get_hf_cache_dir()?;
+
+    // Priority order: prefer TØRG-compatible models (Qwen3, Ministral)
+    let preferred_repos = [
+        "models--Qwen--Qwen3-0.6B-GGUF",
+        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
+        "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+    ];
+
+    // Check preferred repos first
+    for repo_name in &preferred_repos {
+        let repo_path = cache.join(repo_name);
+        if repo_path.exists() {
+            if let Some(gguf) = find_gguf_in_dir(&repo_path) {
+                return Some(gguf);
+            }
+        }
+    }
+
+    // Fallback: scan all model repositories
+    if let Ok(entries) = std::fs::read_dir(&cache) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir()
+                && path.file_name()?.to_str()?.starts_with("models--")
+            {
+                if let Some(gguf) = find_gguf_in_dir(&path) {
+                    return Some(gguf);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Get the HuggingFace cache directory
+fn get_hf_cache_dir() -> Option<PathBuf> {
+    // Check HF_HOME environment variable first
+    if let Ok(hf_home) = std::env::var("HF_HOME") {
+        return Some(PathBuf::from(hf_home).join("hub"));
+    }
+
+    // Fall back to default location: ~/.cache/huggingface/hub
+    dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
+}
+
+/// Recursively find the first .gguf file in a directory
+fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+                return Some(path);
+            } else if path.is_dir() {
+                if let Some(found) = find_gguf_in_dir(&path) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Load the model if available, returning None if not found

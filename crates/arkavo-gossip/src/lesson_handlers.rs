@@ -23,10 +23,19 @@ impl GossipProtocol {
         let lesson_id = announcement.lesson_id;
         let now = Utc::now();
 
+        tracing::info!(
+            lesson_id = %lesson_id,
+            originator = %announcement.originator,
+            category = %announcement.category,
+            confidence = announcement.confidence,
+            "Received lesson announcement"
+        );
+
         // Check for duplicate
         {
             let seen = self.seen_lesson_ids.read().await;
             if seen.contains_key(&lesson_id) {
+                tracing::debug!(lesson_id = %lesson_id, "Duplicate lesson announcement ignored");
                 return Err(GossipError::Duplicate(lesson_id));
             }
         }
@@ -64,6 +73,13 @@ impl GossipProtocol {
         &self,
         vote: LessonVote,
     ) -> GossipResult<Vec<GossipMessage>> {
+        tracing::info!(
+            lesson_id = %vote.lesson_id,
+            voter = %vote.voter,
+            approve = vote.approve,
+            "Received lesson vote"
+        );
+
         // Verify signature
         {
             let verifier = self.verifier.read().await;
@@ -86,18 +102,26 @@ impl GossipProtocol {
                 LessonConsensusStatus::Approved => {
                     if state.status != LessonStatus::Approved {
                         state.status = LessonStatus::Approved;
+                        tracing::info!(
+                            lesson_id = %vote.lesson_id,
+                            originator = %state.announcement.originator,
+                            category = %state.announcement.category,
+                            votes = state.consensus.votes.len(),
+                            "Lesson approved by consensus"
+                        );
                         // Emit lesson approval notification
                         if let Some(tx) = &self.lesson_approved_tx {
                             let _ = tx.send(state.announcement.clone());
-                            tracing::info!(
-                                "Lesson {} approved by quorum, notifying subscribers",
-                                vote.lesson_id
-                            );
                         }
                     }
                 }
                 LessonConsensusStatus::Rejected | LessonConsensusStatus::TimedOut => {
                     state.status = LessonStatus::Rejected;
+                    tracing::info!(
+                        lesson_id = %vote.lesson_id,
+                        status = ?state.consensus.status,
+                        "Lesson rejected by consensus"
+                    );
                 }
                 LessonConsensusStatus::Pending => {}
             }
