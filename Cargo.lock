@@ -1161,6 +1161,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",

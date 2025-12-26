@@ -114,6 +114,15 @@ impl GossipProtocol {
             GossipMessage::PatchRequest(request) => self.handle_request(request).await,
             GossipMessage::PatchDelivery(delivery) => self.handle_delivery(delivery).await,
             GossipMessage::AntiEntropy(digest) => self.handle_anti_entropy(digest).await,
+
+            // Learning messages - propagate for now, full handling in LearningModule
+            GossipMessage::LessonAnnounce(ann) => Ok(vec![GossipMessage::LessonAnnounce(ann)]),
+            GossipMessage::LessonVote(vote) => Ok(vec![GossipMessage::LessonVote(vote)]),
+            GossipMessage::LessonRequest(req) => Ok(vec![GossipMessage::LessonRequest(req)]),
+            GossipMessage::LessonDelivery(_) | GossipMessage::LessonDigest(_) => {
+                // No propagation needed for delivery/digest
+                Ok(vec![])
+            }
         }
     }
 

@@ -12,6 +12,7 @@
 
 mod consensus;
 mod error;
+pub mod learning_message;
 mod message;
 mod protocol;
 mod verification;
@@ -20,6 +21,10 @@ pub use consensus::{
     ConsensusState, ConsensusStatus, DEFAULT_QUORUM_THRESHOLD, DEFAULT_VOTE_TIMEOUT, QuorumConfig,
 };
 pub use error::{GossipError, GossipResult};
+pub use learning_message::{
+    LessonAnnouncement, LessonDelivery, LessonDigest, LessonDigestEntry, LessonRequest,
+    LessonStatus, LessonVote, LocalEvidence,
+};
 pub use message::{
     AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
     PatchRequest, PatchStatus, PatchVote,
