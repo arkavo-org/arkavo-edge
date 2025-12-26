@@ -38,7 +38,7 @@ a2a:
 
 mcp_servers:
   - name: fleet-env
-    command: ./mcp-fleet-env/target/debug/arkavo-mcp-fleet-env
+    command: ../mcp-fleet-env/target/debug/arkavo-mcp-fleet-env
     args: ["--connect", "http://localhost:8360"]
 
 ## Logging

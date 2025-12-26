@@ -475,6 +475,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     let mut in_peers_section = false;
     let mut in_args_section = false;
     let mut in_a2a_section = false;
+    let mut in_purpose_multiline = false;
+    let mut purpose_lines: Vec<String> = Vec::new();
 
     // Check if this is the new markdown format by looking for specific patterns
     let is_new_format = content.contains("## Agent Identity")
@@ -607,6 +609,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 
                 // Also handle direct YAML-style properties in markdown (for flexibility)
                 parse_yaml_properties(
+                    line,
                     trimmed,
                     agent,
                     &mut in_mcp_section,
@@ -614,6 +617,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     &mut in_peers_section,
                     &mut in_a2a_section,
                     &mut in_args_section,
+                    &mut in_purpose_multiline,
+                    &mut purpose_lines,
                 );
             }
         } else {
@@ -699,6 +704,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 
             if let Some(agent) = current_agent.as_mut() {
                 parse_yaml_properties(
+                    line,
                     trimmed,
                     agent,
                     &mut in_mcp_section,
@@ -706,6 +712,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     &mut in_peers_section,
                     &mut in_a2a_section,
                     &mut in_args_section,
+                    &mut in_purpose_multiline,
+                    &mut purpose_lines,
                 );
             }
         }
@@ -762,6 +770,7 @@ fn has_required_args(schema: &serde_json::Value) -> bool {
 // Helper function to parse YAML-style properties (used by both old and new format parsers)
 #[allow(clippy::too_many_arguments)]
 fn parse_yaml_properties(
+    line: &str,
     trimmed: &str,
     agent: &mut AgentConfig,
     in_mcp_section: &mut bool,
@@ -769,6 +778,8 @@ fn parse_yaml_properties(
     in_peers_section: &mut bool,
     in_a2a_section: &mut bool,
     in_args_section: &mut bool,
+    in_purpose_multiline: &mut bool,
+    purpose_lines: &mut Vec<String>,
 ) {
     // Check for a2a section
     if trimmed == "a2a:" {
@@ -943,13 +954,41 @@ fn parse_yaml_properties(
                 .trim_matches('"')
                 .to_string();
         } else if trimmed.starts_with("purpose:") {
-            agent.purpose = trimmed
-                .strip_prefix("purpose:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"')
-                .to_string();
-        } else if trimmed.starts_with("model:") {
+            let value = trimmed.strip_prefix("purpose:").unwrap_or("").trim();
+            if value == "|" || value == "|-" || value == "|+" {
+                // Start multi-line YAML string
+                *in_purpose_multiline = true;
+                purpose_lines.clear();
+            } else {
+                // Single-line purpose
+                agent.purpose = value.trim_matches('"').to_string();
+            }
+        } else if *in_purpose_multiline {
+            // Collect multi-line purpose content
+            if line.starts_with("  ") || line.starts_with("\t") {
+                // Indented line - part of multi-line value
+                purpose_lines.push(line.trim().to_string());
+            } else if trimmed.is_empty() {
+                // Empty line in multi-line - preserve as paragraph break
+                purpose_lines.push(String::new());
+            } else {
+                // Non-indented, non-empty line - end of multi-line
+                *in_purpose_multiline = false;
+                agent.purpose = purpose_lines.join("\n").trim().to_string();
+                purpose_lines.clear();
+                // Re-process this line (it might be a new property)
+                // Continue to let other parsers handle it
+            }
+        }
+
+        // End multi-line purpose on new property/section
+        if *in_purpose_multiline && (trimmed.starts_with("model:") || trimmed.starts_with('#')) {
+            *in_purpose_multiline = false;
+            agent.purpose = purpose_lines.join("\n").trim().to_string();
+            purpose_lines.clear();
+        }
+
+        if trimmed.starts_with("model:") {
             agent.model = trimmed
                 .strip_prefix("model:")
                 .unwrap_or("")

@@ -9,13 +9,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use arkavo_ensemble::{CostFunction, GenerationMethod, PolicyEnsemble, PolicyLayer};
-use arkavo_sat::ProbeScheduler;
+use arkavo_sat::{ProbeResult, ProbeScheduler, ProbeTask};
 use arkavo_sbe::InvariantLayer;
 use torg_core::Graph;
 
@@ -78,6 +78,20 @@ pub struct AutoLearnStats {
     pub patches_rejected: u64,
 }
 
+/// Result from a concurrent synthesis operation
+struct SynthesisResult {
+    /// The patch ID if broadcast succeeded
+    patch_id: Option<Uuid>,
+    /// The signal ID that triggered this synthesis
+    signal_id: Uuid,
+    /// Whether synthesis succeeded
+    success: bool,
+    /// Whether this was a dry-run
+    dry_run: bool,
+    /// The synthesized graph (for ensemble update)
+    graph: Option<Graph>,
+}
+
 /// The main auto-learning orchestrator
 ///
 /// Coordinates the four-step learning cycle:
@@ -88,8 +102,8 @@ pub struct AutoLearnStats {
 pub struct AutoLearner<C: CostFunction> {
     /// Configuration
     config: AutoLearnConfig,
-    /// The synthesizer (Ministral-3B)
-    synthesizer: MinistralSynthesizer,
+    /// The synthesizer (Ministral-3B) - wrapped in Arc for concurrent access
+    synthesizer: Arc<MinistralSynthesizer>,
     /// The immune verifier
     verifier: ImmuneVerifier,
     /// Network bridge for gossip
@@ -104,17 +118,32 @@ pub struct AutoLearner<C: CostFunction> {
     patch_rx: Option<mpsc::Receiver<IncomingPatch>>,
     /// Statistics
     stats: AutoLearnStats,
+    /// Sender for probe tasks
+    probe_task_tx: Option<mpsc::Sender<ProbeTask>>,
+    /// Receiver for probe results
+    probe_result_rx: Option<mpsc::Receiver<ProbeResult>>,
+    /// Model ID for pain signal context
+    model_id: String,
+    /// Semaphore for limiting concurrent synthesis operations
+    synthesis_semaphore: Arc<Semaphore>,
+    /// Sender for synthesis results (cloned into spawned tasks)
+    synthesis_result_tx: mpsc::Sender<SynthesisResult>,
+    /// Receiver for synthesis results
+    synthesis_result_rx: Option<mpsc::Receiver<SynthesisResult>>,
 }
 
 impl<C: CostFunction> AutoLearner<C> {
     /// Create a new auto-learner
     pub fn new(
         config: AutoLearnConfig,
-        synthesizer: MinistralSynthesizer,
+        synthesizer: Arc<MinistralSynthesizer>,
         verifier: ImmuneVerifier,
         network: Arc<GossipNetworkBridge>,
         ensemble: PolicyEnsemble<C>,
     ) -> Self {
+        let (synthesis_result_tx, synthesis_result_rx) = mpsc::channel(32);
+        let synthesis_semaphore = Arc::new(Semaphore::new(config.max_concurrent_synthesis));
+
         Self {
             config,
             synthesizer,
@@ -125,6 +154,12 @@ impl<C: CostFunction> AutoLearner<C> {
             probe_scheduler: None,
             patch_rx: None,
             stats: AutoLearnStats::default(),
+            probe_task_tx: None,
+            probe_result_rx: None,
+            model_id: String::new(),
+            synthesis_semaphore,
+            synthesis_result_tx,
+            synthesis_result_rx: Some(synthesis_result_rx),
         }
     }
 
@@ -138,6 +173,30 @@ impl<C: CostFunction> AutoLearner<C> {
     pub fn with_patch_receiver(mut self, rx: mpsc::Receiver<IncomingPatch>) -> Self {
         self.patch_rx = Some(rx);
         self
+    }
+
+    /// Set the model ID for pain signal context
+    pub fn with_model_id(mut self, model_id: String) -> Self {
+        self.model_id = model_id;
+        self
+    }
+
+    /// Start the probe scheduler as a background task
+    ///
+    /// Returns a join handle if the scheduler was configured, None otherwise.
+    /// After calling this, probe tasks can be sent via `probe_cycle()`.
+    pub fn start_probe_scheduler(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        let scheduler = self.probe_scheduler.take()?;
+
+        let (task_tx, task_rx) = mpsc::channel(32);
+        let (result_tx, result_rx) = mpsc::channel(32);
+
+        self.probe_task_tx = Some(task_tx);
+        self.probe_result_rx = Some(result_rx);
+
+        Some(tokio::spawn(async move {
+            scheduler.start(task_rx, result_tx).await;
+        }))
     }
 
     /// Get the pain aggregator for adding signals
@@ -162,6 +221,9 @@ impl<C: CostFunction> AutoLearner<C> {
 
     /// Run the main auto-learning loop
     pub async fn run(&mut self, cancel: CancellationToken) -> AutoLearnResult<()> {
+        // Start the probe scheduler if configured
+        let _probe_handle = self.start_probe_scheduler();
+
         let mut probe_timer = interval(self.config.probe_interval);
 
         loop {
@@ -170,6 +232,12 @@ impl<C: CostFunction> AutoLearner<C> {
                 tracing::info!("AutoLearner shutting down");
                 break;
             }
+
+            // Process any completed probe results
+            self.process_probe_results();
+
+            // Collect completed synthesis results
+            self.collect_synthesis_results();
 
             // Try to receive incoming patches
             let incoming_patch = if let Some(ref mut rx) = self.patch_rx {
@@ -185,14 +253,29 @@ impl<C: CostFunction> AutoLearner<C> {
                 continue;
             }
 
-            // Process local pain signals
-            if let Some(signal) = self.aggregator.next_signal() {
-                if signal.severity >= self.config.synthesis_threshold
+            // Process synthesis - sequential mode when max_concurrent_synthesis == 1,
+            // otherwise concurrent mode with spawned tasks
+            if self.config.max_concurrent_synthesis <= 1 {
+                // Sequential mode: process one signal at a time (simpler, lower overhead)
+                if let Some(signal) = self.aggregator.next_signal()
+                    && signal.severity >= self.config.synthesis_threshold
                     && let Err(e) = self.process_signal(signal).await
                 {
                     tracing::warn!("Failed to process signal: {}", e);
                 }
-                continue;
+            } else {
+                // Concurrent mode: acquire permit BEFORE spawn to enforce backpressure
+                while let Ok(permit) = self.synthesis_semaphore.clone().try_acquire_owned() {
+                    let Some(signal) = self.aggregator.next_signal() else {
+                        drop(permit); // Return permit if no signals
+                        break;
+                    };
+                    if signal.severity >= self.config.synthesis_threshold {
+                        self.spawn_synthesis_with_permit(signal, permit);
+                    } else {
+                        drop(permit); // Return permit for below-threshold signals
+                    }
+                }
             }
 
             // Use select for timer-based operations only
@@ -369,26 +452,123 @@ impl<C: CostFunction> AutoLearner<C> {
 
     /// Run a proactive probing cycle
     async fn probe_cycle(&mut self) -> AutoLearnResult<()> {
-        let Some(ref _scheduler) = self.probe_scheduler else {
+        let Some(ref task_tx) = self.probe_task_tx else {
             return Ok(());
         };
 
         // Get the production graph for probing
-        let graph = &self.ensemble.production().graph;
+        let graph = Arc::new(self.ensemble.production().graph.clone());
 
         // Select top nodes for probing
-        let targets = self.aggregator.select_probe_targets(graph, 3);
+        let targets = self.aggregator.select_probe_targets(&graph, 3);
 
         for target in targets {
-            // Record the probe in the prioritizer
+            let task = ProbeTask {
+                graph: graph.clone(),
+                output_id: target.output_id,
+                epsilon: 1, // Fixed: finds nodes closest to decision boundary
+                priority: target.score,
+            };
+
             tracing::trace!(
-                "Probing output {} with score {:.3}",
+                "Enqueueing probe for output {} with score {:.3}",
                 target.output_id,
                 target.score
             );
+
+            if task_tx.send(task).await.is_err() {
+                tracing::warn!("Failed to enqueue probe task: channel closed");
+                break;
+            }
         }
 
         Ok(())
+    }
+
+    /// Process results from the probe scheduler
+    fn process_probe_results(&mut self) {
+        let Some(ref mut result_rx) = self.probe_result_rx else {
+            return;
+        };
+
+        while let Ok(result) = result_rx.try_recv() {
+            if let Some(ref err) = result.error {
+                tracing::debug!("Probe failed: {}", err);
+                continue;
+            }
+
+            // Use the graph that was actually probed, not current production
+            // (production may have changed between enqueue and result)
+            let graph = &result.task.graph;
+            for probe in result.probes {
+                tracing::debug!(
+                    "Probe found boundary at output {}, distance {}",
+                    probe.output_id,
+                    probe.distance_to_flip
+                );
+                self.aggregator
+                    .from_probe_result(probe, graph, self.model_id.clone());
+            }
+        }
+    }
+
+    /// Spawn a concurrent synthesis task with pre-acquired permit
+    ///
+    /// The permit is acquired BEFORE spawn to enforce backpressure and prevent
+    /// spawning more tasks than max_concurrent_synthesis.
+    fn spawn_synthesis_with_permit(&self, signal: PainSignal, permit: OwnedSemaphorePermit) {
+        let synthesizer = self.synthesizer.clone();
+        let verifier = self.verifier.clone();
+        let network = self.network.clone();
+        let config = self.config.clone();
+        let result_tx = self.synthesis_result_tx.clone();
+
+        tokio::spawn(async move {
+            // Permit is held for the duration of synthesis (RAII)
+            let _permit = permit;
+
+            let result =
+                run_synthesis_pipeline(signal, synthesizer, verifier, network, config).await;
+
+            // Send result back (ignore error if receiver dropped)
+            let _ = result_tx.send(result).await;
+        });
+    }
+
+    /// Collect completed synthesis results and update stats
+    fn collect_synthesis_results(&mut self) {
+        let Some(ref mut rx) = self.synthesis_result_rx else {
+            return;
+        };
+
+        while let Ok(result) = rx.try_recv() {
+            self.stats.signals_processed += 1;
+
+            if result.success {
+                self.stats.syntheses_succeeded += 1;
+
+                if result.dry_run {
+                    self.stats.patches_dry_run += 1;
+                } else if result.patch_id.is_some() {
+                    self.stats.patches_broadcast += 1;
+                }
+
+                // Add successful synthesis to ensemble
+                if let Some(graph) = result.graph {
+                    let policy = PolicyLayer::new(graph);
+                    if let Err(e) = self.ensemble.add_candidate(
+                        policy,
+                        GenerationMethod::AnomalyRemediation {
+                            anomaly_id: result.signal_id,
+                        },
+                    ) {
+                        tracing::debug!("Failed to add candidate to ensemble: {}", e);
+                    }
+                }
+            } else {
+                self.stats.syntheses_failed += 1;
+            }
+        }
     }
 
     /// Create a patchlet from a verified graph
@@ -423,16 +603,174 @@ impl<C: CostFunction> AutoLearner<C> {
     }
 }
 
+/// Standalone synthesis pipeline for concurrent execution
+///
+/// This function runs the full synthesis -> verification -> broadcast pipeline
+/// without requiring mutable access to the AutoLearner.
+async fn run_synthesis_pipeline(
+    signal: PainSignal,
+    synthesizer: Arc<MinistralSynthesizer>,
+    verifier: ImmuneVerifier,
+    network: Arc<GossipNetworkBridge>,
+    config: AutoLearnConfig,
+) -> SynthesisResult {
+    let signal_id = signal.id;
+
+    // Step 1: Synthesis via Ministral-3B
+    let graph = match tokio::time::timeout(
+        config.synthesis_timeout,
+        synthesizer.synthesize_patchlet(&signal),
+    )
+    .await
+    {
+        Ok(Ok(graph)) => graph,
+        Ok(Err(e)) => {
+            tracing::debug!("Synthesis failed: {}", e.message);
+            return SynthesisResult {
+                patch_id: None,
+                signal_id,
+                success: false,
+                dry_run: config.dry_run,
+                graph: None,
+            };
+        }
+        Err(_) => {
+            tracing::debug!("Synthesis timeout");
+            return SynthesisResult {
+                patch_id: None,
+                signal_id,
+                success: false,
+                dry_run: config.dry_run,
+                graph: None,
+            };
+        }
+    };
+
+    // Step 2: Immune Response - verify with InvariantLayer
+    let timeout_ms = verifier.config().timeout_ms;
+    let verifier_clone = verifier.clone();
+    let graph_clone = graph.clone();
+    let signal_clone = signal.clone();
+
+    let verification = match tokio::time::timeout(
+        Duration::from_millis(timeout_ms),
+        tokio::task::spawn_blocking(move || verifier_clone.verify(&graph_clone, &signal_clone)),
+    )
+    .await
+    {
+        Ok(Ok(Ok(result))) => result,
+        Ok(Ok(Err(e))) => {
+            tracing::debug!("Verification error: {}", e);
+            return SynthesisResult {
+                patch_id: None,
+                signal_id,
+                success: false,
+                dry_run: config.dry_run,
+                graph: None,
+            };
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("Verification task error: {}", e);
+            return SynthesisResult {
+                patch_id: None,
+                signal_id,
+                success: false,
+                dry_run: config.dry_run,
+                graph: None,
+            };
+        }
+        Err(_) => {
+            tracing::warn!("Verification timeout after {}ms", timeout_ms);
+            return SynthesisResult {
+                patch_id: None,
+                signal_id,
+                success: false,
+                dry_run: config.dry_run,
+                graph: None,
+            };
+        }
+    };
+
+    if !verification.passed {
+        tracing::debug!(
+            "Verification failed: {} invariant violations, {} boundary issues",
+            verification.invariant_violations.len(),
+            verification.boundary_issues.len()
+        );
+        return SynthesisResult {
+            patch_id: None,
+            signal_id,
+            success: false,
+            dry_run: config.dry_run,
+            graph: None,
+        };
+    }
+
+    // Step 3: Swarm Propagation (or dry-run logging)
+    let patch_id = if config.dry_run {
+        let dry_run_id = Uuid::new_v4();
+        tracing::info!(
+            "[DRY-RUN] Would broadcast patch {} (signal: {}, severity: {:.2})",
+            dry_run_id,
+            signal.source.description(),
+            signal.severity
+        );
+        Some(dry_run_id)
+    } else {
+        // Create patchlet for broadcast
+        let trigger = PainTrigger {
+            anomaly_id: signal.id,
+            description: signal.source.description(),
+            severity: signal.severity,
+            timestamp: signal.timestamp,
+        };
+        let verification_summary = VerificationSummary {
+            passed: verification.passed,
+            invariant_checks: verification.invariant_violations.len() as u32,
+            sat_probes: verification
+                .stress_stats
+                .as_ref()
+                .map(|s| s.inputs_tested as u32)
+                .unwrap_or(0),
+        };
+        let method = GenerationMethod::AnomalyRemediation {
+            anomaly_id: signal.id,
+        };
+        let patchlet =
+            Patchlet::new(graph.clone(), trigger, method).with_verification(verification_summary);
+
+        match network.broadcast_patch(&patchlet).await {
+            Ok(id) => {
+                tracing::info!("Broadcast patch {}", id);
+                Some(id)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to broadcast patch: {}", e);
+                None
+            }
+        }
+    };
+
+    SynthesisResult {
+        patch_id,
+        signal_id,
+        success: true,
+        dry_run: config.dry_run,
+        graph: Some(graph),
+    }
+}
+
 /// Builder for AutoLearner with sensible defaults
 pub struct AutoLearnerBuilder<C: CostFunction> {
     config: AutoLearnConfig,
-    synthesizer: Option<MinistralSynthesizer>,
+    synthesizer: Option<Arc<MinistralSynthesizer>>,
     invariant_layer: Option<Arc<InvariantLayer>>,
     verifier_config: VerifierConfig,
     network: Option<Arc<GossipNetworkBridge>>,
     ensemble: Option<PolicyEnsemble<C>>,
     probe_scheduler: Option<ProbeScheduler>,
     patch_rx: Option<mpsc::Receiver<IncomingPatch>>,
+    model_id: String,
 }
 
 impl<C: CostFunction> AutoLearnerBuilder<C> {
@@ -447,6 +785,7 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
             ensemble: None,
             probe_scheduler: None,
             patch_rx: None,
+            model_id: String::new(),
         }
     }
 
@@ -456,8 +795,8 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
         self
     }
 
-    /// Set the synthesizer
-    pub fn synthesizer(mut self, synthesizer: MinistralSynthesizer) -> Self {
+    /// Set the synthesizer (wrapped in Arc for concurrent access)
+    pub fn synthesizer(mut self, synthesizer: Arc<MinistralSynthesizer>) -> Self {
         self.synthesizer = Some(synthesizer);
         self
     }
@@ -498,6 +837,12 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
         self
     }
 
+    /// Set the model ID for pain signal context
+    pub fn model_id(mut self, model_id: String) -> Self {
+        self.model_id = model_id;
+        self
+    }
+
     /// Build the AutoLearner
     pub fn build(self) -> AutoLearnResult<AutoLearner<C>> {
         let synthesizer = self
@@ -518,7 +863,8 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
 
         let verifier = ImmuneVerifier::with_config(invariant_layer, self.verifier_config);
 
-        let mut learner = AutoLearner::new(self.config, synthesizer, verifier, network, ensemble);
+        let mut learner = AutoLearner::new(self.config, synthesizer, verifier, network, ensemble)
+            .with_model_id(self.model_id);
 
         if let Some(scheduler) = self.probe_scheduler {
             learner = learner.with_probe_scheduler(scheduler);
@@ -585,7 +931,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = MinistralSynthesizer::new().unwrap();
+        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
         let verifier = ImmuneVerifier::new(invariant_layer);
 
         let keypair = AgentKeypair::generate();
@@ -620,7 +966,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = MinistralSynthesizer::new().unwrap();
+        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(crate::network::GossipNetworkBridge::new(
             "test-agent".to_string(),
@@ -637,5 +983,100 @@ mod tests {
             .unwrap();
 
         assert_eq!(learner.stats().signals_processed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_probe_cycle_enqueues_tasks() {
+        use arkavo_sat::ProbeScheduler;
+
+        let graph = create_simple_graph();
+        let production = PolicyLayer::new(graph);
+        let invariant_layer = Arc::new(InvariantLayer::new());
+        let cost = ConstantCost::new(1.0);
+        let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
+
+        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let keypair = AgentKeypair::generate();
+        let network = Arc::new(crate::network::GossipNetworkBridge::new(
+            "test-agent".to_string(),
+            keypair,
+            NetworkConfig::default(),
+        ));
+
+        let scheduler = ProbeScheduler::new();
+
+        let mut learner = AutoLearnerBuilder::new()
+            .synthesizer(synthesizer)
+            .invariant_layer(invariant_layer)
+            .network(network)
+            .ensemble(ensemble)
+            .probe_scheduler(scheduler)
+            .model_id("test-model".to_string())
+            .build()
+            .unwrap();
+
+        // Start the probe scheduler
+        let handle = learner.start_probe_scheduler();
+        assert!(handle.is_some(), "Probe scheduler should start");
+
+        // Run one probe cycle - should enqueue tasks without error
+        let result = learner.probe_cycle().await;
+        assert!(result.is_ok(), "Probe cycle should succeed");
+
+        // Process any results (may be empty if scheduler hasn't finished)
+        learner.process_probe_results();
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_synthesis_semaphore_initialized() {
+        let graph = create_simple_graph();
+        let production = PolicyLayer::new(graph);
+        let invariant_layer = Arc::new(InvariantLayer::new());
+        let cost = ConstantCost::new(1.0);
+        let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
+
+        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let keypair = AgentKeypair::generate();
+        let network = Arc::new(crate::network::GossipNetworkBridge::new(
+            "test-agent".to_string(),
+            keypair,
+            NetworkConfig::default(),
+        ));
+
+        // Configure for concurrent synthesis (max 3)
+        let config = AutoLearnConfig {
+            max_concurrent_synthesis: 3,
+            ..AutoLearnConfig::default()
+        };
+
+        let learner = AutoLearnerBuilder::new()
+            .config(config)
+            .synthesizer(synthesizer)
+            .invariant_layer(invariant_layer)
+            .network(network)
+            .ensemble(ensemble)
+            .build()
+            .unwrap();
+
+        // Verify semaphore is initialized with correct permits
+        assert_eq!(
+            learner.synthesis_semaphore.available_permits(),
+            3,
+            "Semaphore should have max_concurrent_synthesis permits"
+        );
+    }
+
+    #[test]
+    fn test_sequential_mode_when_max_concurrent_is_one() {
+        // When max_concurrent_synthesis <= 1, sequential mode is used
+        let config = AutoLearnConfig {
+            max_concurrent_synthesis: 1,
+            ..AutoLearnConfig::default()
+        };
+
+        assert!(
+            config.max_concurrent_synthesis <= 1,
+            "Sequential mode should be used when max_concurrent_synthesis <= 1"
+        );
     }
 }

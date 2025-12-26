@@ -35,10 +35,16 @@
 
 mod agent_utility;
 mod config;
+pub mod coordination;
 mod module;
+mod persistence;
+mod store;
 
 pub use agent_utility::{
     AgentContribution, AgentUtility, BetaPrior, BurstFeedback, FinalTaskReport, QualityMetrics,
 };
 pub use config::LearningConfig;
+pub use coordination::{CoordinationMetrics, MetricsCollector, MovingAverage};
 pub use module::{AgentUtilityStats, LearningModule};
+pub use persistence::{Episode, EpisodeOutcome, Lesson, LessonPattern, Observation};
+pub use store::{LearningStore, StoreError};

@@ -24,6 +24,8 @@ dirs = { workspace = true }
 rand = { workspace = true }
 rand_distr = "0.4"
 regex = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"], optional = true }
 
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
@@ -41,6 +43,7 @@ llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
+persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
 windows = ["gemini", "llm-remote", "deepseek"]
 

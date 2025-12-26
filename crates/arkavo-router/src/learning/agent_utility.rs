@@ -134,6 +134,9 @@ pub struct AgentUtility {
     pub window_successes: u64,
     /// Windowed failures (for concept drift)
     pub window_failures: u64,
+    /// Windowed prior for fast concept drift adaptation
+    #[serde(default)]
+    pub window_prior: BetaPrior,
     /// Task category performance (category -> BetaPrior)
     pub category_priors: HashMap<String, BetaPrior>,
     /// When the agent was first seen
@@ -162,6 +165,7 @@ impl AgentUtility {
             total_failures: 0,
             window_successes: 0,
             window_failures: 0,
+            window_prior: BetaPrior::cold_start(),
             category_priors: HashMap::new(),
             created_at: Utc::now(),
             probationary: true,
@@ -174,24 +178,57 @@ impl AgentUtility {
     }
 
     /// Record a burst outcome
+    ///
+    /// When `quality_score` is available, uses weighted updates instead of binary +1/-1:
+    /// - Success with quality 0.9 → +0.9 alpha (vs always +1)
+    /// - Failure with quality 0.8 (almost worked) → -0.2 beta (vs always +1)
     pub fn record_outcome(&mut self, feedback: &BurstFeedback, max_recent: usize) {
+        // Use quality-weighted update when quality_score is available
+        if let Some(quality) = feedback.quality_score {
+            // Quality is 0.0 to 1.0, convert to update weight
+            // Success: quality directly as alpha weight (high quality = more credit)
+            // Failure: (1 - quality) as beta weight (low quality = more penalty)
+            if feedback.success {
+                self.prior.apply_fractional_update(quality);
+                self.window_prior.apply_fractional_update(quality);
+            } else {
+                let weight = -(1.0 - quality);
+                self.prior.apply_fractional_update(weight);
+                self.window_prior.apply_fractional_update(weight);
+            }
+        } else {
+            // No quality score: use binary +1/-1 as before
+            if feedback.success {
+                self.prior.record_success();
+                self.window_prior.record_success();
+            } else {
+                self.prior.record_failure();
+                self.window_prior.record_failure();
+            }
+        }
+
+        // Update counts (binary for stats tracking)
         if feedback.success {
-            self.prior.record_success();
             self.total_successes += 1;
             self.window_successes += 1;
         } else {
-            self.prior.record_failure();
             self.total_failures += 1;
             self.window_failures += 1;
         }
 
-        // Update category-specific prior
+        // Update category-specific prior (same quality-aware logic)
         let category_prior = self
             .category_priors
             .entry(feedback.task_category.clone())
             .or_insert_with(BetaPrior::cold_start);
 
-        if feedback.success {
+        if let Some(quality) = feedback.quality_score {
+            if feedback.success {
+                category_prior.apply_fractional_update(quality);
+            } else {
+                category_prior.apply_fractional_update(-(1.0 - quality));
+            }
+        } else if feedback.success {
             category_prior.record_success();
         } else {
             category_prior.record_failure();
@@ -227,6 +264,28 @@ impl AgentUtility {
         self.get_prior(category).sample_default()
     }
 
+    /// Sample blending global and windowed priors for concept drift adaptation
+    ///
+    /// Uses weighted average: `(1 - window_weight) * global + window_weight * windowed`
+    /// The `window_weight` increases as windowed observations accumulate.
+    pub fn sample_blended(&self, category: Option<&str>) -> f64 {
+        let global_prior = self.get_prior(category);
+
+        // Weight windowed prior by its observation count relative to a threshold
+        let window_obs = (self.window_successes + self.window_failures) as f64;
+        let window_weight = (window_obs / 20.0).min(0.5); // Max 50% weight at 20+ observations
+
+        if window_weight < 0.01 {
+            // Not enough windowed data, use global only
+            return global_prior.sample_default();
+        }
+
+        let global_sample = global_prior.sample_default();
+        let window_sample = self.window_prior.sample_default();
+
+        global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+    }
+
     /// Total observations for this agent
     pub fn total_observations(&self) -> u64 {
         self.total_successes + self.total_failures
@@ -239,10 +298,11 @@ impl AgentUtility {
         }
     }
 
-    /// Decay window counts for concept drift adaptation
+    /// Decay window counts and prior for concept drift adaptation
     pub fn decay_window(&mut self, factor: f64) {
         self.window_successes = (self.window_successes as f64 * factor) as u64;
         self.window_failures = (self.window_failures as f64 * factor) as u64;
+        self.window_prior.decay(factor);
     }
 }
 
@@ -460,5 +520,80 @@ mod tests {
         utility.total_successes += 1;
         utility.check_graduation(50);
         assert!(!utility.probationary);
+    }
+
+    #[test]
+    fn test_sample_blended_adapts_to_recent_failures() {
+        let mut utility = AgentUtility::new("test".to_string());
+
+        // Add 50 global successes (high performing historically)
+        for _ in 0..50 {
+            utility.prior.record_success();
+            utility.total_successes += 1;
+        }
+
+        // Now add 20 windowed failures (recent poor performance)
+        for _ in 0..20 {
+            utility.window_prior.record_failure();
+            utility.window_failures += 1;
+        }
+
+        // Blended sample should be lower than pure global sample
+        let mut blended_sum = 0.0;
+        let mut global_sum = 0.0;
+        for _ in 0..100 {
+            blended_sum += utility.sample_blended(None);
+            global_sum += utility.prior.sample_default();
+        }
+
+        assert!(
+            blended_sum / 100.0 < global_sum / 100.0,
+            "Blended sample should reflect recent failures"
+        );
+    }
+
+    #[test]
+    fn test_quality_weighted_updates() {
+        let mut utility = AgentUtility::new("test".to_string());
+        let initial_alpha = utility.prior.alpha;
+        let initial_beta = utility.prior.beta;
+
+        // High quality success should add ~0.9 to alpha
+        let high_quality =
+            BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100).with_quality(0.9);
+        utility.record_outcome(&high_quality, 100);
+        assert!(
+            (utility.prior.alpha - initial_alpha - 0.9).abs() < 0.01,
+            "High quality success should add 0.9 to alpha"
+        );
+
+        // Low quality success should add less
+        let mut utility2 = AgentUtility::new("test2".to_string());
+        let low_quality =
+            BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100).with_quality(0.5);
+        utility2.record_outcome(&low_quality, 100);
+        assert!(
+            (utility2.prior.alpha - initial_alpha - 0.5).abs() < 0.01,
+            "Low quality success should add 0.5 to alpha"
+        );
+
+        // High quality failure (almost worked) should add less to beta
+        let mut utility3 = AgentUtility::new("test3".to_string());
+        let almost_worked =
+            BurstFeedback::failure(Uuid::new_v4(), "test".to_string(), 100).with_quality(0.8);
+        utility3.record_outcome(&almost_worked, 100);
+        assert!(
+            (utility3.prior.beta - initial_beta - 0.2).abs() < 0.01,
+            "Almost-worked failure should only add 0.2 to beta"
+        );
+
+        // No quality score should use binary +1
+        let mut utility4 = AgentUtility::new("test4".to_string());
+        let no_quality = BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100);
+        utility4.record_outcome(&no_quality, 100);
+        assert!(
+            (utility4.prior.alpha - initial_alpha - 1.0).abs() < 0.01,
+            "No quality should add full 1.0 to alpha"
+        );
     }
 }
