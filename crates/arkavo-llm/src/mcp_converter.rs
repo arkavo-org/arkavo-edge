@@ -67,7 +67,7 @@ impl McpConverter {
     /// Make JSON Schema compatible with Gemini API
     /// - Gemini doesn't support "const", so convert to "enum" with single value
     /// - Strip out non-JSON-Schema fields that may leak from MCP ToolSchema
-    fn make_gemini_compatible(schema: &Value) -> Value {
+    pub fn make_gemini_compatible(schema: &Value) -> Value {
         // Invalid fields that may leak from MCP ToolSchema into parameters
         const INVALID_FIELDS: &[&str] = &["name", "aliases", "parameters", "category"];
 
@@ -750,5 +750,86 @@ mod tests {
         assert!(!schema.to_string().contains("oneOf"));
         // Should have picked the first object option
         assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_invalid_toolschema_fields() {
+        // Regression test for GitHub issue #435
+        // Some MCP tools have their ToolSchema structure (name, aliases, parameters)
+        // incorrectly nested inside the parameters field, causing Gemini API errors
+        let malformed_schema = json!({
+            "type": "object",
+            "name": "leaked_name",
+            "aliases": ["alias1", "alias2"],
+            "parameters": {
+                "type": "object",
+                "properties": {"x": {"type": "string"}}
+            },
+            "category": "leaked_category",
+            "properties": {
+                "query": {"type": "string"}
+            }
+        });
+
+        let sanitized = McpConverter::make_gemini_compatible(&malformed_schema);
+        let schema_str = sanitized.to_string();
+
+        // Should NOT contain the invalid fields
+        assert!(
+            !schema_str.contains("\"name\""),
+            "Schema should not contain 'name' field"
+        );
+        assert!(
+            !schema_str.contains("\"aliases\""),
+            "Schema should not contain 'aliases' field"
+        );
+        assert!(
+            !schema_str.contains("\"parameters\""),
+            "Schema should not contain nested 'parameters' field"
+        );
+        assert!(
+            !schema_str.contains("\"category\""),
+            "Schema should not contain 'category' field"
+        );
+
+        // Should retain valid JSON Schema fields
+        assert_eq!(sanitized["type"], "object");
+        assert!(sanitized["properties"].is_object());
+        assert_eq!(sanitized["properties"]["query"]["type"], "string");
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_nested_invalid_fields() {
+        // Test that invalid fields are stripped at all nesting levels
+        let deeply_nested_schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "name": "should_be_removed",
+                    "aliases": ["bad"],
+                    "properties": {
+                        "setting": {
+                            "type": "string",
+                            "category": "should_also_be_removed"
+                        }
+                    }
+                }
+            }
+        });
+
+        let sanitized = McpConverter::make_gemini_compatible(&deeply_nested_schema);
+
+        // Check the nested levels don't have invalid fields
+        assert!(sanitized["properties"]["config"]["name"].is_null());
+        assert!(sanitized["properties"]["config"]["aliases"].is_null());
+        assert!(sanitized["properties"]["config"]["properties"]["setting"]["category"].is_null());
+
+        // Valid fields should be preserved
+        assert_eq!(sanitized["properties"]["config"]["type"], "object");
+        assert_eq!(
+            sanitized["properties"]["config"]["properties"]["setting"]["type"],
+            "string"
+        );
     }
 }

@@ -149,7 +149,13 @@ impl ArchitectExecutor {
             let response = if tool_registry.is_some() && provider.supports_tools() {
                 let tools_json = tool_registry.map(|r| {
                     let tool_infos = r.list_tools();
-                    arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
+                    // Use the correct format based on the model provider
+                    match current_model {
+                        ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+                            arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
+                        }
+                        _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
+                    }
                 });
 
                 provider
