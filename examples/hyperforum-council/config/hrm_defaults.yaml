@@ -1,0 +1,55 @@
+# HRM Orchestration Defaults for HYPERforum AI Council
+version: "1.0"
+
+burst_defaults:
+  max_steps: 5          # More steps for complex discourse
+  max_tool_calls: 8     # More tools for research/verification
+  max_wall_time_sec: 60 # Longer for thoughtful analysis
+
+router:
+  scoring:
+    embedding_similarity_weight: 0.35
+    skill_overlap_weight: 0.40      # Prioritize skill match for discourse
+    utility_prior_weight: 0.25
+  bandit:
+    algorithm: thompson_sampling
+    cold_start_prior: [2, 1]        # Optimistic exploration
+    discount_factor: 0.90           # Faster adaptation for discourse quality
+    probation_threshold: 30         # Graduate specialists sooner
+
+guardrails:
+  cost_ceiling_usd_per_subtask: 0.75  # Higher for thorough analysis
+  max_reroutes_per_subtask: 2         # Fewer re-routes, more decisive
+  thrash_detection:
+    enabled: true
+    similarity_threshold: 0.80
+    window_size: 4
+
+memory:
+  stm_max_items: 100                  # More context for ongoing discourse
+  task_max_context_tokens: 8000       # Larger context for debate threads
+  ltm_retrieval_budget: 20            # More historical precedents
+
+# Council-specific settings
+council:
+  deliberation_rounds: 3              # Max rounds before synthesis
+  quorum_specialists: 3               # Minimum specialists required
+  synthesis_trigger: "consensus_or_timeout"
+  escalation_threshold: 5             # Re-routes before human escalation
+
+  # Specialist categories for Thompson Sampling
+  discourse_categories:
+    - "logical_analysis"     # Critical Analyst specialty
+    - "fact_verification"    # Researcher specialty
+    - "integration"          # Synthesizer specialty
+    - "counterargument"      # Devil's Advocate specialty
+    - "process_management"   # Facilitator specialty
+
+# OpenTDF encryption for sensitive insights
+encryption:
+  enabled: true
+  kas_url: "https://100.arkavo.net"
+  policy_namespace: "https://arkavo.net/attr"
+  default_attributes:
+    council: "hyperforum"
+    content-type: "synthesis"
