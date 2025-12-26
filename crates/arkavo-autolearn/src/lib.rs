@@ -205,7 +205,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = MinistralSynthesizer::new().unwrap();
+        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(GossipNetworkBridge::new(
             "test-agent".to_string(),
