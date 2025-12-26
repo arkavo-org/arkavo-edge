@@ -2,6 +2,7 @@
 //!
 //! Handles lesson announcements, votes, requests, deliveries, and digests.
 
+use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::{GossipError, GossipResult};
@@ -20,11 +21,12 @@ impl GossipProtocol {
         announcement: LessonAnnouncement,
     ) -> GossipResult<Vec<GossipMessage>> {
         let lesson_id = announcement.lesson_id;
+        let now = Utc::now();
 
         // Check for duplicate
         {
             let seen = self.seen_lesson_ids.read().await;
-            if seen.contains(&lesson_id) {
+            if seen.contains_key(&lesson_id) {
                 return Err(GossipError::Duplicate(lesson_id));
             }
         }
@@ -35,8 +37,8 @@ impl GossipProtocol {
             verifier.verify_lesson_announcement(&announcement)?;
         }
 
-        // Mark as seen
-        self.seen_lesson_ids.write().await.insert(lesson_id);
+        // Mark as seen with timestamp
+        self.seen_lesson_ids.write().await.insert(lesson_id, now);
 
         // Store the lesson
         let state = LessonState {
@@ -44,6 +46,7 @@ impl GossipProtocol {
             status: LessonStatus::Pending,
             consensus: LessonConsensusState::new(lesson_id),
             content: None,
+            created_at: now,
         };
         self.lessons.write().await.insert(lesson_id, state);
 

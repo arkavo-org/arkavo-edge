@@ -45,6 +45,10 @@ pub enum GossipError {
     /// Serialization error
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    /// Peer rate limited
+    #[error("Rate limited: peer {0} exceeded message limit")]
+    RateLimited(String),
 }
 
 /// Result type alias for gossip operations

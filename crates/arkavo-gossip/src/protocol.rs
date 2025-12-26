@@ -2,10 +2,11 @@
 //!
 //! Implements epidemic-style gossip for patch and lesson propagation across agents.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
@@ -60,6 +61,8 @@ struct PatchState {
     consensus: ConsensusState,
     /// Patch content if received
     content: Option<Vec<u8>>,
+    /// When this patch was first seen
+    created_at: DateTime<Utc>,
 }
 
 /// State for a tracked lesson
@@ -73,7 +76,18 @@ pub(crate) struct LessonState {
     pub(crate) consensus: LessonConsensusState,
     /// Lesson content if received
     pub(crate) content: Option<Vec<u8>>,
+    /// When this lesson was first seen
+    pub(crate) created_at: DateTime<Utc>,
 }
+
+/// Maximum size for seen_* sets before triggering cleanup
+const MAX_SEEN_SIZE: usize = 10000;
+
+/// Default max messages per peer per window
+const DEFAULT_MAX_MESSAGES_PER_PEER: usize = 100;
+
+/// Default rate limit window
+const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 /// The gossip protocol handler
 pub struct GossipProtocol {
@@ -81,20 +95,26 @@ pub struct GossipProtocol {
     pub(crate) agent_id: String,
     /// Protocol configuration
     pub(crate) config: GossipConfig,
-    /// Known peers
-    pub(crate) peers: Arc<RwLock<HashSet<String>>>,
+    /// Known peers (peer_id -> ())
+    pub(crate) peers: Arc<RwLock<HashMap<String, ()>>>,
     /// Tracked patches
     patches: Arc<RwLock<HashMap<Uuid, PatchState>>>,
     /// Tracked lessons
     pub(crate) lessons: Arc<RwLock<HashMap<Uuid, LessonState>>>,
     /// Message verifier
     pub(crate) verifier: Arc<RwLock<PatchVerifier>>,
-    /// Seen patch IDs (for deduplication)
-    seen_messages: Arc<RwLock<HashSet<Uuid>>>,
-    /// Seen lesson IDs (for deduplication)
-    pub(crate) seen_lesson_ids: Arc<RwLock<HashSet<Uuid>>>,
+    /// Seen patch IDs with timestamps (for deduplication with TTL)
+    seen_messages: Arc<RwLock<HashMap<Uuid, DateTime<Utc>>>>,
+    /// Seen lesson IDs with timestamps (for deduplication with TTL)
+    pub(crate) seen_lesson_ids: Arc<RwLock<HashMap<Uuid, DateTime<Utc>>>>,
     /// Broadcast channel for lesson approval notifications
     pub(crate) lesson_approved_tx: Option<broadcast::Sender<LessonAnnouncement>>,
+    /// Per-peer message timestamps for rate limiting
+    peer_message_times: Arc<RwLock<HashMap<String, Vec<DateTime<Utc>>>>>,
+    /// Max messages per peer per window
+    max_messages_per_peer: usize,
+    /// Window duration for rate limiting
+    rate_limit_window: Duration,
 }
 
 impl GossipProtocol {
@@ -103,13 +123,16 @@ impl GossipProtocol {
         Self {
             agent_id,
             config,
-            peers: Arc::new(RwLock::new(HashSet::new())),
+            peers: Arc::new(RwLock::new(HashMap::new())),
             patches: Arc::new(RwLock::new(HashMap::new())),
             lessons: Arc::new(RwLock::new(HashMap::new())),
             verifier: Arc::new(RwLock::new(PatchVerifier::new(key_registry))),
-            seen_messages: Arc::new(RwLock::new(HashSet::new())),
-            seen_lesson_ids: Arc::new(RwLock::new(HashSet::new())),
+            seen_messages: Arc::new(RwLock::new(HashMap::new())),
+            seen_lesson_ids: Arc::new(RwLock::new(HashMap::new())),
             lesson_approved_tx: None,
+            peer_message_times: Arc::new(RwLock::new(HashMap::new())),
+            max_messages_per_peer: DEFAULT_MAX_MESSAGES_PER_PEER,
+            rate_limit_window: DEFAULT_RATE_LIMIT_WINDOW,
         }
     }
 
@@ -125,7 +148,7 @@ impl GossipProtocol {
 
     /// Add a peer to the known peers list
     pub async fn add_peer(&self, peer_id: String) {
-        self.peers.write().await.insert(peer_id);
+        self.peers.write().await.insert(peer_id, ());
     }
 
     /// Remove a peer from the known peers list
@@ -136,6 +159,48 @@ impl GossipProtocol {
     /// Get number of known peers
     pub async fn peer_count(&self) -> usize {
         self.peers.read().await.len()
+    }
+
+    /// Check if a peer is rate limited
+    ///
+    /// Returns true if the peer is allowed to send, false if rate limited.
+    pub async fn check_peer_rate_limit(&self, peer_id: &str) -> bool {
+        let now = Utc::now();
+        let window = chrono::Duration::from_std(self.rate_limit_window)
+            .unwrap_or(chrono::Duration::seconds(60));
+
+        let mut times = self.peer_message_times.write().await;
+        let peer_times = times.entry(peer_id.to_string()).or_default();
+
+        // Remove expired entries
+        peer_times.retain(|t| now.signed_duration_since(*t) < window);
+
+        // Check if under limit
+        if peer_times.len() >= self.max_messages_per_peer {
+            tracing::debug!(
+                "Peer {} rate limited: {} messages in window",
+                peer_id,
+                peer_times.len()
+            );
+            false
+        } else {
+            peer_times.push(now);
+            true
+        }
+    }
+
+    /// Handle an incoming gossip message with rate limiting
+    ///
+    /// Returns Err(GossipError::RateLimited) if the peer has exceeded the rate limit.
+    pub async fn handle_message_from_peer(
+        &self,
+        from_peer: &str,
+        message: GossipMessage,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        if !self.check_peer_rate_limit(from_peer).await {
+            return Err(GossipError::RateLimited(from_peer.to_string()));
+        }
+        self.handle_message(message).await
     }
 
     /// Handle an incoming gossip message
@@ -162,11 +227,12 @@ impl GossipProtocol {
         announcement: PatchAnnouncement,
     ) -> GossipResult<Vec<GossipMessage>> {
         let patch_id = announcement.patch_id;
+        let now = Utc::now();
 
         // Check for duplicate
         {
             let seen = self.seen_messages.read().await;
-            if seen.contains(&patch_id) {
+            if seen.contains_key(&patch_id) {
                 return Err(GossipError::Duplicate(patch_id));
             }
         }
@@ -177,8 +243,8 @@ impl GossipProtocol {
             verifier.verify_announcement(&announcement)?;
         }
 
-        // Mark as seen
-        self.seen_messages.write().await.insert(patch_id);
+        // Mark as seen with timestamp
+        self.seen_messages.write().await.insert(patch_id, now);
 
         // Store the patch
         let state = PatchState {
@@ -186,6 +252,7 @@ impl GossipProtocol {
             status: PatchStatus::Pending,
             consensus: ConsensusState::new(patch_id),
             content: None,
+            created_at: now,
         };
         self.patches.write().await.insert(patch_id, state);
 
@@ -350,8 +417,8 @@ impl GossipProtocol {
     pub async fn select_propagation_peers(&self, exclude: Option<&str>) -> Vec<String> {
         let peers = self.peers.read().await;
         let mut selected: Vec<String> = peers
-            .iter()
-            .filter(|p| exclude.is_none_or(|e| *p != e))
+            .keys()
+            .filter(|p| exclude.is_none_or(|e| p.as_str() != e))
             .cloned()
             .collect();
 
@@ -385,6 +452,110 @@ impl GossipProtocol {
             .registry_mut()
             .register(agent_id, pubkey);
     }
+
+    /// Clean up expired entries based on max_message_age
+    ///
+    /// Removes patches, lessons, and seen entries older than the configured TTL.
+    pub async fn cleanup_expired(&self) {
+        let now = Utc::now();
+        let max_age = chrono::Duration::from_std(self.config.max_message_age)
+            .unwrap_or(chrono::Duration::seconds(300));
+
+        // Clean expired patches
+        {
+            let mut patches = self.patches.write().await;
+            let before = patches.len();
+            patches.retain(|_, state| {
+                let age = now.signed_duration_since(state.created_at);
+                age < max_age
+            });
+            let removed = before - patches.len();
+            if removed > 0 {
+                tracing::debug!("Cleaned up {} expired patches", removed);
+            }
+        }
+
+        // Clean expired lessons
+        {
+            let mut lessons = self.lessons.write().await;
+            let before = lessons.len();
+            lessons.retain(|_, state| {
+                let age = now.signed_duration_since(state.created_at);
+                age < max_age
+            });
+            let removed = before - lessons.len();
+            if removed > 0 {
+                tracing::debug!("Cleaned up {} expired lessons", removed);
+            }
+        }
+
+        // Clean expired seen_messages
+        {
+            let mut seen = self.seen_messages.write().await;
+            let before = seen.len();
+            seen.retain(|_, timestamp| {
+                let age = now.signed_duration_since(*timestamp);
+                age < max_age
+            });
+            let removed = before - seen.len();
+            if removed > 0 {
+                tracing::debug!("Cleaned up {} expired seen_messages", removed);
+            }
+
+            // Also clear if exceeds max size
+            if seen.len() > MAX_SEEN_SIZE {
+                tracing::warn!(
+                    "seen_messages exceeds max size ({}), clearing",
+                    MAX_SEEN_SIZE
+                );
+                seen.clear();
+            }
+        }
+
+        // Clean expired seen_lesson_ids
+        {
+            let mut seen = self.seen_lesson_ids.write().await;
+            let before = seen.len();
+            seen.retain(|_, timestamp| {
+                let age = now.signed_duration_since(*timestamp);
+                age < max_age
+            });
+            let removed = before - seen.len();
+            if removed > 0 {
+                tracing::debug!("Cleaned up {} expired seen_lesson_ids", removed);
+            }
+
+            // Also clear if exceeds max size
+            if seen.len() > MAX_SEEN_SIZE {
+                tracing::warn!(
+                    "seen_lesson_ids exceeds max size ({}), clearing",
+                    MAX_SEEN_SIZE
+                );
+                seen.clear();
+            }
+        }
+    }
+
+    /// Get cleanup statistics
+    pub async fn stats(&self) -> GossipStats {
+        GossipStats {
+            peer_count: self.peers.read().await.len(),
+            patch_count: self.patches.read().await.len(),
+            lesson_count: self.lessons.read().await.len(),
+            seen_messages_count: self.seen_messages.read().await.len(),
+            seen_lesson_ids_count: self.seen_lesson_ids.read().await.len(),
+        }
+    }
+}
+
+/// Statistics for the gossip protocol
+#[derive(Debug, Clone)]
+pub struct GossipStats {
+    pub peer_count: usize,
+    pub patch_count: usize,
+    pub lesson_count: usize,
+    pub seen_messages_count: usize,
+    pub seen_lesson_ids_count: usize,
 }
 
 #[cfg(test)]

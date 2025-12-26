@@ -87,6 +87,36 @@ pub async fn start_lesson_propagation_loop(learning_bus: Arc<LearningBus>, inter
     }
 }
 
+/// Start periodic cleanup of expired gossip entries
+///
+/// Cleans up patches, lessons, and seen_* maps older than max_message_age.
+pub async fn start_cleanup_loop(learning_bus: Arc<LearningBus>, interval: Duration) {
+    tracing::info!(
+        "Starting gossip cleanup loop for agent {} (interval: {:?})",
+        learning_bus.agent_id(),
+        interval
+    );
+    let mut ticker = tokio::time::interval(interval);
+
+    loop {
+        ticker.tick().await;
+
+        tracing::debug!("Gossip cleanup tick");
+
+        let gossip = learning_bus.gossip().read().await;
+        gossip.cleanup_expired().await;
+        let stats = gossip.stats().await;
+        drop(gossip);
+
+        tracing::debug!(
+            "Gossip stats after cleanup: {} patches, {} lessons, {} seen_messages",
+            stats.patch_count,
+            stats.lesson_count,
+            stats.seen_messages_count
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

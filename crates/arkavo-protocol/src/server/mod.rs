@@ -1,23 +1,28 @@
 mod a2a_server;
 mod conductor;
 mod config_helpers;
+mod episode_buffer;
+mod event_loop;
 mod gossip_transport;
 mod handlers;
 mod learning_bus;
 mod mcp_bridge;
+mod policy_cache;
 mod startup;
+mod synthesis;
 mod tool_memory;
 
 pub use a2a_server::A2aServer;
 pub use conductor::execute_with_conductor;
 pub use config_helpers::AgentMetadata;
+pub use episode_buffer::{EpisodeBuffer, ToolObservation};
+pub use event_loop::{start_event_processing_loop, start_lesson_application_loop};
 pub use gossip_transport::{
-    start_anti_entropy_loop, start_gossip_transport, start_lesson_propagation_loop,
+    start_anti_entropy_loop, start_cleanup_loop, start_gossip_transport,
+    start_lesson_propagation_loop,
 };
-pub use learning_bus::{
-    BehaviorAdvice, EpisodeBuffer, LearningBus, LearningEvent, ToolObservation,
-    start_event_processing_loop, start_lesson_application_loop,
-};
+pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
+pub use policy_cache::PolicyCache;
 pub use mcp_bridge::McpBridgeTool;
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};

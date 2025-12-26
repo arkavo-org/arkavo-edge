@@ -33,7 +33,9 @@ pub use message::{
     AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
     PatchRequest, PatchStatus, PatchVote,
 };
-pub use protocol::{DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT, GossipConfig, GossipProtocol};
+pub use protocol::{
+    DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT, GossipConfig, GossipProtocol, GossipStats,
+};
 pub use verification::{
     KeyRegistry, PatchVerifier, compute_content_hash, sign_announcement, sign_lesson_announcement,
     sign_lesson_vote, sign_vote,
