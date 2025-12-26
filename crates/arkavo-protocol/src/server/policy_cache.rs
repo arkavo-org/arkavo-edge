@@ -227,9 +227,18 @@ mod tests {
 
     #[test]
     fn test_extract_sector() {
-        assert_eq!(PolicyCache::extract_sector("sector_4"), Some("4".to_string()));
-        assert_eq!(PolicyCache::extract_sector("sector 5"), Some("5".to_string()));
-        assert_eq!(PolicyCache::extract_sector("IF sector_abc"), Some("abc".to_string()));
+        assert_eq!(
+            PolicyCache::extract_sector("sector_4"),
+            Some("4".to_string())
+        );
+        assert_eq!(
+            PolicyCache::extract_sector("sector 5"),
+            Some("5".to_string())
+        );
+        assert_eq!(
+            PolicyCache::extract_sector("IF sector_abc"),
+            Some("abc".to_string())
+        );
         assert_eq!(PolicyCache::extract_sector("no relevant data"), None);
     }
 
@@ -242,7 +251,11 @@ mod tests {
             "agent-1".to_string(),
             "swarm-1".to_string(),
             "navigation".to_string(),
-            LessonPattern::new("sector_4".to_string(), "slow".to_string(), "avoid_crash".to_string()),
+            LessonPattern::new(
+                "sector_4".to_string(),
+                "slow".to_string(),
+                "avoid_crash".to_string(),
+            ),
             0.8,
             3,
         );

@@ -24,12 +24,12 @@ pub use gossip_transport::{
     start_lesson_propagation_loop,
 };
 pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
-pub use policy_cache::PolicyCache;
-pub use tool_pattern_cache::ToolPatternCache;
-pub use tool_pattern_observer::ToolPatternObserver;
 pub use mcp_bridge::McpBridgeTool;
+pub use policy_cache::PolicyCache;
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
+pub use tool_pattern_cache::ToolPatternCache;
+pub use tool_pattern_observer::ToolPatternObserver;
 
 use crate::auth::AuthBackend;
 use crate::mcp_registry::McpRegistry;

@@ -13,9 +13,9 @@ use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use super::super::LearningBus;
 use super::super::config_helpers::AgentMetadata;
 use super::super::execute_with_conductor_and_learning;
-use super::super::LearningBus;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(

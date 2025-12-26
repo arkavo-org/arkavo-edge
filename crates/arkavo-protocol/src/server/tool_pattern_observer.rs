@@ -93,7 +93,9 @@ impl ToolPatternObserver {
 
     /// Check if any patterns are ready for synthesis
     pub fn has_ready_patterns(&self) -> bool {
-        self.patterns.values().any(|p| p.success_count >= self.min_evidence)
+        self.patterns
+            .values()
+            .any(|p| p.success_count >= self.min_evidence)
     }
 
     /// Get patterns ready for lesson synthesis (above threshold)
@@ -141,7 +143,8 @@ impl ToolPatternObserver {
             format!("tool_call:{}", tracker.tool_name),
             format!("use_{format}_format"),
             "successful_tool_invocation".to_string(),
-        ).with_metadata(metadata);
+        )
+        .with_metadata(metadata);
 
         Some(Lesson::new(
             agent_id.to_string(),
@@ -234,10 +237,22 @@ mod tests {
     fn test_lesson_synthesis() {
         let mut observer = ToolPatternObserver::with_min_evidence("test".to_string(), 2);
 
-        observer.record_success("get_sector", ToolCallFormat::Fence, "", &serde_json::json!({"id": 4}));
-        observer.record_success("get_sector", ToolCallFormat::Fence, "", &serde_json::json!({"id": 4}));
+        observer.record_success(
+            "get_sector",
+            ToolCallFormat::Fence,
+            "",
+            &serde_json::json!({"id": 4}),
+        );
+        observer.record_success(
+            "get_sector",
+            ToolCallFormat::Fence,
+            "",
+            &serde_json::json!({"id": 4}),
+        );
 
-        let lesson = observer.synthesize_lesson("get_sector", ToolCallFormat::Fence, "agent-1", "swarm-1").unwrap();
+        let lesson = observer
+            .synthesize_lesson("get_sector", ToolCallFormat::Fence, "agent-1", "swarm-1")
+            .unwrap();
 
         assert_eq!(lesson.category, TOOL_FORMAT_CATEGORY);
         assert!(lesson.confidence > 0.0);

@@ -10,8 +10,8 @@ use arkavo_gossip::{
     GossipConfig, GossipMessage, GossipProtocol, KeyRegistry, LessonAnnouncement, LessonDigest,
     sign_lesson_announcement,
 };
-use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
 use arkavo_router::Router;
+use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
@@ -127,7 +127,13 @@ impl LearningBus {
         keypair: Arc<AgentKeypair>,
         gossip_config: GossipConfig,
     ) -> Self {
-        Self::with_config(agent_id, swarm_id, keypair, gossip_config, LearningConfig::default())
+        Self::with_config(
+            agent_id,
+            swarm_id,
+            keypair,
+            gossip_config,
+            LearningConfig::default(),
+        )
     }
 
     /// Create a new learning bus with custom configuration

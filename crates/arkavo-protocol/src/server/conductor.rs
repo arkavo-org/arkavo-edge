@@ -127,7 +127,11 @@ pub async fn execute_with_conductor_and_learning(
 
     // Inject few-shot examples from learned tool patterns
     let augmented_content = if let Some(bus) = learning_bus {
-        let tool_names: Vec<String> = registry_arc.list_tools().iter().map(|t| t.name.clone()).collect();
+        let tool_names: Vec<String> = registry_arc
+            .list_tools()
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
         let few_shot_examples = bus
             .get_few_shot_examples(&tool_names, arkavo_router::learning::ToolCallFormat::Fence)
             .await;

@@ -173,9 +173,15 @@ mod tests {
 
     #[test]
     fn test_infer_category() {
-        assert_eq!(EpisodeBuffer::infer_category("navigate_sector"), "navigation");
+        assert_eq!(
+            EpisodeBuffer::infer_category("navigate_sector"),
+            "navigation"
+        );
         assert_eq!(EpisodeBuffer::infer_category("move_to"), "navigation");
-        assert_eq!(EpisodeBuffer::infer_category("report_hazard"), "hazard_response");
+        assert_eq!(
+            EpisodeBuffer::infer_category("report_hazard"),
+            "hazard_response"
+        );
         assert_eq!(EpisodeBuffer::infer_category("build_wall"), "construction");
         assert_eq!(EpisodeBuffer::infer_category("unknown_tool"), "general");
     }
@@ -215,6 +221,9 @@ mod tests {
             });
         }
 
-        assert_eq!(buffer.ready_for_episode_synthesis(), Some("navigation".to_string()));
+        assert_eq!(
+            buffer.ready_for_episode_synthesis(),
+            Some("navigation".to_string())
+        );
     }
 }

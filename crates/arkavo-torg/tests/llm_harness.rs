@@ -62,9 +62,7 @@ fn find_any_gguf_sync() -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir()
-                && path.file_name()?.to_str()?.starts_with("models--")
-            {
+            if path.is_dir() && path.file_name()?.to_str()?.starts_with("models--") {
                 if let Some(gguf) = find_gguf_in_dir(&path) {
                     return Some(gguf);
                 }

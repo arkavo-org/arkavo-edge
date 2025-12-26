@@ -3,10 +3,10 @@
 //! Converts observations into episodes and episodes into lessons using LLM.
 
 use arkavo_llm::Message;
+use arkavo_router::Router;
 use arkavo_router::learning::{
     Episode, EpisodeOutcome, Lesson, LessonPattern, Observation, QualityMetrics,
 };
-use arkavo_router::Router;
 use uuid::Uuid;
 
 use super::episode_buffer::ToolObservation;
@@ -281,14 +281,8 @@ mod tests {
 
     #[test]
     fn test_extract_quality_score() {
-        assert_eq!(
-            extract_quality_score(r#"{"quality_score": 0.8}"#),
-            0.8
-        );
-        assert_eq!(
-            extract_quality_score(r#"{"quality_score": 1.5}"#),
-            1.0
-        );
+        assert_eq!(extract_quality_score(r#"{"quality_score": 0.8}"#), 0.8);
+        assert_eq!(extract_quality_score(r#"{"quality_score": 1.5}"#), 1.0);
         assert_eq!(extract_quality_score("invalid"), 0.7);
     }
 

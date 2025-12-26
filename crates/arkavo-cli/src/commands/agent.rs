@@ -1441,7 +1441,8 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                                 if let A2aResponse::Success { result, .. } = response
                                     && let Some(their_key_b64) = result.as_str()
                                 {
-                                    match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64) {
+                                    match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64)
+                                    {
                                         Ok(their_key) => {
                                             learning_bus_peers
                                                 .register_peer_key(peer_id.clone(), their_key)
@@ -1686,8 +1687,7 @@ fn broadcast_agent_mdns_sync(
                             if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next()
                                 && discovered_peers.remove(agent_id)
                             {
-                                let _ =
-                                    peer_tx.blocking_send((agent_id.to_string(), false, None));
+                                let _ = peer_tx.blocking_send((agent_id.to_string(), false, None));
                             }
                         }
                         _ => {}

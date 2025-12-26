@@ -45,11 +45,7 @@ impl std::str::FromStr for ToolCallFormat {
 
 impl ToolCallFormat {
     /// Generate a few-shot example for a tool call
-    pub fn format_example(
-        &self,
-        tool_name: &str,
-        args: &serde_json::Value,
-    ) -> String {
+    pub fn format_example(&self, tool_name: &str, args: &serde_json::Value) -> String {
         match self {
             Self::Fence => {
                 format!(
@@ -134,8 +130,14 @@ mod tests {
 
     #[test]
     fn test_tool_call_format_parse() {
-        assert_eq!("fence".parse::<ToolCallFormat>().unwrap(), ToolCallFormat::Fence);
-        assert_eq!("XML".parse::<ToolCallFormat>().unwrap(), ToolCallFormat::Xml);
+        assert_eq!(
+            "fence".parse::<ToolCallFormat>().unwrap(),
+            ToolCallFormat::Fence
+        );
+        assert_eq!(
+            "XML".parse::<ToolCallFormat>().unwrap(),
+            ToolCallFormat::Xml
+        );
         assert!("invalid".parse::<ToolCallFormat>().is_err());
     }
 

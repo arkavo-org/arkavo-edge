@@ -145,7 +145,8 @@ pub async fn start_event_processing_loop(
 
                                     // Add to buffer
                                     {
-                                        let mut buffer = learning_bus.episode_buffer().write().await;
+                                        let mut buffer =
+                                            learning_bus.episode_buffer().write().await;
                                         buffer.add_episode(episode);
                                     }
 
