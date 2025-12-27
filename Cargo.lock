@@ -938,6 +938,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "git2",
+ "octocrab",
  "regex",
  "reqwest",
  "serde",
