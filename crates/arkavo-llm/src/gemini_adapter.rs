@@ -1,5 +1,6 @@
 use crate::config::LlmConfig;
 use crate::error::{Error, Result};
+use crate::mcp_converter::McpConverter;
 use crate::message::Message;
 use crate::provider::{Provider, ProviderResponse};
 use crate::stream::StreamResponse;
@@ -221,6 +222,15 @@ impl GeminiProvider {
         function_declarations
             .iter()
             .map(|decl| {
+                let raw_params = decl
+                    .get("parameters")
+                    .cloned()
+                    .ok_or_else(|| Error::Provider("Tool missing parameters".into()))?;
+
+                // Sanitize parameters to remove invalid fields (name, aliases, etc.)
+                // that may leak from MCP ToolSchema and cause Gemini API errors
+                let sanitized_params = McpConverter::make_gemini_compatible(&raw_params);
+
                 Ok(FunctionDeclaration {
                     name: decl
                         .get("name")
@@ -232,10 +242,7 @@ impl GeminiProvider {
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| Error::Provider("Tool missing description".into()))?
                         .to_string(),
-                    parameters: decl
-                        .get("parameters")
-                        .cloned()
-                        .ok_or_else(|| Error::Provider("Tool missing parameters".into()))?,
+                    parameters: sanitized_params,
                 })
             })
             .collect()

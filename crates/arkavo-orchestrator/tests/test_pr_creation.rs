@@ -8,9 +8,26 @@ use arkavo_orchestrator::cognitive_engine::{
 use serde_json::json;
 use std::sync::Arc;
 
+/// Check if GitHub CLI is installed and authenticated
+fn check_gh_cli() -> bool {
+    std::process::Command::new("gh")
+        .args(["auth", "status"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[tokio::test]
-#[ignore]
 async fn test_pr_creation_with_mcp_tool() {
+    // Gracefully skip if gh CLI not available or not authenticated
+    if !check_gh_cli() {
+        eprintln!(
+            "Skipping test_pr_creation_with_mcp_tool: GitHub CLI not installed or not authenticated"
+        );
+        eprintln!("Run 'gh auth login' to enable this test");
+        return;
+    }
+
     let storage = Arc::new(
         MemoryStorage::new()
             .await

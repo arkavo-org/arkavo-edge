@@ -7,6 +7,7 @@ pub mod context_control;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod github_api;
 pub mod github_checks;
 pub mod github_org_knowledge;
 pub mod github_review;

@@ -3,9 +3,10 @@ use crate::code_review::CodeReviewTool;
 use crate::context_control::ContextRestoreTool;
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
-use crate::github::{
-    GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit, GitHubPrMergeKit,
-    GitHubReleaseCreateKit, GitHubRepoCloneKit,
+use crate::github::GitHubRepoCloneKit;
+use crate::github_api::{
+    GitHubIssueCreateTool, GitHubIssueListTool, GitHubPrCreateTool, GitHubPrListTool,
+    GitHubPrMergeTool, GitHubReleaseCreateTool,
 };
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
@@ -224,20 +225,23 @@ impl ToolRegistry {
             Box::new(GetTimeStatusTool::new(sync_state)),
         );
 
-        // GitHub Issue Management tools
-        self.register("github_issue_create", Box::new(GitHubIssueCreateKit::new()));
-        self.register("github_issue_list", Box::new(GitHubIssueListKit::new()));
+        // GitHub Issue Management tools (API-based, no gh CLI required)
+        self.register(
+            "github_issue_create",
+            Box::new(GitHubIssueCreateTool::new()),
+        );
+        self.register("github_issue_list", Box::new(GitHubIssueListTool::new()));
 
-        // GitHub PR tools
-        self.register("github_pr_create", Box::new(GitHubPrCreateKit::new()));
-        self.register("github_pr_list", Box::new(GitHubPrListKit::new()));
-        self.register("github_pr_merge", Box::new(GitHubPrMergeKit::new()));
+        // GitHub PR tools (API-based, no gh CLI required)
+        self.register("github_pr_create", Box::new(GitHubPrCreateTool::new()));
+        self.register("github_pr_list", Box::new(GitHubPrListTool::new()));
+        self.register("github_pr_merge", Box::new(GitHubPrMergeTool::new()));
 
         // GitHub Repository tools
         self.register("github_repo_clone", Box::new(GitHubRepoCloneKit::new()));
         self.register(
             "github_release_create",
-            Box::new(GitHubReleaseCreateKit::new()),
+            Box::new(GitHubReleaseCreateTool::new()),
         );
 
         // GitHub Org Knowledge tools
