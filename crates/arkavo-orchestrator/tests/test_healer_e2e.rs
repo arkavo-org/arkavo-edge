@@ -283,7 +283,10 @@ async fn test_healer_full_flow_with_pr() {
             );
         }
         Err(e) => {
-            println!("  Note: PR creation returned error (expected in test env): {}", e);
+            println!(
+                "  Note: PR creation returned error (expected in test env): {}",
+                e
+            );
         }
     }
 

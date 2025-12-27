@@ -21,7 +21,9 @@ fn check_gh_cli() -> bool {
 async fn test_pr_creation_with_mcp_tool() {
     // Gracefully skip if gh CLI not available or not authenticated
     if !check_gh_cli() {
-        eprintln!("Skipping test_pr_creation_with_mcp_tool: GitHub CLI not installed or not authenticated");
+        eprintln!(
+            "Skipping test_pr_creation_with_mcp_tool: GitHub CLI not installed or not authenticated"
+        );
         eprintln!("Run 'gh auth login' to enable this test");
         return;
     }

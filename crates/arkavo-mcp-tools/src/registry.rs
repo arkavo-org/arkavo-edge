@@ -226,7 +226,10 @@ impl ToolRegistry {
         );
 
         // GitHub Issue Management tools (API-based, no gh CLI required)
-        self.register("github_issue_create", Box::new(GitHubIssueCreateTool::new()));
+        self.register(
+            "github_issue_create",
+            Box::new(GitHubIssueCreateTool::new()),
+        );
         self.register("github_issue_list", Box::new(GitHubIssueListTool::new()));
 
         // GitHub PR tools (API-based, no gh CLI required)

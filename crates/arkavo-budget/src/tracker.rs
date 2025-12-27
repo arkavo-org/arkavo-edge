@@ -286,10 +286,7 @@ impl BudgetTracker {
                 if let Some(limit_value) = limit
                     && spent + cost > limit_value
                 {
-                    return Err(anyhow::anyhow!(
-                        "Agent {} budget limit exceeded",
-                        agent_id
-                    ));
+                    return Err(anyhow::anyhow!("Agent {} budget limit exceeded", agent_id));
                 }
             }
         }

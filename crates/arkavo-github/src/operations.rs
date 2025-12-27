@@ -3,11 +3,11 @@
 //! Provides direct API access via octocrab, replacing the gh CLI dependency.
 
 use crate::error::{GitHubError, Result};
+use octocrab::Octocrab;
+use octocrab::models::issues::Issue;
 use octocrab::models::pulls::PullRequest;
 use octocrab::models::repos::Release;
-use octocrab::models::issues::Issue;
 use octocrab::params::State;
-use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -41,8 +41,9 @@ impl GitHubOperations {
 
     /// Create from environment variable GITHUB_TOKEN
     pub fn from_env() -> Result<Self> {
-        let token = std::env::var("GITHUB_TOKEN")
-            .map_err(|_| GitHubError::GitHubApi("GITHUB_TOKEN environment variable not set".into()))?;
+        let token = std::env::var("GITHUB_TOKEN").map_err(|_| {
+            GitHubError::GitHubApi("GITHUB_TOKEN environment variable not set".into())
+        })?;
         Self::new(&token)
     }
 
@@ -67,7 +68,11 @@ impl GitHubOperations {
             .await
             .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
 
-        info!("Created PR #{}: {}", pr.number, pr.html_url.as_ref().map(|u| u.as_str()).unwrap_or(""));
+        info!(
+            "Created PR #{}: {}",
+            pr.number,
+            pr.html_url.as_ref().map(|u| u.as_str()).unwrap_or("")
+        );
         Ok(pr)
     }
 
@@ -98,7 +103,10 @@ impl GitHubOperations {
         number: u64,
         method: MergeMethod,
     ) -> Result<()> {
-        info!("Merging PR #{} in {}/{} with method {:?}", number, owner, repo, method);
+        info!(
+            "Merging PR #{} in {}/{} with method {:?}",
+            number, owner, repo, method
+        );
 
         let merge_method = match method {
             MergeMethod::Merge => octocrab::params::pulls::MergeMethod::Merge,
@@ -213,7 +221,10 @@ impl GitHubOperations {
         number: u64,
         labels: &[String],
     ) -> Result<()> {
-        debug!("Adding labels to {}/{}#{}: {:?}", owner, repo, number, labels);
+        debug!(
+            "Adding labels to {}/{}#{}: {:?}",
+            owner, repo, number, labels
+        );
 
         self.client
             .issues(owner, repo)
@@ -232,7 +243,10 @@ impl GitHubOperations {
         number: u64,
         assignees: &[String],
     ) -> Result<()> {
-        debug!("Adding assignees to {}/{}#{}: {:?}", owner, repo, number, assignees);
+        debug!(
+            "Adding assignees to {}/{}#{}: {:?}",
+            owner, repo, number, assignees
+        );
 
         let assignees_refs: Vec<&str> = assignees.iter().map(|s| s.as_str()).collect();
         self.client

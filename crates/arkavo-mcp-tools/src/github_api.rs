@@ -6,9 +6,9 @@ use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_pr_body;
 use async_trait::async_trait;
-use octocrab::params::State;
 use octocrab::Octocrab;
-use serde_json::{json, Value};
+use octocrab::params::State;
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -79,7 +79,10 @@ fn get_current_repo() -> Result<(String, String)> {
         url.trim_start_matches("git@github.com:")
             .trim_end_matches(".git")
     } else {
-        return Err(ToolError::Mcp(format!("Unsupported remote URL format: {}", url)));
+        return Err(ToolError::Mcp(format!(
+            "Unsupported remote URL format: {}",
+            url
+        )));
     };
 
     let (owner, repo) = parse_repo(repo_path)?;
