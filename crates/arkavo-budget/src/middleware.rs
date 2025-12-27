@@ -223,9 +223,17 @@ where
             let pricing = ProviderPricing::new();
             if let Some(cost) = pricing.estimate_cost(&provider_name, &model_id, input_tokens, output_tokens) {
                 let usage = TokenUsage::new(input_tokens, output_tokens);
-                let _ = tracker
-                    .record_spending(agent_id, provider_name, model_id, usage, cost)
-                    .await;
+                if let Err(e) = tracker
+                    .record_spending(agent_id.clone(), provider_name, model_id, usage, cost)
+                    .await
+                {
+                    warn!(
+                        error = %e,
+                        %agent_id,
+                        output_tokens,
+                        "Failed to record stream usage - budget tracking may be inaccurate"
+                    );
+                }
             }
         };
 

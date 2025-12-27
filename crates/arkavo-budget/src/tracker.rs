@@ -231,6 +231,129 @@ impl BudgetTracker {
         Ok(record)
     }
 
+    /// Atomically check affordability and record spending.
+    /// Prevents race conditions by holding locks through both check and deduct.
+    /// Returns Ok(SpendingRecord) if affordable, Err if budget would be exceeded.
+    pub async fn try_spend(
+        &self,
+        agent_id: String,
+        provider: String,
+        model: String,
+        usage: TokenUsage,
+        cost: TokenCost,
+    ) -> Result<SpendingRecord> {
+        // Acquire config lock and hold through entire operation
+        let mut config = self.config.write().await;
+        config.time_windows.update();
+
+        // Check global limits while holding lock
+        {
+            let status = self.status.read().await;
+            let global_checks = [
+                (config.limits.session_limit, status.session_spent),
+                (config.limits.hourly_limit, status.hourly_spent),
+                (config.limits.daily_limit, status.daily_spent),
+                (config.limits.monthly_limit, status.monthly_spent),
+                (config.limits.total_limit, status.total_spent),
+            ];
+
+            for (limit, spent) in global_checks {
+                if let Some(limit_value) = limit
+                    && spent + cost > limit_value
+                {
+                    return Err(anyhow::anyhow!(
+                        "Budget limit exceeded: {} + {} > {}",
+                        spent,
+                        cost,
+                        limit_value
+                    ));
+                }
+            }
+        }
+
+        // Check agent-specific limits
+        if let Some(agent_budget) = config.agent_budgets.get(&agent_id) {
+            let agent_statuses = self.agent_status.read().await;
+            let agent_status = agent_statuses.get(&agent_id).cloned().unwrap_or_default();
+
+            let agent_checks = [
+                (agent_budget.session_limit, agent_status.session_spent),
+                (agent_budget.hourly_limit, agent_status.hourly_spent),
+                (agent_budget.daily_limit, agent_status.daily_spent),
+            ];
+
+            for (limit, spent) in agent_checks {
+                if let Some(limit_value) = limit
+                    && spent + cost > limit_value
+                {
+                    return Err(anyhow::anyhow!(
+                        "Agent {} budget limit exceeded",
+                        agent_id
+                    ));
+                }
+            }
+        }
+
+        // Checks passed - now record (still holding config lock)
+        let record = SpendingRecord {
+            id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+            agent_id: agent_id.clone(),
+            provider,
+            model,
+            usage,
+            cost,
+            metadata: None,
+        };
+
+        // Update global status
+        {
+            let mut status = self.status.write().await;
+            status.session_spent += cost;
+            status.hourly_spent += cost;
+            status.daily_spent += cost;
+            status.monthly_spent += cost;
+            status.total_spent += cost;
+            status.last_updated = Utc::now();
+            self.check_thresholds(&config, &status, None).await?;
+        }
+
+        // Update agent status
+        {
+            let mut agent_statuses = self.agent_status.write().await;
+            let agent_status = agent_statuses
+                .entry(agent_id.clone())
+                .or_insert_with(BudgetStatus::default);
+
+            agent_status.session_spent += cost;
+            agent_status.hourly_spent += cost;
+            agent_status.daily_spent += cost;
+            agent_status.monthly_spent += cost;
+            agent_status.total_spent += cost;
+            agent_status.last_updated = Utc::now();
+
+            if let Some(agent_budget) = config.agent_budgets.get(&agent_id) {
+                self.check_agent_thresholds(&config.thresholds, agent_budget, agent_status)
+                    .await?;
+            }
+        }
+
+        // Record in history
+        {
+            let mut history = self.spending_history.write().await;
+            history.push(record.clone());
+            if history.len() > 10000 {
+                history.drain(0..1000);
+            }
+        }
+
+        let _ = self
+            .event_sender
+            .send(BudgetEvent::SpendingRecorded(record.clone()));
+
+        Ok(record)
+    }
+
     async fn check_thresholds(
         &self,
         config: &BudgetConfig,

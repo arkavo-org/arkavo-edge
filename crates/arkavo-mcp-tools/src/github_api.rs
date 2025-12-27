@@ -249,8 +249,6 @@ impl Default for GitHubPrListTool {
 #[async_trait]
 impl Tool for GitHubPrListTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
-
         let (owner, repo) = if let Some(repo_str) = params["repository"].as_str() {
             let (o, r) = parse_repo(repo_str)?;
             (o.to_string(), r.to_string())
@@ -264,8 +262,9 @@ impl Tool for GitHubPrListTool {
             _ => State::Open,
         };
 
-        let pulls_handler = client.pulls(&owner, &repo);
-        let page = pulls_handler
+        let page = get_github_client()
+            .await?
+            .pulls(&owner, &repo)
             .list()
             .state(state)
             .send()
@@ -278,7 +277,7 @@ impl Tool for GitHubPrListTool {
             .map(|pr| {
                 json!({
                     "number": pr.number,
-                    "title": pr.title.as_ref().map(|t| t.as_str()).unwrap_or(""),
+                    "title": pr.title.as_deref().unwrap_or(""),
                     "state": format!("{:?}", pr.state.as_ref().unwrap_or(&octocrab::models::IssueState::Open)),
                     "url": pr.html_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                     "user": pr.user.as_ref().map(|u| u.login.clone()).unwrap_or_default()
@@ -511,8 +510,6 @@ impl Default for GitHubIssueListTool {
 #[async_trait]
 impl Tool for GitHubIssueListTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
-
         let (owner, repo) = if let Some(repo_str) = params["repository"].as_str() {
             let (o, r) = parse_repo(repo_str)?;
             (o.to_string(), r.to_string())
@@ -526,8 +523,9 @@ impl Tool for GitHubIssueListTool {
             _ => State::Open,
         };
 
-        let issues_handler = client.issues(&owner, &repo);
-        let page = issues_handler
+        let page = get_github_client()
+            .await?
+            .issues(&owner, &repo)
             .list()
             .state(state)
             .send()
