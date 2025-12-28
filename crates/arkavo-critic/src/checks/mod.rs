@@ -1,11 +1,13 @@
 //! Verification checks for the Critic pipeline
 
+mod circuit;
 mod lint;
 mod policy;
 mod schema;
 mod semantic;
 mod traits;
 
+pub use circuit::{CircuitCheck, CompiledCircuit, PolicyId};
 pub use lint::LintCheck;
 pub use policy::PolicyCheck;
 pub use schema::SchemaCheck;
