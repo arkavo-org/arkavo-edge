@@ -37,6 +37,9 @@ pub enum Error {
 
     #[error("Architect mode error: {0}")]
     ArchitectError(String),
+
+    #[error("Request blocked by policy '{policy_id}': {reason}")]
+    ModerationBlocked { policy_id: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

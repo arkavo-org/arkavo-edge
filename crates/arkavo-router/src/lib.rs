@@ -19,6 +19,7 @@ pub mod stream;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
+pub mod preflight;
 
 pub use architect::{
     ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
@@ -39,6 +40,7 @@ pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
+pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
 
 pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
@@ -63,6 +65,7 @@ pub struct Router {
     metrics: Arc<RwLock<RoutingMetrics>>,
     connectivity: Arc<ConnectivityChecker>,
     offline_mode: bool,
+    preflight: Option<Arc<preflight::PreflightModerator>>,
 }
 
 impl Router {
@@ -73,6 +76,7 @@ impl Router {
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: false,
+            preflight: None,
         })
     }
 
@@ -83,7 +87,18 @@ impl Router {
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: true,
+            preflight: None,
         })
+    }
+
+    /// Add pre-flight moderation to the router
+    ///
+    /// Pre-flight moderation evaluates TØR-G circuits against requests
+    /// BEFORE LLM inference, blocking policy-violating requests early.
+    #[must_use]
+    pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
+        self.preflight = Some(Arc::new(moderator));
+        self
     }
 
     pub fn set_offline_mode(&mut self, offline: bool) {
@@ -163,6 +178,18 @@ impl Router {
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
+
+        // Pre-flight moderation check (before any LLM inference)
+        if let Some(preflight) = &self.preflight {
+            match preflight.check(task_description) {
+                preflight::ModerationResult::Allow => {}
+                preflight::ModerationResult::Block {
+                    policy_id, reason, ..
+                } => {
+                    return Err(Error::ModerationBlocked { policy_id, reason });
+                }
+            }
+        }
 
         // Check complexity for architect mode
         let scorer = ComplexityScorer::new();
@@ -843,6 +870,7 @@ impl Router {
             metrics: self.metrics.clone(),
             connectivity: self.connectivity.clone(),
             offline_mode: self.offline_mode,
+            preflight: self.preflight.clone(),
         })
     }
 
