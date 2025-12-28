@@ -91,11 +91,7 @@ mod tests {
 
     #[test]
     fn test_has_tool_calls() {
-        let input = VerificationInput::new(
-            "test".into(),
-            make_response("", vec![]),
-            vec![],
-        );
+        let input = VerificationInput::new("test".into(), make_response("", vec![]), vec![]);
         assert!(!FeatureId::HasToolCalls.extract(&input));
 
         let input_with_tools = VerificationInput::new(
@@ -142,11 +138,8 @@ mod tests {
         );
         assert!(FeatureId::ResponseHasCode.extract(&input));
 
-        let input_no_code = VerificationInput::new(
-            "test".into(),
-            make_response("Hello world", vec![]),
-            vec![],
-        );
+        let input_no_code =
+            VerificationInput::new("test".into(), make_response("Hello world", vec![]), vec![]);
         assert!(!FeatureId::ResponseHasCode.extract(&input_no_code));
     }
 

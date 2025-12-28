@@ -3,10 +3,10 @@
 //! Target: sub-microsecond total latency (feature extraction + evaluation).
 
 use arkavo_critic::{CircuitCheck, FeatureId, PolicyId, VerificationInput};
-use arkavo_llm::tool_parser::ParsedToolCall;
 use arkavo_llm::ProviderResponse;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use torg_core::{evaluate_into, BoolOp, Graph, Node, Source};
+use arkavo_llm::tool_parser::ParsedToolCall;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use torg_core::{BoolOp, Graph, Node, Source, evaluate_into};
 use torg_serde::to_bytes;
 
 /// Build a simple OR circuit: output = input0 OR input1
@@ -157,11 +157,7 @@ fn bench_circuit_check_full(c: &mut Criterion) {
         )
         .unwrap();
 
-    let input = VerificationInput::new(
-        "test".into(),
-        make_response("```code```", vec![]),
-        vec![],
-    );
+    let input = VerificationInput::new("test".into(), make_response("```code```", vec![]), vec![]);
 
     // Use tokio runtime for async benchmark
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -194,11 +190,7 @@ fn bench_circuit_check_multiple_policies(c: &mut Criterion) {
             .unwrap();
     }
 
-    let input = VerificationInput::new(
-        "test".into(),
-        make_response("```code```", vec![]),
-        vec![],
-    );
+    let input = VerificationInput::new("test".into(), make_response("```code```", vec![]), vec![]);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()

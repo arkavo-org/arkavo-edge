@@ -1,7 +1,7 @@
 //! Pre-flight moderation using TØR-G boolean circuits
 
 use dashmap::DashMap;
-use torg_core::{evaluate_into, Graph};
+use torg_core::{Graph, evaluate_into};
 use torg_serde::from_bytes;
 
 use super::circuit::CompiledCircuit;

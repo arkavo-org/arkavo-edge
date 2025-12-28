@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use std::sync::Mutex;
 use std::time::Instant;
-use torg_core::{evaluate_into, Graph};
+use torg_core::{Graph, evaluate_into};
 
 /// Policy identifier for circuit registration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -218,8 +218,8 @@ impl VerificationCheck for CircuitCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_llm::tool_parser::ParsedToolCall;
     use arkavo_llm::ProviderResponse;
+    use arkavo_llm::tool_parser::ParsedToolCall;
     use torg_core::{BoolOp, Node, Source};
     use torg_serde::to_bytes;
 
@@ -419,11 +419,7 @@ mod tests {
     async fn test_skip_when_no_circuits() {
         let check = CircuitCheck::new();
 
-        let input = VerificationInput::new(
-            "test".into(),
-            make_response("Hello", vec![]),
-            vec![],
-        );
+        let input = VerificationInput::new("test".into(), make_response("Hello", vec![]), vec![]);
 
         // is_applicable should return false
         assert!(!check.is_applicable(&input));
@@ -455,11 +451,8 @@ mod tests {
         assert_eq!(check.len(), 2);
 
         // Response with code and non-empty should pass both
-        let input = VerificationInput::new(
-            "test".into(),
-            make_response("```code```", vec![]),
-            vec![],
-        );
+        let input =
+            VerificationInput::new("test".into(), make_response("```code```", vec![]), vec![]);
 
         let result = check.verify(&input).await;
         assert!(result.is_pass());

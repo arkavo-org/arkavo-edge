@@ -14,12 +14,12 @@ pub mod metrics;
 pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
+pub mod preflight;
 pub mod selector;
 pub mod stream;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
-pub mod preflight;
 
 pub use architect::{
     ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
@@ -37,10 +37,10 @@ pub use orchestrator::{
     ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
+pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
-pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
 
 pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
