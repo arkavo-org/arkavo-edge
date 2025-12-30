@@ -6,19 +6,21 @@
 //!
 //! # Runtime Policy Configuration
 //!
-//! Policies are loaded from user configuration at runtime, not hardcoded.
-//! Configuration file: `~/.config/arkavo/policies.toml`
+//! Policies are defined per-agent in AGENTS.md frontmatter, not hardcoded.
+//! The loader searches for AGENTS.md in the current directory and parent directories.
 //!
-//! ```toml
-//! [[policies]]
-//! id = "block_pii"
-//! features = ["InputContainsPII"]
-//! action = "block"
-//!
-//! [[policies]]
-//! id = "block_sql_injection"
-//! features = ["InputContainsSQLKeywords"]
-//! action = "block"
+//! ```yaml
+//! ---
+//! name: secure-agent
+//! preflight:
+//!   policies:
+//!     - id: block_pii
+//!       features: [InputContainsPII]
+//!       action: block
+//!     - id: block_sql_injection
+//!       features: [InputContainsSQLKeywords]
+//!       action: block
+//! ---
 //! ```
 //!
 //! # Example
@@ -26,14 +28,14 @@
 //! ```ignore
 //! use arkavo_router::preflight::{PreflightModerator, load_policies_from_config};
 //!
-//! // Load policies from user configuration
+//! // Load policies from AGENTS.md in current/parent directories
 //! let moderator = load_policies_from_config()?;
 //!
 //! // Check a request
 //! match moderator.check("user input") {
 //!     ModerationResult::Allow => { /* proceed with LLM */ }
 //!     ModerationResult::Block { policy_id, reason, .. } => {
-//!         // Request blocked by user-configured policy
+//!         // Request blocked by agent-configured policy
 //!     }
 //! }
 //! ```

@@ -53,7 +53,7 @@ pub async fn process_with_tools(
 ) -> Result<ToolIntegrationResult, Box<dyn std::error::Error>> {
     let config = config.unwrap_or_default();
 
-    // Load preflight policies from user configuration (~/.config/arkavo/policies.toml)
+    // Load preflight policies from AGENTS.md in current or parent directories
     let moderator = arkavo_router::preflight::load_policies_from_config().unwrap_or_else(|e| {
         tracing::warn!("Failed to load policies: {e}, using empty moderator");
         arkavo_router::preflight::PreflightModerator::new()
