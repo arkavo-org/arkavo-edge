@@ -54,11 +54,10 @@ pub async fn process_with_tools(
     let config = config.unwrap_or_default();
 
     // Load preflight policies from user configuration (~/.config/arkavo/policies.toml)
-    let moderator = arkavo_router::preflight::load_policies_from_config()
-        .unwrap_or_else(|e| {
-            tracing::warn!("Failed to load policies: {e}, using empty moderator");
-            arkavo_router::preflight::PreflightModerator::new()
-        });
+    let moderator = arkavo_router::preflight::load_policies_from_config().unwrap_or_else(|e| {
+        tracing::warn!("Failed to load policies: {e}, using empty moderator");
+        arkavo_router::preflight::PreflightModerator::new()
+    });
 
     let router = Arc::new(Router::new().await?.with_preflight(moderator));
 

@@ -45,8 +45,8 @@ mod moderator;
 mod result;
 
 pub use config::{
-    load_policies_from_agents_md, load_policies_from_config, AgentConfig, PolicyAction,
-    PolicyConfig, PolicyFileConfig, PreflightConfig,
+    AgentConfig, PolicyAction, PolicyConfig, PolicyFileConfig, PreflightConfig,
+    load_policies_from_agents_md, load_policies_from_config,
 };
 pub use features::PreflightFeature;
 pub use moderator::{PolicyId, PreflightModerator};

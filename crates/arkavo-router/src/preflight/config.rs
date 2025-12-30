@@ -6,23 +6,18 @@
 use super::features::PreflightFeature;
 use super::moderator::{PolicyId, PreflightModerator};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use torg_core::{BoolOp, Graph, Node, Source};
 
 /// Policy action type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PolicyAction {
     /// Block requests matching the features (NOT circuit)
+    #[default]
     Block,
     /// Allow only requests matching the features (pass-through)
     Allow,
-}
-
-impl Default for PolicyAction {
-    fn default() -> Self {
-        Self::Block
-    }
 }
 
 /// Single policy configuration
@@ -217,8 +212,7 @@ pub fn load_policies_from_agents_md(
     // Extract YAML content from markdown (between --- markers or parse directly)
     let yaml_content = extract_yaml_from_markdown(&content);
 
-    let config: AgentConfig = serde_yaml::from_str(&yaml_content)
-        .unwrap_or_default();
+    let config: AgentConfig = serde_yaml::from_str(&yaml_content).unwrap_or_default();
 
     let policies = match config.preflight {
         Some(preflight) => preflight.policies,
@@ -288,10 +282,10 @@ pub fn load_policies_from_agents_md(
 /// Handles both frontmatter (---) and inline YAML sections
 fn extract_yaml_from_markdown(content: &str) -> String {
     // Try frontmatter first (between --- markers)
-    if content.starts_with("---") {
-        if let Some(end) = content[3..].find("---") {
-            return content[3..end + 3].to_string();
-        }
+    if let Some(after_start) = content.strip_prefix("---")
+        && let Some(end) = after_start.find("---")
+    {
+        return after_start[..end].to_string();
     }
 
     // Otherwise, try to parse the whole content as YAML-like markdown
@@ -328,6 +322,7 @@ fn extract_yaml_from_markdown(content: &str) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::NamedTempFile;
 
     #[test]
