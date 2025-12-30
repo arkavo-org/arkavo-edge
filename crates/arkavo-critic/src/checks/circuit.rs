@@ -182,7 +182,7 @@ impl VerificationCheck for CircuitCheck {
             let circuit = entry.value();
 
             if let Some(failing_output) = circuit.evaluate(input) {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 let evidence = VerificationEvidence::failed(
                     self.id(),
                     &format!(
@@ -190,24 +190,24 @@ impl VerificationCheck for CircuitCheck {
                         policy_id.0, failing_output
                     ),
                     CheckSeverity::Error,
-                    latency,
+                    latency_us,
                 );
                 tracing::warn!(
                     check = "circuit",
                     policy = %policy_id.0,
                     output = failing_output,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Circuit check failed"
                 );
                 return CheckResult::Fail(evidence);
             }
         }
 
-        let latency = start.elapsed().as_millis() as u64;
+        let latency_us = start.elapsed().as_micros() as u64;
         tracing::debug!(
             check = "circuit",
             circuits = self.circuits.len(),
-            latency_ms = latency,
+            latency_us = latency_us,
             "All circuits passed"
         );
 

@@ -154,22 +154,22 @@ impl VerificationCheck for SemanticCheck {
             .await
         {
             Ok(judgment) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 tracing::debug!(
                     check = "semantic",
                     passed = judgment.passed,
                     issue = %judgment.issue_type,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Semantic check complete"
                 );
-                self.judgment_to_result(judgment, latency)
+                self.judgment_to_result(judgment, latency_us)
             }
             Err(e) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 tracing::warn!(
                     check = "semantic",
                     error = %e,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Semantic check failed"
                 );
                 // Judge error is not a verification failure, just skip

@@ -86,6 +86,11 @@ impl PreflightModerator {
     /// Evaluate all circuits against input text
     ///
     /// Returns `Allow` if all circuits pass, or `Block` with the first failing policy
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal mutex is poisoned (only possible if a thread panicked
+    /// while holding the lock).
     #[must_use]
     pub fn check(&self, input: &str) -> ModerationResult {
         if self.circuits.is_empty() {
@@ -374,6 +379,36 @@ mod tests {
             assert!(feature_values[0].1);
         } else {
             panic!("Expected Block result");
+        }
+    }
+
+    #[test]
+    fn test_empty_input_passes() {
+        let moderator = PreflightModerator::new();
+        let graph = build_not_circuit();
+        moderator.register_graph(
+            PolicyId::new("block_pii"),
+            graph,
+            vec![PreflightFeature::InputContainsPII],
+        );
+        // Empty input should pass (no PII detected)
+        assert!(moderator.check("").is_allowed());
+    }
+
+    #[test]
+    fn test_100k_character_length_blocked() {
+        let moderator = PreflightModerator::new();
+        let graph = build_not_circuit();
+        moderator.register_graph(
+            PolicyId::new("length_limit"),
+            graph,
+            vec![PreflightFeature::InputLengthExceedsThreshold(100_000)],
+        );
+        let long_input = "x".repeat(100_001);
+        let result = moderator.check(&long_input);
+        assert!(result.is_blocked());
+        if let ModerationResult::Block { policy_id, .. } = result {
+            assert_eq!(policy_id, "length_limit");
         }
     }
 }

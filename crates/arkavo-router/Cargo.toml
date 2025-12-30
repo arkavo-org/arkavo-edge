@@ -26,7 +26,6 @@ rand_distr = "0.4"
 regex = { workspace = true }
 sha2 = { workspace = true }
 dashmap = { workspace = true }
-once_cell = { workspace = true }
 torg-core = { workspace = true }
 torg-serde = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"], optional = true }
@@ -50,6 +49,13 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
 windows = ["gemini", "llm-remote", "deepseek"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "preflight"
+harness = false
 
 [lints]
 workspace = true

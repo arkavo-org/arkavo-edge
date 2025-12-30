@@ -74,13 +74,13 @@ pub struct VerificationEvidence {
     pub description: String,
     /// Additional context/details
     pub details: Option<serde_json::Value>,
-    /// Time taken for this check (ms)
-    pub latency_ms: u64,
+    /// Time taken for this check (microseconds)
+    pub latency_us: u64,
 }
 
 impl VerificationEvidence {
     /// Create a passing evidence
-    pub fn passed(check_id: &str, description: &str, latency_ms: u64) -> Self {
+    pub fn passed(check_id: &str, description: &str, latency_us: u64) -> Self {
         Self {
             id: Uuid::new_v4(),
             check_id: check_id.to_string(),
@@ -89,12 +89,12 @@ impl VerificationEvidence {
             severity: CheckSeverity::Info,
             description: description.to_string(),
             details: None,
-            latency_ms,
+            latency_us,
         }
     }
 
     /// Create a failing evidence
-    pub fn failed(check_id: &str, reason: &str, severity: CheckSeverity, latency_ms: u64) -> Self {
+    pub fn failed(check_id: &str, reason: &str, severity: CheckSeverity, latency_us: u64) -> Self {
         Self {
             id: Uuid::new_v4(),
             check_id: check_id.to_string(),
@@ -105,12 +105,12 @@ impl VerificationEvidence {
             severity,
             description: reason.to_string(),
             details: None,
-            latency_ms,
+            latency_us,
         }
     }
 
     /// Create a partial pass evidence
-    pub fn partial(check_id: &str, score: f64, notes: &str, latency_ms: u64) -> Self {
+    pub fn partial(check_id: &str, score: f64, notes: &str, latency_us: u64) -> Self {
         Self {
             id: Uuid::new_v4(),
             check_id: check_id.to_string(),
@@ -126,7 +126,7 @@ impl VerificationEvidence {
             },
             description: notes.to_string(),
             details: None,
-            latency_ms,
+            latency_us,
         }
     }
 
@@ -140,7 +140,7 @@ impl VerificationEvidence {
             severity: CheckSeverity::Warning,
             description: reason.to_string(),
             details: None,
-            latency_ms: 0,
+            latency_us: 0,
         }
     }
 
@@ -156,7 +156,7 @@ impl VerificationEvidence {
             severity: CheckSeverity::Info,
             description: reason.to_string(),
             details: None,
-            latency_ms: 0,
+            latency_us: 0,
         }
     }
 
@@ -202,7 +202,7 @@ mod tests {
     fn test_evidence_creation() {
         let evidence = VerificationEvidence::passed("schema", "All schemas valid", 1);
         assert!(evidence.status.is_passed());
-        assert_eq!(evidence.latency_ms, 1);
+        assert_eq!(evidence.latency_us, 1);
 
         let evidence = VerificationEvidence::failed("policy", "Violation", CheckSeverity::Error, 2);
         assert!(evidence.status.is_failed());

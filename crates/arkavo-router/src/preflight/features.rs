@@ -1,7 +1,7 @@
 //! Pre-flight feature extraction for boolean circuit inputs
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Boolean features extractable from raw request text
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -27,21 +27,22 @@ pub enum PreflightFeature {
 }
 
 // Pre-compiled regexes for performance
-static SSN_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("valid SSN regex"));
+static SSN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("valid SSN regex"));
 
-static CREDIT_CARD_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b").expect("valid CC regex"));
+static CREDIT_CARD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b").expect("valid CC regex")
+});
 
-static EMAIL_REGEX: Lazy<Regex> = Lazy::new(|| {
+static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b").expect("valid email regex")
 });
 
-static URL_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"https?://[^\s]+").expect("valid URL regex"));
+static URL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://[^\s]+").expect("valid URL regex"));
 
-static BASE64_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"[A-Za-z0-9+/]{20,}={0,2}").expect("valid base64 regex"));
+static BASE64_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[A-Za-z0-9+/]{20,}={0,2}").expect("valid base64 regex"));
 
 static SQL_KEYWORDS: &[&str] = &[
     "SELECT", "DROP", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "ALTER",
@@ -159,5 +160,31 @@ mod tests {
         assert!(feature.extract("Visit https://example.com"));
         assert!(feature.extract("Check http://test.org/path"));
         assert!(!feature.extract("No URL here"));
+    }
+
+    #[test]
+    fn test_base64_detection() {
+        let feature = PreflightFeature::InputContainsBase64;
+        // Valid base64 pattern (20+ chars)
+        assert!(feature.extract("SGVsbG8gV29ybGQhIFRoaXMgaXMgYmFzZTY0"));
+        assert!(!feature.extract("SGVsbG8=")); // Too short
+        assert!(!feature.extract("Hello World")); // Not base64
+    }
+
+    #[test]
+    fn test_leet_speak_bypass_limitation() {
+        // Documents known limitation: leet speak bypasses detection
+        let feature = PreflightFeature::InputContainsSQLKeywords;
+        assert!(feature.extract("DROP TABLE users"));
+        assert!(!feature.extract("DR0P T4BL3 us3rs")); // Known bypass
+    }
+
+    #[test]
+    fn test_homoglyph_bypass_limitation() {
+        // Documents known limitation: Unicode homoglyphs bypass detection
+        let feature = PreflightFeature::InputContainsSQLKeywords;
+        assert!(feature.extract("DROP TABLE"));
+        // Cyrillic 'О' (U+041E) looks like Latin 'O'
+        assert!(!feature.extract("DRОР TABLE")); // Known bypass
     }
 }

@@ -15,8 +15,8 @@ pub struct PipelineResult {
     pub passed: bool,
     /// Evidence from all checks
     pub evidence: Vec<VerificationEvidence>,
-    /// Total latency in milliseconds
-    pub total_latency_ms: u64,
+    /// Total latency in microseconds
+    pub total_latency_us: u64,
     /// Number of checks run
     pub checks_run: usize,
     /// Number of checks skipped
@@ -111,11 +111,11 @@ impl CriticPipeline {
             match result {
                 CheckResult::Pass => {
                     // Create passing evidence for tracking
-                    let latency = start.elapsed().as_millis() as u64;
+                    let latency_us = start.elapsed().as_micros() as u64;
                     evidence.push(VerificationEvidence::passed(
                         check.id(),
                         "Check passed",
-                        latency,
+                        latency_us,
                     ));
                 }
                 CheckResult::Fail(e) => {
@@ -151,21 +151,21 @@ impl CriticPipeline {
             }
         }
 
-        let total_latency = start.elapsed().as_millis() as u64;
+        let total_latency_us = start.elapsed().as_micros() as u64;
 
         tracing::info!(
             passed = !had_failure,
             checks_run = checks_run,
             checks_skipped = checks_skipped,
             needs_approval = needs_approval,
-            latency_ms = total_latency,
+            latency_us = total_latency_us,
             "Pipeline complete"
         );
 
         PipelineResult {
             passed: !had_failure && !needs_approval,
             evidence,
-            total_latency_ms: total_latency,
+            total_latency_us,
             checks_run,
             checks_skipped,
             needs_approval,
