@@ -40,6 +40,11 @@ pub enum Error {
 
     #[error("Request blocked by policy '{policy_id}': {reason}")]
     ModerationBlocked { policy_id: String, reason: String },
+
+    /// Response rejected by CriticPipeline
+    #[cfg(feature = "critic")]
+    #[error("Response rejected by critic: {failures:?}")]
+    CriticRejected { failures: Vec<String> },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

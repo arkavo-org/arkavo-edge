@@ -35,7 +35,9 @@ mod config;
 mod error;
 mod evidence;
 pub mod features;
+mod judge;
 mod pipeline;
+mod validator;
 
 pub use checks::{
     CheckResult, CircuitCheck, LintCheck, PolicyCheck, PolicyId, SchemaCheck, SemanticCheck,
@@ -45,4 +47,19 @@ pub use config::CriticConfig;
 pub use error::{Error, Result};
 pub use evidence::{CheckSeverity, VerificationEvidence, VerificationStatus};
 pub use features::FeatureId;
+pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use pipeline::{CriticPipeline, PipelineResult};
+pub use validator::{ResponseValidator, ValidationError};
+
+/// Create a CriticPipeline with default checks
+///
+/// Includes:
+/// - CircuitCheck (priority 5): TØR-G boolean circuit policies
+/// - SchemaCheck (priority 10): Tool call schema validation
+/// - PolicyCheck (priority 15): Security policy enforcement
+pub fn default_pipeline() -> CriticPipeline {
+    CriticPipeline::new()
+        .add_check(CircuitCheck::new())
+        .add_check(SchemaCheck::new())
+        .add_check(PolicyCheck::with_security_defaults())
+}

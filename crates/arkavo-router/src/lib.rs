@@ -66,6 +66,8 @@ pub struct Router {
     connectivity: Arc<ConnectivityChecker>,
     offline_mode: bool,
     preflight: Option<Arc<preflight::PreflightModerator>>,
+    #[cfg(feature = "critic")]
+    critic: Option<Arc<arkavo_critic::CriticPipeline>>,
 }
 
 impl Router {
@@ -77,6 +79,8 @@ impl Router {
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: false,
             preflight: None,
+            #[cfg(feature = "critic")]
+            critic: None,
         })
     }
 
@@ -88,6 +92,8 @@ impl Router {
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: true,
             preflight: None,
+            #[cfg(feature = "critic")]
+            critic: None,
         })
     }
 
@@ -98,6 +104,17 @@ impl Router {
     #[must_use]
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
+        self
+    }
+
+    /// Add post-LLM critic validation to the router
+    ///
+    /// The CriticPipeline validates LLM responses AFTER inference,
+    /// checking for policy violations, schema errors, and semantic issues.
+    #[cfg(feature = "critic")]
+    #[must_use]
+    pub fn with_critic(mut self, pipeline: arkavo_critic::CriticPipeline) -> Self {
+        self.critic = Some(Arc::new(pipeline));
         self
     }
 
@@ -871,6 +888,8 @@ impl Router {
             connectivity: self.connectivity.clone(),
             offline_mode: self.offline_mode,
             preflight: self.preflight.clone(),
+            #[cfg(feature = "critic")]
+            critic: self.critic.clone(),
         })
     }
 

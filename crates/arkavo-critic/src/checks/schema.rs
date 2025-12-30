@@ -1,11 +1,11 @@
 //! Schema validation check
 //!
-//! Validates tool calls against their schemas using arkavo-router's ResponseValidator.
+//! Validates tool calls against their schemas using ResponseValidator.
 //! This is the fastest check (<1ms) and should run first.
 
 use super::traits::{CheckResult, VerificationCheck, VerificationInput};
 use crate::evidence::{CheckSeverity, VerificationEvidence};
-use arkavo_router::ResponseValidator;
+use crate::validator::ResponseValidator;
 use async_trait::async_trait;
 use std::time::Instant;
 

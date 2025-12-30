@@ -428,6 +428,7 @@ dependencies = [
  "arkavo-budget",
  "arkavo-cef",
  "arkavo-context",
+ "arkavo-critic",
  "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-device-identity",
@@ -562,7 +563,6 @@ version = "0.51.6"
 dependencies = [
  "arkavo-llm",
  "arkavo-mcp-tools",
- "arkavo-router",
  "arkavo-torg-circuits",
  "async-trait",
  "chrono",
@@ -1152,6 +1152,7 @@ version = "0.51.6"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
+ "arkavo-critic",
  "arkavo-gemini",
  "arkavo-llm",
  "arkavo-mcp",
@@ -1172,11 +1173,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2 0.10.9",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
+ "toml",
  "torg-core",
  "torg-serde",
  "tracing",
@@ -8351,6 +8355,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.12.1",
+ "itoa 1.0.16",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "serdect"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10030,6 +10047,12 @@ dependencies = [
  "crypto-common 0.2.0-rc.4",
  "subtle",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
