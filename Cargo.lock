@@ -563,6 +563,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp-tools",
  "arkavo-router",
+ "arkavo-torg-circuits",
  "async-trait",
  "chrono",
  "criterion",
@@ -1156,6 +1157,7 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-mcp-tools",
  "arkavo-observability",
+ "arkavo-torg-circuits",
  "async-trait",
  "chrono",
  "criterion",
@@ -1314,6 +1316,15 @@ dependencies = [
  "tokio",
  "torg-core",
  "torg-mask",
+]
+
+[[package]]
+name = "arkavo-torg-circuits"
+version = "0.51.6"
+dependencies = [
+ "parking_lot",
+ "torg-core",
+ "torg-serde",
 ]
 
 [[package]]

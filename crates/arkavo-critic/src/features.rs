@@ -3,6 +3,8 @@
 //! This module maps `VerificationInput` data to boolean values
 //! for evaluation by TØR-G circuits.
 
+use arkavo_torg_circuits::CircuitFeature;
+
 use crate::checks::VerificationInput;
 
 /// Boolean feature IDs for circuit inputs.
@@ -40,23 +42,6 @@ pub enum FeatureId {
 }
 
 impl FeatureId {
-    /// Extract boolean value from verification input.
-    #[must_use]
-    pub fn extract(&self, input: &VerificationInput) -> bool {
-        match self {
-            Self::HasToolCalls => !input.response.tool_calls.is_empty(),
-            Self::IntentIsRead => Self::check_tool_intent(input, "read"),
-            Self::IntentIsWrite => Self::check_tool_intent(input, "write"),
-            Self::IntentIsDelete => Self::check_tool_intent(input, "delete"),
-            Self::IntentIsExecute => Self::check_tool_intent(input, "execute"),
-            Self::ResponseIsEmpty => input.response.content.is_empty(),
-            Self::ResponseHasCode => input.response.content.contains("```"),
-            Self::CategoryIsSecurity => input.task_category.as_deref() == Some("security"),
-            Self::CategoryIsDatabase => input.task_category.as_deref() == Some("database"),
-            Self::Custom(key) => Self::extract_custom(input, key),
-        }
-    }
-
     fn check_tool_intent(input: &VerificationInput, intent: &str) -> bool {
         input
             .response
@@ -72,6 +57,40 @@ impl FeatureId {
             .and_then(|ctx| ctx.get(key))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
+    }
+}
+
+impl CircuitFeature for FeatureId {
+    type Input = VerificationInput;
+
+    fn extract(&self, input: &Self::Input) -> bool {
+        match self {
+            Self::HasToolCalls => !input.response.tool_calls.is_empty(),
+            Self::IntentIsRead => Self::check_tool_intent(input, "read"),
+            Self::IntentIsWrite => Self::check_tool_intent(input, "write"),
+            Self::IntentIsDelete => Self::check_tool_intent(input, "delete"),
+            Self::IntentIsExecute => Self::check_tool_intent(input, "execute"),
+            Self::ResponseIsEmpty => input.response.content.is_empty(),
+            Self::ResponseHasCode => input.response.content.contains("```"),
+            Self::CategoryIsSecurity => input.task_category.as_deref() == Some("security"),
+            Self::CategoryIsDatabase => input.task_category.as_deref() == Some("database"),
+            Self::Custom(key) => Self::extract_custom(input, key),
+        }
+    }
+
+    fn name(&self) -> String {
+        match self {
+            Self::HasToolCalls => "HasToolCalls".into(),
+            Self::IntentIsRead => "IntentIsRead".into(),
+            Self::IntentIsWrite => "IntentIsWrite".into(),
+            Self::IntentIsDelete => "IntentIsDelete".into(),
+            Self::IntentIsExecute => "IntentIsExecute".into(),
+            Self::ResponseIsEmpty => "ResponseIsEmpty".into(),
+            Self::ResponseHasCode => "ResponseHasCode".into(),
+            Self::CategoryIsSecurity => "CategoryIsSecurity".into(),
+            Self::CategoryIsDatabase => "CategoryIsDatabase".into(),
+            Self::Custom(key) => format!("Custom({key})"),
+        }
     }
 }
 

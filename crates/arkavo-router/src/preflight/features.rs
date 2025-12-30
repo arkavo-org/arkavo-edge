@@ -1,5 +1,6 @@
 //! Pre-flight feature extraction for boolean circuit inputs
 
+use arkavo_torg_circuits::CircuitFeature;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -41,6 +42,9 @@ static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 static URL_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"https?://[^\s]+").expect("valid URL regex"));
 
+// Minimum 20 characters (~15 bytes decoded) to avoid false positives from
+// random text matching the Base64 alphabet. Common payloads (API tokens,
+// JWT segments, encrypted data) are typically longer than this threshold.
 static BASE64_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9+/]{20,}={0,2}").expect("valid base64 regex"));
 
@@ -49,10 +53,10 @@ static SQL_KEYWORDS: &[&str] = &[
 ];
 static SHELL_COMMANDS: &[&str] = &["rm ", "sudo ", "chmod ", "curl ", "wget ", "sh ", "bash "];
 
-impl PreflightFeature {
-    /// Extract boolean value from raw input text
-    #[must_use]
-    pub fn extract(&self, input: &str) -> bool {
+impl CircuitFeature for PreflightFeature {
+    type Input = str;
+
+    fn extract(&self, input: &Self::Input) -> bool {
         match self {
             Self::InputContainsPII => {
                 SSN_REGEX.is_match(input)
@@ -81,9 +85,7 @@ impl PreflightFeature {
         }
     }
 
-    /// Get feature name for debugging
-    #[must_use]
-    pub fn name(&self) -> String {
+    fn name(&self) -> String {
         match self {
             Self::InputContainsPII => "InputContainsPII".into(),
             Self::InputContainsProfanity => "InputContainsProfanity".into(),

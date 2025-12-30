@@ -38,6 +38,7 @@ arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]

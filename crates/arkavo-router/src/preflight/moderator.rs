@@ -1,7 +1,7 @@
 //! Pre-flight moderation using TØR-G boolean circuits
 
 use dashmap::DashMap;
-use torg_core::{Graph, evaluate_into};
+use torg_core::Graph;
 use torg_serde::from_bytes;
 
 use super::circuit::CompiledCircuit;
@@ -86,11 +86,6 @@ impl PreflightModerator {
     /// Evaluate all circuits against input text
     ///
     /// Returns `Allow` if all circuits pass, or `Block` with the first failing policy
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internal mutex is poisoned (only possible if a thread panicked
-    /// while holding the lock).
     #[must_use]
     pub fn check(&self, input: &str) -> ModerationResult {
         if self.circuits.is_empty() {
@@ -101,46 +96,20 @@ impl PreflightModerator {
             let policy_id = entry.key();
             let circuit = entry.value();
 
-            // Lock buffers
-            let mut input_buf = circuit
-                .input_buffer
-                .lock()
-                .expect("input buffer lock poisoned");
-            let mut output_buf = circuit
-                .output_buffer
-                .lock()
-                .expect("output buffer lock poisoned");
+            // Evaluate circuit using shared implementation
+            let (failing_output, feature_values) = circuit.evaluate_with_features(input);
 
-            // Extract features
-            let mut feature_values = Vec::with_capacity(circuit.feature_map.len());
-            for (i, feature) in circuit.feature_map.iter().enumerate() {
-                let value = feature.extract(input);
-                if i < input_buf.len() {
-                    input_buf[i] = value;
-                }
-                feature_values.push((feature.name(), value));
-            }
-
-            // Evaluate circuit
-            evaluate_into(&circuit.graph, &input_buf, &mut output_buf);
-
-            // Release input buffer early
-            drop(input_buf);
-
-            // Check outputs (any false = policy violation)
-            for (i, &output) in output_buf.iter().enumerate() {
-                if !output {
-                    tracing::warn!(
-                        policy = %policy_id.0,
-                        output_index = i,
-                        "Pre-flight moderation blocked request"
-                    );
-                    return ModerationResult::block_with_features(
-                        &policy_id.0,
-                        format!("Policy violated (output {i})"),
-                        feature_values,
-                    );
-                }
+            if let Some(output_index) = failing_output {
+                tracing::warn!(
+                    policy = %policy_id.0,
+                    output_index = output_index,
+                    "Pre-flight moderation blocked request"
+                );
+                return ModerationResult::block_with_features(
+                    &policy_id.0,
+                    format!("Policy violated (output {output_index})"),
+                    feature_values,
+                );
             }
 
             tracing::debug!(

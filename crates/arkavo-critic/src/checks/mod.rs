@@ -7,7 +7,7 @@ mod schema;
 mod semantic;
 mod traits;
 
-pub use circuit::{CircuitCheck, CompiledCircuit, PolicyId};
+pub use circuit::{CircuitCheck, PolicyId};
 pub use lint::LintCheck;
 pub use policy::PolicyCheck;
 pub use schema::SchemaCheck;

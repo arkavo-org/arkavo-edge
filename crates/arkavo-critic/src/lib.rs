@@ -38,8 +38,8 @@ pub mod features;
 mod pipeline;
 
 pub use checks::{
-    CheckResult, CircuitCheck, CompiledCircuit, LintCheck, PolicyCheck, PolicyId, SchemaCheck,
-    SemanticCheck, VerificationCheck, VerificationInput,
+    CheckResult, CircuitCheck, LintCheck, PolicyCheck, PolicyId, SchemaCheck, SemanticCheck,
+    VerificationCheck, VerificationInput,
 };
 pub use config::CriticConfig;
 pub use error::{Error, Result};

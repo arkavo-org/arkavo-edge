@@ -1,0 +1,16 @@
+[package]
+name = "arkavo-torg-circuits"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Generic boolean circuit evaluation with pre-allocated buffers"
+
+[dependencies]
+torg-core = { workspace = true }
+torg-serde = { workspace = true }
+parking_lot = { workspace = true }
+
+[lints]
+workspace = true

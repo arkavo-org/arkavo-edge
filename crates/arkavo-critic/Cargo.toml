@@ -27,6 +27,7 @@ torg-serde = { workspace = true }
 arkavo-router = { path = "../arkavo-router" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
 
 [dev-dependencies]
 criterion = { workspace = true }

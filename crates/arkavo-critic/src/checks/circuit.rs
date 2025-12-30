@@ -8,9 +8,8 @@ use crate::evidence::{CheckSeverity, VerificationEvidence};
 use crate::features::FeatureId;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::sync::Mutex;
 use std::time::Instant;
-use torg_core::{Graph, evaluate_into};
+use torg_core::Graph;
 
 /// Policy identifier for circuit registration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,61 +23,8 @@ impl PolicyId {
     }
 }
 
-/// Compiled circuit with pre-allocated buffers for zero-allocation evaluation.
-pub struct CompiledCircuit {
-    graph: Graph,
-    feature_map: Vec<FeatureId>,
-    /// Pre-allocated input buffer (protected by mutex for thread safety)
-    input_buffer: Mutex<Vec<bool>>,
-    /// Pre-allocated output buffer
-    output_buffer: Mutex<Vec<bool>>,
-}
-
-impl CompiledCircuit {
-    /// Create a new compiled circuit with pre-allocated buffers.
-    #[must_use]
-    pub fn new(graph: Graph, feature_map: Vec<FeatureId>) -> Self {
-        let input_len = graph
-            .inputs
-            .iter()
-            .max()
-            .map(|&m| m as usize + 1)
-            .unwrap_or(0);
-        let output_len = graph.outputs.len();
-
-        Self {
-            graph,
-            feature_map,
-            input_buffer: Mutex::new(vec![false; input_len]),
-            output_buffer: Mutex::new(vec![false; output_len]),
-        }
-    }
-
-    /// Evaluate the circuit with the given input.
-    ///
-    /// Returns `Some(i)` if output `i` is false (policy violation),
-    /// or `None` if all outputs are true (policy passes).
-    fn evaluate(&self, input: &VerificationInput) -> Option<usize> {
-        let mut input_buf = self.input_buffer.lock().unwrap();
-        let mut output_buf = self.output_buffer.lock().unwrap();
-
-        // Extract features into input buffer
-        for (i, feature) in self.feature_map.iter().enumerate() {
-            if i < input_buf.len() {
-                input_buf[i] = feature.extract(input);
-            }
-        }
-
-        // Evaluate circuit (nanoseconds)
-        evaluate_into(&self.graph, &input_buf, &mut output_buf);
-
-        // Release input buffer early - no longer needed
-        drop(input_buf);
-
-        // Find first failing output
-        output_buf.iter().position(|&v| !v)
-    }
-}
+/// Type alias for CompiledCircuit specialized to FeatureId
+type CompiledCircuit = arkavo_torg_circuits::CompiledCircuit<FeatureId>;
 
 /// Fast-path policy gate using TØR-G boolean circuits.
 ///
@@ -114,6 +60,10 @@ impl CircuitCheck {
     /// # Errors
     ///
     /// Returns error if deserialization fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of features does not match the circuit's input count.
     pub fn register(
         &self,
         id: PolicyId,
@@ -127,6 +77,10 @@ impl CircuitCheck {
     }
 
     /// Register a circuit from a pre-built graph.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of features does not match the circuit's input count.
     pub fn register_graph(&self, id: PolicyId, graph: Graph, features: Vec<FeatureId>) {
         let circuit = CompiledCircuit::new(graph, features);
         self.circuits.insert(id, circuit);
