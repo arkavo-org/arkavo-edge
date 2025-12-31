@@ -53,7 +53,16 @@ pub async fn process_with_tools(
 ) -> Result<ToolIntegrationResult, Box<dyn std::error::Error>> {
     let config = config.unwrap_or_default();
 
-    let router = Arc::new(Router::new().await?);
+    // Load preflight policies from AGENTS.md in current or parent directories
+    let moderator = arkavo_router::preflight::load_policies_from_config().unwrap_or_else(|e| {
+        tracing::warn!("Failed to load policies: {e}, using empty moderator");
+        arkavo_router::preflight::PreflightModerator::new()
+    });
+
+    let router = Arc::new(Router::new().await?.with_preflight(moderator));
+
+    // Create critic pipeline for post-LLM validation
+    let critic = arkavo_critic::default_pipeline();
 
     let storage = Arc::new(arkavo_memory::MemoryStorage::new().await?);
     let mut tool_registry = ToolRegistry::from_mcp_or_default(mcp_client, storage);
@@ -349,6 +358,22 @@ pub async fn process_with_tools(
         }
 
         if tool_calls.is_empty() {
+            // Post-LLM validation via critic pipeline
+            let input = arkavo_critic::VerificationInput::new(
+                task_description.to_string(),
+                response.clone(),
+                vec![],
+            );
+            let result = critic.verify(&input).await;
+            if !result.passed {
+                let failures: Vec<String> = result
+                    .failures()
+                    .iter()
+                    .map(|e| e.description.clone())
+                    .collect();
+                return Err(format!("Response rejected by critic: {failures:?}").into());
+            }
+
             return Ok(ToolIntegrationResult {
                 final_response: response.content,
                 tool_executions: all_tool_executions,

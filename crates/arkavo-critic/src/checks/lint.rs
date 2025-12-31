@@ -177,10 +177,10 @@ impl VerificationCheck for LintCheck {
         .flatten()
         .collect();
 
-        let latency = start.elapsed().as_millis() as u64;
+        let latency_us = start.elapsed().as_micros() as u64;
 
         if issues.is_empty() {
-            tracing::debug!(check = "lint", latency_ms = latency, "Lint check passed");
+            tracing::debug!(check = "lint", latency_us = latency_us, "Lint check passed");
             CheckResult::Pass
         } else if issues.len() == 1 && issues[0].starts_with("Meta-commentary") {
             // Meta-commentary is a warning, not a failure
@@ -188,23 +188,27 @@ impl VerificationCheck for LintCheck {
                 self.id(),
                 &issues[0],
                 CheckSeverity::Warning,
-                latency,
+                latency_us,
             );
             tracing::warn!(
                 check = "lint",
                 issue = %issues[0],
-                latency_ms = latency,
+                latency_us = latency_us,
                 "Lint check warning"
             );
             CheckResult::Warn(evidence)
         } else {
             let combined = issues.join("; ");
-            let evidence =
-                VerificationEvidence::failed(self.id(), &combined, CheckSeverity::Error, latency);
+            let evidence = VerificationEvidence::failed(
+                self.id(),
+                &combined,
+                CheckSeverity::Error,
+                latency_us,
+            );
             tracing::warn!(
                 check = "lint",
                 issues = ?issues,
-                latency_ms = latency,
+                latency_us = latency_us,
                 "Lint check failed"
             );
             CheckResult::Fail(evidence)

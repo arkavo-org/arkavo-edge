@@ -1,11 +1,11 @@
-//! Semantic verification check using arkavo-router's Judge
+//! Semantic verification check using ResponseJudge
 //!
 //! Uses LLM-based validation for semantic coherence.
 //! Slower check (~50ms) but catches nuanced issues.
 
 use super::traits::{CheckResult, VerificationCheck, VerificationInput};
 use crate::evidence::{CheckSeverity, VerificationEvidence};
-use arkavo_router::{IssueType, JudgmentResult, ResponseJudge};
+use crate::judge::{IssueType, JudgmentResult, ResponseJudge};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
@@ -46,23 +46,21 @@ impl SemanticCheck {
         self
     }
 
-    /// Initialize the judge (requires llama-cpp feature)
-    #[cfg(feature = "llm-semantic")]
-    async fn ensure_judge(&self) -> crate::Result<()> {
-        let mut guard = self.judge.write().await;
-        if guard.is_none() {
-            let judge = ResponseJudge::new_local().await?;
-            *guard = Some(judge);
-        }
-        Ok(())
-    }
-
-    #[cfg(not(feature = "llm-semantic"))]
+    /// Check if judge is initialized
+    ///
+    /// Returns error if judge needs to be initialized via `with_judge()`.
+    /// This check requires explicit judge initialization since it uses
+    /// LLM-based validation which needs a provider.
     #[allow(clippy::unused_async)]
     async fn ensure_judge(&self) -> crate::Result<()> {
-        Err(crate::Error::Config(
-            "Semantic check requires llm-semantic feature".to_string(),
-        ))
+        let is_none = self.judge.read().await.is_none();
+        if is_none {
+            return Err(crate::Error::Config(
+                "Semantic check requires explicit judge initialization via with_judge()"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Map Judge issue type to CheckSeverity
@@ -154,22 +152,22 @@ impl VerificationCheck for SemanticCheck {
             .await
         {
             Ok(judgment) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 tracing::debug!(
                     check = "semantic",
                     passed = judgment.passed,
                     issue = %judgment.issue_type,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Semantic check complete"
                 );
-                self.judgment_to_result(judgment, latency)
+                self.judgment_to_result(judgment, latency_us)
             }
             Err(e) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 tracing::warn!(
                     check = "semantic",
                     error = %e,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Semantic check failed"
                 );
                 // Judge error is not a verification failure, just skip

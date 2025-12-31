@@ -33,9 +33,13 @@ pub enum Error {
     #[error("Check '{check_id}' timed out after {timeout_ms}ms")]
     CheckTimeout { check_id: String, timeout_ms: u64 },
 
-    /// Router/Judge error
-    #[error("Router error: {0}")]
-    Router(#[from] arkavo_router::Error),
+    /// Judge error
+    #[error("Judge error: {0}")]
+    Judge(String),
+
+    /// Validation error
+    #[error("Validation error: {0}")]
+    Validation(String),
 
     /// Configuration error
     #[error("Configuration error: {0}")]

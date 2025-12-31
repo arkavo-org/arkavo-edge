@@ -1,11 +1,11 @@
 //! Schema validation check
 //!
-//! Validates tool calls against their schemas using arkavo-router's ResponseValidator.
+//! Validates tool calls against their schemas using ResponseValidator.
 //! This is the fastest check (<1ms) and should run first.
 
 use super::traits::{CheckResult, VerificationCheck, VerificationInput};
 use crate::evidence::{CheckSeverity, VerificationEvidence};
-use arkavo_router::ResponseValidator;
+use crate::validator::ResponseValidator;
 use async_trait::async_trait;
 use std::time::Instant;
 
@@ -60,26 +60,26 @@ impl VerificationCheck for SchemaCheck {
 
         match validator.quick_validate(&input.response) {
             Ok(()) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 tracing::debug!(
                     check = "schema",
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Schema check passed"
                 );
                 CheckResult::Pass
             }
             Err(validation_error) => {
-                let latency = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 let evidence = VerificationEvidence::failed(
                     self.id(),
                     &validation_error.to_string(),
                     CheckSeverity::Error,
-                    latency,
+                    latency_us,
                 );
                 tracing::warn!(
                     check = "schema",
                     error = %validation_error,
-                    latency_ms = latency,
+                    latency_us = latency_us,
                     "Schema check failed"
                 );
                 CheckResult::Fail(evidence)

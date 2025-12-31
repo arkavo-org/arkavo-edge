@@ -591,6 +591,20 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         println!("=== Submitting Task ===\n");
         println!("  Task: {task}");
 
+        // Pre-flight check on outgoing A2A request (load from user config)
+        let moderator = arkavo_router::preflight::load_policies_from_config()
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to load policies: {e}, using empty moderator");
+                arkavo_router::preflight::PreflightModerator::new()
+            });
+        if let arkavo_router::ModerationResult::Block {
+            policy_id, reason, ..
+        } = moderator.check(task)
+        {
+            transport.close().await.ok();
+            return Err(format!("Task blocked by policy {policy_id}: {reason}").into());
+        }
+
         let message = Message {
             parts: vec![MessagePart::Text {
                 content: format!(

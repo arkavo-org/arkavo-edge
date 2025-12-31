@@ -14,6 +14,7 @@ pub mod metrics;
 pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
+pub mod preflight;
 pub mod selector;
 pub mod stream;
 pub mod tool_request_parser;
@@ -36,6 +37,7 @@ pub use orchestrator::{
     ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
+pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
@@ -63,6 +65,9 @@ pub struct Router {
     metrics: Arc<RwLock<RoutingMetrics>>,
     connectivity: Arc<ConnectivityChecker>,
     offline_mode: bool,
+    preflight: Option<Arc<preflight::PreflightModerator>>,
+    #[cfg(feature = "critic")]
+    critic: Option<Arc<arkavo_critic::CriticPipeline>>,
 }
 
 impl Router {
@@ -73,6 +78,9 @@ impl Router {
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: false,
+            preflight: None,
+            #[cfg(feature = "critic")]
+            critic: None,
         })
     }
 
@@ -83,7 +91,31 @@ impl Router {
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: true,
+            preflight: None,
+            #[cfg(feature = "critic")]
+            critic: None,
         })
+    }
+
+    /// Add pre-flight moderation to the router
+    ///
+    /// Pre-flight moderation evaluates TØR-G circuits against requests
+    /// BEFORE LLM inference, blocking policy-violating requests early.
+    #[must_use]
+    pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
+        self.preflight = Some(Arc::new(moderator));
+        self
+    }
+
+    /// Add post-LLM critic validation to the router
+    ///
+    /// The CriticPipeline validates LLM responses AFTER inference,
+    /// checking for policy violations, schema errors, and semantic issues.
+    #[cfg(feature = "critic")]
+    #[must_use]
+    pub fn with_critic(mut self, pipeline: arkavo_critic::CriticPipeline) -> Self {
+        self.critic = Some(Arc::new(pipeline));
+        self
     }
 
     pub fn set_offline_mode(&mut self, offline: bool) {
@@ -163,6 +195,18 @@ impl Router {
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
+
+        // Pre-flight moderation check (before any LLM inference)
+        if let Some(preflight) = &self.preflight {
+            match preflight.check(task_description) {
+                preflight::ModerationResult::Allow => {}
+                preflight::ModerationResult::Block {
+                    policy_id, reason, ..
+                } => {
+                    return Err(Error::ModerationBlocked { policy_id, reason });
+                }
+            }
+        }
 
         // Check complexity for architect mode
         let scorer = ComplexityScorer::new();
@@ -843,6 +887,9 @@ impl Router {
             metrics: self.metrics.clone(),
             connectivity: self.connectivity.clone(),
             offline_mode: self.offline_mode,
+            preflight: self.preflight.clone(),
+            #[cfg(feature = "critic")]
+            critic: self.critic.clone(),
         })
     }
 

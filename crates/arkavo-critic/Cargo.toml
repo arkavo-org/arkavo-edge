@@ -17,16 +17,27 @@ tokio-stream = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { version = "1.18.1", features = ["v4"] }
+dashmap = { workspace = true }
 
-# Internal dependencies - import router for Judge and Validator
-arkavo-router = { path = "../arkavo-router" }
+# TØR-G circuit evaluation
+torg-core = { workspace = true }
+torg-serde = { workspace = true }
+
+# Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = []
-# Enable LLM-based semantic checks via router's judge
-llm-semantic = ["arkavo-router/llama-cpp"]
+
+[[bench]]
+name = "circuit_eval"
+harness = false
 
 [lints]
 workspace = true

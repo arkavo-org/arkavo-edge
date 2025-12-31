@@ -25,6 +25,11 @@ rand = { workspace = true }
 rand_distr = "0.4"
 regex = { workspace = true }
 sha2 = { workspace = true }
+dashmap = { workspace = true }
+torg-core = { workspace = true }
+torg-serde = { workspace = true }
+toml = { workspace = true }
+serde_yaml = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"], optional = true }
 
 # Internal dependencies
@@ -35,10 +40,13 @@ arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
+arkavo-critic = { path = "../arkavo-critic", optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
 default = ["llama-cpp", "gemini", "deepseek"]
+critic = ["arkavo-critic"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
@@ -46,6 +54,14 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
 windows = ["gemini", "llm-remote", "deepseek"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "preflight"
+harness = false
 
 [lints]
 workspace = true

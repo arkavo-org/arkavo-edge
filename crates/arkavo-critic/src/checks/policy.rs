@@ -177,12 +177,12 @@ impl VerificationCheck for PolicyCheck {
             }
         }
 
-        let latency = start.elapsed().as_millis() as u64;
+        let latency_us = start.elapsed().as_micros() as u64;
 
         if violations.is_empty() {
             tracing::debug!(
                 check = "policy",
-                latency_ms = latency,
+                latency_us = latency_us,
                 "Policy check passed"
             );
             CheckResult::Pass
@@ -199,13 +199,13 @@ impl VerificationCheck for PolicyCheck {
                 self.id(),
                 &combined.join("; "),
                 max_severity,
-                latency,
+                latency_us,
             );
 
             tracing::warn!(
                 check = "policy",
                 violations = ?combined,
-                latency_ms = latency,
+                latency_us = latency_us,
                 "Policy check failed"
             );
 
