@@ -24,6 +24,7 @@ pub mod openrpc;
 pub mod push_notifications;
 pub mod rate_limit;
 pub mod registration;
+pub mod resilient;
 pub mod security;
 pub mod server;
 pub mod session_persistence;
@@ -64,6 +65,7 @@ pub use types::{
     AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
 };
+pub use resilient::{ResilientTransport, TransportType};
 pub use websocket::WebSocketTransport;
 
 pub struct Client;

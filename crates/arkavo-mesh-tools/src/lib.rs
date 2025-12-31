@@ -32,7 +32,7 @@ use arkavo_protocol::types::{
     TaskStatus,
 };
 use arkavo_protocol::{
-    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
+    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, ResilientTransport, TransportConfig,
 };
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -327,7 +327,7 @@ impl Tool for SendTaskTool {
         };
 
         let transport =
-            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Arc::new(ResilientTransport::new(transport_config).map_err(|e| {
                 MeshToolError::Execution(format!("Failed to create transport: {e}"))
             })?);
 
@@ -465,7 +465,7 @@ impl Tool for GetTaskStatusTool {
         };
 
         let transport =
-            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Arc::new(ResilientTransport::new(transport_config).map_err(|e| {
                 MeshToolError::Execution(format!("Failed to create transport: {e}"))
             })?);
 
