@@ -178,6 +178,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     return Err("--agent-id requires an argument".into());
                 }
             }
+            "--prompt" | "-p" => {
+                if i + 1 < args.len() {
+                    task_description = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--prompt requires an argument".into());
+                }
+            }
             "--help" | "-h" => {
                 print_usage();
                 return Ok(());
@@ -607,9 +615,7 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
 
         let message = Message {
             parts: vec![MessagePart::Text {
-                content: format!(
-                    "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
-                ),
+                content: task.to_string(),
             }],
             metadata: Some(serde_json::json!({
                 "task_type": "code_task",
@@ -1109,15 +1115,18 @@ fn print_usage() {
     println!(
         "    arkavo task [TASK]              Execute AI task (tries mesh, falls back to local)"
     );
+    println!("    arkavo task --prompt <TASK>     Execute AI task with explicit prompt");
     println!("    arkavo task [OPTIONS]           Commit existing changes");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo task 'fix all warnings'");
+    println!("    arkavo task --prompt 'Register with RimWorld'");
     println!("    arkavo task 'add tests' --mesh-only     # Require mesh agents");
     println!("    arkavo task 'refactor' --local-only     # Force local execution");
     println!("    arkavo task --yes                        # Auto-approve commit");
     println!();
     println!("OPTIONS:");
+    println!("    -p, --prompt <T>   Task/prompt to execute");
     println!("    -y, --yes          Auto-approve without prompting");
     println!("    --push             Push to remote after committing");
     println!("    --no-validate      Skip pre-commit validation");

@@ -47,7 +47,7 @@ pub use learning::{
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse, ToolParser};
+use arkavo_llm::{Message, Provider, ProviderResponse, Role, StreamResponse, ToolParser};
 use arkavo_mcp_tools::ToolRegistry;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -344,7 +344,7 @@ impl Router {
     pub async fn route_with_tools(
         &self,
         task_description: &str,
-        messages: Vec<Message>,
+        mut messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
         const MAX_RETRIES: u8 = 3;
@@ -410,21 +410,28 @@ impl Router {
                         validation_error
                     );
 
-                    if attempt + 1 < MAX_RETRIES
-                        && let Some(upgraded) =
-                            Self::upgrade_model_local_only(&current_decision.recommended_model)
-                    {
-                        current_decision.recommended_model = upgraded;
+                    if attempt + 1 < MAX_RETRIES {
+                        // RL FEEDBACK: Inject validation error with concrete example
+                        // to help model learn the correct format
+                        let feedback_msg = Message {
+                            role: Role::User,
+                            content: format!(
+                                "ERROR: {}\n\nYou MUST include ALL required parameters inside the fence. Example:\n```tool_name\nparam1: value1\nparam2: value2\n```\nTry again with the correct parameters.",
+                                validation_error
+                            ),
+                            images: None,
+                        };
+                        messages.push(feedback_msg);
                         tracing::info!(
-                            "Upgrading to {:?} due to validation failure (local only)",
-                            current_decision.recommended_model
+                            "Injecting validation feedback for learning (attempt {})",
+                            attempt + 1
                         );
                         continue;
                     }
-                    // No more local upgrades available or max retries reached
-                    // Return the response anyway with a warning
+                    // Max retries reached - return response anyway
                     tracing::warn!(
-                        "Validation failed but no local upgrade available, returning response"
+                        "Validation failed after {} attempts, returning response",
+                        MAX_RETRIES
                     );
                     return Ok(response);
                 }
@@ -563,7 +570,7 @@ impl Router {
     pub async fn route_with_quality_gate(
         &self,
         task_description: &str,
-        messages: Vec<Message>,
+        mut messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         max_retries: u8,
     ) -> Result<ProviderResponse> {
@@ -633,11 +640,20 @@ impl Router {
                     );
 
                     if attempt + 1 < max_retries {
-                        current_decision.recommended_model =
-                            self.upgrade_model(&current_decision.recommended_model);
+                        // RL FEEDBACK: Inject validation error with concrete example
+                        // to help model learn the correct format
+                        let feedback_msg = Message {
+                            role: Role::User,
+                            content: format!(
+                                "ERROR: {}\n\nYou MUST include ALL required parameters inside the fence. Example:\n```tool_name\nparam1: value1\nparam2: value2\n```\nTry again with the correct parameters.",
+                                validation_error
+                            ),
+                            images: None,
+                        };
+                        messages.push(feedback_msg);
                         tracing::info!(
-                            "Upgrading to {:?} due to validation failure",
-                            current_decision.recommended_model
+                            "Injecting validation feedback for learning (attempt {})",
+                            attempt + 1
                         );
                         continue;
                     }

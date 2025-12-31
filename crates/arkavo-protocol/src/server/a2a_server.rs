@@ -396,6 +396,43 @@ impl A2aServer {
         info!("✓ Tool registry built successfully");
     }
 
+    /// Rebuild the tool registry with current MCP tools.
+    /// Called at server start time after MCP servers have been registered.
+    async fn rebuild_tool_registry(&self) {
+        use crate::server::mcp_bridge::McpBridgeTool;
+
+        let mcp_tools = match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => tools,
+            Err(e) => {
+                warn!("Failed to list MCP tools for rebuild: {}", e);
+                return;
+            }
+        };
+
+        if mcp_tools.is_empty() {
+            debug!("No MCP tools to register");
+            return;
+        }
+
+        info!("Rebuilding tool registry with {} MCP tools", mcp_tools.len());
+
+        // Use empty registry for progressive tool discovery
+        // Small models can't handle 30+ tools - they discover via REQUEST_TOOL: protocol
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
+
+        // Register each MCP tool as a bridge
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(self.mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
+
+        let tool_names: Vec<_> = tool_registry.list_tools().iter().map(|t| t.name.clone()).collect();
+        info!("✓ Tool registry rebuilt with tools: {:?}", tool_names);
+
+        *self.tool_registry.write().await = Some(Arc::new(tool_registry));
+    }
+
     pub async fn start_file_watcher(&self) -> Result<()> {
         use notify::{Event, EventKind, RecursiveMode, Watcher};
         use std::sync::mpsc::channel;
@@ -663,6 +700,10 @@ impl A2aServer {
             .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid bind address: {e}")))?;
 
         info!("Starting A2A server on {}", addr);
+
+        // Rebuild tool registry now that MCP servers have been registered
+        // This fixes the race condition where tools were queried before MCP servers connected
+        self.rebuild_tool_registry().await;
 
         let server = ServerBuilder::default()
             .max_connections(self.config.max_connections as u32)
