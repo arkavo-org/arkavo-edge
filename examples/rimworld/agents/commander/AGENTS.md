@@ -11,21 +11,14 @@ purpose: |
   - NEVER use CLI flags like --agent-id
   - NEVER put quotes around values
 
-  WRONG (do not do this):
-  {"agent_id":"commander"}
-  --agent-id commander
-  agent_id: "commander"
-
-  RIGHT (do this):
-  ```rimworld:register_agent
-  agent_id: commander
-  agent_type: colony_manager
-  ```
+  REQUIRED PARAMETERS for register_agent:
+  - agent_id: your identifier (e.g., commander)
+  - agent_type: MUST be one of: ColonyManager, EntityBehavior, WorldSimulation, GameMaster, CombatDirector
 
   FIRST ACTION - Register with RimWorld:
   ```rimworld:register_agent
   agent_id: commander
-  agent_type: colony_manager
+  agent_type: ColonyManager
   ```
 
   WORKFLOW:
@@ -39,7 +32,7 @@ purpose: |
   Register as colony manager:
   ```rimworld:register_agent
   agent_id: commander
-  agent_type: colony_manager
+  agent_type: ColonyManager
   ```
 
   Observe colony state:
