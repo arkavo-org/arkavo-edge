@@ -7,7 +7,7 @@ pub mod mdns {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::{RwLock, mpsc};
-    use tracing::{info, warn};
+    use tracing::{debug, error, info, warn};
 
     /// Discovers A2A agents using mDNS
     pub async fn discover_agents(
@@ -26,30 +26,29 @@ pub mod mdns {
         let service_type = "_a2a._tcp.local.";
         let receiver = mdns.browse(service_type)?;
 
-        // Spawn a task to handle discovered services
+        // Spawn a blocking task for mDNS discovery to avoid blocking the async runtime
+        // The mdns-sd receiver uses blocking I/O, so we run it on a dedicated thread
         let agents_clone = agents.clone();
         let connections_clone = agent_connections.clone();
         let telemetry_clone = telemetry_tx.clone();
-        tokio::spawn(async move {
+        let rt = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
             loop {
-                match receiver.recv_timeout(Duration::from_secs(1)) {
+                match receiver.recv_timeout(Duration::from_millis(500)) {
                     Ok(event) => match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            handle_service_discovered(
-                                info,
-                                agents_clone.clone(),
-                                connections_clone.clone(),
-                                telemetry_clone.clone(),
-                            )
-                            .await;
+                            let agents = agents_clone.clone();
+                            let connections = connections_clone.clone();
+                            let telemetry = telemetry_clone.clone();
+                            rt.spawn(async move {
+                                handle_service_discovered(info, agents, connections, telemetry)
+                                    .await;
+                            });
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             info!("Service removed: {}", fullname);
-                            // Agent cleanup handled by connection timeout
                         }
-                        _ => {
-                            // Handle other events if needed
-                        }
+                        _ => {}
                     },
                     Err(_) => {
                         // Timeout - continue loop
@@ -144,7 +143,19 @@ pub mod mdns {
             let telemetry_tx_clone = telemetry_tx.clone();
             let agent_connections_clone = agent_connections.clone();
 
+            debug!(
+                agent_id = %agent_id_clone,
+                endpoint = %endpoint,
+                "Spawning auto-connect task"
+            );
+
             tokio::spawn(async move {
+                debug!(
+                    agent_id = %agent_id_clone,
+                    endpoint = %endpoint,
+                    "Auto-connect task started"
+                );
+
                 info!(
                     "Auto-connecting to discovered agent: {} at {}",
                     agent_id_clone, endpoint
@@ -157,15 +168,25 @@ pub mod mdns {
                     telemetry_tx_clone,
                 ));
 
-                // Connect to the agent
-                if let Err(e) = connection.connect().await {
-                    warn!("Failed to auto-connect to agent {}: {}", agent_id_clone, e);
-                } else {
-                    info!("Successfully auto-connected to agent: {}", agent_id_clone);
+                debug!(agent_id = %agent_id_clone, "Calling connection.connect()");
 
-                    // Store connection
-                    let mut connections = agent_connections_clone.write().await;
-                    connections.insert(agent_id_clone.clone(), connection);
+                // Connect to the agent
+                match connection.connect().await {
+                    Err(e) => {
+                        error!("Failed to auto-connect to agent {}: {}", agent_id_clone, e);
+                    }
+                    Ok(()) => {
+                        info!("Successfully auto-connected to agent: {}", agent_id_clone);
+
+                        // Store connection
+                        let mut connections = agent_connections_clone.write().await;
+                        connections.insert(agent_id_clone.clone(), connection);
+                        debug!(
+                            agent_id = %agent_id_clone,
+                            total_connections = connections.len(),
+                            "Stored agent connection"
+                        );
+                    }
                 }
             });
 

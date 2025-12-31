@@ -89,7 +89,9 @@ start_agent() {
     fi
 
     cd "$dir"
-    nohup env RUST_LOG=info "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
+    # Enable debug logging for chat/swarm interactions
+    local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info}"
+    nohup env RUST_LOG="$log_level" "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
     cd "$SCRIPT_DIR"
@@ -162,6 +164,14 @@ main() {
             echo "  2. Build harmony-bridge: cargo build -p harmony-bridge (in game-rl repo)"
             echo "  3. Start RimWorld with GameRL mod enabled"
             echo "  4. Run this script to start agents"
+            echo ""
+            echo "Environment:"
+            echo "  RUST_LOG  Set log level (default: arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info)"
+            echo ""
+            echo "Examples:"
+            echo "  $0                          # Start with debug logging"
+            echo "  RUST_LOG=info $0            # Start with info logging only"
+            echo "  RUST_LOG=debug $0           # Start with full debug logging"
             exit 0
             ;;
     esac

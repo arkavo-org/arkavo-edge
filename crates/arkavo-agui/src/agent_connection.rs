@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
+use tracing::{debug, error, info};
 
 /// Represents a persistent connection to an AI agent
 #[derive(Clone)]
@@ -338,11 +339,18 @@ impl AgentConnection {
         ui_tx: mpsc::Sender<crate::types::AgUiEvent>, // Bounded channel
         auth_token: Option<String>,                   // JWT token for authenticated sessions
     ) -> Result<SubscriptionHandle, Box<dyn std::error::Error + Send + Sync>> {
+        debug!(
+            agent_id = %agent_id,
+            self_agent_id = %self.agent_id,
+            "AgentConnection::subscribe_to_chat called"
+        );
+
         let client_guard = self.client.read().await;
         let client = client_guard.as_ref().ok_or("Not connected")?;
 
         // Ensure we're connecting to the right agent
         if agent_id != self.agent_id {
+            error!(agent_id = %agent_id, self_agent_id = %self.agent_id, "Agent ID mismatch");
             return Err("Agent ID mismatch".into());
         }
 
@@ -388,10 +396,17 @@ impl AgentConnection {
             metadata: None,
         };
 
+        debug!(agent_id = %agent_id, "Calling chat_open RPC");
         let session: ChatSession = client
             .request("chat_open", rpc_params![open_request])
             .await
             .map_err(|e| format!("Failed to open chat session: {e}"))?;
+
+        info!(
+            agent_id = %agent_id,
+            session_id = %session.session_id,
+            "Chat session opened successfully"
+        );
 
         // Store the session ID
         self.chat_sessions
@@ -578,14 +593,23 @@ impl AgentConnection {
         agent_id: &str,
         text: String,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        debug!(
+            agent_id = %agent_id,
+            text_len = text.len(),
+            text_preview = %text.chars().take(100).collect::<String>(),
+            "AgentConnection::send_user_message called"
+        );
+
         // Ensure we're sending to the right agent
         if agent_id != self.agent_id {
+            error!(agent_id = %agent_id, self_agent_id = %self.agent_id, "Agent ID mismatch in send_user_message");
             return Err("Agent ID mismatch".into());
         }
 
         // Get the broadcast channel for this agent (not used in new protocol but kept for consistency)
         let _broadcast_tx = {
             let broadcasts = self.chat_broadcasts.read().await;
+            debug!(agent_id = %agent_id, has_broadcast = broadcasts.contains_key(agent_id), "Checking broadcast channel");
             broadcasts
                 .get(agent_id)
                 .ok_or("No active chat subscription for this agent")?
@@ -598,28 +622,49 @@ impl AgentConnection {
         // Get the session ID for this agent
         let session_id = {
             let sessions = self.chat_sessions.read().await;
+            debug!(
+                agent_id = %agent_id,
+                has_session = sessions.contains_key(agent_id),
+                total_sessions = sessions.len(),
+                "Looking up chat session"
+            );
             sessions
                 .get(agent_id)
                 .cloned()
                 .ok_or("No active chat session for this agent")?
         };
 
+        debug!(agent_id = %agent_id, session_id = %session_id, "Found session, getting client");
+
         let client_guard = self.client.read().await;
         let client = client_guard.as_ref().ok_or("Not connected")?;
 
         // Create user message
         let user_message = UserMessage {
-            content: text,
+            content: text.clone(),
             attachments: None,
             metadata: None,
         };
 
+        debug!(
+            agent_id = %agent_id,
+            session_id = %session_id,
+            content_len = text.len(),
+            "Sending chat_send RPC"
+        );
+
+        let session_id_for_log = session_id.clone();
+
         // Send the message to the session
         client
-            .request::<String, _>("chat_send", rpc_params![session_id, user_message])
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
             .await
-            .map_err(|e| format!("Failed to send message: {e}"))?;
+            .map_err(|e| {
+                error!(agent_id = %agent_id, session_id = %session_id_for_log, error = %e, "chat_send RPC failed");
+                format!("Failed to send message: {e}")
+            })?;
 
+        info!(agent_id = %agent_id, session_id = %session_id_for_log, "Message sent successfully via chat_send RPC");
         Ok(())
     }
 

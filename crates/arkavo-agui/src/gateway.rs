@@ -3,6 +3,7 @@ use crate::budget_handler::BudgetHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
 use crate::types::*;
+use tracing::{debug, error, info, warn};
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::types::ConfigError;
 use axum::{
@@ -522,31 +523,38 @@ async fn handle_websocket(
         };
 
         match msg {
-            Some(Ok(Message::Text(text))) => match serde_json::from_str::<AgUiEvent>(&text) {
-                Ok(event) => {
-                    if let Err(e) = handle_event(
-                        event,
-                        &session_id,
-                        &connections,
-                        &agents,
-                        &agent_connections,
-                        &budget_handler,
-                        &tx,
-                    )
-                    .await
-                    {
-                        eprintln!("AG-UI: Error handling event: {e}");
+            Some(Ok(Message::Text(text))) => {
+                debug!(
+                    raw_text = %text,
+                    "Gateway: Received WebSocket message"
+                );
+                match serde_json::from_str::<AgUiEvent>(&text) {
+                    Ok(event) => {
+                        debug!(event_type = ?std::mem::discriminant(&event), "Gateway: Parsed event successfully");
+                        if let Err(e) = handle_event(
+                            event,
+                            &session_id,
+                            &connections,
+                            &agents,
+                            &agent_connections,
+                            &budget_handler,
+                            &tx,
+                        )
+                        .await
+                        {
+                            error!("AG-UI: Error handling event: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        error!(raw_text = %text, error = %e, "AG-UI: Failed to parse event");
+                        let error = AgUiEvent::Error {
+                            code: "INVALID_EVENT".to_string(),
+                            message: format!("Failed to parse event: {e}"),
+                        };
+                        let _ = tx.send(error).await;
                     }
                 }
-                Err(e) => {
-                    eprintln!("AG-UI: Failed to parse event: {e}");
-                    let error = AgUiEvent::Error {
-                        code: "INVALID_EVENT".to_string(),
-                        message: format!("Failed to parse event: {e}"),
-                    };
-                    let _ = tx.send(error).await;
-                }
-            },
+            }
             Some(Ok(Message::Close(_))) | None => {
                 break;
             }
@@ -643,22 +651,40 @@ async fn handle_event(
         }
 
         AgUiEvent::ChatOpen { agent_id } => {
+            debug!(
+                agent_id = %agent_id,
+                session_id = %session_id,
+                "Gateway: ChatOpen received"
+            );
             // Get the agent connection
             let agent_conns = agent_connections.read().await;
+            debug!(
+                agent_id = %agent_id,
+                total_agent_connections = agent_conns.len(),
+                "Gateway: Looking up agent connection"
+            );
             if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                debug!(agent_id = %agent_id, "Gateway: Found agent connection, subscribing to chat");
                 // Subscribe to chat for this agent
                 match agent_conn
                     .subscribe_to_chat(agent_id.clone(), tx.clone(), None) // See #384
                     .await
                 {
                     Ok(sub_handle) => {
+                        info!(agent_id = %agent_id, "Gateway: Successfully subscribed to chat");
                         // Store subscription handle
                         let mut conn_guard = connections.write().await;
                         if let Some(conn_info) = conn_guard.get_mut(session_id) {
                             conn_info.subscriptions.push(sub_handle);
+                            debug!(
+                                agent_id = %agent_id,
+                                total_subscriptions = conn_info.subscriptions.len(),
+                                "Gateway: Stored subscription handle"
+                            );
                         }
                     }
                     Err(e) => {
+                        error!(agent_id = %agent_id, error = %e, "Gateway: Failed to subscribe to chat");
                         let error = AgUiEvent::Error {
                             code: "SUBSCRIPTION_FAILED".to_string(),
                             message: format!("Failed to subscribe to chat: {e}"),
@@ -667,6 +693,7 @@ async fn handle_event(
                     }
                 }
             } else {
+                error!(agent_id = %agent_id, "Gateway: Agent not connected");
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_CONNECTED".to_string(),
                     message: format!("Agent {agent_id} is not connected"),
@@ -691,12 +718,20 @@ async fn handle_event(
             content,
             attachments: _,
         } => {
+            debug!(
+                agent_id = %agent_id,
+                content_len = content.len(),
+                content_preview = %content.chars().take(100).collect::<String>(),
+                "Gateway: UserMessage received"
+            );
             // Get the agent connection
             let agent_conns = agent_connections.read().await;
             if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                debug!(agent_id = %agent_id, "Gateway: Found agent connection, sending message");
                 // Send the user message
                 match agent_conn.send_user_message(&agent_id, content).await {
                     Err(e) => {
+                        error!(agent_id = %agent_id, error = %e, "Gateway: Failed to send message");
                         let error = AgUiEvent::Error {
                             code: "MESSAGE_SEND_FAILED".to_string(),
                             message: format!("Failed to send message: {e}"),
@@ -704,10 +739,11 @@ async fn handle_event(
                         tx.send(error).await?;
                     }
                     Ok(_) => {
-                        // Message sent successfully
+                        info!(agent_id = %agent_id, "Gateway: Message sent successfully to agent");
                     }
                 }
             } else {
+                error!(agent_id = %agent_id, "Gateway: Agent not connected for UserMessage");
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_CONNECTED".to_string(),
                     message: format!("Agent {agent_id} is not connected"),
