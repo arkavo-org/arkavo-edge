@@ -1,0 +1,6 @@
+logs/
+*.log
+.alice.pid
+.bob.pid
+.alice.port
+.bob.port
