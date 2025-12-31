@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::classifier::{Classification, TaskCategory};
+use crate::classifier::{Classification, TaskCategory, TaskImportance};
 use crate::decision::{ModelChoice, RoutingDecision};
 use crate::model_discovery;
 
@@ -106,69 +106,86 @@ impl ModelSelector {
         }
     }
 
-    /// Select the best available cloud model, preferring Anthropic > Gemini
-    fn best_cloud_model(&self, prefer_pro: bool) -> ModelChoice {
-        if self.availability.anthropic {
-            if prefer_pro {
-                ModelChoice::ClaudeOpus
-            } else {
-                ModelChoice::ClaudeSonnet
+    fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
+        // Primary selection based on importance tier
+        let model_by_importance = self.select_by_importance(classification.importance);
+
+        // Category-specific overrides for specialized needs
+        match classification.category {
+            // Vision requires multimodal capability
+            TaskCategory::VisionAnalysis => {
+                if self.availability.gemini {
+                    ModelChoice::GeminiFlash
+                } else if self.availability.anthropic {
+                    ModelChoice::ClaudeSonnet
+                } else {
+                    // Local models don't have vision - fall back to best available
+                    model_by_importance
+                }
             }
-        } else if self.availability.gemini {
-            if prefer_pro {
-                ModelChoice::GeminiPro
-            } else {
-                ModelChoice::GeminiFlash
-            }
-        } else {
-            // No cloud available, use local (with availability check)
-            self.best_available_local_model(prefer_pro)
+            // Code generation prefers DeepSeek when available
+            TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
+            // Otherwise use importance-based selection
+            _ => model_by_importance,
         }
     }
 
-    fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
-        match classification.category {
-            TaskCategory::FrontendUI if classification.confidence > 0.75 => {
-                self.best_cloud_model(false)
+    /// Select model based on importance tier - uses best available at each tier
+    fn select_by_importance(&self, importance: TaskImportance) -> ModelChoice {
+        match importance {
+            TaskImportance::Critical => {
+                // Most capable model available
+                if self.availability.anthropic {
+                    ModelChoice::ClaudeOpus
+                } else if self.availability.gemini {
+                    ModelChoice::GeminiPro
+                } else if self.availability.deepseek {
+                    ModelChoice::DeepSeekV32
+                } else {
+                    self.best_available_local_model(true)
+                }
             }
-
-            // BackendAPI uses local model for simple tasks - saves cloud for complex API design
-            TaskCategory::BackendAPI => ModelChoice::LocalQwen3,
-
-            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
-
-            TaskCategory::SecurityScan => ModelChoice::LocalMinistral3B,
-
-            TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
-
-            TaskCategory::TestGeneration if classification.confidence > 0.70 => {
-                self.best_cloud_model(true)
+            TaskImportance::High => {
+                // Capable model - prefer Sonnet/Flash for speed+quality balance
+                if self.availability.anthropic {
+                    ModelChoice::ClaudeSonnet
+                } else if self.availability.gemini {
+                    ModelChoice::GeminiPro
+                } else if self.availability.deepseek {
+                    ModelChoice::DeepSeekV32
+                } else {
+                    self.best_available_local_model(true)
+                }
             }
-
-            TaskCategory::Documentation => ModelChoice::LocalQwen3,
-
-            TaskCategory::Refactoring if classification.confidence > 0.75 => {
-                self.best_cloud_model(false)
+            TaskImportance::Normal => {
+                // Balanced - prefer fast cloud or good local
+                if self.availability.gemini {
+                    ModelChoice::GeminiFlash
+                } else if self.availability.anthropic {
+                    ModelChoice::ClaudeSonnet
+                } else {
+                    self.best_available_local_model(false)
+                }
             }
-
-            TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
-
-            TaskCategory::VisionAnalysis => self.best_cloud_model(false),
-
-            // General tasks with high confidence use larger local model for better reasoning
-            TaskCategory::General if classification.confidence > 0.7 => {
-                self.best_available_local_model(true)
+            TaskImportance::Low => {
+                // Fast and cheap - local preferred
+                ModelChoice::LocalQwen3
             }
-
-            // Low confidence general tasks use fast model
-            _ => ModelChoice::LocalQwen3,
         }
     }
 
     fn explain_selection(&self, model: &ModelChoice, classification: &Classification) -> String {
+        let importance_str = match classification.importance {
+            TaskImportance::Critical => "critical",
+            TaskImportance::High => "high",
+            TaskImportance::Normal => "normal",
+            TaskImportance::Low => "low",
+        };
+
         let category_reason = match (classification.category, model) {
+            (TaskCategory::Chat, _) => "Chat: Using most capable model for quality responses",
             (TaskCategory::FrontendUI, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Frontend task: Claude Sonnet excellent for UI development"
+                "Frontend task: Claude excellent for UI development"
             }
             (TaskCategory::FrontendUI, _) => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
             (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus) => {
@@ -177,33 +194,33 @@ impl ModelSelector {
             (TaskCategory::BackendAPI, ModelChoice::ClaudeSonnet) => {
                 "Backend API: Claude Sonnet for fast, high-quality code"
             }
-            (TaskCategory::BackendAPI, _) => "Backend API: Gemini Pro provides highest quality",
-            (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
-            (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
+            (TaskCategory::BackendAPI, _) => "Backend API: Selected based on importance",
+            (TaskCategory::CodeSearch, _) => "Code search: Fast local model sufficient",
+            (TaskCategory::SecurityScan, _) => "Security scan: Capable model for thorough analysis",
             (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
                 "Test generation: Claude Opus for comprehensive tests"
             }
             (TaskCategory::TestGeneration, _) => {
-                "Test generation: Gemini Pro for comprehensive tests"
+                "Test generation: Capable model for comprehensive tests"
             }
-            (TaskCategory::Documentation, _) => "Documentation: Local Gemma 4B sufficient",
+            (TaskCategory::Documentation, _) => "Documentation: Fast model sufficient",
             (TaskCategory::Refactoring, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
                 "Refactoring: Claude for excellent code transformations"
             }
-            (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
+            (TaskCategory::Refactoring, _) => "Refactoring: Selected based on importance",
             (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
-                "Code generation: DeepSeek V3.2 with tool support for code generation"
+                "Code generation: DeepSeek V3.2 optimized for code generation"
             }
             (TaskCategory::CodeGeneration, _) => {
-                "Code generation: DeepSeek-Coder V2 Lite optimized for code/patch generation"
+                "Code generation: Selected based on importance"
             }
             (TaskCategory::VisionAnalysis, _) => {
-                "Vision analysis: Gemini Flash with multimodal support"
+                "Vision analysis: Multimodal model required"
             }
             (TaskCategory::General, ModelChoice::LocalQwen3) => {
                 "General task: Fast local Qwen3 for quick responses"
             }
-            (TaskCategory::General, _) => "General task: Local model for efficiency",
+            (TaskCategory::General, _) => "General task: Selected based on importance",
         };
 
         let model_benefit = match model {
@@ -225,7 +242,8 @@ impl ModelSelector {
         };
 
         format!(
-            "{}. Using {}: {}",
+            "[{}] {}. Using {}: {}",
+            importance_str,
             category_reason,
             model.name(),
             model_benefit
@@ -234,92 +252,25 @@ impl ModelSelector {
 
     /// Select the best model for a subtask based on its category (used in architect mode)
     pub fn select_for_subtask(&self, category: TaskCategory) -> ModelChoice {
+        // Use the importance system for consistency
+        let importance = Classification::importance_for_category(category);
+
+        // Category-specific overrides
         match category {
-            // Frontend tasks: Use cheaper, fast models
-            TaskCategory::FrontendUI => {
-                if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // Backend/Security/Tests: Use more capable models
-            TaskCategory::BackendAPI
-            | TaskCategory::SecurityScan
-            | TaskCategory::TestGeneration => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeOpus
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral8B
-                }
-            }
-
-            // Documentation: Use cheaper models
-            TaskCategory::Documentation => {
-                if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
-            }
-
-            // Refactoring: Use balanced models
-            TaskCategory::Refactoring => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // CodeGeneration: DeepSeek V3.2 excels at code generation with tools
-            TaskCategory::CodeGeneration => {
-                if self.availability.deepseek {
-                    ModelChoice::DeepSeekV32
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalDeepSeekCoder
-                }
-            }
-
-            // Code search: Local model is sufficient
-            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
-
-            // Vision: Needs multimodal
+            // Vision requires multimodal
             TaskCategory::VisionAnalysis => {
                 if self.availability.gemini {
                     ModelChoice::GeminiFlash
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
-                    ModelChoice::LocalMinistral3B
+                    self.select_by_importance(importance)
                 }
             }
-
-            // General: Use fast local model
-            TaskCategory::General => ModelChoice::LocalQwen3,
-
-            // Fallback for any future categories - prefer local
-            #[allow(unreachable_patterns)]
-            _ => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
-            }
+            // CodeGeneration prefers DeepSeek
+            TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
+            // Otherwise use importance-based selection
+            _ => self.select_by_importance(importance),
         }
     }
 

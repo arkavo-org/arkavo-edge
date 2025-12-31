@@ -45,7 +45,7 @@ arkavo-critic = { path = "../arkavo-critic", optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
-default = ["llama-cpp", "gemini", "deepseek"]
+default = ["llama-cpp", "gemini", "deepseek", "persistence"]
 critic = ["arkavo-critic"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]

@@ -45,6 +45,25 @@ impl ModelChoice {
         }
     }
 
+    /// Parse a model name string into a ModelChoice
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            s if s.contains("gemini-flash") => Some(Self::GeminiFlash),
+            s if s.contains("gemini") && s.contains("pro") => Some(Self::GeminiPro),
+            s if s.contains("claude") && s.contains("sonnet") => Some(Self::ClaudeSonnet),
+            s if s.contains("claude") && s.contains("opus") => Some(Self::ClaudeOpus),
+            s if s.contains("qwen") => Some(Self::LocalQwen3),
+            s if s.contains("ministral") && s.contains("8") => Some(Self::LocalMinistral8B),
+            s if s.contains("ministral") => Some(Self::LocalMinistral3B),
+            s if s.contains("gemma") && s.contains("12") => Some(Self::LocalGemma12B),
+            s if s.contains("gemma") && s.contains("4") => Some(Self::LocalGemma4B),
+            s if s.contains("gemma") => Some(Self::LocalGemma270M),
+            s if s.contains("deepseek") && s.contains("coder") => Some(Self::LocalDeepSeekCoder),
+            s if s.contains("deepseek") => Some(Self::DeepSeekV32),
+            _ => None,
+        }
+    }
+
     pub fn is_local(&self) -> bool {
         matches!(
             self,

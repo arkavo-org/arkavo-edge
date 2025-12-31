@@ -244,6 +244,17 @@ Guidelines:
                     ModelChoice::LocalQwen3
                 }
             }
+
+            // Chat: Use most capable model
+            TaskCategory::Chat => {
+                if self.availability.anthropic {
+                    ModelChoice::ClaudeOpus
+                } else if self.availability.gemini {
+                    ModelChoice::GeminiPro
+                } else {
+                    ModelChoice::LocalMinistral8B
+                }
+            }
         }
     }
 

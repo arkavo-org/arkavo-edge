@@ -96,7 +96,7 @@ impl HttpTransport {
 #[async_trait]
 impl A2aTransport for HttpTransport {
     async fn connect(&self, endpoint: &A2aEndpoint) -> anyhow::Result<()> {
-        info!("Connecting to HTTP endpoint: {}", endpoint.url);
+        debug!("Connecting to HTTP endpoint: {}", endpoint.url);
 
         self.validate_endpoint(endpoint)?;
 
@@ -105,7 +105,7 @@ impl A2aTransport for HttpTransport {
             *endpoint_guard = Some(endpoint.clone());
         }
 
-        info!("Successfully connected to {}", endpoint.url);
+        debug!("Connected to {}", endpoint.url);
         Ok(())
     }
 
@@ -172,8 +172,8 @@ impl A2aTransport for HttpTransport {
                     }
 
                     if retries < max_retries {
-                        warn!(
-                            "Request failed with status {}, retrying... ({}/{})",
+                        debug!(
+                            "Request failed with status {}, retrying ({}/{})",
                             status,
                             retries + 1,
                             max_retries
@@ -190,8 +190,8 @@ impl A2aTransport for HttpTransport {
                 }
                 Err(e) => {
                     if retries < max_retries {
-                        warn!(
-                            "Request failed: {}, retrying... ({}/{})",
+                        debug!(
+                            "Request failed: {}, retrying ({}/{})",
                             e,
                             retries + 1,
                             max_retries
@@ -201,6 +201,7 @@ impl A2aTransport for HttpTransport {
                         continue;
                     }
 
+                    debug!("Request failed after {} retries: {}", max_retries, e);
                     return Err(A2aError::Http(format!("Request failed: {e}")).into());
                 }
             }

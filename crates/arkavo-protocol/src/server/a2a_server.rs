@@ -17,10 +17,11 @@ use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 
 use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
+use super::conductor::execute_with_conductor_and_model;
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
-use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
+use super::{A2aRpcImpl, A2aRpcServer};
 
 pub struct A2aServer {
     config: ServerConfig,
@@ -43,6 +44,8 @@ pub struct A2aServer {
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// Learning bus for gossip-based learning propagation
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
+    /// Shared conversation context for the agent - all chat sessions share this
+    agent_context: Arc<tokio::sync::RwLock<Vec<arkavo_llm::Message>>>,
 }
 
 impl A2aServer {
@@ -71,6 +74,7 @@ impl A2aServer {
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
+            agent_context: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
@@ -86,6 +90,21 @@ impl A2aServer {
     /// Get the learning bus reference
     pub async fn learning_bus(&self) -> Option<Arc<LearningBus>> {
         self.learning_bus.read().await.clone()
+    }
+
+    /// Get the shared agent context
+    pub fn agent_context(&self) -> Arc<tokio::sync::RwLock<Vec<arkavo_llm::Message>>> {
+        self.agent_context.clone()
+    }
+
+    /// Append a message to the agent's shared context
+    pub async fn append_to_context(&self, message: arkavo_llm::Message) {
+        self.agent_context.write().await.push(message);
+    }
+
+    /// Append multiple messages to the agent's shared context
+    pub async fn extend_context(&self, messages: Vec<arkavo_llm::Message>) {
+        self.agent_context.write().await.extend(messages);
     }
 
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
@@ -373,19 +392,23 @@ impl A2aServer {
     }
 
     async fn build_tool_registry(&self) {
-        info!("Building tool registry from MCP connections");
-        let storage = match arkavo_memory::MemoryStorage::new().await {
-            Ok(s) => std::sync::Arc::new(s),
-            Err(e) => {
-                error!(error = %e, "Failed to initialize storage for tool registry");
-                return;
-            }
-        };
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
+        use crate::server::mcp_bridge::McpBridgeTool;
+
+        info!("Building tool registry from MCP connections (progressive discovery mode)");
+
+        // Use empty registry - agents discover tools progressively via MCP servers only
+        // No default GitHub/Git/TDF/browser tools - clean slate for specialized agents
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
 
         match self.mcp_registry.list_all_tools().await {
             Ok(tools) => {
                 info!("Found {} tools from MCP servers", tools.len());
+                // Register MCP tools as bridges
+                for tool in tools {
+                    let tool_name = tool.name.clone();
+                    let bridge = McpBridgeTool::new(self.mcp_registry.clone(), tool);
+                    tool_registry.register(&tool_name, Box::new(bridge));
+                }
             }
             Err(e) => {
                 warn!("Failed to list tools from MCP servers: {}", e);
@@ -552,13 +575,224 @@ impl A2aServer {
         let agent_plan = self.agent_plan.clone();
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
+        let agent_context = self.agent_context.clone();
+        let agent_metadata = self.agent_metadata.clone();
 
         eprintln!("[Notifications] Starting push-based notification handler");
 
         let handle = tokio::spawn(async move {
+            // Run startup planning immediately using the purpose as initial prompt
+            if !system_prompt.is_empty() {
+                // Wait briefly for MCP tools to be registered
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+                let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
+                if !tools.is_empty() && !planning_completed.load(Ordering::SeqCst) {
+                    planning_completed.store(true, Ordering::SeqCst);
+
+                    // Get agent's configured model for planning
+                    let preferred_model = {
+                        let metadata = agent_metadata.read().await;
+                        arkavo_router::ModelChoice::from_name(&metadata.model)
+                    };
+
+                    let plan = run_startup_planning_phase(
+                        &system_prompt,
+                        &router,
+                        &mcp_registry,
+                        &conductor,
+                        preferred_model,
+                    )
+                    .await;
+
+                    // Add planning summary to shared context so agent remembers what it planned
+                    {
+                        let goals_summary = plan
+                            .goals
+                            .iter()
+                            .enumerate()
+                            .map(|(i, g)| format!("{}. {}", i + 1, g.description))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let planning_message = format!(
+                            "I have analyzed my purpose and created the following goals:\n{}\n\nI will watch for: {:?}",
+                            goals_summary,
+                            plan.watch_for
+                        );
+                        agent_context.write().await.push(arkavo_llm::Message {
+                            role: arkavo_llm::Role::Assistant,
+                            content: planning_message,
+                            images: None,
+                        });
+                    }
+
+                    *agent_plan.write().await = plan;
+                    eprintln!("[Planning] Agent startup planning complete");
+
+                    // Execute first goal immediately if available
+                    let plan_guard = agent_plan.read().await;
+                    if let Some(first_goal) = plan_guard.goals.first() {
+                        eprintln!(
+                            "[Planning] Executing first goal: {}",
+                            first_goal.description
+                        );
+                        let goal_prompt = format!(
+                            "{}\n\n## Immediate Task\n{}\n\nExecute this goal now using the available tools.",
+                            system_prompt,
+                            first_goal.description
+                        );
+                        drop(plan_guard);
+
+                        // Execute the first goal using the conductor with agent's configured model
+                        let preferred_model = {
+                            let metadata = agent_metadata.read().await;
+                            arkavo_router::ModelChoice::from_name(&metadata.model)
+                        };
+                        if preferred_model.is_some() {
+                            eprintln!("[Planning] Using configured model: {:?}", preferred_model);
+                        }
+                        match execute_with_conductor_and_model(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            goal_prompt.clone(),
+                            preferred_model,
+                        )
+                        .await
+                        {
+                            Ok(response) => {
+                                eprintln!(
+                                    "[Planning] First goal response: {}",
+                                    response.chars().take(200).collect::<String>()
+                                );
+                                // Add goal execution to context
+                                agent_context.write().await.push(arkavo_llm::Message {
+                                    role: arkavo_llm::Role::Assistant,
+                                    content: format!("Executed first goal. Result: {}", response),
+                                    images: None,
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!("[Planning] First goal execution failed: {}", e);
+                                // Add failure to context
+                                agent_context.write().await.push(arkavo_llm::Message {
+                                    role: arkavo_llm::Role::Assistant,
+                                    content: format!("First goal execution failed: {}", e),
+                                    images: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Agent action loop interval - from agent configuration (default: 0 = disabled)
+            let action_interval_secs: u64 = 10; // TODO: read from agent_metadata.action_interval
+
+            let mut action_tick = if action_interval_secs > 0 {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(action_interval_secs));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                Some(interval)
+            } else {
+                None
+            };
+
             loop {
-                match notification_rx.recv().await {
-                    Ok(notification) => {
+                tokio::select! {
+                    // Goal-driven action tick - work toward completing plan goals
+                    _ = async {
+                        if let Some(ref mut tick) = action_tick {
+                            tick.tick().await
+                        } else {
+                            std::future::pending::<tokio::time::Instant>().await
+                        }
+                    } => {
+                        // Find next pending goal to work on
+                        let mut plan = agent_plan.write().await;
+                        let current_goal = plan.goals.iter_mut()
+                            .find(|g| matches!(g.status, super::startup::GoalStatus::Active | super::startup::GoalStatus::InProgress));
+
+                        let goal_prompt = if let Some(goal) = current_goal {
+                            goal.status = super::startup::GoalStatus::InProgress;
+                            let goal_desc = goal.description.clone();
+                            drop(plan);
+
+                            let memory = agent_memory.read().await;
+                            let memory_section = memory.format_for_prompt();
+                            drop(memory);
+
+                            eprintln!("[Goals] Working on: {}", goal_desc);
+                            Some(format!(
+                                "{}\n\n## Current Goal\n{}\n\n## Recent Actions (review before acting)\n{}\n\n## Instructions\nReview recent actions above - do NOT repeat actions that already succeeded or failed. Make progress on the goal using different tools. When the goal is achieved, respond with GOAL_COMPLETE.",
+                                system_prompt,
+                                goal_desc,
+                                memory_section
+                            ))
+                        } else {
+                            drop(plan);
+                            eprintln!("[Goals] All goals complete, idling");
+                            None
+                        };
+
+                        if let Some(prompt) = goal_prompt {
+                            // Use agent's configured model
+                            let preferred_model = {
+                                let metadata = agent_metadata.read().await;
+                                arkavo_router::ModelChoice::from_name(&metadata.model)
+                            };
+                            match execute_with_conductor_and_model(
+                                &conductor,
+                                &router,
+                                &mcp_registry,
+                                prompt,
+                                preferred_model,
+                            )
+                            .await
+                            {
+                                Ok(result) => {
+                                    eprintln!("[Goals] Result: {} chars", result.len());
+
+                                    // Check if goal was completed
+                                    if result.contains("GOAL_COMPLETE") {
+                                        let mut plan = agent_plan.write().await;
+                                        if let Some(goal) = plan.goals.iter_mut()
+                                            .find(|g| matches!(g.status, super::startup::GoalStatus::InProgress))
+                                        {
+                                            goal.status = super::startup::GoalStatus::Completed;
+                                            eprintln!("[Goals] Completed: {}", goal.description);
+                                        }
+                                    }
+
+                                    // Add to context
+                                    if !result.is_empty() {
+                                        agent_context.write().await.push(arkavo_llm::Message {
+                                            role: arkavo_llm::Role::Assistant,
+                                            content: result.chars().take(500).collect::<String>(),
+                                            images: None,
+                                        });
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[Goals] Action failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle MCP notifications (reactive)
+                    notification_result = notification_rx.recv() => {
+                        let notification = match notification_result {
+                            Ok(n) => n,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                warn!("Notification handler lagged, missed {} messages", n);
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                info!("Notification channel closed, stopping handler");
+                                break;
+                            }
+                        };
+
                         if std::env::var("ARKAVO_DEBUG").is_ok() {
                             eprintln!(
                                 "[Notifications] Received: server={} method={}",
@@ -576,26 +810,7 @@ impl A2aServer {
                             continue;
                         }
 
-                        let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
-                        let should_plan = !planning_completed.load(Ordering::SeqCst)
-                            && !system_prompt.is_empty()
-                            && !tools.is_empty();
-
-                        if should_plan {
-                            eprintln!("[Planning] Conditions met - starting startup planning");
-                            planning_completed.store(true, Ordering::SeqCst);
-
-                            let plan = run_startup_planning_phase(
-                                &system_prompt,
-                                &router,
-                                &mcp_registry,
-                                &conductor,
-                            )
-                            .await;
-
-                            *agent_plan.write().await = plan;
-                            eprintln!("[Planning] Agent startup planning complete");
-                        }
+                        // Planning already done at startup, skip redundant check
 
                         let plan = agent_plan.read().await;
                         let goals_section = if !plan.goals.is_empty() {
@@ -630,14 +845,18 @@ impl A2aServer {
                             "[Notifications] Processing with LLM: {} chars",
                             prompt.len()
                         );
+                        // Use agent's configured model
+                        let preferred_model = {
+                            let metadata = agent_metadata.read().await;
+                            arkavo_router::ModelChoice::from_name(&metadata.model)
+                        };
                         let start_time = std::time::Instant::now();
-                        match execute_with_conductor(
+                        match execute_with_conductor_and_model(
                             &conductor,
                             &router,
                             &mcp_registry,
                             prompt,
-                            None,
-                            None,
+                            preferred_model,
                         )
                         .await
                         {
@@ -647,6 +866,24 @@ impl A2aServer {
                                 if !result.is_empty() {
                                     info!("Notification processed: {} chars", result.len());
                                     debug!("Notification result: {}", result);
+                                }
+
+                                // Check for REQUEST_HELP pattern for A2A collaboration
+                                if let Some(help_start) = result.find("REQUEST_HELP:") {
+                                    let help_desc = result[help_start + 13..]
+                                        .lines()
+                                        .next()
+                                        .unwrap_or("")
+                                        .trim();
+                                    if !help_desc.is_empty() {
+                                        info!(
+                                            "[A2A] Agent requesting help: {}",
+                                            help_desc
+                                        );
+                                        // TODO: Route to appropriate peer via A2A
+                                        // For now, log the request - full implementation
+                                        // would query peers and inject response
+                                    }
                                 }
 
                                 // Emit learning event for successful tool execution
@@ -680,14 +917,7 @@ impl A2aServer {
                             }
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!("Notification handler lagged, missed {} messages", n);
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("Notification channel closed, stopping handler");
-                        break;
-                    }
-                }
+                } // tokio::select!
             }
         });
 
@@ -717,36 +947,66 @@ impl A2aServer {
         let router = self.router.read().await.clone();
         let tool_registry = self.tool_registry.read().await.clone();
 
+        // Initialize agent context with system prompt if not already set
+        {
+            let mut ctx = self.agent_context.write().await;
+            if ctx.is_empty() {
+                let metadata = self.agent_metadata.read().await;
+                if !metadata.purpose.is_empty() {
+                    ctx.push(arkavo_llm::Message {
+                        role: arkavo_llm::Role::System,
+                        content: metadata.purpose.clone(),
+                        images: None,
+                    });
+                    info!("Initialized agent context with purpose as system prompt");
+                }
+            }
+        }
+
+        // Use shared agent context for all chat sessions
+        let shared_context = self.agent_context.clone();
+        let tool_memory = Some(self.agent_memory.clone());
+        let agent_plan = Some(self.agent_plan.clone());
+
         let chat_sessions = if let Some(router_instance) = router.clone() {
             info!(
-                "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
+                "✓ ChatSessionManager will be created WITH Router + shared context + memory + plan"
             );
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            Arc::new(crate::chat_session::ChatSessionManager::with_full_context(
                 None,
                 Some(router_instance),
                 tool_registry.clone(),
                 3600,
                 self.buffer_config.clone(),
+                shared_context,
+                tool_memory,
+                agent_plan,
             ))
         } else if llm_adapter.is_some() {
-            info!("✓ ChatSessionManager will be created WITH LLM adapter");
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            info!("✓ ChatSessionManager will be created WITH LLM adapter + shared context");
+            Arc::new(crate::chat_session::ChatSessionManager::with_full_context(
                 llm_adapter.clone(),
                 None,
                 None,
                 3600,
                 self.buffer_config.clone(),
+                shared_context,
+                tool_memory,
+                agent_plan,
             ))
         } else {
             warn!(
                 "✗ ChatSessionManager will be created WITHOUT LLM adapter or router - messages will fail!"
             );
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            Arc::new(crate::chat_session::ChatSessionManager::with_full_context(
                 None,
                 None,
                 None,
                 3600,
                 self.buffer_config.clone(),
+                shared_context,
+                tool_memory,
+                agent_plan,
             ))
         };
 

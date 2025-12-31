@@ -24,6 +24,7 @@ pub enum TaskCategory {
     Refactoring,
     CodeGeneration,
     VisionAnalysis,
+    Chat,
     General,
 }
 
@@ -39,6 +40,7 @@ impl TaskCategory {
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
+            "chat" | "conversation" | "message" | "talk" => Self::Chat,
             _ => Self::General,
         }
     }
@@ -54,6 +56,7 @@ impl TaskCategory {
             Self::Refactoring => "refactoring",
             Self::CodeGeneration => "code_generation",
             Self::VisionAnalysis => "vision_analysis",
+            Self::Chat => "chat",
             Self::General => "general",
         }
     }
@@ -96,11 +99,33 @@ impl TaskCategory {
                 input: 2000,
                 output: 3000,
             },
+            Self::Chat => TokenEstimate {
+                input: 500,
+                output: 2000,
+            },
             Self::General => TokenEstimate {
                 input: 300,
                 output: 1000,
             },
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TaskImportance {
+    /// Low importance - use cheapest/fastest model
+    Low = 0,
+    /// Normal importance - use balanced model
+    Normal = 1,
+    /// High importance - use capable model
+    High = 2,
+    /// Critical importance - use most capable model available
+    Critical = 3,
+}
+
+impl Default for TaskImportance {
+    fn default() -> Self {
+        Self::Normal
     }
 }
 
@@ -113,17 +138,21 @@ pub struct Classification {
     pub is_multi_step: bool,
     /// Estimated number of subtasks if this is a complex task
     pub estimated_subtasks: u8,
+    /// Importance level - determines model tier selection
+    pub importance: TaskImportance,
 }
 
 impl Classification {
     /// Create a new classification with default complexity fields
     pub fn new(category: TaskCategory, confidence: f32, reasoning: String) -> Self {
+        let importance = Self::importance_for_category(category);
         Self {
             category,
             confidence,
             reasoning,
             is_multi_step: false,
             estimated_subtasks: 1,
+            importance,
         }
     }
 
@@ -135,12 +164,44 @@ impl Classification {
         task: &str,
     ) -> Self {
         let (is_multi_step, estimated_subtasks) = Self::detect_complexity(task);
+        let base_importance = Self::importance_for_category(category);
+        // Boost importance for complex multi-step tasks
+        let importance = if is_multi_step && estimated_subtasks > 3 {
+            match base_importance {
+                TaskImportance::Low => TaskImportance::Normal,
+                TaskImportance::Normal => TaskImportance::High,
+                TaskImportance::High | TaskImportance::Critical => TaskImportance::Critical,
+            }
+        } else {
+            base_importance
+        };
         Self {
             category,
             confidence,
             reasoning,
             is_multi_step,
             estimated_subtasks,
+            importance,
+        }
+    }
+
+    /// Determine base importance level for a task category
+    pub fn importance_for_category(category: TaskCategory) -> TaskImportance {
+        match category {
+            // Chat requires high quality responses
+            TaskCategory::Chat => TaskImportance::Critical,
+            // Code generation and security need capable models
+            TaskCategory::CodeGeneration | TaskCategory::SecurityScan => TaskImportance::High,
+            // Tests and refactoring benefit from quality
+            TaskCategory::TestGeneration | TaskCategory::Refactoring => TaskImportance::High,
+            // Backend API design needs good reasoning
+            TaskCategory::BackendAPI => TaskImportance::Normal,
+            // Frontend, vision need multimodal but not necessarily biggest
+            TaskCategory::FrontendUI | TaskCategory::VisionAnalysis => TaskImportance::Normal,
+            // Search and docs can use fast models
+            TaskCategory::CodeSearch | TaskCategory::Documentation => TaskImportance::Low,
+            // General defaults to normal
+            TaskCategory::General => TaskImportance::Normal,
         }
     }
 

@@ -1,4 +1,4 @@
-use super::conductor::execute_with_conductor;
+use super::conductor::execute_with_conductor_and_model;
 use super::mcp_bridge::McpBridgeTool;
 use crate::mcp_registry::McpRegistry;
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
@@ -36,6 +36,7 @@ pub async fn run_startup_planning_phase(
     router: &Arc<arkavo_router::Router>,
     mcp_registry: &Arc<McpRegistry>,
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    preferred_model: Option<arkavo_router::ModelChoice>,
 ) -> AgentPlan {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -142,9 +143,18 @@ pub async fn run_startup_planning_phase(
         }
     }
 
-    // 5. Execute planning through conductor (uses larger model for high-confidence tasks)
-    let result =
-        execute_with_conductor(conductor, router, mcp_registry, planning_prompt, None, None).await;
+    // 5. Execute planning through conductor using agent's configured model
+    if preferred_model.is_some() {
+        eprintln!("[Planning] Using configured model: {:?}", preferred_model);
+    }
+    let result = execute_with_conductor_and_model(
+        conductor,
+        router,
+        mcp_registry,
+        planning_prompt,
+        preferred_model,
+    )
+    .await;
 
     match result {
         Ok(response) => {

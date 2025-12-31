@@ -248,20 +248,12 @@ impl TaskExecutor {
         Ok(())
     }
 
-    /// Update task progress
+    /// Update task progress (does not modify task status)
     pub async fn update_task_progress(&self, task_id: &Uuid, progress: TaskProgress) -> Result<()> {
-        // Store progress in task data
-        let mut task = self
-            .store
-            .get_task(task_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
-
-        task.progress = Some(progress.clone());
-        task.updated_at = chrono::Utc::now();
-
-        // Update the entire task
-        self.store.create_task(task).await?; // This will update existing
+        // Update only progress, preserving current status
+        self.store
+            .update_task_progress(task_id, progress.clone())
+            .await?;
 
         self.emit_event(TaskEvent::ProgressUpdated {
             task_id: *task_id,

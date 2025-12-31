@@ -180,6 +180,18 @@ pub async fn start_event_processing_loop(
                                                     lesson.confidence
                                                 );
 
+                                                // Add to policy cache for immediate use
+                                                learning_bus.add_lesson_to_cache(lesson.clone()).await;
+
+                                                // Persist to SQLite for cross-session learning
+                                                // Store in agent-local .arkavo dir (not global)
+                                                // Sharing happens via A2A when requested
+                                                let db_path = std::path::PathBuf::from(".arkavo")
+                                                    .join("learning.db");
+                                                if let Err(e) = learning_bus.persist_lesson(&lesson, &db_path).await {
+                                                    tracing::warn!("Failed to persist lesson: {}", e);
+                                                }
+
                                                 // Create announcement and gossip
                                                 let announcement = LessonAnnouncement::new(
                                                     lesson.id,
@@ -237,6 +249,25 @@ pub async fn start_event_processing_loop(
                     }
                     LearningEvent::GossipReceived(_) => {
                         // Gossip messages are handled separately via handle_gossip
+                    }
+                    LearningEvent::ValidationFailure {
+                        tool_name,
+                        error_type,
+                        param_name,
+                        model_id,
+                        attempt,
+                    } => {
+                        tracing::debug!(
+                            "Validation failure: tool={:?} error={} param={:?} model={} attempt={}",
+                            tool_name,
+                            error_type,
+                            param_name,
+                            model_id,
+                            attempt
+                        );
+                        // Validation failures are tracked for analytics
+                        // The RL feedback injection in Router handles immediate learning
+                        // Here we could aggregate patterns for long-term tool schema improvements
                     }
                 }
             }

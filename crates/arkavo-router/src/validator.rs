@@ -46,6 +46,35 @@ impl std::fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
+impl ValidationError {
+    /// Get the error type as a string for learning events
+    pub fn error_type(&self) -> &'static str {
+        match self {
+            ValidationError::HallucinatedTool { .. } => "hallucinated",
+            ValidationError::MissingRequiredParam { .. } => "missing_param",
+            ValidationError::InvalidParamType { .. } => "wrong_type",
+        }
+    }
+
+    /// Get the tool name if available
+    pub fn tool_name(&self) -> Option<&str> {
+        match self {
+            ValidationError::HallucinatedTool { tool_name } => Some(tool_name),
+            ValidationError::MissingRequiredParam { tool_name, .. } => Some(tool_name),
+            ValidationError::InvalidParamType { tool_name, .. } => Some(tool_name),
+        }
+    }
+
+    /// Get the parameter name if available
+    pub fn param_name(&self) -> Option<&str> {
+        match self {
+            ValidationError::HallucinatedTool { .. } => None,
+            ValidationError::MissingRequiredParam { param, .. } => Some(param),
+            ValidationError::InvalidParamType { param, .. } => Some(param),
+        }
+    }
+}
+
 pub struct ResponseValidator {
     available_tools: HashSet<String>,
     tool_schemas: Vec<ToolInfo>,

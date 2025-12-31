@@ -32,7 +32,7 @@ where
                 };
 
                 if let Err(e) = send_to_peer(peer_id.clone(), payload).await {
-                    tracing::warn!("Failed to send gossip to {}: {}", peer_id, e);
+                    tracing::debug!("Failed to send gossip to {}: {}", peer_id, e);
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {

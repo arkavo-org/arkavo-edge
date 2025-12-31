@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Represents a persistent connection to an AI agent
 #[derive(Clone)]
@@ -397,10 +397,27 @@ impl AgentConnection {
         };
 
         debug!(agent_id = %agent_id, "Calling chat_open RPC");
-        let session: ChatSession = client
-            .request("chat_open", rpc_params![open_request])
+
+        // Try chat_open with retry on connection failure
+        let session: ChatSession = match client
+            .request("chat_open", rpc_params![open_request.clone()])
             .await
-            .map_err(|e| format!("Failed to open chat session: {e}"))?;
+        {
+            Ok(session) => session,
+            Err(e) => {
+                // Connection might be stale - check if it's a connection error
+                let error_str = e.to_string();
+                if error_str.contains("background task closed") || error_str.contains("connection") {
+                    warn!(agent_id = %agent_id, error = %e, "Connection appears stale, signaling reconnect");
+                    // Signal connection lost so reconnection can happen
+                    drop(client_guard);
+                    // Clear client to trigger reconnection on next attempt
+                    *self.client.write().await = None;
+                    return Err(format!("Connection lost, please retry: {e}").into());
+                }
+                return Err(format!("Failed to open chat session: {e}").into());
+            }
+        };
 
         info!(
             agent_id = %agent_id,

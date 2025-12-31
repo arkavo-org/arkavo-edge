@@ -20,8 +20,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Notify, RwLock, broadcast, mpsc};
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
+
+/// Tool memory for tracking recent tool calls
+pub type ToolMemory = crate::server::ToolMemory;
+/// Agent plan for tracking goals
+pub type AgentPlan = crate::server::AgentPlan;
 
 /// Manages active chat sessions
 pub struct ChatSessionManager {
@@ -34,6 +39,12 @@ pub struct ChatSessionManager {
     task_tracker: ObservableTaskTracker,
     _ttl_seconds: u64,
     buffer_config: BufferConfig,
+    /// Shared conversation context - all sessions share this agent's context
+    shared_context: Arc<RwLock<Vec<Message>>>,
+    /// Recent tool call memory for context enrichment
+    tool_memory: Option<Arc<RwLock<ToolMemory>>>,
+    /// Agent's active goals/plan
+    agent_plan: Option<Arc<RwLock<AgentPlan>>>,
 }
 
 struct ChatSessionState {
@@ -73,6 +84,48 @@ impl ChatSessionManager {
         ttl_seconds: u64,
         buffer_config: BufferConfig,
     ) -> Self {
+        Self::with_shared_context(
+            llm_adapter,
+            router,
+            tool_registry,
+            ttl_seconds,
+            buffer_config,
+            Arc::new(RwLock::new(Vec::new())),
+        )
+    }
+
+    /// Create a new chat session manager with shared context
+    pub fn with_shared_context(
+        llm_adapter: Option<Arc<LlmClientAdapter>>,
+        router: Option<Arc<Router>>,
+        tool_registry: Option<Arc<ToolRegistry>>,
+        ttl_seconds: u64,
+        buffer_config: BufferConfig,
+        shared_context: Arc<RwLock<Vec<Message>>>,
+    ) -> Self {
+        Self::with_full_context(
+            llm_adapter,
+            router,
+            tool_registry,
+            ttl_seconds,
+            buffer_config,
+            shared_context,
+            None,
+            None,
+        )
+    }
+
+    /// Create a new chat session manager with full agent context (memory + plan)
+    pub fn with_full_context(
+        llm_adapter: Option<Arc<LlmClientAdapter>>,
+        router: Option<Arc<Router>>,
+        tool_registry: Option<Arc<ToolRegistry>>,
+        ttl_seconds: u64,
+        buffer_config: BufferConfig,
+        shared_context: Arc<RwLock<Vec<Message>>>,
+        tool_memory: Option<Arc<RwLock<ToolMemory>>>,
+        agent_plan: Option<Arc<RwLock<AgentPlan>>>,
+    ) -> Self {
         let session_metrics = Arc::new(RwLock::new(HashMap::new()));
         let metrics_collector = MetricsCollector::new();
         let task_tracker = ObservableTaskTracker::new("chat-session-manager");
@@ -103,6 +156,9 @@ impl ChatSessionManager {
             task_tracker,
             _ttl_seconds: ttl_seconds,
             buffer_config,
+            shared_context,
+            tool_memory,
+            agent_plan,
         }
     }
 
@@ -179,6 +235,9 @@ impl ChatSessionManager {
             let sessions = self.sessions.clone();
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
+            let shared_context = self.shared_context.clone();
+            let tool_memory = self.tool_memory.clone();
+            let agent_plan = self.agent_plan.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -191,6 +250,9 @@ impl ChatSessionManager {
                         sessions,
                         session_metrics,
                         metrics_collector,
+                        shared_context,
+                        tool_memory,
+                        agent_plan,
                     )
                     .await;
                 });
@@ -242,8 +304,28 @@ impl ChatSessionManager {
     /// Send a message to a session
     #[instrument(skip(self, message), fields(session.id = %session_id, message.length = message.content.len()))]
     pub async fn send_message(&self, session_id: &str, message: UserMessage) -> Result<()> {
+        debug!(
+            session.id = %session_id,
+            content_preview = %message.content.chars().take(100).collect::<String>(),
+            "ChatSessionManager::send_message called"
+        );
+
         let sessions = self.sessions.read().await;
+        debug!(
+            session.id = %session_id,
+            total_sessions = sessions.len(),
+            "Looking up session"
+        );
+
         if let Some(session_state) = sessions.get(session_id) {
+            debug!(
+                session.id = %session_id,
+                state = %session_state.state,
+                has_router = self.router.is_some(),
+                has_llm_adapter = self.llm_adapter.is_some(),
+                "Found session state"
+            );
+
             // Check if session is in valid state
             if session_state.state != SessionState::Active {
                 warn!(session.state = %session_state.state, "Attempted to send message to non-active session");
@@ -254,6 +336,7 @@ impl ChatSessionManager {
 
             // Check if we have an LLM adapter or router to process messages
             if self.llm_adapter.is_none() && self.router.is_none() {
+                error!(session.id = %session_id, "No LLM adapter or router available!");
                 return Err(A2aError::NoLlmAdapter);
             }
 
@@ -268,12 +351,21 @@ impl ChatSessionManager {
             // Log the message
             session_observability::log_message_sent(session_id, message_length);
 
+            debug!(
+                session.id = %session_id,
+                "Sending message to session handler via channel"
+            );
+
             session_state
                 .message_tx
                 .send(message)
                 .await
-                .map_err(|_| A2aError::MessageSendFailed("Channel closed".to_string()))
+                .map_err(|e| {
+                    error!(session.id = %session_id, error = %e, "Failed to send to message channel");
+                    A2aError::MessageSendFailed("Channel closed".to_string())
+                })
         } else {
+            error!(session.id = %session_id, "Session not found in sessions map");
             Err(A2aError::SessionNotFound(session_id.to_string()))
         }
     }
@@ -715,7 +807,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, shared_context, tool_memory, agent_plan), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -726,14 +818,33 @@ impl ChatSessionManager {
         sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
+        shared_context: Arc<RwLock<Vec<Message>>>,
+        tool_memory: Option<Arc<RwLock<ToolMemory>>>,
+        agent_plan: Option<Arc<RwLock<AgentPlan>>>,
     ) {
-        let mut conversation_context: Vec<Message> = Vec::new();
-        info!("Router-based session handler started");
+        let context_size = shared_context.read().await.len();
+        info!(
+            session.id = %session_id,
+            has_tool_registry = tool_registry.is_some(),
+            has_tool_memory = tool_memory.is_some(),
+            has_agent_plan = agent_plan.is_some(),
+            shared_context_size = context_size,
+            broadcast_receivers = delta_tx.receiver_count(),
+            "Router-based session handler started with shared agent context"
+        );
 
         loop {
+            debug!(session.id = %session_id, "Waiting for message on channel...");
             tokio::select! {
                 // Handle incoming user messages
                 Some(user_message) = message_rx.recv() => {
+                    debug!(
+                        session.id = %session_id,
+                        content_len = user_message.content.len(),
+                        content_preview = %user_message.content.chars().take(100).collect::<String>(),
+                        broadcast_receivers = delta_tx.receiver_count(),
+                        "Received user message in session handler"
+                    );
                     let start_time = std::time::Instant::now();
 
                     // Record message received
@@ -742,7 +853,21 @@ impl ChatSessionManager {
                     }
                     metrics_collector.record_message_received();
 
-                    // Add to conversation context
+                    // Get mutable copy of shared context for this interaction
+                    let mut conversation_context = shared_context.read().await.clone();
+
+                    // Enrich context with goals and recent actions
+                    let enrichment = Self::build_context_enrichment(&tool_memory, &agent_plan).await;
+                    if !enrichment.is_empty() {
+                        // Add enrichment as a system message so the model has current state
+                        conversation_context.push(Message {
+                            role: Role::System,
+                            content: enrichment,
+                            images: None,
+                        });
+                    }
+
+                    // Add user message to context
                     conversation_context.push(Message {
                         role: Role::User,
                         content: user_message.content.clone(),
@@ -753,6 +878,12 @@ impl ChatSessionManager {
                     session_observability::log_stream_start(&session_id, None);
 
                     let mut final_response;
+
+                    debug!(
+                        session.id = %session_id,
+                        context_len = conversation_context.len(),
+                        "Calling router.route_with_quality_gate with shared context"
+                    );
 
                     // Route with quality gate (max 3 retries with model escalation)
                     #[allow(deprecated)]
@@ -766,6 +897,13 @@ impl ChatSessionManager {
                         .await
                     {
                         Ok(response) => {
+                            debug!(
+                                session.id = %session_id,
+                                response_len = response.content.len(),
+                                tool_calls = response.tool_calls.len(),
+                                response_preview = %response.content.chars().take(200).collect::<String>(),
+                                "Router returned response"
+                            );
                             final_response = response.content.clone();
 
                             // Send text delta
@@ -778,7 +916,15 @@ impl ChatSessionManager {
                                 },
                                 timestamp: chrono::Utc::now(),
                             };
-                            let _ = delta_tx.send(text_delta);
+                            debug!(
+                                session.id = %session_id,
+                                broadcast_receivers = delta_tx.receiver_count(),
+                                "Sending text delta to broadcast channel"
+                            );
+                            match delta_tx.send(text_delta) {
+                                Ok(n) => debug!(session.id = %session_id, receivers = n, "Text delta sent successfully"),
+                                Err(e) => error!(session.id = %session_id, error = %e, "Failed to send text delta - no receivers!"),
+                            }
 
                             // Check for tool calls and execute them
                             if !response.tool_calls.is_empty() {
@@ -933,6 +1079,9 @@ impl ChatSessionManager {
                     };
                     let _ = delta_tx.send(end_delta);
 
+                    // Write back updated context to shared state
+                    *shared_context.write().await = conversation_context;
+
                     // Record metrics
                     if let Some(metrics) = session_metrics.read().await.get(&session_id) {
                         metrics.record_message_sent(final_response.len());
@@ -963,6 +1112,42 @@ impl ChatSessionManager {
         }
 
         info!("Router session handler exited");
+    }
+
+    /// Build context enrichment from tool memory and agent plan
+    async fn build_context_enrichment(
+        tool_memory: &Option<Arc<RwLock<ToolMemory>>>,
+        agent_plan: &Option<Arc<RwLock<AgentPlan>>>,
+    ) -> String {
+        let mut parts = Vec::new();
+
+        // Add active goals
+        if let Some(plan_lock) = agent_plan {
+            let plan = plan_lock.read().await;
+            if !plan.goals.is_empty() {
+                let goals_str: Vec<String> = plan
+                    .goals
+                    .iter()
+                    .enumerate()
+                    .map(|(i, g)| format!("{}. {} ({:?})", i + 1, g.description, g.status))
+                    .collect();
+                parts.push(format!("## Active Goals\n{}", goals_str.join("\n")));
+            }
+            if !plan.watch_for.is_empty() {
+                parts.push(format!("## Watching For\n{}", plan.watch_for.join(", ")));
+            }
+        }
+
+        // Add recent actions from tool memory
+        if let Some(memory_lock) = tool_memory {
+            let memory = memory_lock.read().await;
+            let memory_section = memory.format_for_prompt();
+            if !memory_section.is_empty() {
+                parts.push(memory_section);
+            }
+        }
+
+        parts.join("\n\n")
     }
 
     /// Get metrics snapshot for all sessions

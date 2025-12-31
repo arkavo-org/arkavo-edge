@@ -374,6 +374,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.conductor,
             self.router.as_ref(),
             self.learning_bus.as_ref(),
+            &self.agent_metadata,
             request,
         )
         .await

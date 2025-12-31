@@ -17,7 +17,7 @@ pub async fn execute_with_conductor(
     task_id: Option<uuid::Uuid>,
     task_executor: Option<&Arc<TaskExecutor>>,
 ) -> std::result::Result<String, String> {
-    execute_with_conductor_and_learning(
+    execute_with_conductor_full(
         conductor,
         router,
         mcp_registry,
@@ -25,6 +25,29 @@ pub async fn execute_with_conductor(
         task_id,
         task_executor,
         None,
+        None,
+    )
+    .await
+}
+
+/// Execute a task using the HRM Conductor with a preferred model
+#[allow(deprecated)]
+pub(super) async fn execute_with_conductor_and_model(
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    router: &Arc<arkavo_router::Router>,
+    mcp_registry: &Arc<McpRegistry>,
+    task_content: String,
+    preferred_model: Option<arkavo_router::ModelChoice>,
+) -> std::result::Result<String, String> {
+    execute_with_conductor_full(
+        conductor,
+        router,
+        mcp_registry,
+        task_content,
+        None,
+        None,
+        None,
+        preferred_model,
     )
     .await
 }
@@ -40,6 +63,31 @@ pub async fn execute_with_conductor_and_learning(
     task_id: Option<uuid::Uuid>,
     task_executor: Option<&Arc<TaskExecutor>>,
     learning_bus: Option<&Arc<LearningBus>>,
+) -> std::result::Result<String, String> {
+    execute_with_conductor_full(
+        conductor,
+        router,
+        mcp_registry,
+        task_content,
+        task_id,
+        task_executor,
+        learning_bus,
+        None,
+    )
+    .await
+}
+
+/// Full conductor execution with all options
+#[allow(deprecated)]
+pub(super) async fn execute_with_conductor_full(
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    router: &Arc<arkavo_router::Router>,
+    mcp_registry: &Arc<McpRegistry>,
+    task_content: String,
+    task_id: Option<uuid::Uuid>,
+    task_executor: Option<&Arc<TaskExecutor>>,
+    learning_bus: Option<&Arc<LearningBus>>,
+    preferred_model: Option<arkavo_router::ModelChoice>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -157,7 +205,7 @@ pub async fn execute_with_conductor_and_learning(
     }];
 
     let response = router
-        .route_with_tools(&task_content, messages, Some(&registry_arc))
+        .route_with_tools_and_model(&task_content, messages, Some(&registry_arc), preferred_model)
         .await
         .map_err(|e| format!("Router failed: {e}"))?;
 

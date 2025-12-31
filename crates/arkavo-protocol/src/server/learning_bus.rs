@@ -3,6 +3,7 @@
 //! Central bus connecting event capture, learning, and gossip protocol.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use arkavo_crypto::{AgentKeypair, AgentPublicKey};
@@ -11,7 +12,9 @@ use arkavo_gossip::{
     sign_lesson_announcement,
 };
 use arkavo_router::Router;
-use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
+use arkavo_router::learning::{
+    AgentContribution, Episode, LearningModule, LearningStore, Lesson, ToolCallFormat,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
@@ -68,6 +71,14 @@ pub enum LearningEvent {
     },
     /// Gossip message received from peer
     GossipReceived(GossipMessage),
+    /// Validation failed - model produced malformed output
+    ValidationFailure {
+        tool_name: Option<String>,
+        error_type: String,
+        param_name: Option<String>,
+        model_id: String,
+        attempt: u8,
+    },
 }
 
 /// Behavior advice based on learned lessons
@@ -529,6 +540,48 @@ impl LearningBus {
     /// Get the number of cached tool format lessons
     pub async fn cached_tool_pattern_count(&self) -> usize {
         self.policy_cache.read().await.tool_format_lesson_count()
+    }
+
+    /// Load persisted lessons from SQLite into the policy cache at startup
+    ///
+    /// Returns the number of lessons loaded.
+    pub async fn load_lessons_from_store(&self, db_path: &Path) -> Result<usize, String> {
+        let store = LearningStore::new(db_path)
+            .await
+            .map_err(|e| format!("Failed to open learning store: {e}"))?;
+
+        let lessons = store
+            .get_lessons(&self.swarm_id)
+            .await
+            .map_err(|e| format!("Failed to load lessons: {e}"))?;
+
+        let count = lessons.len();
+        let mut cache = self.policy_cache.write().await;
+        for lesson in lessons {
+            cache.add_lesson(lesson);
+        }
+
+        tracing::info!(
+            "Loaded {} lessons from persistent storage for swarm '{}'",
+            count,
+            self.swarm_id
+        );
+        Ok(count)
+    }
+
+    /// Store a lesson to persistent storage
+    pub async fn persist_lesson(&self, lesson: &Lesson, db_path: &Path) -> Result<(), String> {
+        let store = LearningStore::new(db_path)
+            .await
+            .map_err(|e| format!("Failed to open learning store: {e}"))?;
+
+        store
+            .store_lesson(lesson)
+            .await
+            .map_err(|e| format!("Failed to store lesson: {e}"))?;
+
+        tracing::debug!("Persisted lesson {} to storage", lesson.id);
+        Ok(())
     }
 }
 

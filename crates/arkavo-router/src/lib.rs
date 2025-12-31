@@ -25,7 +25,7 @@ pub use architect::{
     ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
     ComplexityScorer, Subtask, SubtaskResult,
 };
-pub use classifier::{TaskCategory, TaskClassifier};
+pub use classifier::{Classification, TaskCategory, TaskClassifier, TaskImportance};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
 pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
@@ -53,6 +53,19 @@ use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::Stream;
+
+/// Validation failure event for learning
+#[derive(Debug, Clone)]
+pub struct ValidationFailureEvent {
+    pub tool_name: Option<String>,
+    pub error_type: String,
+    pub param_name: Option<String>,
+    pub model_id: String,
+    pub attempt: u8,
+}
+
+/// Callback for validation failures - sends events for learning
+pub type ValidationCallback = tokio::sync::mpsc::Sender<ValidationFailureEvent>;
 
 /// Default buffer size for streaming channels
 /// Balance between memory usage and backpressure handling
@@ -344,11 +357,41 @@ impl Router {
     pub async fn route_with_tools(
         &self,
         task_description: &str,
-        mut messages: Vec<Message>,
+        messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
+        self.route_with_tools_and_model(task_description, messages, tool_registry, None)
+            .await
+    }
+
+    /// Route with tools using a preferred model, escalating if quality is poor
+    ///
+    /// If `preferred_model` is provided, starts with that model instead of classifier selection.
+    /// Falls back to classifier selection if quality gate fails.
+    pub async fn route_with_tools_and_model(
+        &self,
+        task_description: &str,
+        mut messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        preferred_model: Option<ModelChoice>,
+    ) -> Result<ProviderResponse> {
         const MAX_RETRIES: u8 = 3;
-        let mut current_decision = self.classify(task_description).await?;
+
+        // Use preferred model if provided, otherwise classify
+        let mut current_decision = if let Some(model) = preferred_model {
+            tracing::info!(
+                "Using preferred model: {} (bypassing classifier)",
+                model.name()
+            );
+            decision::RoutingDecision::new(
+                model,
+                classifier::TaskCategory::General,
+                0.9,
+                "Agent-configured model".to_string(),
+            )
+        } else {
+            self.classify(task_description).await?
+        };
 
         for attempt in 0..MAX_RETRIES {
             let tools_json = match tool_registry {

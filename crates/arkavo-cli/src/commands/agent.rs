@@ -1075,6 +1075,25 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             gossip_config,
         ))
     };
+
+    // Load persisted lessons from agent-local .arkavo dir
+    // Each agent has isolated learning - sharing via A2A when requested
+    let db_path = std::path::PathBuf::from(".arkavo").join("learning.db");
+    match learning_bus.load_lessons_from_store(&db_path).await {
+        Ok(count) if count > 0 => {
+            if std::env::var("ARKAVO_DEBUG").is_ok() {
+                println!("[Learning] Loaded {} lessons from persistent storage", count);
+            }
+        }
+        Ok(_) => {} // No lessons to load, that's fine
+        Err(e) => {
+            // Don't fail startup, just warn
+            if std::env::var("ARKAVO_DEBUG").is_ok() {
+                eprintln!("[Learning] Failed to load lessons: {}", e);
+            }
+        }
+    }
+
     server.set_learning_bus(learning_bus.clone()).await;
 
     // Set agent metadata (this initializes the router which will be set on learning bus)
@@ -1521,7 +1540,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                                     tracing::debug!("Gossip sent to {}", peer_id);
                                 }
                                 Err(e) => {
-                                    tracing::warn!("Failed to send gossip to {}: {}", peer_id, e);
+                                    tracing::debug!("Failed to send gossip to {}: {}", peer_id, e);
                                 }
                             }
                         } else {

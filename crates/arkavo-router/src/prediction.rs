@@ -198,6 +198,7 @@ impl WorkflowCostPredictor {
             TaskCategory::Refactoring => Duration::from_secs(5),
             TaskCategory::CodeGeneration => Duration::from_secs(8),
             TaskCategory::VisionAnalysis => Duration::from_secs(4),
+            TaskCategory::Chat => Duration::from_secs(5),
             TaskCategory::General => Duration::from_secs(3),
         }
     }

@@ -15,7 +15,7 @@ use tracing::{info, warn};
 
 use super::super::LearningBus;
 use super::super::config_helpers::AgentMetadata;
-use super::super::execute_with_conductor_and_learning;
+use super::super::conductor::execute_with_conductor_full;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(
@@ -27,6 +27,7 @@ pub async fn handle_message_send(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: Option<&Arc<arkavo_router::Router>>,
     learning_bus: Option<&Arc<LearningBus>>,
+    agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -58,6 +59,7 @@ pub async fn handle_message_send(
                 let task_store = task_store.clone();
                 let task_id_clone = task_id;
                 let learning_bus = learning_bus.cloned();
+                let agent_metadata = agent_metadata.clone();
 
                 tokio::spawn(async move {
                     if let Err(e) = task_executor
@@ -70,7 +72,13 @@ pub async fn handle_message_send(
 
                     info!("Executing task {} via HRM Conductor", task_id_clone);
 
-                    match execute_with_conductor_and_learning(
+                    // Use agent's configured model
+                    let preferred_model = {
+                        let metadata = agent_metadata.read().await;
+                        arkavo_router::ModelChoice::from_name(&metadata.model)
+                    };
+
+                    match execute_with_conductor_full(
                         &conductor,
                         &router,
                         &mcp_registry,
@@ -78,6 +86,7 @@ pub async fn handle_message_send(
                         Some(task_id_clone),
                         Some(&task_executor),
                         learning_bus.as_ref(),
+                        preferred_model,
                     )
                     .await
                     {
