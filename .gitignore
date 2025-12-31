@@ -65,3 +65,4 @@ vendor/cef_binary*/
 vendor/*.tar.bz2
 vendor/qairt/
 vendor/llama.cpp/
+logs/
