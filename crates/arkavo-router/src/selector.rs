@@ -402,8 +402,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_backend_api_routing_uses_local() {
-        // BackendAPI now uses local models for simple tasks (saves cloud for complex API design)
+    async fn test_backend_api_routing_uses_gemini() {
+        // BackendAPI has Normal importance - uses Gemini Flash when available
         let selector = ModelSelector::with_availability(gemini_only());
 
         let classification =
@@ -413,8 +413,7 @@ mod tests {
             .select(&classification, "Create a REST API endpoint")
             .unwrap();
 
-        assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
-        assert_eq!(decision.estimated_cost_usd, 0.0);
+        assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
     }
 
     #[tokio::test]

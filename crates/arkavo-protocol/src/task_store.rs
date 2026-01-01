@@ -186,17 +186,7 @@ impl TaskStore for SqliteTaskStore {
             Some((data, status_str)) => {
                 let mut task: Task = serde_json::from_str(&data)?;
                 // Override status from column (source of truth)
-                task.status = match status_str.as_str() {
-                    "submitted" => TaskStatus::Submitted,
-                    "working" => TaskStatus::Working,
-                    "input_required" => TaskStatus::InputRequired,
-                    "completed" => TaskStatus::Completed,
-                    "canceled" => TaskStatus::Canceled,
-                    "failed" => TaskStatus::Failed,
-                    "rejected" => TaskStatus::Rejected,
-                    "auth_required" => TaskStatus::AuthRequired,
-                    _ => task.status, // Fallback to data if unknown
-                };
+                task.status = TaskStatus::from_db_str(&status_str, task.status);
                 Ok(Some(task))
             }
             None => Ok(None),
@@ -204,17 +194,6 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn update_task_status(&self, task_id: &Uuid, status: TaskStatus) -> Result<()> {
-        let status_str = match status {
-            TaskStatus::Submitted => "submitted",
-            TaskStatus::Working => "working",
-            TaskStatus::InputRequired => "input_required",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Canceled => "canceled",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Rejected => "rejected",
-            TaskStatus::AuthRequired => "auth_required",
-        };
-
         let now = Utc::now();
 
         let rows_affected = sqlx::query(
@@ -224,7 +203,7 @@ impl TaskStore for SqliteTaskStore {
             WHERE id = ?3
             "#,
         )
-        .bind(status_str)
+        .bind(status.as_db_str())
         .bind(now)
         .bind(task_id.to_string())
         .execute(&self.pool)
@@ -303,17 +282,7 @@ impl TaskStore for SqliteTaskStore {
             .map(|(data, status_str)| {
                 let mut task: Task = serde_json::from_str(&data)?;
                 // Override status from column (source of truth)
-                task.status = match status_str.as_str() {
-                    "submitted" => TaskStatus::Submitted,
-                    "working" => TaskStatus::Working,
-                    "input_required" => TaskStatus::InputRequired,
-                    "completed" => TaskStatus::Completed,
-                    "canceled" => TaskStatus::Canceled,
-                    "failed" => TaskStatus::Failed,
-                    "rejected" => TaskStatus::Rejected,
-                    "auth_required" => TaskStatus::AuthRequired,
-                    _ => task.status,
-                };
+                task.status = TaskStatus::from_db_str(&status_str, task.status);
                 Ok(task)
             })
             .collect::<Result<Vec<Task>, serde_json::Error>>()?;
@@ -340,17 +309,6 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn get_tasks_by_status(&self, status: TaskStatus) -> Result<Vec<Task>> {
-        let status_str = match status {
-            TaskStatus::Submitted => "submitted",
-            TaskStatus::Working => "working",
-            TaskStatus::InputRequired => "input_required",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Canceled => "canceled",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Rejected => "rejected",
-            TaskStatus::AuthRequired => "auth_required",
-        };
-
         let rows = sqlx::query_as::<_, (String,)>(
             r#"
             SELECT data FROM tasks
@@ -358,7 +316,7 @@ impl TaskStore for SqliteTaskStore {
             ORDER BY created_at DESC
             "#,
         )
-        .bind(status_str)
+        .bind(status.as_db_str())
         .fetch_all(&self.pool)
         .await?;
 

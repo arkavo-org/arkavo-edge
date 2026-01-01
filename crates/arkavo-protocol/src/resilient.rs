@@ -22,8 +22,6 @@ pub enum TransportType {
 /// 2. Falls back to HTTP if WebSocket fails (reliable, stateless)
 /// 3. Periodically retries WebSocket when operating in HTTP fallback mode
 pub struct ResilientTransport {
-    #[allow(dead_code)]
-    config: TransportConfig,
     ws_transport: WebSocketTransport,
     http_transport: HttpTransport,
     active_transport: Arc<RwLock<Option<TransportType>>>,
@@ -39,7 +37,6 @@ impl ResilientTransport {
         let http_transport = HttpTransport::new(config.clone())?;
 
         Ok(Self {
-            config,
             ws_transport,
             http_transport,
             active_transport: Arc::new(RwLock::new(None)),

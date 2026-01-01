@@ -58,6 +58,37 @@ pub enum TaskStatus {
     AuthRequired,
 }
 
+impl TaskStatus {
+    /// Convert status to database string representation
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::Working => "working",
+            Self::InputRequired => "input_required",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+            Self::Failed => "failed",
+            Self::Rejected => "rejected",
+            Self::AuthRequired => "auth_required",
+        }
+    }
+
+    /// Parse status from database string, with fallback
+    pub fn from_db_str(s: &str, fallback: Self) -> Self {
+        match s {
+            "submitted" => Self::Submitted,
+            "working" => Self::Working,
+            "input_required" => Self::InputRequired,
+            "completed" => Self::Completed,
+            "canceled" => Self::Canceled,
+            "failed" => Self::Failed,
+            "rejected" => Self::Rejected,
+            "auth_required" => Self::AuthRequired,
+            _ => fallback,
+        }
+    }
+}
+
 /// Declaration of tasks an agent can fulfill
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TaskDeclareRequest {
