@@ -293,10 +293,12 @@ mod tests {
         let result = transport.send_request(request).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Transport not connected"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Transport not connected")
+        );
     }
 
     #[tokio::test]

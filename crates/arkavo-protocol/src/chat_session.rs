@@ -363,14 +363,10 @@ impl ChatSessionManager {
                 "Sending message to session handler via channel"
             );
 
-            session_state
-                .message_tx
-                .send(message)
-                .await
-                .map_err(|e| {
-                    error!(session.id = %session_id, error = %e, "Failed to send to message channel");
-                    A2aError::MessageSendFailed("Channel closed".to_string())
-                })
+            session_state.message_tx.send(message).await.map_err(|e| {
+                error!(session.id = %session_id, error = %e, "Failed to send to message channel");
+                A2aError::MessageSendFailed("Channel closed".to_string())
+            })
         } else {
             error!(session.id = %session_id, "Session not found in sessions map");
             Err(A2aError::SessionNotFound(session_id.to_string()))

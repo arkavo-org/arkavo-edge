@@ -211,12 +211,8 @@ impl ModelSelector {
             (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
                 "Code generation: DeepSeek V3.2 optimized for code generation"
             }
-            (TaskCategory::CodeGeneration, _) => {
-                "Code generation: Selected based on importance"
-            }
-            (TaskCategory::VisionAnalysis, _) => {
-                "Vision analysis: Multimodal model required"
-            }
+            (TaskCategory::CodeGeneration, _) => "Code generation: Selected based on importance",
+            (TaskCategory::VisionAnalysis, _) => "Vision analysis: Multimodal model required",
             (TaskCategory::General, ModelChoice::LocalQwen3) => {
                 "General task: Fast local Qwen3 for quick responses"
             }

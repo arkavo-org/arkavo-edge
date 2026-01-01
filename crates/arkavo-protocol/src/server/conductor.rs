@@ -205,7 +205,12 @@ pub(super) async fn execute_with_conductor_full(
     }];
 
     let response = router
-        .route_with_tools_and_model(&task_content, messages, Some(&registry_arc), preferred_model)
+        .route_with_tools_and_model(
+            &task_content,
+            messages,
+            Some(&registry_arc),
+            preferred_model,
+        )
         .await
         .map_err(|e| format!("Router failed: {e}"))?;
 

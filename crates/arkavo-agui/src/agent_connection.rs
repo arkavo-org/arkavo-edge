@@ -407,7 +407,8 @@ impl AgentConnection {
             Err(e) => {
                 // Connection might be stale - check if it's a connection error
                 let error_str = e.to_string();
-                if error_str.contains("background task closed") || error_str.contains("connection") {
+                if error_str.contains("background task closed") || error_str.contains("connection")
+                {
                     warn!(agent_id = %agent_id, error = %e, "Connection appears stale, signaling reconnect");
                     // Signal connection lost so reconnection can happen
                     drop(client_guard);

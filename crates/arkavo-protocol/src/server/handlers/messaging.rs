@@ -14,8 +14,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::LearningBus;
-use super::super::config_helpers::AgentMetadata;
 use super::super::conductor::execute_with_conductor_full;
+use super::super::config_helpers::AgentMetadata;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(

@@ -56,6 +56,7 @@ pub use registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
     VerifyResponse,
 };
+pub use resilient::{ResilientTransport, TransportType};
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;
 pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
@@ -65,7 +66,6 @@ pub use types::{
     AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
 };
-pub use resilient::{ResilientTransport, TransportType};
 pub use websocket::WebSocketTransport;
 
 pub struct Client;

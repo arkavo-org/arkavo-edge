@@ -1099,7 +1099,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     match learning_bus.load_lessons_from_store(&db_path).await {
         Ok(count) if count > 0 => {
             if std::env::var("ARKAVO_DEBUG").is_ok() {
-                println!("[Learning] Loaded {} lessons from persistent storage", count);
+                println!(
+                    "[Learning] Loaded {} lessons from persistent storage",
+                    count
+                );
             }
         }
         Ok(_) => {} // No lessons to load, that's fine

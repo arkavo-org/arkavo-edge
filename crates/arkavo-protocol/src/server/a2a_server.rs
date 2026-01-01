@@ -16,8 +16,8 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 
-use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::conductor::execute_with_conductor_and_model;
+use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
@@ -447,7 +447,10 @@ impl A2aServer {
             return;
         }
 
-        info!("Rebuilding tool registry with {} MCP tools", mcp_tools.len());
+        info!(
+            "Rebuilding tool registry with {} MCP tools",
+            mcp_tools.len()
+        );
 
         // Use empty registry for progressive tool discovery
         // Small models can't handle 30+ tools - they discover via REQUEST_TOOL: protocol
@@ -460,7 +463,11 @@ impl A2aServer {
             tool_registry.register(&tool_name, Box::new(bridge));
         }
 
-        let tool_names: Vec<_> = tool_registry.list_tools().iter().map(|t| t.name.clone()).collect();
+        let tool_names: Vec<_> = tool_registry
+            .list_tools()
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
         info!("✓ Tool registry rebuilt with tools: {:?}", tool_names);
 
         *self.tool_registry.write().await = Some(Arc::new(tool_registry));
@@ -613,7 +620,10 @@ impl A2aServer {
                 }
 
                 if tools.is_empty() {
-                    eprintln!("[Planning] No MCP tools registered after {}ms - skipping startup planning", total_waited);
+                    eprintln!(
+                        "[Planning] No MCP tools registered after {}ms - skipping startup planning",
+                        total_waited
+                    );
                 } else {
                     eprintln!(
                         "[Planning] Found {} MCP tools after {}ms - starting autonomous planning",
@@ -651,8 +661,7 @@ impl A2aServer {
                             .join("\n");
                         let planning_message = format!(
                             "I have analyzed my purpose and created the following goals:\n{}\n\nI will watch for: {:?}",
-                            goals_summary,
-                            plan.watch_for
+                            goals_summary, plan.watch_for
                         );
                         agent_context.write().await.push(arkavo_llm::Message {
                             role: arkavo_llm::Role::Assistant,
@@ -673,8 +682,7 @@ impl A2aServer {
                         );
                         let goal_prompt = format!(
                             "{}\n\n## Immediate Task\n{}\n\nExecute this goal now using the available tools.",
-                            system_prompt,
-                            first_goal.description
+                            system_prompt, first_goal.description
                         );
                         drop(plan_guard);
 
@@ -733,7 +741,8 @@ impl A2aServer {
             eprintln!("[Goals] Action loop interval: {}s", action_interval_secs);
 
             let mut action_tick = {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(action_interval_secs));
+                let mut interval =
+                    tokio::time::interval(tokio::time::Duration::from_secs(action_interval_secs));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 Some(interval)
             };
@@ -1035,7 +1044,10 @@ impl A2aServer {
             arkavo_router::ModelChoice::from_name(&metadata.model)
         };
         if preferred_model.is_some() {
-            info!("Chat sessions will use preferred model: {:?}", preferred_model);
+            info!(
+                "Chat sessions will use preferred model: {:?}",
+                preferred_model
+            );
         }
 
         let chat_sessions = if let Some(router_instance) = router.clone() {

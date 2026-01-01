@@ -3,7 +3,6 @@ use crate::budget_handler::BudgetHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
 use crate::types::*;
-use tracing::{debug, error, info};
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::types::ConfigError;
 use axum::{
@@ -23,6 +22,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
+use tracing::{debug, error, info};
 
 /// Connection information for active WebSocket clients
 struct ConnectionInfo {

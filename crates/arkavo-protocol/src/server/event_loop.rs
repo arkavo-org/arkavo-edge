@@ -181,15 +181,23 @@ pub async fn start_event_processing_loop(
                                                 );
 
                                                 // Add to policy cache for immediate use
-                                                learning_bus.add_lesson_to_cache(lesson.clone()).await;
+                                                learning_bus
+                                                    .add_lesson_to_cache(lesson.clone())
+                                                    .await;
 
                                                 // Persist to SQLite for cross-session learning
                                                 // Store in agent-local .arkavo dir (not global)
                                                 // Sharing happens via A2A when requested
                                                 let db_path = std::path::PathBuf::from(".arkavo")
                                                     .join("learning.db");
-                                                if let Err(e) = learning_bus.persist_lesson(&lesson, &db_path).await {
-                                                    tracing::warn!("Failed to persist lesson: {}", e);
+                                                if let Err(e) = learning_bus
+                                                    .persist_lesson(&lesson, &db_path)
+                                                    .await
+                                                {
+                                                    tracing::warn!(
+                                                        "Failed to persist lesson: {}",
+                                                        e
+                                                    );
                                                 }
 
                                                 // Create announcement and gossip
