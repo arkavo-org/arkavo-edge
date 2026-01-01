@@ -107,12 +107,19 @@ impl A2aServer {
         self.agent_context.write().await.extend(messages);
     }
 
-    pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
+    pub async fn set_agent_metadata(
+        &self,
+        name: String,
+        purpose: String,
+        model: String,
+        action_interval: u64,
+    ) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.name.clone_from(&name);
         metadata.purpose = purpose;
         metadata.model.clone_from(&model);
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
+        metadata.action_interval = action_interval;
         drop(metadata);
 
         // Always initialize router for task execution via HRM conductor
@@ -165,10 +172,13 @@ impl A2aServer {
             metadata.model != new_config.model
         };
 
+        // Note: action_interval not yet supported in hot-reload config
+        let current_interval = self.agent_metadata.read().await.action_interval;
         self.set_agent_metadata(
             new_config.name.clone(),
             new_config.purpose.clone(),
             new_config.model.clone(),
+            current_interval, // Preserve existing interval
         )
         .await;
 
@@ -583,10 +593,35 @@ impl A2aServer {
         let handle = tokio::spawn(async move {
             // Run startup planning immediately using the purpose as initial prompt
             if !system_prompt.is_empty() {
-                // Wait briefly for MCP tools to be registered
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                // Poll for MCP tools with exponential backoff (max 30 seconds)
+                let mut tools = Vec::new();
+                let mut wait_ms = 500;
+                let max_wait_total = 30_000;
+                let mut total_waited = 0;
 
-                let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
+                while tools.is_empty() && total_waited < max_wait_total {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
+                    total_waited += wait_ms;
+                    tools = mcp_registry.list_all_tools().await.unwrap_or_default();
+                    if tools.is_empty() {
+                        eprintln!(
+                            "[Planning] Waiting for MCP tools... ({}/{}ms)",
+                            total_waited, max_wait_total
+                        );
+                        wait_ms = (wait_ms * 2).min(5000); // exponential backoff, max 5s
+                    }
+                }
+
+                if tools.is_empty() {
+                    eprintln!("[Planning] No MCP tools registered after {}ms - skipping startup planning", total_waited);
+                } else {
+                    eprintln!(
+                        "[Planning] Found {} MCP tools after {}ms - starting autonomous planning",
+                        tools.len(),
+                        total_waited
+                    );
+                }
+
                 if !tools.is_empty() && !planning_completed.load(Ordering::SeqCst) {
                     planning_completed.store(true, Ordering::SeqCst);
 
@@ -686,15 +721,21 @@ impl A2aServer {
                 }
             }
 
-            // Agent action loop interval - from agent configuration (default: 0 = disabled)
-            let action_interval_secs: u64 = 10; // TODO: read from agent_metadata.action_interval
+            // Agent action loop interval - from agent configuration (default: 10 seconds)
+            let action_interval_secs = {
+                let metadata = agent_metadata.read().await;
+                if metadata.action_interval > 0 {
+                    metadata.action_interval
+                } else {
+                    10 // Default to 10 seconds for autonomous operation
+                }
+            };
+            eprintln!("[Goals] Action loop interval: {}s", action_interval_secs);
 
-            let mut action_tick = if action_interval_secs > 0 {
+            let mut action_tick = {
                 let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(action_interval_secs));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 Some(interval)
-            } else {
-                None
             };
 
             loop {
@@ -730,7 +771,27 @@ impl A2aServer {
                             ))
                         } else {
                             drop(plan);
-                            eprintln!("[Goals] All goals complete, idling");
+                            // All goals complete - replan to generate new objectives
+                            eprintln!("[Goals] All goals complete - re-planning for new objectives");
+
+                            let preferred_model = {
+                                let metadata = agent_metadata.read().await;
+                                arkavo_router::ModelChoice::from_name(&metadata.model)
+                            };
+
+                            let new_plan = run_startup_planning_phase(
+                                &system_prompt,
+                                &router,
+                                &mcp_registry,
+                                &conductor,
+                                preferred_model,
+                            )
+                            .await;
+
+                            if !new_plan.goals.is_empty() {
+                                eprintln!("[Goals] Re-planned {} new goals", new_plan.goals.len());
+                                *agent_plan.write().await = new_plan;
+                            }
                             None
                         };
 
@@ -968,6 +1029,15 @@ impl A2aServer {
         let tool_memory = Some(self.agent_memory.clone());
         let agent_plan = Some(self.agent_plan.clone());
 
+        // Get preferred model from agent metadata for chat sessions
+        let preferred_model = {
+            let metadata = self.agent_metadata.read().await;
+            arkavo_router::ModelChoice::from_name(&metadata.model)
+        };
+        if preferred_model.is_some() {
+            info!("Chat sessions will use preferred model: {:?}", preferred_model);
+        }
+
         let chat_sessions = if let Some(router_instance) = router.clone() {
             info!(
                 "✓ ChatSessionManager will be created WITH Router + shared context + memory + plan"
@@ -981,6 +1051,7 @@ impl A2aServer {
                 shared_context,
                 tool_memory,
                 agent_plan,
+                preferred_model,
             ))
         } else if llm_adapter.is_some() {
             info!("✓ ChatSessionManager will be created WITH LLM adapter + shared context");
@@ -993,6 +1064,7 @@ impl A2aServer {
                 shared_context,
                 tool_memory,
                 agent_plan,
+                preferred_model,
             ))
         } else {
             warn!(
@@ -1007,6 +1079,7 @@ impl A2aServer {
                 shared_context,
                 tool_memory,
                 agent_plan,
+                preferred_model,
             ))
         };
 

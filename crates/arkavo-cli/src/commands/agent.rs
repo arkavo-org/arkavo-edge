@@ -294,6 +294,7 @@ fn run_agent_with_options(
             peers: Vec::new(),
             a2a_enabled: true,
             a2a_service_type: None,
+            action_interval: 0, // Use default
         }]
     } else {
         let config_content = fs::read_to_string(&config_path)?;
@@ -345,6 +346,7 @@ fn run_agent_with_options(
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    action_interval: 0, // Use default
                 }]
             }
         }
@@ -416,6 +418,7 @@ fn run_agent_with_options(
                 peers: Vec::new(),
                 a2a_enabled: true,
                 a2a_service_type: None,
+                action_interval: 0, // Use default
             };
 
             if verbose {
@@ -455,6 +458,8 @@ pub struct AgentConfig {
     pub peers: Vec<String>,               // e.g., ["http://localhost:8352"]
     pub a2a_enabled: bool,                // Default: true
     pub a2a_service_type: Option<String>, // Custom mDNS service type
+    /// Action interval in seconds for continuous autonomous operation (0 = default 10s)
+    pub action_interval: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -516,6 +521,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    action_interval: 0, // Use default
                 });
                 in_agent_section = true;
                 continue;
@@ -566,6 +572,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         peers: Vec::new(),
                         a2a_enabled: true,
                         a2a_service_type: None,
+                        action_interval: 0, // Use default
                     });
                     in_agent_section = true;
                 }
@@ -692,6 +699,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    action_interval: 0, // Use default
                 });
                 in_agent_section = true;
                 continue;
@@ -1015,8 +1023,17 @@ fn parse_yaml_properties(
                     .to_string();
                 agent.api_keys.insert(key_name, key_value);
             }
+        } else if trimmed.starts_with("action_interval:") {
+            // Action interval in seconds for continuous autonomous operation
+            if let Ok(interval) = trimmed
+                .strip_prefix("action_interval:")
+                .unwrap_or("")
+                .trim()
+                .parse::<u64>()
+            {
+                agent.action_interval = interval;
+            }
         }
-        // Note: autonomous_interval and event_tool are deprecated - push notifications are used instead
     }
 }
 
@@ -1102,6 +1119,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             config.name.clone(),
             config.purpose.clone(),
             config.model.clone(),
+            config.action_interval,
         )
         .await;
 

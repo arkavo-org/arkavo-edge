@@ -45,6 +45,8 @@ pub struct ChatSessionManager {
     tool_memory: Option<Arc<RwLock<ToolMemory>>>,
     /// Agent's active goals/plan
     agent_plan: Option<Arc<RwLock<AgentPlan>>>,
+    /// Preferred model from agent configuration (bypasses router selection)
+    preferred_model: Option<arkavo_router::ModelChoice>,
 }
 
 struct ChatSessionState {
@@ -112,6 +114,7 @@ impl ChatSessionManager {
             shared_context,
             None,
             None,
+            None, // No preferred model
         )
     }
 
@@ -125,6 +128,7 @@ impl ChatSessionManager {
         shared_context: Arc<RwLock<Vec<Message>>>,
         tool_memory: Option<Arc<RwLock<ToolMemory>>>,
         agent_plan: Option<Arc<RwLock<AgentPlan>>>,
+        preferred_model: Option<arkavo_router::ModelChoice>,
     ) -> Self {
         let session_metrics = Arc::new(RwLock::new(HashMap::new()));
         let metrics_collector = MetricsCollector::new();
@@ -159,6 +163,7 @@ impl ChatSessionManager {
             shared_context,
             tool_memory,
             agent_plan,
+            preferred_model,
         }
     }
 
@@ -238,6 +243,7 @@ impl ChatSessionManager {
             let shared_context = self.shared_context.clone();
             let tool_memory = self.tool_memory.clone();
             let agent_plan = self.agent_plan.clone();
+            let preferred_model = self.preferred_model;
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -253,6 +259,7 @@ impl ChatSessionManager {
                         shared_context,
                         tool_memory,
                         agent_plan,
+                        preferred_model,
                     )
                     .await;
                 });
@@ -807,7 +814,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, shared_context, tool_memory, agent_plan), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, shared_context, tool_memory, agent_plan, preferred_model), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -821,6 +828,7 @@ impl ChatSessionManager {
         shared_context: Arc<RwLock<Vec<Message>>>,
         tool_memory: Option<Arc<RwLock<ToolMemory>>>,
         agent_plan: Option<Arc<RwLock<AgentPlan>>>,
+        preferred_model: Option<arkavo_router::ModelChoice>,
     ) {
         let context_size = shared_context.read().await.len();
         info!(
@@ -882,17 +890,17 @@ impl ChatSessionManager {
                     debug!(
                         session.id = %session_id,
                         context_len = conversation_context.len(),
-                        "Calling router.route_with_quality_gate with shared context"
+                        preferred_model = ?preferred_model,
+                        "Calling router.route_with_tools_and_model with shared context"
                     );
 
-                    // Route with quality gate (max 3 retries with model escalation)
-                    #[allow(deprecated)]
+                    // Route with preferred model if configured, otherwise let router classify
                     match router
-                        .route_with_quality_gate(
+                        .route_with_tools_and_model(
                             &user_message.content,
                             conversation_context.clone(),
                             tool_registry.as_deref(),
-                            3, // max_retries
+                            preferred_model,
                         )
                         .await
                     {
@@ -982,13 +990,12 @@ impl ChatSessionManager {
                                     }
 
                                     // Route again to get final response with tool results
-                                    #[allow(deprecated)]
                                     match router
-                                        .route_with_quality_gate(
+                                        .route_with_tools_and_model(
                                             &user_message.content,
                                             conversation_context.clone(),
                                             tool_registry.as_deref(),
-                                            3,
+                                            preferred_model,
                                         )
                                         .await
                                     {

@@ -291,6 +291,20 @@ pub(super) async fn execute_with_conductor_full(
                     ));
                 }
                 Err(err_str) => {
+                    // Treat "already" errors as idempotent success (e.g., "already registered")
+                    let err_lower = err_str.to_lowercase();
+                    if err_lower.contains("already ") {
+                        info!(
+                            "Tool {} - idempotent success: {}",
+                            tool_call.tool_name, err_str
+                        );
+                        tool_results.push(format!(
+                            "## Tool: {}\nSUCCESS: Already completed. Do NOT call this tool again. Proceed with next action.",
+                            tool_call.tool_name
+                        ));
+                        continue;
+                    }
+
                     let latency_ms = start_time.elapsed().as_millis() as u64;
                     warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
 

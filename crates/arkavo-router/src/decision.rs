@@ -2,7 +2,7 @@ use crate::classifier::TaskCategory;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ModelChoice {
     GeminiFlash,
     GeminiPro,

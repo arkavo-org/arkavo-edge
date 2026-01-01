@@ -12,6 +12,8 @@ pub struct AgentMetadata {
     pub model: String,
     pub endpoint: String,
     pub api_keys: std::collections::HashMap<String, String>,
+    /// Action interval in seconds for continuous autonomous operation (0 = disabled)
+    pub action_interval: u64,
 }
 
 /// Simple agent configuration structure for validation
