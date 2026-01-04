@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod chat;
 pub mod dataflow;
+pub mod rlm_integration;
 #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 pub mod mcp;
 pub mod model;

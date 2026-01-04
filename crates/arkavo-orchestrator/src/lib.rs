@@ -7,6 +7,7 @@
 #![allow(clippy::large_enum_variant)]
 
 pub mod agent_assignment;
+pub mod chunk_processor;
 pub mod code_solver;
 pub mod cognitive_engine;
 mod cognitive_engine_core;
@@ -24,6 +25,9 @@ pub mod types;
 pub mod webhook;
 
 pub use agent_assignment::{AgentAssigner, AgentAssignment};
+pub use chunk_processor::{
+    AgentCost, ChunkBatch, ChunkProcessor, ChunkProcessorConfig, ChunkResult, ProcessingResult,
+};
 pub use code_solver::{CodeSolver, SolverConfig, SolverMetrics, SolverResult};
 pub use cognitive_engine::{CognitiveEngine, ExecutionPlan, ExecutionResult};
 pub use config::OrchestratorConfig;
