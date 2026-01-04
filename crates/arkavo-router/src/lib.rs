@@ -15,6 +15,7 @@ pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod preflight;
+pub mod rlm;
 pub mod selector;
 pub mod stream;
 pub mod tool_request_parser;
@@ -38,6 +39,10 @@ pub use orchestrator::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
+pub use rlm::{
+    create_rlm_manager, create_rlm_manager_with_config, RlmConfig, RlmContextManager,
+    RlmDecompositionResult, RlmProbeResult, RlmSearchResult, RlmStats, SharedRlmManager,
+};
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};

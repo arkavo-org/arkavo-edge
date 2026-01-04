@@ -9,11 +9,17 @@ repository.workspace = true
 
 [features]
 default = []
-llm-remote = ["arkavo-llm/llm-remote"]
-llama-cpp = ["arkavo-llm/llama-cpp"]
+llm-remote = ["dep:arkavo-llm", "arkavo-llm/llm-remote"]
+llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
+iroh-storage = ["arkavo-tdf", "arkavo-tdf-iroh"]
 
 [dependencies]
-arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, optional = true }
+arkavo-tdf = { path = "../arkavo-tdf", optional = true }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
+async-trait = { workspace = true }
 serde = { workspace = true }
+tiktoken-rs = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }

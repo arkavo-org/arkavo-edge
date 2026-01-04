@@ -41,6 +41,12 @@ pub enum Error {
     #[error("Request blocked by policy '{policy_id}': {reason}")]
     ModerationBlocked { policy_id: String, reason: String },
 
+    #[error("Context decomposition error: {0}")]
+    ContextDecomposition(String),
+
+    #[error("Manifest not found: {0}")]
+    ManifestNotFound(String),
+
     /// Response rejected by CriticPipeline
     #[cfg(feature = "critic")]
     #[error("Response rejected by critic: {failures:?}")]

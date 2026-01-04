@@ -552,9 +552,14 @@ name = "arkavo-context"
 version = "0.51.6"
 dependencies = [
  "arkavo-llm",
+ "arkavo-tdf",
+ "arkavo-tdf-iroh",
+ "async-trait",
  "serde",
+ "tiktoken-rs",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
