@@ -20,6 +20,6 @@ arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 tiktoken-rs = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
