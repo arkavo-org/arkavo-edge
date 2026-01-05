@@ -58,8 +58,7 @@ pub async fn handle_message_send(
                     manifest_id = Some(mid.clone());
                     // Include manifest summary as context for the task
                     text_parts.push(format!(
-                        "[RLM Context: manifest={}, {} chunks, {} tokens]\n{}",
-                        mid, chunk_count, total_tokens, summary
+                        "[RLM Context: manifest={mid}, {chunk_count} chunks, {total_tokens} tokens]\n{summary}"
                     ));
                     info!(
                         "Received ContextManifest: {} chunks, {} tokens",

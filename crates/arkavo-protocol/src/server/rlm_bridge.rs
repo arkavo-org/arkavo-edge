@@ -139,8 +139,8 @@ pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
         match model_hint {
             Some("270M") => 2_048,
             Some("1B") => 4_096,
-            Some("2B") | Some("3B") => 8_192,
-            Some("7B") | Some("8B") => 32_768,
+            Some("2B" | "3B") => 8_192,
+            Some("7B" | "8B") => 32_768,
             Some("14B") => 32_768,
             _ => 8_192, // Default
         }
