@@ -575,7 +575,9 @@ impl GossipProtocol {
 
         // Propagate to peers (basic gossip)
         let mut messages = Vec::new();
-        let peers = self.select_propagation_peers(Some(&announcement.holder)).await;
+        let peers = self
+            .select_propagation_peers(Some(&announcement.holder))
+            .await;
 
         if !peers.is_empty() {
             messages.push(GossipMessage::ContextManifestAnnounce(announcement));

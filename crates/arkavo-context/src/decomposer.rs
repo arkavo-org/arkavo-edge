@@ -274,7 +274,11 @@ impl<S: ChunkStorage> ContextDecomposer<S> {
 
     /// Fetch specific chunks by indices.
     #[instrument(skip(self, manifest))]
-    pub async fn probe(&self, manifest: &ContextManifest, indices: &[usize]) -> Result<Vec<String>> {
+    pub async fn probe(
+        &self,
+        manifest: &ContextManifest,
+        indices: &[usize],
+    ) -> Result<Vec<String>> {
         let mut results = Vec::with_capacity(indices.len());
 
         for &idx in indices {
@@ -370,7 +374,11 @@ mod tests {
 
         let manifest = decomposer.decompose(&context).await.unwrap();
 
-        assert!(manifest.chunk_count > 1, "Expected multiple chunks, got {}", manifest.chunk_count);
+        assert!(
+            manifest.chunk_count > 1,
+            "Expected multiple chunks, got {}",
+            manifest.chunk_count
+        );
         assert!(manifest.total_chars > 100);
     }
 
@@ -394,7 +402,10 @@ mod tests {
                        Authentication token validation.";
 
         let manifest = decomposer.decompose(context).await.unwrap();
-        let results = decomposer.search(&manifest, &["authentication"]).await.unwrap();
+        let results = decomposer
+            .search(&manifest, &["authentication"])
+            .await
+            .unwrap();
 
         assert!(!results.is_empty());
     }

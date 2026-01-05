@@ -1555,7 +1555,9 @@ async fn process_message_print(
         || provider_name.contains("gpt")
         || provider_name.contains("anthropic");
 
-    if let Some(rlm_hint) = check_rlm_activation(&full_context, model_size_hint, is_large_context_provider) {
+    if let Some(rlm_hint) =
+        check_rlm_activation(&full_context, model_size_hint, is_large_context_provider)
+    {
         eprintln!("[RLM] {}", rlm_hint);
     }
 

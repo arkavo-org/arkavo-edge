@@ -5,7 +5,7 @@ use crate::mcp_registry::McpRegistry;
 use crate::task_executor::TaskExecutor;
 use crate::types::TaskProgress;
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
-use arkavo_mcp_tools::context_tools::{create_context_tools, SharedRlmOps};
+use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -127,53 +127,49 @@ pub async fn execute_with_conductor_and_learning(
     let context_size = model_context_size(None, router.is_anthropic_available());
     let rlm_bridge = RlmBridge::with_default_manager();
 
-    let (rlm_system_prompt, rlm_manifest_id) = if rlm_bridge.should_activate(input_tokens, context_size) {
-        update_progress("Decomposing large context for RLM mode", 35);
-        info!(
-            "RLM mode activated: {} tokens > {}% of {} context",
-            input_tokens,
-            70,
-            context_size
-        );
+    let (rlm_system_prompt, rlm_manifest_id) =
+        if rlm_bridge.should_activate(input_tokens, context_size) {
+            update_progress("Decomposing large context for RLM mode", 35);
+            info!(
+                "RLM mode activated: {} tokens > {}% of {} context",
+                input_tokens, 70, context_size
+            );
 
-        match rlm_bridge.manager().decompose(&task_content).await {
-            Ok(result) => {
-                info!(
-                    "Context decomposed: {} chunks, {} tokens, manifest={}",
-                    result.chunk_count,
-                    result.total_tokens,
-                    result.manifest_id
-                );
+            match rlm_bridge.manager().decompose(&task_content).await {
+                Ok(result) => {
+                    info!(
+                        "Context decomposed: {} chunks, {} tokens, manifest={}",
+                        result.chunk_count, result.total_tokens, result.manifest_id
+                    );
 
-                // Add RLM tools to registry
-                let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
-                let context_tools = create_context_tools(rlm_ops.clone());
-                for tool in context_tools {
-                    let schema = tool.schema();
-                    tool_registry.register(&schema.name.clone(), tool);
+                    // Add RLM tools to registry
+                    let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
+                    let context_tools = create_context_tools(rlm_ops.clone());
+                    for tool in context_tools {
+                        let schema = tool.schema();
+                        tool_registry.register(&schema.name.clone(), tool);
+                    }
+                    info!("Added 3 RLM context tools to registry");
+
+                    // Generate system prompt with manifest reference
+                    // Recreate bridge since we moved it into Arc
+                    let bridge_for_prompt = RlmBridge::with_default_manager();
+                    let system_prompt = bridge_for_prompt.generate_system_prompt(&result);
+
+                    (Some(system_prompt), Some(result.manifest_id))
                 }
-                info!("Added 3 RLM context tools to registry");
-
-                // Generate system prompt with manifest reference
-                // Recreate bridge since we moved it into Arc
-                let bridge_for_prompt = RlmBridge::with_default_manager();
-                let system_prompt = bridge_for_prompt.generate_system_prompt(&result);
-
-                (Some(system_prompt), Some(result.manifest_id))
+                Err(e) => {
+                    warn!("RLM decomposition failed, falling back to normal mode: {e}");
+                    (None, None)
+                }
             }
-            Err(e) => {
-                warn!("RLM decomposition failed, falling back to normal mode: {e}");
-                (None, None)
-            }
-        }
-    } else {
-        debug!(
-            "RLM mode not needed: {} tokens within {} context limit",
-            input_tokens,
-            context_size
-        );
-        (None, None)
-    };
+        } else {
+            debug!(
+                "RLM mode not needed: {} tokens within {} context limit",
+                input_tokens, context_size
+            );
+            (None, None)
+        };
 
     if let Some(manifest_id) = &rlm_manifest_id {
         debug!("RLM manifest {} ready for context queries", manifest_id);

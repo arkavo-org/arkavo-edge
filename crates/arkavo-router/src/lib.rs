@@ -40,8 +40,8 @@ pub use orchestrator::{
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
 pub use rlm::{
-    create_rlm_manager, create_rlm_manager_with_config, RlmConfig, RlmContextManager,
-    RlmDecompositionResult, RlmProbeResult, RlmSearchResult, RlmStats, SharedRlmManager,
+    RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
+    RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,
 };
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};

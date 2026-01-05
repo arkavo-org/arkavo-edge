@@ -33,7 +33,8 @@ impl RlmBridge {
 
     /// Check if RLM mode should activate for given token count.
     pub fn should_activate(&self, input_tokens: usize, model_context_size: usize) -> bool {
-        self.manager.should_activate(input_tokens, model_context_size)
+        self.manager
+            .should_activate(input_tokens, model_context_size)
     }
 
     /// Generate system prompt for RLM mode.
@@ -48,7 +49,10 @@ impl RlmBridge {
 #[async_trait]
 impl RlmOperations for RlmBridge {
     async fn decompose(&self, content: &str) -> Result<DecomposeResult, String> {
-        info!(content_len = content.len(), "RLM bridge: decomposing context");
+        info!(
+            content_len = content.len(),
+            "RLM bridge: decomposing context"
+        );
 
         let result = self
             .manager

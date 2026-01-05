@@ -393,6 +393,9 @@ mod tests {
         assert!(json.contains("context_manifest_announce"));
 
         let restored: GossipMessage = serde_json::from_str(&json).unwrap();
-        assert!(matches!(restored, GossipMessage::ContextManifestAnnounce(_)));
+        assert!(matches!(
+            restored,
+            GossipMessage::ContextManifestAnnounce(_)
+        ));
     }
 }

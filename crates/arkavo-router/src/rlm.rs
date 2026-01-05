@@ -135,7 +135,8 @@ impl RlmContextManager {
 
     /// Check if RLM mode should be activated based on input size.
     pub fn should_activate(&self, input_tokens: usize, model_context_size: usize) -> bool {
-        let threshold = (model_context_size as f32 * self.config.activation_threshold_ratio) as usize;
+        let threshold =
+            (model_context_size as f32 * self.config.activation_threshold_ratio) as usize;
         input_tokens > threshold
     }
 
@@ -152,7 +153,8 @@ impl RlmContextManager {
         let chunk_count = manifest.chunk_count;
         let total_tokens = manifest.total_tokens;
         let summary = manifest.to_summary();
-        let chunk_previews: Vec<ChunkPreview> = manifest.chunks.iter().map(ChunkPreview::from).collect();
+        let chunk_previews: Vec<ChunkPreview> =
+            manifest.chunks.iter().map(ChunkPreview::from).collect();
 
         // Store manifest for future operations
         self.manifests
@@ -261,7 +263,15 @@ impl RlmContextManager {
             .chunk_previews
             .iter()
             .take(20) // Limit to first 20 chunks in prompt
-            .map(|c| format!("  [{}] {} ({}tok): {}", c.index, c.hints.join(", "), c.tokens, c.preview))
+            .map(|c| {
+                format!(
+                    "  [{}] {} ({}tok): {}",
+                    c.index,
+                    c.hints.join(", "),
+                    c.tokens,
+                    c.preview
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -375,7 +385,8 @@ mod tests {
     async fn test_rlm_search() {
         let manager = RlmContextManager::new();
 
-        let context = "Authentication module.\n\nDatabase connection.\n\nAuthentication validation.";
+        let context =
+            "Authentication module.\n\nDatabase connection.\n\nAuthentication validation.";
         let decomp = manager.decompose(context).await.unwrap();
 
         let result = manager

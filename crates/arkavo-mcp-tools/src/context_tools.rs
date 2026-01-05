@@ -13,8 +13,8 @@ use tracing::{debug, info, warn};
 
 use arkavo_mcp::ToolSchema;
 
-use crate::server::{Tool, error_response, success_response};
 use crate::ToolError;
+use crate::server::{Tool, error_response, success_response};
 
 /// Trait for RLM context operations.
 /// Implemented by arkavo-router::rlm::RlmContextManager.
@@ -24,10 +24,18 @@ pub trait RlmOperations: Send + Sync {
     async fn decompose(&self, content: &str) -> Result<DecomposeResult, String>;
 
     /// Probe chunks by indices, returns vec of (index, content).
-    async fn probe(&self, manifest_id: &str, indices: &[usize]) -> Result<Vec<(usize, String)>, String>;
+    async fn probe(
+        &self,
+        manifest_id: &str,
+        indices: &[usize],
+    ) -> Result<Vec<(usize, String)>, String>;
 
     /// Search chunks by keywords, returns vec of (index, content).
-    async fn search(&self, manifest_id: &str, keywords: &[&str]) -> Result<Vec<(usize, String)>, String>;
+    async fn search(
+        &self,
+        manifest_id: &str,
+        keywords: &[&str],
+    ) -> Result<Vec<(usize, String)>, String>;
 }
 
 /// Result from context decomposition.
@@ -120,7 +128,11 @@ impl Tool for ContextProbeTool {
                     })
                     .collect();
 
-                info!(manifest_id, chunk_count = results.len(), "Chunks probed successfully");
+                info!(
+                    manifest_id,
+                    chunk_count = results.len(),
+                    "Chunks probed successfully"
+                );
 
                 Ok(success_response(json!({
                     "manifest_id": manifest_id,
@@ -383,25 +395,31 @@ mod tests {
                 manifest_id: "test-manifest".to_string(),
                 chunk_count: 3,
                 total_tokens: 150,
-                previews: vec![
-                    ChunkPreview {
-                        index: 0,
-                        tokens: 50,
-                        preview: "First chunk...".to_string(),
-                        hints: vec!["test".to_string()],
-                    },
-                ],
+                previews: vec![ChunkPreview {
+                    index: 0,
+                    tokens: 50,
+                    preview: "First chunk...".to_string(),
+                    hints: vec!["test".to_string()],
+                }],
             })
         }
 
-        async fn probe(&self, _manifest_id: &str, indices: &[usize]) -> Result<Vec<(usize, String)>, String> {
+        async fn probe(
+            &self,
+            _manifest_id: &str,
+            indices: &[usize],
+        ) -> Result<Vec<(usize, String)>, String> {
             Ok(indices
                 .iter()
                 .map(|&i| (i, format!("Content of chunk {i}")))
                 .collect())
         }
 
-        async fn search(&self, _manifest_id: &str, _keywords: &[&str]) -> Result<Vec<(usize, String)>, String> {
+        async fn search(
+            &self,
+            _manifest_id: &str,
+            _keywords: &[&str],
+        ) -> Result<Vec<(usize, String)>, String> {
             Ok(vec![(0, "Matching content".to_string())])
         }
     }
@@ -419,7 +437,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(
+            result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        );
     }
 
     #[tokio::test]
@@ -435,7 +458,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(
+            result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        );
     }
 
     #[tokio::test]
@@ -450,7 +478,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(
+            result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        );
         let data = result.get("data").unwrap();
         assert_eq!(data.get("manifest_id").unwrap(), "test-manifest");
     }

@@ -13,7 +13,9 @@ pub mod summarizer;
 
 pub use chunker::SemanticChunker;
 pub use compressor::ContextCompressor;
-pub use decomposer::{ChunkRef, ChunkStorage, ContextDecomposer, ContextManifest, MemoryChunkStorage};
+pub use decomposer::{
+    ChunkRef, ChunkStorage, ContextDecomposer, ContextManifest, MemoryChunkStorage,
+};
 pub use deduplicator::Deduplicator;
 pub use error::{Error, Result};
 pub use metrics::{CompressionMetrics, CompressionStats};

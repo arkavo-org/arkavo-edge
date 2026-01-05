@@ -8,7 +8,7 @@ use arkavo_protocol::agent_registry::{AgentInfo, AgentRegistry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, instrument, warn};
 
 /// Configuration for chunk processing.
@@ -305,7 +305,11 @@ impl ChunkProcessor {
         }
 
         // Aggregate results
-        self.aggregate_results(manifest, all_results, start_time.elapsed().as_millis() as u64)
+        self.aggregate_results(
+            manifest,
+            all_results,
+            start_time.elapsed().as_millis() as u64,
+        )
     }
 
     /// Aggregate chunk results into final output.
@@ -485,8 +489,10 @@ mod tests {
         assert_eq!(total_chunks, 10);
 
         // Verify all chunk indices are covered
-        let mut all_indices: Vec<usize> =
-            batches.iter().flat_map(|b| b.chunk_indices.clone()).collect();
+        let mut all_indices: Vec<usize> = batches
+            .iter()
+            .flat_map(|b| b.chunk_indices.clone())
+            .collect();
         all_indices.sort();
         assert_eq!(all_indices, (0..10).collect::<Vec<_>>());
     }
