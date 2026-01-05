@@ -225,6 +225,41 @@
       "Message": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "ChunkPreviewInfo": {
+            "description": "Preview information for a chunk in an RLM manifest.",
+            "properties": {
+              "hints": {
+                "default": [],
+                "description": "Semantic hints/keywords for searching",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "index": {
+                "description": "Chunk index (0-based)",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "preview": {
+                "description": "Preview text (first ~100 chars)",
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Token count for this chunk",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "preview",
+              "tokens"
+            ],
+            "type": "object"
+          },
           "MessagePart": {
             "description": "Part of a message",
             "oneOf": [
@@ -303,6 +338,53 @@
                 "required": [
                   "content",
                   "schema",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "RLM Context Manifest - decomposed large context",
+                "properties": {
+                  "chunk_count": {
+                    "description": "Number of chunks in the manifest",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "chunk_previews": {
+                    "default": [],
+                    "description": "Chunk previews with hints for search",
+                    "items": {
+                      "$ref": "#/definitions/ChunkPreviewInfo"
+                    },
+                    "type": "array"
+                  },
+                  "manifest_id": {
+                    "description": "Unique manifest identifier",
+                    "type": "string"
+                  },
+                  "summary": {
+                    "description": "Summary of the decomposed context",
+                    "type": "string"
+                  },
+                  "total_tokens": {
+                    "description": "Total tokens across all chunks",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "enum": [
+                      "context_manifest"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chunk_count",
+                  "manifest_id",
+                  "summary",
+                  "total_tokens",
                   "type"
                 ],
                 "type": "object"
@@ -741,6 +823,43 @@
       },
       "MessagePart": {
         "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ChunkPreviewInfo": {
+            "description": "Preview information for a chunk in an RLM manifest.",
+            "properties": {
+              "hints": {
+                "default": [],
+                "description": "Semantic hints/keywords for searching",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "index": {
+                "description": "Chunk index (0-based)",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "preview": {
+                "description": "Preview text (first ~100 chars)",
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Token count for this chunk",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "preview",
+              "tokens"
+            ],
+            "type": "object"
+          }
+        },
         "description": "Part of a message",
         "oneOf": [
           {
@@ -821,6 +940,53 @@
               "type"
             ],
             "type": "object"
+          },
+          {
+            "description": "RLM Context Manifest - decomposed large context",
+            "properties": {
+              "chunk_count": {
+                "description": "Number of chunks in the manifest",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "chunk_previews": {
+                "default": [],
+                "description": "Chunk previews with hints for search",
+                "items": {
+                  "$ref": "#/definitions/ChunkPreviewInfo"
+                },
+                "type": "array"
+              },
+              "manifest_id": {
+                "description": "Unique manifest identifier",
+                "type": "string"
+              },
+              "summary": {
+                "description": "Summary of the decomposed context",
+                "type": "string"
+              },
+              "total_tokens": {
+                "description": "Total tokens across all chunks",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "context_manifest"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "chunk_count",
+              "manifest_id",
+              "summary",
+              "total_tokens",
+              "type"
+            ],
+            "type": "object"
           }
         ],
         "title": "MessagePart"
@@ -828,6 +994,41 @@
       "MessageSendRequest": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "ChunkPreviewInfo": {
+            "description": "Preview information for a chunk in an RLM manifest.",
+            "properties": {
+              "hints": {
+                "default": [],
+                "description": "Semantic hints/keywords for searching",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "index": {
+                "description": "Chunk index (0-based)",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "preview": {
+                "description": "Preview text (first ~100 chars)",
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Token count for this chunk",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "preview",
+              "tokens"
+            ],
+            "type": "object"
+          },
           "Message": {
             "description": "Message for A2A communication",
             "properties": {
@@ -925,6 +1126,53 @@
                 "required": [
                   "content",
                   "schema",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "RLM Context Manifest - decomposed large context",
+                "properties": {
+                  "chunk_count": {
+                    "description": "Number of chunks in the manifest",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "chunk_previews": {
+                    "default": [],
+                    "description": "Chunk previews with hints for search",
+                    "items": {
+                      "$ref": "#/definitions/ChunkPreviewInfo"
+                    },
+                    "type": "array"
+                  },
+                  "manifest_id": {
+                    "description": "Unique manifest identifier",
+                    "type": "string"
+                  },
+                  "summary": {
+                    "description": "Summary of the decomposed context",
+                    "type": "string"
+                  },
+                  "total_tokens": {
+                    "description": "Total tokens across all chunks",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "enum": [
+                      "context_manifest"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chunk_count",
+                  "manifest_id",
+                  "summary",
+                  "total_tokens",
                   "type"
                 ],
                 "type": "object"
@@ -959,6 +1207,41 @@
       "MessageSendResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "ChunkPreviewInfo": {
+            "description": "Preview information for a chunk in an RLM manifest.",
+            "properties": {
+              "hints": {
+                "default": [],
+                "description": "Semantic hints/keywords for searching",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "index": {
+                "description": "Chunk index (0-based)",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "preview": {
+                "description": "Preview text (first ~100 chars)",
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Token count for this chunk",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "preview",
+              "tokens"
+            ],
+            "type": "object"
+          },
           "Message": {
             "description": "Message for A2A communication",
             "properties": {
@@ -1056,6 +1339,53 @@
                 "required": [
                   "content",
                   "schema",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "RLM Context Manifest - decomposed large context",
+                "properties": {
+                  "chunk_count": {
+                    "description": "Number of chunks in the manifest",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "chunk_previews": {
+                    "default": [],
+                    "description": "Chunk previews with hints for search",
+                    "items": {
+                      "$ref": "#/definitions/ChunkPreviewInfo"
+                    },
+                    "type": "array"
+                  },
+                  "manifest_id": {
+                    "description": "Unique manifest identifier",
+                    "type": "string"
+                  },
+                  "summary": {
+                    "description": "Summary of the decomposed context",
+                    "type": "string"
+                  },
+                  "total_tokens": {
+                    "description": "Total tokens across all chunks",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "enum": [
+                      "context_manifest"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chunk_count",
+                  "manifest_id",
+                  "summary",
+                  "total_tokens",
                   "type"
                 ],
                 "type": "object"
@@ -1375,6 +1705,41 @@
       "TaskGetResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "ChunkPreviewInfo": {
+            "description": "Preview information for a chunk in an RLM manifest.",
+            "properties": {
+              "hints": {
+                "default": [],
+                "description": "Semantic hints/keywords for searching",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "index": {
+                "description": "Chunk index (0-based)",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "preview": {
+                "description": "Preview text (first ~100 chars)",
+                "type": "string"
+              },
+              "tokens": {
+                "description": "Token count for this chunk",
+                "format": "uint",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "preview",
+              "tokens"
+            ],
+            "type": "object"
+          },
           "Message": {
             "description": "Message for A2A communication",
             "properties": {
@@ -1472,6 +1837,53 @@
                 "required": [
                   "content",
                   "schema",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "RLM Context Manifest - decomposed large context",
+                "properties": {
+                  "chunk_count": {
+                    "description": "Number of chunks in the manifest",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "chunk_previews": {
+                    "default": [],
+                    "description": "Chunk previews with hints for search",
+                    "items": {
+                      "$ref": "#/definitions/ChunkPreviewInfo"
+                    },
+                    "type": "array"
+                  },
+                  "manifest_id": {
+                    "description": "Unique manifest identifier",
+                    "type": "string"
+                  },
+                  "summary": {
+                    "description": "Summary of the decomposed context",
+                    "type": "string"
+                  },
+                  "total_tokens": {
+                    "description": "Total tokens across all chunks",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "enum": [
+                      "context_manifest"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chunk_count",
+                  "manifest_id",
+                  "summary",
+                  "total_tokens",
                   "type"
                 ],
                 "type": "object"
@@ -1904,7 +2316,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.41.5"
+    "version": "0.52.0"
   },
   "methods": [
     {
@@ -2270,6 +2682,41 @@
           "schema": {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "definitions": {
+              "ChunkPreviewInfo": {
+                "description": "Preview information for a chunk in an RLM manifest.",
+                "properties": {
+                  "hints": {
+                    "default": [],
+                    "description": "Semantic hints/keywords for searching",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "index": {
+                    "description": "Chunk index (0-based)",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "preview": {
+                    "description": "Preview text (first ~100 chars)",
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "description": "Token count for this chunk",
+                    "format": "uint",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "index",
+                  "preview",
+                  "tokens"
+                ],
+                "type": "object"
+              },
               "Message": {
                 "description": "Message for A2A communication",
                 "properties": {
@@ -2370,6 +2817,53 @@
                       "type"
                     ],
                     "type": "object"
+                  },
+                  {
+                    "description": "RLM Context Manifest - decomposed large context",
+                    "properties": {
+                      "chunk_count": {
+                        "description": "Number of chunks in the manifest",
+                        "format": "uint",
+                        "minimum": 0.0,
+                        "type": "integer"
+                      },
+                      "chunk_previews": {
+                        "default": [],
+                        "description": "Chunk previews with hints for search",
+                        "items": {
+                          "$ref": "#/definitions/ChunkPreviewInfo"
+                        },
+                        "type": "array"
+                      },
+                      "manifest_id": {
+                        "description": "Unique manifest identifier",
+                        "type": "string"
+                      },
+                      "summary": {
+                        "description": "Summary of the decomposed context",
+                        "type": "string"
+                      },
+                      "total_tokens": {
+                        "description": "Total tokens across all chunks",
+                        "format": "uint",
+                        "minimum": 0.0,
+                        "type": "integer"
+                      },
+                      "type": {
+                        "enum": [
+                          "context_manifest"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "chunk_count",
+                      "manifest_id",
+                      "summary",
+                      "total_tokens",
+                      "type"
+                    ],
+                    "type": "object"
                   }
                 ]
               }
@@ -2406,6 +2900,41 @@
         "schema": {
           "$schema": "http://json-schema.org/draft-07/schema#",
           "definitions": {
+            "ChunkPreviewInfo": {
+              "description": "Preview information for a chunk in an RLM manifest.",
+              "properties": {
+                "hints": {
+                  "default": [],
+                  "description": "Semantic hints/keywords for searching",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "index": {
+                  "description": "Chunk index (0-based)",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "preview": {
+                  "description": "Preview text (first ~100 chars)",
+                  "type": "string"
+                },
+                "tokens": {
+                  "description": "Token count for this chunk",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "index",
+                "preview",
+                "tokens"
+              ],
+              "type": "object"
+            },
             "Message": {
               "description": "Message for A2A communication",
               "properties": {
@@ -2503,6 +3032,53 @@
                   "required": [
                     "content",
                     "schema",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "RLM Context Manifest - decomposed large context",
+                  "properties": {
+                    "chunk_count": {
+                      "description": "Number of chunks in the manifest",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "type": "integer"
+                    },
+                    "chunk_previews": {
+                      "default": [],
+                      "description": "Chunk previews with hints for search",
+                      "items": {
+                        "$ref": "#/definitions/ChunkPreviewInfo"
+                      },
+                      "type": "array"
+                    },
+                    "manifest_id": {
+                      "description": "Unique manifest identifier",
+                      "type": "string"
+                    },
+                    "summary": {
+                      "description": "Summary of the decomposed context",
+                      "type": "string"
+                    },
+                    "total_tokens": {
+                      "description": "Total tokens across all chunks",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "enum": [
+                        "context_manifest"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "chunk_count",
+                    "manifest_id",
+                    "summary",
+                    "total_tokens",
                     "type"
                   ],
                   "type": "object"
@@ -2640,6 +3216,41 @@
         "schema": {
           "$schema": "http://json-schema.org/draft-07/schema#",
           "definitions": {
+            "ChunkPreviewInfo": {
+              "description": "Preview information for a chunk in an RLM manifest.",
+              "properties": {
+                "hints": {
+                  "default": [],
+                  "description": "Semantic hints/keywords for searching",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "index": {
+                  "description": "Chunk index (0-based)",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "preview": {
+                  "description": "Preview text (first ~100 chars)",
+                  "type": "string"
+                },
+                "tokens": {
+                  "description": "Token count for this chunk",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "index",
+                "preview",
+                "tokens"
+              ],
+              "type": "object"
+            },
             "Message": {
               "description": "Message for A2A communication",
               "properties": {
@@ -2737,6 +3348,53 @@
                   "required": [
                     "content",
                     "schema",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "RLM Context Manifest - decomposed large context",
+                  "properties": {
+                    "chunk_count": {
+                      "description": "Number of chunks in the manifest",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "type": "integer"
+                    },
+                    "chunk_previews": {
+                      "default": [],
+                      "description": "Chunk previews with hints for search",
+                      "items": {
+                        "$ref": "#/definitions/ChunkPreviewInfo"
+                      },
+                      "type": "array"
+                    },
+                    "manifest_id": {
+                      "description": "Unique manifest identifier",
+                      "type": "string"
+                    },
+                    "summary": {
+                      "description": "Summary of the decomposed context",
+                      "type": "string"
+                    },
+                    "total_tokens": {
+                      "description": "Total tokens across all chunks",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "enum": [
+                        "context_manifest"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "chunk_count",
+                    "manifest_id",
+                    "summary",
+                    "total_tokens",
                     "type"
                   ],
                   "type": "object"
