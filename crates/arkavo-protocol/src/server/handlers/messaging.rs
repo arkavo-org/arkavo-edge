@@ -37,16 +37,46 @@ pub async fn handle_message_send(
         return Err(e);
     }
 
-    let task_content: String = request
-        .message
-        .parts
-        .iter()
-        .filter_map(|p| match p {
-            crate::types::MessagePart::Text { content } => Some(content.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Extract task content and detect RLM mode from message parts
+    let (task_content, rlm_manifest_id): (String, Option<String>) = {
+        let mut text_parts: Vec<String> = Vec::new();
+        let mut manifest_id: Option<String> = None;
+
+        for part in &request.message.parts {
+            match part {
+                crate::types::MessagePart::Text { content } => {
+                    text_parts.push(content.clone());
+                }
+                crate::types::MessagePart::ContextManifest {
+                    manifest_id: mid,
+                    summary,
+                    chunk_count,
+                    total_tokens,
+                    ..
+                } => {
+                    // Store manifest ID for RLM tool access
+                    manifest_id = Some(mid.clone());
+                    // Include manifest summary as context for the task
+                    text_parts.push(format!(
+                        "[RLM Context: manifest={}, {} chunks, {} tokens]\n{}",
+                        mid, chunk_count, total_tokens, summary
+                    ));
+                    info!(
+                        "Received ContextManifest: {} chunks, {} tokens",
+                        chunk_count, total_tokens
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        (text_parts.join("\n"), manifest_id)
+    };
+
+    // Log RLM mode if manifest received
+    if let Some(ref mid) = rlm_manifest_id {
+        info!("Task will use RLM mode with manifest: {}", mid);
+    }
 
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {

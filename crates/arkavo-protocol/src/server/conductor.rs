@@ -1,9 +1,11 @@
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::mcp_bridge::McpBridgeTool;
+use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 use crate::mcp_registry::McpRegistry;
 use crate::task_executor::TaskExecutor;
 use crate::types::TaskProgress;
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
+use arkavo_mcp_tools::context_tools::{create_context_tools, SharedRlmOps};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -120,6 +122,63 @@ pub async fn execute_with_conductor_and_learning(
             .collect::<Vec<_>>()
     );
 
+    // 4.5 Check if RLM mode should activate (large context handling)
+    let input_tokens = estimate_tokens(&task_content);
+    let context_size = model_context_size(None, router.is_anthropic_available());
+    let rlm_bridge = RlmBridge::with_default_manager();
+
+    let (rlm_system_prompt, rlm_manifest_id) = if rlm_bridge.should_activate(input_tokens, context_size) {
+        update_progress("Decomposing large context for RLM mode", 35);
+        info!(
+            "RLM mode activated: {} tokens > {}% of {} context",
+            input_tokens,
+            70,
+            context_size
+        );
+
+        match rlm_bridge.manager().decompose(&task_content).await {
+            Ok(result) => {
+                info!(
+                    "Context decomposed: {} chunks, {} tokens, manifest={}",
+                    result.chunk_count,
+                    result.total_tokens,
+                    result.manifest_id
+                );
+
+                // Add RLM tools to registry
+                let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
+                let context_tools = create_context_tools(rlm_ops.clone());
+                for tool in context_tools {
+                    let schema = tool.schema();
+                    tool_registry.register(&schema.name.clone(), tool);
+                }
+                info!("Added 3 RLM context tools to registry");
+
+                // Generate system prompt with manifest reference
+                // Recreate bridge since we moved it into Arc
+                let bridge_for_prompt = RlmBridge::with_default_manager();
+                let system_prompt = bridge_for_prompt.generate_system_prompt(&result);
+
+                (Some(system_prompt), Some(result.manifest_id))
+            }
+            Err(e) => {
+                warn!("RLM decomposition failed, falling back to normal mode: {e}");
+                (None, None)
+            }
+        }
+    } else {
+        debug!(
+            "RLM mode not needed: {} tokens within {} context limit",
+            input_tokens,
+            context_size
+        );
+        (None, None)
+    };
+
+    if let Some(manifest_id) = &rlm_manifest_id {
+        debug!("RLM manifest {} ready for context queries", manifest_id);
+    }
+
     update_progress("Generating LLM response", 40);
 
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
@@ -150,11 +209,27 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    let messages = vec![arkavo_llm::Message {
-        role: arkavo_llm::Role::User,
-        content: augmented_content,
-        images: None,
-    }];
+    // Build messages, prepending RLM system prompt if active
+    let messages = if let Some(ref rlm_prompt) = rlm_system_prompt {
+        vec![
+            arkavo_llm::Message {
+                role: arkavo_llm::Role::System,
+                content: rlm_prompt.clone(),
+                images: None,
+            },
+            arkavo_llm::Message {
+                role: arkavo_llm::Role::User,
+                content: augmented_content,
+                images: None,
+            },
+        ]
+    } else {
+        vec![arkavo_llm::Message {
+            role: arkavo_llm::Role::User,
+            content: augmented_content,
+            images: None,
+        }]
+    };
 
     let response = router
         .route_with_tools(&task_content, messages, Some(&registry_arc))
