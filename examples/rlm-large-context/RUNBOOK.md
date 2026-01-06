@@ -45,29 +45,39 @@ chmod +x run_analysis.sh
 ./run_analysis.sh
 ```
 
+The script automatically manages the agent lifecycle:
+1. Starts an Arkavo agent in the background
+2. Waits for agent to be ready (mDNS advertisement)
+3. Submits the task via `arkavo task`
+4. Cleans up agent on exit
+
 **What to watch for:**
 
-1. **RLM Activation Message**:
+1. **Agent Startup**:
    ```
-   [RLM] Context size: 102,400 tokens
-   [RLM] Model context: 8,192 tokens
-   [RLM] Activating RLM mode...
-   ```
-
-2. **Decomposition**:
-   ```
-   [RLM] Decomposing context into chunks...
-   [RLM] Created manifest: rlm-XXXXXXXX
-   [RLM] Chunks: 25
+   Starting Arkavo agent for RLM processing...
+   Agent started (PID: 12345)
+   Waiting for agent to advertise...
+   Agent ready!
    ```
 
-3. **Tool Calls** (if model supports tools):
+2. **RLM Activation Message**:
+   ```
+   RLM mode activated for mesh task: 25600 tokens > 70% of 8192 context
+   ```
+
+3. **Decomposition**:
+   ```
+   Task context decomposed: 6 chunks, 25600 tokens, manifest=rlm-XXXXXXXX
+   ```
+
+4. **Tool Calls** (if model supports tools):
    ```
    [TOOL] context_search("password", "auth", "sql")
    [TOOL] context_probe([3, 7, 15])
    ```
 
-4. **Security Report**:
+5. **Security Report**:
    - CRITICAL: MD5 password hashing in `auth/password.rs`
    - HIGH: SQL injection in `db/queries.rs`
    - MEDIUM: Missing rate limiting in `api/auth.rs`
@@ -97,6 +107,23 @@ grep -q "rate\|limiting" analysis.log && echo "✓ Found rate limiting issue"
 ```
 
 ## Common Failure Modes
+
+### Agent Failed to Start
+
+**Symptom**: `ERROR: Agent failed to start`
+
+**Causes**:
+1. Another agent already running on the same port
+2. Missing model configuration
+
+**Fix**:
+```bash
+# Check for existing agents
+pgrep -f "arkavo agent" && pkill -f "arkavo agent"
+
+# Check agent logs
+cat /tmp/arkavo-agent.log
+```
 
 ### RLM Not Activating
 

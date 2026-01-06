@@ -5,6 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
 REPO_DIR="$SCRIPT_DIR/synthetic_repo"
+AGENT_PID=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -13,6 +14,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Cleanup function to stop agent on exit
+cleanup() {
+    if [ -n "$AGENT_PID" ]; then
+        echo -e "\n${YELLOW}Stopping agent (PID: $AGENT_PID)...${NC}"
+        kill "$AGENT_PID" 2>/dev/null || true
+        wait "$AGENT_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 echo -e "${CYAN}━━━━━━ RLM Large Context Demo ━━━━━━${NC}"
 echo ""
@@ -74,13 +85,42 @@ Provide a security report with severity levels (CRITICAL, HIGH, MEDIUM, LOW).
 CODEBASE:
 $CODEBASE"
 
-# Run via arkavo task (uses conductor with RLM)
-echo "Submitting analysis task to Arkavo..."
+# Start Arkavo agent in background (provides RLM conductor)
+echo -e "${BLUE}━━━━━━ STARTING AGENT ━━━━━━${NC}"
+echo ""
+echo "Starting Arkavo agent for RLM processing..."
+
+# Start agent in background with debug output
+# Use ARKAVO_OFFLINE=1 to force local models (better fence format support)
+ARKAVO_DEBUG=1 ARKAVO_OFFLINE=1 "$BINARY" agent run > /tmp/arkavo-agent.log 2>&1 &
+AGENT_PID=$!
+echo "Agent started (PID: $AGENT_PID)"
+
+# Wait for agent to be ready (mDNS advertisement takes a moment)
+echo "Waiting for agent to advertise..."
+sleep 3
+
+# Verify agent is still running
+if ! kill -0 "$AGENT_PID" 2>/dev/null; then
+    echo -e "${RED}ERROR: Agent failed to start. Check /tmp/arkavo-agent.log${NC}"
+    cat /tmp/arkavo-agent.log
+    exit 1
+fi
+
+echo -e "${GREEN}Agent ready!${NC}"
 echo ""
 
-# Use ARKAVO_DEBUG to see RLM activation
-ARKAVO_DEBUG=1 "$BINARY" chat --prompt "$TASK" 2>&1 | while IFS= read -r line; do
-    if [[ "$line" == *"[RLM]"* ]]; then
+# Submit analysis via arkavo task (uses conductor with full RLM support)
+echo -e "${BLUE}━━━━━━ SUBMITTING TASK ━━━━━━${NC}"
+echo ""
+echo "Submitting analysis task via mesh..."
+echo ""
+
+# Run task command - it will discover the agent and use RLM
+ARKAVO_DEBUG=1 "$BINARY" task "$TASK" 2>&1 | while IFS= read -r line; do
+    if [[ "$line" == *"RLM"* ]]; then
+        echo -e "${GREEN}$line${NC}"
+    elif [[ "$line" == *"decompos"* ]]; then
         echo -e "${GREEN}$line${NC}"
     elif [[ "$line" == *"CRITICAL"* ]]; then
         echo -e "${RED}$line${NC}"
@@ -90,6 +130,8 @@ ARKAVO_DEBUG=1 "$BINARY" chat --prompt "$TASK" 2>&1 | while IFS= read -r line; d
         echo -e "${BLUE}$line${NC}"
     elif [[ "$line" == *"context_"* ]]; then
         echo -e "${CYAN}[TOOL] $line${NC}"
+    elif [[ "$line" == *"chunk"* ]]; then
+        echo -e "${CYAN}$line${NC}"
     else
         echo "$line"
     fi

@@ -355,6 +355,9 @@ impl Router {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
 
+        // Estimate input tokens for context-aware tool discovery
+        let input_tokens = Self::estimate_tokens(task_description);
+
         for attempt in 0..MAX_RETRIES {
             let tools_json = match tool_registry {
                 Some(registry) => {
@@ -362,9 +365,14 @@ impl Router {
                         Self::detail_level_for_model(&current_decision.recommended_model);
                     let keywords = Self::extract_keywords(task_description);
 
-                    // Use hybrid search: semantic + token-based
-                    let tool_infos =
-                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based + context-size-aware
+                    let tool_infos = Self::search_tools_hybrid(
+                        registry,
+                        &keywords,
+                        detail_level,
+                        Some(input_tokens),
+                    )
+                    .await;
 
                     Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
                         &tool_infos,
@@ -574,6 +582,9 @@ impl Router {
     ) -> Result<ProviderResponse> {
         let mut current_decision = self.classify(task_description).await?;
 
+        // Estimate input tokens for context-aware tool discovery
+        let input_tokens = Self::estimate_tokens(task_description);
+
         for attempt in 0..max_retries {
             let tools_json = match tool_registry {
                 Some(registry) => {
@@ -581,9 +592,14 @@ impl Router {
                         Self::detail_level_for_model(&current_decision.recommended_model);
                     let keywords = Self::extract_keywords(task_description);
 
-                    // Use hybrid search: semantic + token-based
-                    let tool_infos =
-                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based + context-size-aware
+                    let tool_infos = Self::search_tools_hybrid(
+                        registry,
+                        &keywords,
+                        detail_level,
+                        Some(input_tokens),
+                    )
+                    .await;
 
                     // Use the correct format based on the model provider
                     let json = match current_decision.recommended_model {
@@ -1190,6 +1206,11 @@ impl Router {
         words.join(" ")
     }
 
+    /// Estimate token count from text (approximately 4 chars per token)
+    fn estimate_tokens(text: &str) -> usize {
+        text.len() / 4
+    }
+
     /// Determine detail level based on model context size
     fn detail_level_for_model(model: &decision::ModelChoice) -> arkavo_mcp_tools::DetailLevel {
         use decision::ModelChoice;
@@ -1215,13 +1236,36 @@ impl Router {
     }
 
     /// Search tools using hybrid approach: semantic (if available) + token-based
+    ///
+    /// When input_tokens exceeds RLM threshold (70% of model context), automatically
+    /// includes "context" in the search to surface RLM context tools (context_search,
+    /// context_probe, context_decompose) for large context handling.
     async fn search_tools_hybrid(
         registry: &arkavo_mcp_tools::ToolRegistry,
         query: &str,
         detail: arkavo_mcp_tools::DetailLevel,
+        input_tokens: Option<usize>,
     ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
+        // Check if we should surface RLM context tools based on input size
+        let augmented_query = if let Some(tokens) = input_tokens {
+            // RLM activates at 70% of typical model context (8K = 5600 tokens)
+            const RLM_THRESHOLD: usize = 5600;
+            if tokens > RLM_THRESHOLD {
+                tracing::debug!(
+                    "Large context detected ({} tokens > {}), surfacing context tools",
+                    tokens,
+                    RLM_THRESHOLD
+                );
+                format!("{query} context")
+            } else {
+                query.to_string()
+            }
+        } else {
+            query.to_string()
+        };
+
         // See #383: Add semantic search with local model when llama-cpp feature is enabled
-        registry.search_tools(query, detail)
+        registry.search_tools(&augmented_query, detail)
     }
 
     /// Extract tool calls from text content using multiple parsing strategies

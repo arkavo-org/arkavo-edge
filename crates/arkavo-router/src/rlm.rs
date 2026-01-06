@@ -276,33 +276,27 @@ impl RlmContextManager {
             .join("\n");
 
         format!(
-            r#"You have access to a large context that has been decomposed into {} chunks ({} total tokens).
+            r#"Context has {chunk_count} chunks. Use tools to access code.
 
-AVAILABLE CONTEXT CHUNKS:
-{}
-{}
+Chunks: {chunk_list}
 
-To answer questions about this context, use these tools:
-- context_probe(manifest_id="{}", indices=[...]) - Fetch specific chunks by index
-- context_search(manifest_id="{}", keywords=[...]) - Find chunks matching keywords
+Tools available:
+- context_search: find code by keywords
+- context_probe: get chunk content by index
 
-Strategy:
-1. First use context_search to find relevant chunks based on keywords
-2. Then use context_probe to fetch the full content of relevant chunks
-3. Analyze the fetched content to answer the question
-4. If more context is needed, search or probe additional chunks
+Call tools using this exact format:
+```context_search
+manifest_id: {manifest_id}
+keywords: your, search, terms
+```
 
-IMPORTANT: Do not assume you know the content. Always probe chunks before answering."#,
-            result.chunk_count,
-            result.total_tokens,
-            chunk_list,
-            if result.chunk_count > 20 {
-                format!("  ... and {} more chunks", result.chunk_count - 20)
-            } else {
-                String::new()
-            },
-            result.manifest_id,
-            result.manifest_id,
+```context_probe
+manifest_id: {manifest_id}
+indices: 0, 1, 2
+```"#,
+            chunk_count = result.chunk_count,
+            chunk_list = chunk_list,
+            manifest_id = result.manifest_id,
         )
     }
 

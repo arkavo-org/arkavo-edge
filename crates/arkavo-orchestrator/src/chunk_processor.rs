@@ -184,7 +184,7 @@ impl ChunkProcessor {
 
         for (i, agent) in agents.iter().enumerate() {
             // Some agents get one extra chunk for even distribution
-            let chunks_for_agent = base_chunks + if i < extra_chunks { 1 } else { 0 };
+            let chunks_for_agent = base_chunks + usize::from(i < extra_chunks);
 
             if chunks_for_agent == 0 {
                 continue;

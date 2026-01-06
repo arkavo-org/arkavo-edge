@@ -353,12 +353,28 @@ impl A2aServer {
     }
 
     async fn initialize_router(&self) {
-        info!("Initializing router for dynamic model selection");
-        match arkavo_router::Router::new().await {
+        // Check for offline mode (local models only)
+        let offline_mode = std::env::var("ARKAVO_OFFLINE").is_ok();
+        if offline_mode {
+            info!("Initializing router in OFFLINE mode (local models only)");
+        } else {
+            info!("Initializing router for dynamic model selection");
+        }
+
+        let router_result = if offline_mode {
+            arkavo_router::Router::new_offline().await
+        } else {
+            arkavo_router::Router::new().await
+        };
+
+        match router_result {
             Ok(router) => {
                 let router = Arc::new(router);
                 *self.router.write().await = Some(router.clone());
-                info!("✓ Successfully initialized router");
+                info!(
+                    "✓ Successfully initialized router (offline={})",
+                    offline_mode
+                );
 
                 // Set router on learning bus for LLM-based synthesis
                 if let Some(bus) = self.learning_bus.read().await.as_ref() {

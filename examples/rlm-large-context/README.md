@@ -19,9 +19,6 @@ A local 7B model with an 8K context window needs to analyze a 100K+ token codeba
 ```bash
 # Build Arkavo
 cargo build -p arkavo
-
-# Verify RLM tools are available
-../../target/debug/arkavo chat --prompt "List available context tools"
 ```
 
 ### Run the Demo
@@ -30,11 +27,16 @@ cargo build -p arkavo
 # 1. Generate a large synthetic codebase
 ./generate_codebase.sh
 
-# 2. Run the analysis task
+# 2. Run the analysis (automatically starts agent)
 ./run_analysis.sh
-
-# 3. Watch RLM decompose and query the context
 ```
+
+The script automatically:
+- Starts an Arkavo agent in the background
+- Detects RLM activation for large contexts
+- Uses context tools to navigate chunks
+- Produces security analysis
+- Cleans up agent on exit
 
 ## How It Works
 
