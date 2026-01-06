@@ -1370,8 +1370,12 @@ impl Router {
     /// - result = tool-name(param="value", param2=123)
     /// - context_probe(indices=[0, 1])
     /// - `context_search(keywords=["security", "auth"])`
+    /// - Code inside markdown blocks: ```python\ncontext_search(...)\n```
     fn extract_python_function_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
         use regex::Regex;
+
+        // First, extract content from markdown code blocks to avoid matching "python" as tool
+        let content_to_parse = Self::extract_code_block_content(content);
 
         // Match: optional_var = tool-name(args) - handle nested brackets in args
         let re = match Regex::new(
@@ -1383,15 +1387,33 @@ impl Router {
 
         let mut calls = Vec::new();
 
-        for cap in re.captures_iter(content) {
+        for cap in re.captures_iter(&content_to_parse) {
             let (tool_name, args_str) = match (cap.get(1), cap.get(2)) {
                 (Some(t), Some(a)) => (t.as_str().to_string(), a.as_str()),
                 _ => continue,
             };
 
-            // Skip common Python built-ins
+            // Skip common Python built-ins and markdown code fence language hints
             if [
-                "print", "len", "str", "int", "float", "list", "dict", "range", "type",
+                "print",
+                "len",
+                "str",
+                "int",
+                "float",
+                "list",
+                "dict",
+                "range",
+                "type",
+                "python",
+                "bash",
+                "shell",
+                "rust",
+                "javascript",
+                "js",
+                "typescript",
+                "ts",
+                "json",
+                "yaml",
             ]
             .contains(&tool_name.as_str())
             {
@@ -1408,6 +1430,37 @@ impl Router {
         }
 
         if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Extract content from markdown code blocks
+    ///
+    /// Handles ```language\ncode\n``` blocks, returning the code content
+    /// with the language hint stripped out. Also returns non-block content.
+    fn extract_code_block_content(content: &str) -> String {
+        use regex::Regex;
+
+        // Match markdown code blocks: ```lang\ncode\n```
+        let code_block_re = match Regex::new(r"```(?:\w+)?\s*\n([\s\S]*?)```") {
+            Ok(r) => r,
+            Err(_) => return content.to_string(),
+        };
+
+        let mut extracted = String::new();
+
+        // Extract content from inside code blocks
+        for cap in code_block_re.captures_iter(content) {
+            if let Some(code) = cap.get(1) {
+                extracted.push_str(code.as_str());
+                extracted.push('\n');
+            }
+        }
+
+        // Also include content outside code blocks (for inline function calls)
+        // Remove code blocks first, then add remaining content
+        let without_blocks = code_block_re.replace_all(content, "");
+        extracted.push_str(&without_blocks);
+
+        extracted
     }
 
     /// Parse Python keyword arguments including lists
@@ -1728,5 +1781,31 @@ chunks = context_probe(indices=[0, 1, 2])
         assert_eq!(calls.len(), 2);
         assert!(calls.iter().any(|c| c.tool_name == "context_search"));
         assert!(calls.iter().any(|c| c.tool_name == "context_probe"));
+
+        // Ensure "python" is not extracted as a tool
+        assert!(!calls.iter().any(|c| c.tool_name == "python"));
+    }
+
+    #[test]
+    fn test_extract_code_block_content() {
+        let content = r#"
+Let me explain:
+
+```python
+result = context_search(keywords=["auth"])
+```
+
+You can also use:
+
+```bash
+echo "hello"
+```
+"#;
+        let extracted = Router::extract_code_block_content(content);
+
+        // Should contain the code from inside the blocks
+        assert!(extracted.contains("result = context_search"));
+        // Should NOT contain the language hints as standalone text
+        // (they're stripped from the fence markers)
     }
 }
