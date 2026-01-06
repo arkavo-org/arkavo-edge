@@ -3,6 +3,8 @@ use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, LlmConfig, Message, encode_image_file};
 use arkavo_memory::{ContextLedger, storage::MemoryStorage};
+#[cfg(not(all(unix, feature = "mcp-tools")))]
+use arkavo_protocol::server::{RlmBridge, estimate_tokens, model_context_size};
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
@@ -37,6 +39,32 @@ fn get_or_create_runtime() -> &'static Runtime {
             .build()
             .expect("Failed to create tokio runtime")
     })
+}
+
+/// Check if RLM mode should activate and return system prompt if so
+#[cfg(not(all(unix, feature = "mcp-tools")))]
+fn check_rlm_activation(content: &str, model_hint: Option<&str>, is_cloud: bool) -> Option<String> {
+    let input_tokens = estimate_tokens(content);
+    let context_size = model_context_size(model_hint, is_cloud);
+    let rlm_bridge = RlmBridge::with_default_manager();
+
+    if rlm_bridge.should_activate(input_tokens, context_size) {
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "[DEBUG] RLM mode would activate: {} tokens > {}% of {} context window",
+                input_tokens, 70, context_size
+            );
+        }
+        // Return a hint that RLM mode should be used
+        // Full RLM decomposition requires async context; this is a detection hint
+        Some(format!(
+            "Note: Input context ({} tokens) exceeds 70% of model context ({} tokens). \
+             Consider using 'arkavo task' with mesh agents for optimal RLM processing.",
+            input_tokens, context_size
+        ))
+    } else {
+        None
+    }
 }
 
 /// Strip LLM internal blocks (`<think>`, `<tool>`, conversation prefixes) for clean output
@@ -1507,6 +1535,30 @@ async fn process_message_print(
                 "UNBALANCED!"
             }
         );
+    }
+
+    // Check if RLM mode would be beneficial for this context size
+    let full_context: String = messages.iter().map(|m| m.content.as_str()).collect();
+    // Derive model info from provider name
+    let provider_name = client.provider_name().to_lowercase();
+    let model_size_hint = if provider_name.contains("270m") {
+        Some("270M")
+    } else if provider_name.contains("1b") {
+        Some("1B")
+    } else if provider_name.contains("7b") {
+        Some("7B")
+    } else {
+        None
+    };
+    let is_large_context_provider = provider_name.contains("gemini")
+        || provider_name.contains("claude")
+        || provider_name.contains("gpt")
+        || provider_name.contains("anthropic");
+
+    if let Some(rlm_hint) =
+        check_rlm_activation(&full_context, model_size_hint, is_large_context_provider)
+    {
+        eprintln!("[RLM] {}", rlm_hint);
     }
 
     // Use streaming but only print content

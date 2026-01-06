@@ -3,6 +3,7 @@
 
 pub mod chunker;
 pub mod compressor;
+pub mod decomposer;
 pub mod deduplicator;
 pub mod error;
 pub mod metrics;
@@ -12,6 +13,9 @@ pub mod summarizer;
 
 pub use chunker::SemanticChunker;
 pub use compressor::ContextCompressor;
+pub use decomposer::{
+    ChunkRef, ChunkStorage, ContextDecomposer, ContextManifest, MemoryChunkStorage,
+};
 pub use deduplicator::Deduplicator;
 pub use error::{Error, Result};
 pub use metrics::{CompressionMetrics, CompressionStats};
@@ -20,3 +24,6 @@ pub use prompt_enricher::{
     CodeContext, FileContext, ProblemStatement, PromptEnricher, PromptTemplate,
 };
 pub use summarizer::ContextSummarizer;
+
+#[cfg(feature = "iroh-storage")]
+pub use decomposer::IrohChunkStorage;

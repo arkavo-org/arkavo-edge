@@ -15,6 +15,7 @@ pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod preflight;
+pub mod rlm;
 pub mod selector;
 pub mod stream;
 pub mod tool_request_parser;
@@ -38,6 +39,10 @@ pub use orchestrator::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
+pub use rlm::{
+    RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
+    RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,
+};
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
@@ -350,6 +355,9 @@ impl Router {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
 
+        // Estimate input tokens for context-aware tool discovery
+        let input_tokens = Self::estimate_tokens(task_description);
+
         for attempt in 0..MAX_RETRIES {
             let tools_json = match tool_registry {
                 Some(registry) => {
@@ -357,9 +365,14 @@ impl Router {
                         Self::detail_level_for_model(&current_decision.recommended_model);
                     let keywords = Self::extract_keywords(task_description);
 
-                    // Use hybrid search: semantic + token-based
-                    let tool_infos =
-                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based + context-size-aware
+                    let tool_infos = Self::search_tools_hybrid(
+                        registry,
+                        &keywords,
+                        detail_level,
+                        Some(input_tokens),
+                    )
+                    .await;
 
                     Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
                         &tool_infos,
@@ -376,6 +389,10 @@ impl Router {
                 .complete_with_tools(messages.clone(), tools_json, None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Post-process tool calls to handle language identifier fences (e.g., ```python)
+            // The provider may return these as tool calls, but they contain nested tool calls
+            response.tool_calls = Self::filter_and_extract_tool_calls(response.tool_calls);
 
             // Extract tool calls from text content if structured tool_calls is empty
             if response.tool_calls.is_empty() && !response.content.is_empty() {
@@ -569,6 +586,9 @@ impl Router {
     ) -> Result<ProviderResponse> {
         let mut current_decision = self.classify(task_description).await?;
 
+        // Estimate input tokens for context-aware tool discovery
+        let input_tokens = Self::estimate_tokens(task_description);
+
         for attempt in 0..max_retries {
             let tools_json = match tool_registry {
                 Some(registry) => {
@@ -576,9 +596,14 @@ impl Router {
                         Self::detail_level_for_model(&current_decision.recommended_model);
                     let keywords = Self::extract_keywords(task_description);
 
-                    // Use hybrid search: semantic + token-based
-                    let tool_infos =
-                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+                    // Use hybrid search: semantic + token-based + context-size-aware
+                    let tool_infos = Self::search_tools_hybrid(
+                        registry,
+                        &keywords,
+                        detail_level,
+                        Some(input_tokens),
+                    )
+                    .await;
 
                     // Use the correct format based on the model provider
                     let json = match current_decision.recommended_model {
@@ -1185,6 +1210,11 @@ impl Router {
         words.join(" ")
     }
 
+    /// Estimate token count from text (approximately 4 chars per token)
+    fn estimate_tokens(text: &str) -> usize {
+        text.len() / 4
+    }
+
     /// Determine detail level based on model context size
     fn detail_level_for_model(model: &decision::ModelChoice) -> arkavo_mcp_tools::DetailLevel {
         use decision::ModelChoice;
@@ -1210,13 +1240,106 @@ impl Router {
     }
 
     /// Search tools using hybrid approach: semantic (if available) + token-based
+    ///
+    /// When input_tokens exceeds RLM threshold (70% of model context), automatically
+    /// includes "context" in the search to surface RLM context tools (context_search,
+    /// context_probe, context_decompose) for large context handling.
     async fn search_tools_hybrid(
         registry: &arkavo_mcp_tools::ToolRegistry,
         query: &str,
         detail: arkavo_mcp_tools::DetailLevel,
+        input_tokens: Option<usize>,
     ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
+        // Check if we should surface RLM context tools based on input size
+        let augmented_query = if let Some(tokens) = input_tokens {
+            // RLM activates at 70% of typical model context (8K = 5600 tokens)
+            const RLM_THRESHOLD: usize = 5600;
+            if tokens > RLM_THRESHOLD {
+                tracing::debug!(
+                    "Large context detected ({} tokens > {}), surfacing context tools",
+                    tokens,
+                    RLM_THRESHOLD
+                );
+                format!("{query} context")
+            } else {
+                query.to_string()
+            }
+        } else {
+            query.to_string()
+        };
+
         // See #383: Add semantic search with local model when llama-cpp feature is enabled
-        registry.search_tools(query, detail)
+        registry.search_tools(&augmented_query, detail)
+    }
+
+    /// Filter and extract tool calls from provider-returned tool_calls
+    ///
+    /// When a local LLM returns a fence like ```python\ncontext_search(...)```,
+    /// the provider parses this as tool_name="python" with the code as arguments.
+    /// This function detects language identifiers and extracts the nested tool calls.
+    fn filter_and_extract_tool_calls(
+        tool_calls: Vec<arkavo_llm::ParsedToolCall>,
+    ) -> Vec<arkavo_llm::ParsedToolCall> {
+        const LANG_IDENTIFIERS: &[&str] = &[
+            "python",
+            "py",
+            "javascript",
+            "js",
+            "typescript",
+            "ts",
+            "rust",
+            "go",
+            "java",
+            "ruby",
+            "bash",
+            "sh",
+            "shell",
+            "zsh",
+            "powershell",
+            "ps1",
+            "sql",
+            "json",
+            "yaml",
+            "toml",
+        ];
+
+        tool_calls
+            .into_iter()
+            .flat_map(|call| {
+                let tool_lower = call.tool_name.to_lowercase();
+
+                if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
+                    // This is a language fence, try to extract nested tool calls
+                    let content = serde_json::to_string(&call.arguments)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .replace("\\n", "\n")
+                        .replace("\\\"", "\"");
+
+                    tracing::debug!(
+                        "Found language fence '{}', extracting nested calls from: {}",
+                        call.tool_name,
+                        &content[..std::cmp::min(100, content.len())]
+                    );
+
+                    // Try Python function-call syntax first (most common for code blocks)
+                    if let Some(extracted) = Self::extract_python_function_calls(&content) {
+                        return extracted;
+                    }
+
+                    // Try other formats
+                    if let Some(extracted) = Self::extract_json_tool_calls(&content) {
+                        return extracted;
+                    }
+
+                    // No valid tool calls found in language fence
+                    vec![]
+                } else {
+                    // Keep non-language tool calls as-is
+                    vec![call]
+                }
+            })
+            .collect()
     }
 
     /// Extract tool calls from text content using multiple parsing strategies
@@ -1319,58 +1442,59 @@ impl Router {
     /// Handles formats like:
     /// - tool_name(param="value")
     /// - result = tool-name(param="value", param2=123)
+    /// - context_probe(indices=[0, 1])
+    /// - `context_search(keywords=["security", "auth"])`
+    /// - Code inside markdown blocks: ```python\ncontext_search(...)\n```
     fn extract_python_function_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
         use regex::Regex;
 
-        // Match: optional_var = tool-name(args)
-        let re = match Regex::new(r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*)\)") {
+        // First, extract content from markdown code blocks to avoid matching "python" as tool
+        let content_to_parse = Self::extract_code_block_content(content);
+
+        // Match: optional_var = tool-name(args) - handle nested brackets in args
+        let re = match Regex::new(
+            r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*(?:\[[^\]]*\][^)]*)*)\)",
+        ) {
             Ok(r) => r,
             Err(_) => return None,
         };
-        // Parse kwargs: param="value", param2=123
-        let kwarg_re = match Regex::new(r#"(\w+)\s*=\s*(?:"([^"]*)"|(\d+(?:\.\d+)?)|(\w+))"#) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
+
         let mut calls = Vec::new();
 
-        for cap in re.captures_iter(content) {
+        for cap in re.captures_iter(&content_to_parse) {
             let (tool_name, args_str) = match (cap.get(1), cap.get(2)) {
                 (Some(t), Some(a)) => (t.as_str().to_string(), a.as_str()),
                 _ => continue,
             };
 
-            // Skip common Python built-ins
+            // Skip common Python built-ins and markdown code fence language hints
             if [
-                "print", "len", "str", "int", "float", "list", "dict", "range", "type",
+                "print",
+                "len",
+                "str",
+                "int",
+                "float",
+                "list",
+                "dict",
+                "range",
+                "type",
+                "python",
+                "bash",
+                "shell",
+                "rust",
+                "javascript",
+                "js",
+                "typescript",
+                "ts",
+                "json",
+                "yaml",
             ]
             .contains(&tool_name.as_str())
             {
                 continue;
             }
 
-            let mut args = serde_json::Map::new();
-
-            for kwarg in kwarg_re.captures_iter(args_str) {
-                let key = match kwarg.get(1) {
-                    Some(k) => k.as_str().to_string(),
-                    None => continue,
-                };
-                let value = if let Some(s) = kwarg.get(2) {
-                    serde_json::Value::String(s.as_str().to_string())
-                } else if let Some(n) = kwarg.get(3) {
-                    if let Ok(num) = n.as_str().parse::<f64>() {
-                        serde_json::json!(num)
-                    } else {
-                        serde_json::Value::String(n.as_str().to_string())
-                    }
-                } else if let Some(id) = kwarg.get(4) {
-                    serde_json::Value::String(id.as_str().to_string())
-                } else {
-                    continue;
-                };
-                args.insert(key, value);
-            }
+            let args = Self::parse_python_kwargs(args_str);
 
             calls.push(arkavo_llm::ParsedToolCall {
                 tool_name,
@@ -1380,6 +1504,139 @@ impl Router {
         }
 
         if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Extract content from markdown code blocks
+    ///
+    /// Handles ```language\ncode\n``` blocks, returning the code content
+    /// with the language hint stripped out. Also returns non-block content.
+    fn extract_code_block_content(content: &str) -> String {
+        use regex::Regex;
+
+        // Match markdown code blocks: ```lang\ncode\n```
+        let code_block_re = match Regex::new(r"```(?:\w+)?\s*\n([\s\S]*?)```") {
+            Ok(r) => r,
+            Err(_) => return content.to_string(),
+        };
+
+        let mut extracted = String::new();
+
+        // Extract content from inside code blocks
+        for cap in code_block_re.captures_iter(content) {
+            if let Some(code) = cap.get(1) {
+                extracted.push_str(code.as_str());
+                extracted.push('\n');
+            }
+        }
+
+        // Also include content outside code blocks (for inline function calls)
+        // Remove code blocks first, then add remaining content
+        let without_blocks = code_block_re.replace_all(content, "");
+        extracted.push_str(&without_blocks);
+
+        extracted
+    }
+
+    /// Parse Python keyword arguments including lists
+    ///
+    /// Handles: `param="value"`, `param2=123`, `indices=[0, 1]`, `keywords=["a", "b"]`
+    fn parse_python_kwargs(args_str: &str) -> serde_json::Map<String, serde_json::Value> {
+        use regex::Regex;
+
+        let mut args = serde_json::Map::new();
+
+        // Match keyword=value pairs, handling lists with brackets
+        // Pattern: word = (string | number | list | identifier)
+        let kwarg_re = match Regex::new(
+            r#"(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\d+(?:\.\d+)?)|(\[[^\]]*\])|(\w+))"#,
+        ) {
+            Ok(r) => r,
+            Err(_) => return args,
+        };
+
+        for kwarg in kwarg_re.captures_iter(args_str) {
+            let key = match kwarg.get(1) {
+                Some(k) => k.as_str().to_string(),
+                None => continue,
+            };
+
+            let value = if let Some(s) = kwarg.get(2) {
+                // Double-quoted string
+                serde_json::Value::String(s.as_str().to_string())
+            } else if let Some(s) = kwarg.get(3) {
+                // Single-quoted string
+                serde_json::Value::String(s.as_str().to_string())
+            } else if let Some(n) = kwarg.get(4) {
+                // Number
+                if let Ok(num) = n.as_str().parse::<i64>() {
+                    serde_json::json!(num)
+                } else if let Ok(num) = n.as_str().parse::<f64>() {
+                    serde_json::json!(num)
+                } else {
+                    serde_json::Value::String(n.as_str().to_string())
+                }
+            } else if let Some(list_str) = kwarg.get(5) {
+                // List: [0, 1] or ["a", "b"]
+                Self::parse_python_list(list_str.as_str())
+            } else if let Some(id) = kwarg.get(6) {
+                // Bare identifier (True, False, None, or variable name)
+                match id.as_str() {
+                    "True" => serde_json::Value::Bool(true),
+                    "False" => serde_json::Value::Bool(false),
+                    "None" => serde_json::Value::Null,
+                    other => serde_json::Value::String(other.to_string()),
+                }
+            } else {
+                continue;
+            };
+
+            args.insert(key, value);
+        }
+
+        args
+    }
+
+    /// Parse a Python list literal like `[0, 1]` or `["a", "b"]`
+    fn parse_python_list(list_str: &str) -> serde_json::Value {
+        // Remove brackets and split by comma
+        let inner = list_str
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim();
+
+        if inner.is_empty() {
+            return serde_json::json!([]);
+        }
+
+        let mut items = Vec::new();
+
+        // Simple split by comma - handles basic cases
+        for item in inner.split(',') {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+
+            // Try to parse as number first
+            if let Ok(n) = item.parse::<i64>() {
+                items.push(serde_json::json!(n));
+            } else if let Ok(n) = item.parse::<f64>() {
+                items.push(serde_json::json!(n));
+            } else if item.starts_with('"') && item.ends_with('"') {
+                // Double-quoted string
+                let s = item.trim_matches('"');
+                items.push(serde_json::Value::String(s.to_string()));
+            } else if item.starts_with('\'') && item.ends_with('\'') {
+                // Single-quoted string
+                let s = item.trim_matches('\'');
+                items.push(serde_json::Value::String(s.to_string()));
+            } else {
+                // Bare identifier or other
+                items.push(serde_json::Value::String(item.to_string()));
+            }
+        }
+
+        serde_json::Value::Array(items)
     }
 
     /// Extract tool name from first word on each line
@@ -1538,5 +1795,91 @@ mod tests {
             return;
         }
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_python_list_numbers() {
+        let result = Router::parse_python_list("[0, 1, 2]");
+        assert_eq!(result, serde_json::json!([0, 1, 2]));
+    }
+
+    #[test]
+    fn test_parse_python_list_strings() {
+        let result = Router::parse_python_list(r#"["security", "password"]"#);
+        assert_eq!(result, serde_json::json!(["security", "password"]));
+    }
+
+    #[test]
+    fn test_parse_python_kwargs_with_list() {
+        let result = Router::parse_python_kwargs(r#"indices=[0, 1], name="test""#);
+        assert_eq!(result.get("indices"), Some(&serde_json::json!([0, 1])));
+        assert_eq!(result.get("name"), Some(&serde_json::json!("test")));
+    }
+
+    #[test]
+    fn test_extract_python_function_calls_with_list() {
+        let content = r#"context_probe(indices=[0, 1])"#;
+        let calls = Router::extract_python_function_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "context_probe");
+        assert_eq!(
+            calls[0].arguments.get("indices"),
+            Some(&serde_json::json!([0, 1]))
+        );
+    }
+
+    #[test]
+    fn test_extract_python_function_calls_context_search() {
+        let content = r#"context_search(keywords=["security", "auth"])"#;
+        let calls = Router::extract_python_function_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "context_search");
+        assert_eq!(
+            calls[0].arguments.get("keywords"),
+            Some(&serde_json::json!(["security", "auth"]))
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_calls_from_llm_output() {
+        // Simulates actual LLM output with Python code block
+        let content = r#"
+Here's how to search:
+
+```python
+results = context_search(keywords=["security", "password"])
+chunks = context_probe(indices=[0, 1, 2])
+```
+"#;
+        let calls = Router::extract_tool_calls_from_text(content);
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().any(|c| c.tool_name == "context_search"));
+        assert!(calls.iter().any(|c| c.tool_name == "context_probe"));
+
+        // Ensure "python" is not extracted as a tool
+        assert!(!calls.iter().any(|c| c.tool_name == "python"));
+    }
+
+    #[test]
+    fn test_extract_code_block_content() {
+        let content = r#"
+Let me explain:
+
+```python
+result = context_search(keywords=["auth"])
+```
+
+You can also use:
+
+```bash
+echo "hello"
+```
+"#;
+        let extracted = Router::extract_code_block_content(content);
+
+        // Should contain the code from inside the blocks
+        assert!(extracted.contains("result = context_search"));
+        // Should NOT contain the language hints as standalone text
+        // (they're stripped from the fence markers)
     }
 }

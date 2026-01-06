@@ -5,6 +5,7 @@ pub mod dataflow;
 pub mod mcp;
 pub mod model;
 pub mod orchestrator;
+pub mod rlm_integration;
 pub mod task;
 pub mod tdf;
 pub mod terminal;

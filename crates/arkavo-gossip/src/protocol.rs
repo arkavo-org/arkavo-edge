@@ -15,8 +15,9 @@ use crate::error::{GossipError, GossipResult};
 use crate::learning_message::{LessonAnnouncement, LessonStatus};
 use crate::lesson_consensus::LessonConsensusState;
 use crate::message::{
-    AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
-    PatchRequest, PatchStatus, PatchVote,
+    AntiEntropyDigest, ContextChunkDelivery, ContextChunkRequest, ContextManifestAnnouncement,
+    GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry, PatchRequest, PatchStatus,
+    PatchVote,
 };
 use crate::verification::{KeyRegistry, PatchVerifier};
 
@@ -218,6 +219,14 @@ impl GossipProtocol {
             GossipMessage::LessonRequest(req) => self.handle_lesson_request(req).await,
             GossipMessage::LessonDelivery(delivery) => self.handle_lesson_delivery(delivery).await,
             GossipMessage::LessonDigest(digest) => self.handle_lesson_digest(digest).await,
+            // RLM context manifest messages
+            GossipMessage::ContextManifestAnnounce(ann) => {
+                self.handle_context_manifest_announce(ann).await
+            }
+            GossipMessage::ContextChunkRequest(req) => self.handle_context_chunk_request(req).await,
+            GossipMessage::ContextChunkDelivery(delivery) => {
+                self.handle_context_chunk_delivery(delivery).await
+            }
         }
     }
 
@@ -545,6 +554,75 @@ impl GossipProtocol {
             seen_messages_count: self.seen_messages.read().await.len(),
             seen_lesson_ids_count: self.seen_lesson_ids.read().await.len(),
         }
+    }
+
+    // ========== RLM Context Manifest Handlers ==========
+
+    /// Handle a context manifest announcement
+    ///
+    /// When an agent announces a context manifest, other agents can later request chunks.
+    async fn handle_context_manifest_announce(
+        &self,
+        announcement: ContextManifestAnnouncement,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        tracing::info!(
+            "Received context manifest announcement: {} ({} chunks, {} tokens) from {}",
+            announcement.manifest_id,
+            announcement.chunk_count,
+            announcement.total_tokens,
+            announcement.holder
+        );
+
+        // Propagate to peers (basic gossip)
+        let mut messages = Vec::new();
+        let peers = self
+            .select_propagation_peers(Some(&announcement.holder))
+            .await;
+
+        if !peers.is_empty() {
+            messages.push(GossipMessage::ContextManifestAnnounce(announcement));
+        }
+
+        Ok(messages)
+    }
+
+    /// Handle a context chunk request
+    ///
+    /// If we hold the manifest, return the requested chunks.
+    async fn handle_context_chunk_request(
+        &self,
+        request: ContextChunkRequest,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        tracing::debug!(
+            "Received context chunk request: manifest={} from {} (indices={:?}, keywords={:?})",
+            request.manifest_id,
+            request.requester,
+            request.indices,
+            request.keywords
+        );
+
+        // NOTE: Actual chunk retrieval would integrate with RlmContextManager here.
+        // For now, we log and return empty - the A2A RPC layer handles direct requests.
+        Ok(Vec::new())
+    }
+
+    /// Handle a context chunk delivery
+    ///
+    /// Store the received chunks for local use.
+    async fn handle_context_chunk_delivery(
+        &self,
+        delivery: ContextChunkDelivery,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        tracing::debug!(
+            "Received {} chunks for manifest {} from {}",
+            delivery.chunks.len(),
+            delivery.manifest_id,
+            delivery.holder
+        );
+
+        // NOTE: Chunk storage would integrate with RlmContextManager here.
+        // For now, we just acknowledge receipt.
+        Ok(Vec::new())
     }
 }
 

@@ -605,11 +605,14 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
             return Err(format!("Task blocked by policy {policy_id}: {reason}").into());
         }
 
+        // Send raw task content to agent - agent handles RLM decomposition if needed
+        let task_prompt = format!(
+            "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
+        );
+
         let message = Message {
             parts: vec![MessagePart::Text {
-                content: format!(
-                    "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
-                ),
+                content: task_prompt,
             }],
             metadata: Some(serde_json::json!({
                 "task_type": "code_task",

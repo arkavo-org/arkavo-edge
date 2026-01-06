@@ -651,6 +651,34 @@ pub enum MessagePart {
         /// The actual data
         content: serde_json::Value,
     },
+    /// RLM Context Manifest - decomposed large context
+    ContextManifest {
+        /// Unique manifest identifier
+        manifest_id: String,
+        /// Summary of the decomposed context
+        summary: String,
+        /// Number of chunks in the manifest
+        chunk_count: usize,
+        /// Total tokens across all chunks
+        total_tokens: usize,
+        /// Chunk previews with hints for search
+        #[serde(default)]
+        chunk_previews: Vec<ChunkPreviewInfo>,
+    },
+}
+
+/// Preview information for a chunk in an RLM manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChunkPreviewInfo {
+    /// Chunk index (0-based)
+    pub index: usize,
+    /// Token count for this chunk
+    pub tokens: usize,
+    /// Preview text (first ~100 chars)
+    pub preview: String,
+    /// Semantic hints/keywords for searching
+    #[serde(default)]
+    pub hints: Vec<String>,
 }
 
 /// Message send response

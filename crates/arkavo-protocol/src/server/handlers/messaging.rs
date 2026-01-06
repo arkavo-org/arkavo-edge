@@ -37,11 +37,12 @@ pub async fn handle_message_send(
         return Err(e);
     }
 
+    // Extract task content from message parts
     let task_content: String = request
         .message
         .parts
         .iter()
-        .filter_map(|p| match p {
+        .filter_map(|part| match part {
             crate::types::MessagePart::Text { content } => Some(content.clone()),
             _ => None,
         })
