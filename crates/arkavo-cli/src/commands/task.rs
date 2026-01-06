@@ -2,11 +2,10 @@ use arkavo_git::{GitManager, safety::RepoGuard};
 use arkavo_protocol::{
     agent_registry::{AgentInfo, AgentRegistry},
     http::HttpTransport,
-    server::{RlmBridge, estimate_tokens, model_context_size},
     transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TlsConfig, TransportConfig},
     types::{
-        ChunkPreviewInfo, Message, MessagePart, MessageSendRequest, MessageSendResponse,
-        TaskGetRequest, TaskGetResponse, TaskStatus,
+        Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest,
+        TaskGetResponse, TaskStatus,
     },
 };
 use std::collections::HashMap;
@@ -606,86 +605,20 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
             return Err(format!("Task blocked by policy {policy_id}: {reason}").into());
         }
 
-        // Check if RLM mode should activate for large tasks
+        // Send raw task content to agent - agent handles RLM decomposition if needed
         let task_prompt = format!(
             "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
         );
-        let input_tokens = estimate_tokens(&task_prompt);
-        // Assume mesh agents have smaller context windows (8K default for local models)
-        let context_size = model_context_size(None, false);
-        let rlm_bridge = RlmBridge::with_default_manager();
 
-        let message = if rlm_bridge.should_activate(input_tokens, context_size) {
-            info!(
-                "RLM mode activated for mesh task: {} tokens > {}% of {} context",
-                input_tokens, 70, context_size
-            );
-
-            // Decompose context and send manifest
-            match rlm_bridge.manager().decompose(&task_prompt).await {
-                Ok(result) => {
-                    info!(
-                        "Task context decomposed: {} chunks, {} tokens, manifest={}",
-                        result.chunk_count, result.total_tokens, result.manifest_id
-                    );
-
-                    // Convert chunk previews
-                    let chunk_previews: Vec<ChunkPreviewInfo> = result
-                        .chunk_previews
-                        .iter()
-                        .map(|p| ChunkPreviewInfo {
-                            index: p.index,
-                            tokens: p.tokens,
-                            preview: p.preview.clone(),
-                            hints: p.hints.clone(),
-                        })
-                        .collect();
-
-                    Message {
-                        parts: vec![MessagePart::ContextManifest {
-                            manifest_id: result.manifest_id,
-                            summary: result.summary,
-                            chunk_count: result.chunk_count,
-                            total_tokens: result.total_tokens,
-                            chunk_previews,
-                        }],
-                        metadata: Some(serde_json::json!({
-                            "task_type": "code_task",
-                            "source": "arkavo_mesh_cli",
-                            "auto_execute": config.auto_approve,
-                            "rlm_mode": true,
-                        })),
-                    }
-                }
-                Err(e) => {
-                    warn!("RLM decomposition failed, falling back to text: {e}");
-                    Message {
-                        parts: vec![MessagePart::Text {
-                            content: task_prompt,
-                        }],
-                        metadata: Some(serde_json::json!({
-                            "task_type": "code_task",
-                            "source": "arkavo_mesh_cli",
-                            "auto_execute": config.auto_approve,
-                        })),
-                    }
-                }
-            }
-        } else {
-            debug!(
-                "RLM mode not needed: {} tokens within {} context limit",
-                input_tokens, context_size
-            );
-            Message {
-                parts: vec![MessagePart::Text {
-                    content: task_prompt,
-                }],
-                metadata: Some(serde_json::json!({
-                    "task_type": "code_task",
-                    "source": "arkavo_mesh_cli",
-                    "auto_execute": config.auto_approve,
-                })),
-            }
+        let message = Message {
+            parts: vec![MessagePart::Text {
+                content: task_prompt,
+            }],
+            metadata: Some(serde_json::json!({
+                "task_type": "code_task",
+                "source": "arkavo_mesh_cli",
+                "auto_execute": config.auto_approve,
+            })),
         };
 
         let send_request = MessageSendRequest {
