@@ -282,11 +282,16 @@ pub async fn execute_with_conductor_and_learning(
 
             let start_time = std::time::Instant::now();
 
-            // Call the tool via MCP registry - convert error to String early to avoid Send issues
-            let tool_result = mcp_registry
-                .call_tool(&tool_call.tool_name, args.clone(), "hrm")
-                .await
-                .map_err(|e| e.to_string());
+            // Try ToolRegistry first (includes RLM context tools), then fall back to MCP registry
+            let tool_result = if let Some(tool) = registry_arc.get(&tool_call.tool_name) {
+                tool.execute(args.clone()).await.map_err(|e| e.to_string())
+            } else {
+                // Fall back to MCP registry for external tools
+                mcp_registry
+                    .call_tool(&tool_call.tool_name, args.clone(), "hrm")
+                    .await
+                    .map_err(|e| e.to_string())
+            };
 
             match tool_result {
                 Ok(result) => {
