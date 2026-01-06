@@ -390,6 +390,10 @@ impl Router {
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
 
+            // Post-process tool calls to handle language identifier fences (e.g., ```python)
+            // The provider may return these as tool calls, but they contain nested tool calls
+            response.tool_calls = Self::filter_and_extract_tool_calls(response.tool_calls);
+
             // Extract tool calls from text content if structured tool_calls is empty
             if response.tool_calls.is_empty() && !response.content.is_empty() {
                 let extracted = Self::extract_tool_calls_from_text(&response.content);
@@ -1266,6 +1270,76 @@ impl Router {
 
         // See #383: Add semantic search with local model when llama-cpp feature is enabled
         registry.search_tools(&augmented_query, detail)
+    }
+
+    /// Filter and extract tool calls from provider-returned tool_calls
+    ///
+    /// When a local LLM returns a fence like ```python\ncontext_search(...)```,
+    /// the provider parses this as tool_name="python" with the code as arguments.
+    /// This function detects language identifiers and extracts the nested tool calls.
+    fn filter_and_extract_tool_calls(
+        tool_calls: Vec<arkavo_llm::ParsedToolCall>,
+    ) -> Vec<arkavo_llm::ParsedToolCall> {
+        const LANG_IDENTIFIERS: &[&str] = &[
+            "python",
+            "py",
+            "javascript",
+            "js",
+            "typescript",
+            "ts",
+            "rust",
+            "go",
+            "java",
+            "ruby",
+            "bash",
+            "sh",
+            "shell",
+            "zsh",
+            "powershell",
+            "ps1",
+            "sql",
+            "json",
+            "yaml",
+            "toml",
+        ];
+
+        tool_calls
+            .into_iter()
+            .flat_map(|call| {
+                let tool_lower = call.tool_name.to_lowercase();
+
+                if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
+                    // This is a language fence, try to extract nested tool calls
+                    let content = serde_json::to_string(&call.arguments)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .replace("\\n", "\n")
+                        .replace("\\\"", "\"");
+
+                    tracing::debug!(
+                        "Found language fence '{}', extracting nested calls from: {}",
+                        call.tool_name,
+                        &content[..std::cmp::min(100, content.len())]
+                    );
+
+                    // Try Python function-call syntax first (most common for code blocks)
+                    if let Some(extracted) = Self::extract_python_function_calls(&content) {
+                        return extracted;
+                    }
+
+                    // Try other formats
+                    if let Some(extracted) = Self::extract_json_tool_calls(&content) {
+                        return extracted;
+                    }
+
+                    // No valid tool calls found in language fence
+                    vec![]
+                } else {
+                    // Keep non-language tool calls as-is
+                    vec![call]
+                }
+            })
+            .collect()
     }
 
     /// Extract tool calls from text content using multiple parsing strategies
