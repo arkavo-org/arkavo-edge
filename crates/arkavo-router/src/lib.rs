@@ -1368,19 +1368,19 @@ impl Router {
     /// Handles formats like:
     /// - tool_name(param="value")
     /// - result = tool-name(param="value", param2=123)
+    /// - context_probe(indices=[0, 1])
+    /// - `context_search(keywords=["security", "auth"])`
     fn extract_python_function_calls(content: &str) -> Option<Vec<arkavo_llm::ParsedToolCall>> {
         use regex::Regex;
 
-        // Match: optional_var = tool-name(args)
-        let re = match Regex::new(r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*)\)") {
+        // Match: optional_var = tool-name(args) - handle nested brackets in args
+        let re = match Regex::new(
+            r"(?:\w+\s*=\s*)?([a-zA-Z][a-zA-Z0-9_-]*)\(([^)]*(?:\[[^\]]*\][^)]*)*)\)",
+        ) {
             Ok(r) => r,
             Err(_) => return None,
         };
-        // Parse kwargs: param="value", param2=123
-        let kwarg_re = match Regex::new(r#"(\w+)\s*=\s*(?:"([^"]*)"|(\d+(?:\.\d+)?)|(\w+))"#) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
+
         let mut calls = Vec::new();
 
         for cap in re.captures_iter(content) {
@@ -1398,28 +1398,7 @@ impl Router {
                 continue;
             }
 
-            let mut args = serde_json::Map::new();
-
-            for kwarg in kwarg_re.captures_iter(args_str) {
-                let key = match kwarg.get(1) {
-                    Some(k) => k.as_str().to_string(),
-                    None => continue,
-                };
-                let value = if let Some(s) = kwarg.get(2) {
-                    serde_json::Value::String(s.as_str().to_string())
-                } else if let Some(n) = kwarg.get(3) {
-                    if let Ok(num) = n.as_str().parse::<f64>() {
-                        serde_json::json!(num)
-                    } else {
-                        serde_json::Value::String(n.as_str().to_string())
-                    }
-                } else if let Some(id) = kwarg.get(4) {
-                    serde_json::Value::String(id.as_str().to_string())
-                } else {
-                    continue;
-                };
-                args.insert(key, value);
-            }
+            let args = Self::parse_python_kwargs(args_str);
 
             calls.push(arkavo_llm::ParsedToolCall {
                 tool_name,
@@ -1429,6 +1408,108 @@ impl Router {
         }
 
         if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    /// Parse Python keyword arguments including lists
+    ///
+    /// Handles: `param="value"`, `param2=123`, `indices=[0, 1]`, `keywords=["a", "b"]`
+    fn parse_python_kwargs(args_str: &str) -> serde_json::Map<String, serde_json::Value> {
+        use regex::Regex;
+
+        let mut args = serde_json::Map::new();
+
+        // Match keyword=value pairs, handling lists with brackets
+        // Pattern: word = (string | number | list | identifier)
+        let kwarg_re = match Regex::new(
+            r#"(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\d+(?:\.\d+)?)|(\[[^\]]*\])|(\w+))"#,
+        ) {
+            Ok(r) => r,
+            Err(_) => return args,
+        };
+
+        for kwarg in kwarg_re.captures_iter(args_str) {
+            let key = match kwarg.get(1) {
+                Some(k) => k.as_str().to_string(),
+                None => continue,
+            };
+
+            let value = if let Some(s) = kwarg.get(2) {
+                // Double-quoted string
+                serde_json::Value::String(s.as_str().to_string())
+            } else if let Some(s) = kwarg.get(3) {
+                // Single-quoted string
+                serde_json::Value::String(s.as_str().to_string())
+            } else if let Some(n) = kwarg.get(4) {
+                // Number
+                if let Ok(num) = n.as_str().parse::<i64>() {
+                    serde_json::json!(num)
+                } else if let Ok(num) = n.as_str().parse::<f64>() {
+                    serde_json::json!(num)
+                } else {
+                    serde_json::Value::String(n.as_str().to_string())
+                }
+            } else if let Some(list_str) = kwarg.get(5) {
+                // List: [0, 1] or ["a", "b"]
+                Self::parse_python_list(list_str.as_str())
+            } else if let Some(id) = kwarg.get(6) {
+                // Bare identifier (True, False, None, or variable name)
+                match id.as_str() {
+                    "True" => serde_json::Value::Bool(true),
+                    "False" => serde_json::Value::Bool(false),
+                    "None" => serde_json::Value::Null,
+                    other => serde_json::Value::String(other.to_string()),
+                }
+            } else {
+                continue;
+            };
+
+            args.insert(key, value);
+        }
+
+        args
+    }
+
+    /// Parse a Python list literal like `[0, 1]` or `["a", "b"]`
+    fn parse_python_list(list_str: &str) -> serde_json::Value {
+        // Remove brackets and split by comma
+        let inner = list_str
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim();
+
+        if inner.is_empty() {
+            return serde_json::json!([]);
+        }
+
+        let mut items = Vec::new();
+
+        // Simple split by comma - handles basic cases
+        for item in inner.split(',') {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+
+            // Try to parse as number first
+            if let Ok(n) = item.parse::<i64>() {
+                items.push(serde_json::json!(n));
+            } else if let Ok(n) = item.parse::<f64>() {
+                items.push(serde_json::json!(n));
+            } else if item.starts_with('"') && item.ends_with('"') {
+                // Double-quoted string
+                let s = item.trim_matches('"');
+                items.push(serde_json::Value::String(s.to_string()));
+            } else if item.starts_with('\'') && item.ends_with('\'') {
+                // Single-quoted string
+                let s = item.trim_matches('\'');
+                items.push(serde_json::Value::String(s.to_string()));
+            } else {
+                // Bare identifier or other
+                items.push(serde_json::Value::String(item.to_string()));
+            }
+        }
+
+        serde_json::Value::Array(items)
     }
 
     /// Extract tool name from first word on each line
@@ -1587,5 +1668,65 @@ mod tests {
             return;
         }
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_python_list_numbers() {
+        let result = Router::parse_python_list("[0, 1, 2]");
+        assert_eq!(result, serde_json::json!([0, 1, 2]));
+    }
+
+    #[test]
+    fn test_parse_python_list_strings() {
+        let result = Router::parse_python_list(r#"["security", "password"]"#);
+        assert_eq!(result, serde_json::json!(["security", "password"]));
+    }
+
+    #[test]
+    fn test_parse_python_kwargs_with_list() {
+        let result = Router::parse_python_kwargs(r#"indices=[0, 1], name="test""#);
+        assert_eq!(result.get("indices"), Some(&serde_json::json!([0, 1])));
+        assert_eq!(result.get("name"), Some(&serde_json::json!("test")));
+    }
+
+    #[test]
+    fn test_extract_python_function_calls_with_list() {
+        let content = r#"context_probe(indices=[0, 1])"#;
+        let calls = Router::extract_python_function_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "context_probe");
+        assert_eq!(
+            calls[0].arguments.get("indices"),
+            Some(&serde_json::json!([0, 1]))
+        );
+    }
+
+    #[test]
+    fn test_extract_python_function_calls_context_search() {
+        let content = r#"context_search(keywords=["security", "auth"])"#;
+        let calls = Router::extract_python_function_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "context_search");
+        assert_eq!(
+            calls[0].arguments.get("keywords"),
+            Some(&serde_json::json!(["security", "auth"]))
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_calls_from_llm_output() {
+        // Simulates actual LLM output with Python code block
+        let content = r#"
+Here's how to search:
+
+```python
+results = context_search(keywords=["security", "password"])
+chunks = context_probe(indices=[0, 1, 2])
+```
+"#;
+        let calls = Router::extract_tool_calls_from_text(content);
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().any(|c| c.tool_name == "context_search"));
+        assert!(calls.iter().any(|c| c.tool_name == "context_probe"));
     }
 }
