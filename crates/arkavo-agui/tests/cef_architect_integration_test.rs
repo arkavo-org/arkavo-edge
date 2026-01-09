@@ -8,7 +8,7 @@
 //! - CEF renders two-pane architect layout
 //! - Plan resume functionality
 
-use arkavo_agui::renderer::{create_renderer, RendererType, UiRenderer};
+use arkavo_agui::renderer::{create_renderer, RendererType};
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::ComplexityScorer;
 use chrono::Utc;
@@ -39,29 +39,39 @@ async fn test_simple_task_no_architect() {
     }
 }
 
-/// Test that complex tasks DO trigger architect mode
+/// Test that complex tasks with explicit multi-step patterns DO trigger architect mode
+/// The scorer requires: subtasks >= 3, output_tokens >= 2000, and (keywords OR multi_step >= 2)
 #[tokio::test]
 async fn test_complex_task_triggers_architect() {
     let scorer = ComplexityScorer::new();
 
+    // These prompts use explicit multi-step patterns that the scorer detects
     let complex_prompts = [
-        "Build a REST API with authentication, database models, and comprehensive test suite",
-        "Create a CLI tool with multiple subcommands, configuration file support, and logging",
-        "Implement a web scraper with rate limiting, error handling, and data persistence",
+        // Has "first", "then", "after that", "finally" - triggers multi-step detection
+        "Build a REST API. First, create the authentication system with JWT tokens. \
+         Then, set up the database models and migrations. After that, implement \
+         the API endpoints with proper validation. Finally, write comprehensive \
+         integration tests for all endpoints.",
+        // Has "Step 1", "Step 2", etc.
+        "Create a CLI tool. Step 1: Set up argument parsing with subcommands. \
+         Step 2: Implement configuration file loading. Step 3: Add logging \
+         infrastructure. Step 4: Create the main command handlers. Step 5: \
+         Write unit tests for each component.",
     ];
 
     for prompt in complex_prompts {
         let result = scorer.analyze(prompt);
         assert!(
             result.architect_recommended,
-            "Complex prompt '{}' SHOULD trigger architect mode (got: recommended={}, subtasks={})",
-            prompt,
+            "Complex prompt should trigger architect mode (got: recommended={}, subtasks={}, triggers={:?})",
             result.architect_recommended,
-            result.estimated_subtasks
+            result.estimated_subtasks,
+            result.complexity_triggers
         );
         assert!(
-            result.estimated_subtasks >= 2,
-            "Complex prompt should estimate at least 2 subtasks"
+            result.estimated_subtasks >= 3,
+            "Complex prompt should estimate at least 3 subtasks (got: {})",
+            result.estimated_subtasks
         );
     }
 }

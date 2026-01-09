@@ -58,3 +58,7 @@ arkavo-cef = { path = "../arkavo-cef", optional = true }
 
 [dev-dependencies]
 uuid = { workspace = true }
+tempfile = { workspace = true }
+chrono = { workspace = true }
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-router = { path = "../arkavo-router", default-features = false }
