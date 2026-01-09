@@ -77,6 +77,7 @@ async fn use_cef_renderer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_agui::UiRenderer;
     use arkavo_agui::renderer::async_cef_renderer::AsyncCefRendererImpl;
+    use arkavo_memory::PlanStateStore;
 
     println!("Creating Async CEF renderer (non-blocking)...");
     let mut cef_renderer = AsyncCefRendererImpl::new().await?;
@@ -87,6 +88,54 @@ async fn use_cef_renderer(
     println!("[DEBUG] Waiting for page to load...");
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     println!("[DEBUG] Page should be loaded now");
+
+    // Check for interrupted plans that can be resumed
+    let db_path = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("arkavo")
+        .join("plan_state.db");
+
+    if let Ok(store) = PlanStateStore::new(&db_path).await {
+        // Mark any "executing" plans as interrupted (app was closed)
+        let interrupted = store.mark_executing_as_interrupted().await.unwrap_or(0);
+        if interrupted > 0 {
+            eprintln!("[STARTUP] Marked {interrupted} executing plans as interrupted");
+        }
+
+        // Check for resumable plans
+        if let Ok(resumable) = store.get_resumable_plans().await {
+            if !resumable.is_empty() {
+                let plan = &resumable[0];
+                eprintln!(
+                    "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
+                    plan.original_prompt, plan.current_subtask, plan.total_subtasks
+                );
+
+                // Show resume prompt in UI
+                let resume_html = format!(
+                    r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+                        <div style="background:#fff3cd;padding:20px;border-radius:8px;border-left:4px solid #ffc107;margin-bottom:20px;">
+                            <strong style="color:#856404;">Interrupted Plan Found</strong>
+                            <div style="margin-top:8px;color:#333;">"{}"</div>
+                            <div style="font-size:13px;color:#666;margin-top:4px;">
+                                Progress: {}/{} subtasks completed
+                            </div>
+                            <div style="margin-top:12px;font-size:13px;color:#666;">
+                                Enter a new prompt to start fresh, or type <strong>resume</strong> to continue.
+                            </div>
+                        </div>
+                    </div>"#,
+                    plan.original_prompt
+                        .replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;"),
+                    plan.current_subtask,
+                    plan.total_subtasks
+                );
+                cef_renderer.render(&resume_html, "", "").await?;
+            }
+        }
+    }
 
     if let Some(prompt) = initial_prompt {
         println!("Processing initial prompt: {prompt}");
@@ -228,11 +277,19 @@ async fn handle_prompt_async(
     prompt: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_llm::Message;
-    use arkavo_router::Router;
+    use arkavo_router::{ComplexityScorer, Router};
     use std::sync::Arc;
     use tokio_stream::StreamExt;
 
     let enhanced_prompt = prompt.to_string();
+
+    // Analyze task complexity to determine if architect mode should be used
+    let scorer = ComplexityScorer::new();
+    let complexity = scorer.analyze(&enhanced_prompt);
+
+    if complexity.architect_recommended {
+        return handle_architect_prompt(renderer, prompt, complexity).await;
+    }
 
     // Check for special commands before processing with LLM
     let lower_prompt = prompt.trim().to_lowercase();
@@ -517,6 +574,286 @@ async fn handle_prompt_async(
 
     renderer.render(&html, "", "").await.map_err(|e| {
         eprintln!("[ERROR] renderer.render() failed (async): {e}");
+        e.into()
+    })
+}
+
+/// Handle complex prompts using the Architect system (task decomposition + multi-model routing)
+#[cfg(feature = "cef-ui")]
+async fn handle_architect_prompt(
+    renderer: &mut dyn arkavo_agui::UiRenderer,
+    prompt: &str,
+    complexity: arkavo_router::ComplexityScore,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arkavo_llm::Message;
+    use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
+    use arkavo_router::{ArchitectExecutor, ArchitectPlanner, Router};
+    use std::sync::Arc;
+
+    eprintln!(
+        "[ARCHITECT] Complex task detected: {} estimated subtasks, {:.1}% potential savings",
+        complexity.estimated_subtasks, complexity.estimated_savings_percent
+    );
+
+    // Initialize plan state store for persistence
+    let plan_store = {
+        let db_path = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("arkavo")
+            .join("plan_state.db");
+        PlanStateStore::new(&db_path).await.ok()
+    };
+
+    // Show planning indicator in UI with two-pane layout
+    let planning_html = format!(
+        r#"<div style="display:flex;height:100vh;font-family:system-ui,-apple-system,sans-serif;">
+            <div style="flex:1;padding:40px;overflow-y:auto;">
+                <div style="background:#f5f5f5;padding:12px 16px;border-radius:8px;margin-bottom:20px;color:#333;">
+                    <strong style="color:#667eea;">You:</strong> <span style="color:#333;">{}</span>
+                </div>
+                <div style="background:white;padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="display:flex;gap:8px;align-items:center;color:#667eea;">
+                        <div style="width:8px;height:8px;background:#667eea;border-radius:50%;animation:pulse 1.5s ease-in-out infinite;"></div>
+                        <span>Planning task decomposition...</span>
+                    </div>
+                    <div style="margin-top:12px;font-size:14px;color:#666;">
+                        Detected complex task with {} estimated subtasks
+                    </div>
+                </div>
+            </div>
+            <div id="side-panel" style="width:320px;background:#f8f9fa;border-left:1px solid #e0e0e0;padding:20px;overflow-y:auto;">
+                <h3 style="margin:0 0 16px 0;color:#333;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;">Task Progress</h3>
+                <div id="plan-status" style="background:white;border-radius:8px;padding:16px;margin-bottom:16px;">
+                    <div style="color:#667eea;font-weight:600;margin-bottom:8px;">Planning Phase</div>
+                    <div style="font-size:13px;color:#666;">Analyzing task complexity...</div>
+                </div>
+                <div id="subtask-list"></div>
+            </div>
+        </div>"#,
+        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        complexity.estimated_subtasks
+    );
+    renderer.render(&planning_html, "", "").await?;
+
+    // Create planner and generate task graph
+    let planner = ArchitectPlanner::new();
+    let plan = match planner.create_plan(prompt, complexity.clone()).await {
+        Ok(p) => p,
+        Err(e) => {
+            let error_html = format!(
+                r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+                    <div style="background:#f5f5f5;padding:12px 16px;border-radius:8px;margin-bottom:20px;color:#333;">
+                        <strong style="color:#667eea;">You:</strong> <span style="color:#333;">{}</span>
+                    </div>
+                    <div style="background:#fee;padding:20px;border-radius:8px;border-left:4px solid #f44;">
+                        <strong style="color:#c33;">⚠ Planning Failed</strong><br>
+                        <span style="color:#666;font-size:14px;">{}</span>
+                    </div>
+                </div>"#,
+                prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+                e.to_string().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+            );
+            renderer.render(&error_html, "", "").await?;
+            return Err(e.into());
+        }
+    };
+
+    eprintln!(
+        "[ARCHITECT] Plan created: {} subtasks, est. ${:.4} (saves ${:.4})",
+        plan.subtasks.len(),
+        plan.architect_estimate_usd,
+        plan.opus_only_estimate_usd - plan.architect_estimate_usd
+    );
+
+    // Persist the plan for resume capability
+    let plan_id = plan.id;
+    if let Some(ref store) = plan_store {
+        let persisted = PersistedPlan {
+            id: plan_id,
+            original_prompt: prompt.to_string(),
+            plan_json: serde_json::to_string(&plan).unwrap_or_default(),
+            status: PlanStatus::Executing,
+            current_subtask: 0,
+            total_subtasks: plan.subtasks.len(),
+            completed_results_json: None,
+            error_message: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        if let Err(e) = store.save_plan(&persisted).await {
+            eprintln!("[ARCHITECT] Failed to persist plan: {e}");
+        }
+    }
+
+    // Build subtask list HTML
+    let subtask_items: String = plan
+        .subtasks
+        .iter()
+        .map(|st| {
+            format!(
+                r#"<div id="subtask-{}" style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #ccc;">
+                    <div style="font-size:13px;font-weight:500;color:#333;">{}. {}</div>
+                    <div style="font-size:11px;color:#888;margin-top:4px;">{:?} • {}</div>
+                </div>"#,
+                st.index,
+                st.index + 1,
+                st.description.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+                st.category,
+                st.assigned_model.name()
+            )
+        })
+        .collect();
+
+    // Show plan in UI
+    let plan_html = format!(
+        r#"<div style="display:flex;height:100vh;font-family:system-ui,-apple-system,sans-serif;">
+            <div style="flex:1;padding:40px;overflow-y:auto;">
+                <div style="background:#f5f5f5;padding:12px 16px;border-radius:8px;margin-bottom:20px;color:#333;">
+                    <strong style="color:#667eea;">You:</strong> <span style="color:#333;">{}</span>
+                </div>
+                <div id="execution-output" style="background:white;padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="display:flex;gap:8px;align-items:center;color:#667eea;margin-bottom:16px;">
+                        <div style="width:8px;height:8px;background:#667eea;border-radius:50%;animation:pulse 1.5s ease-in-out infinite;"></div>
+                        <span>Executing {} subtasks...</span>
+                    </div>
+                </div>
+            </div>
+            <div id="side-panel" style="width:320px;background:#f8f9fa;border-left:1px solid #e0e0e0;padding:20px;overflow-y:auto;">
+                <h3 style="margin:0 0 16px 0;color:#333;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;">Task Progress</h3>
+                <div id="plan-status" style="background:#e8f5e9;border-radius:8px;padding:16px;margin-bottom:16px;">
+                    <div style="color:#2e7d32;font-weight:600;margin-bottom:8px;">Execution Phase</div>
+                    <div style="font-size:13px;color:#666;">Running {} subtasks</div>
+                    <div style="font-size:12px;color:#888;margin-top:4px;">Est. savings: {:.1}%</div>
+                </div>
+                <div id="subtask-list">{}</div>
+            </div>
+        </div>"#,
+        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        plan.subtasks.len(),
+        plan.subtasks.len(),
+        plan.estimated_savings_percent(),
+        subtask_items
+    );
+    renderer.render(&plan_html, "", "").await?;
+
+    // Execute the plan
+    let router = Router::new().await?;
+    let executor = ArchitectExecutor::new(Arc::new(router));
+    let messages = vec![Message::user(prompt)];
+
+    let result = match executor.execute(&plan, messages, None).await {
+        Ok(r) => r,
+        Err(e) => {
+            // Mark plan as failed in persistent store
+            if let Some(ref store) = plan_store {
+                let _ = store.mark_failed(plan_id, &e.to_string()).await;
+            }
+
+            let error_html = format!(
+                r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+                    <div style="background:#f5f5f5;padding:12px 16px;border-radius:8px;margin-bottom:20px;color:#333;">
+                        <strong style="color:#667eea;">You:</strong> <span style="color:#333;">{}</span>
+                    </div>
+                    <div style="background:#fee;padding:20px;border-radius:8px;border-left:4px solid #f44;">
+                        <strong style="color:#c33;">⚠ Execution Failed</strong><br>
+                        <span style="color:#666;font-size:14px;">{}</span>
+                    </div>
+                </div>"#,
+                prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+                e.to_string().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+            );
+            renderer.render(&error_html, "", "").await?;
+            return Err(e.into());
+        }
+    };
+
+    // Mark plan as completed in persistent store
+    if let Some(ref store) = plan_store {
+        let results_json = serde_json::to_string(&result.subtask_results).ok();
+        let _ = store
+            .update_progress(plan_id, result.subtask_results.len(), results_json.as_deref())
+            .await;
+        let _ = store.mark_completed(plan_id).await;
+    }
+
+    eprintln!(
+        "[ARCHITECT] Execution complete: ${:.4} actual cost, saved ${:.4} ({:.1}%)",
+        result.actual_cost_usd,
+        result.actual_savings_usd,
+        result.savings_percent()
+    );
+
+    // Build completed subtask list
+    let completed_items: String = result
+        .subtask_results
+        .iter()
+        .map(|sr| {
+            let status_color = if sr.success { "#4caf50" } else { "#f44336" };
+            let status_icon = if sr.success { "✓" } else { "✗" };
+            format!(
+                r#"<div style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid {};">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:13px;font-weight:500;color:#333;">{}. {}</span>
+                        <span style="color:{};">{}</span>
+                    </div>
+                    <div style="font-size:11px;color:#888;margin-top:4px;">{} • ${:.4}</div>
+                </div>"#,
+                status_color,
+                sr.index + 1,
+                plan.subtasks.get(sr.index).map(|s| s.description.as_str()).unwrap_or("Unknown"),
+                status_color,
+                status_icon,
+                sr.model_used.name(),
+                sr.actual_cost_usd
+            )
+        })
+        .collect();
+
+    // Render final result with completion status
+    let escaped_response = result
+        .final_response
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\n', "<br>");
+
+    let final_html = format!(
+        r#"<div style="display:flex;height:100vh;font-family:system-ui,-apple-system,sans-serif;">
+            <div style="flex:1;padding:40px;overflow-y:auto;">
+                <div style="background:#f5f5f5;padding:12px 16px;border-radius:8px;margin-bottom:20px;color:#333;">
+                    <strong style="color:#667eea;">You:</strong> <span style="color:#333;">{}</span>
+                </div>
+                <div style="background:white;padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);line-height:1.6;color:#333;">
+                    {}
+                </div>
+                <div style="margin-top:16px;padding:8px 12px;background:#e8f5e9;border-radius:4px;font-size:12px;color:#2e7d32;">
+                    Architect Mode • {} subtasks • ${:.4} (saved ${:.4}, {:.1}%)
+                </div>
+            </div>
+            <div id="side-panel" style="width:320px;background:#f8f9fa;border-left:1px solid #e0e0e0;padding:20px;overflow-y:auto;">
+                <h3 style="margin:0 0 16px 0;color:#333;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;">Completed</h3>
+                <div id="plan-status" style="background:#e8f5e9;border-radius:8px;padding:16px;margin-bottom:16px;">
+                    <div style="color:#2e7d32;font-weight:600;margin-bottom:8px;">✓ Task Complete</div>
+                    <div style="font-size:13px;color:#666;">{}/{} subtasks succeeded</div>
+                    <div style="font-size:12px;color:#2e7d32;margin-top:4px;">Saved {:.1}% vs single model</div>
+                </div>
+                <div id="subtask-list">{}</div>
+            </div>
+        </div>"#,
+        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        escaped_response,
+        result.subtask_results.len(),
+        result.actual_cost_usd,
+        result.actual_savings_usd,
+        result.savings_percent(),
+        result.subtask_results.iter().filter(|r| r.success).count(),
+        result.subtask_results.len(),
+        result.savings_percent(),
+        completed_items
+    );
+
+    renderer.render(&final_html, "", "").await.map_err(|e| {
+        eprintln!("[ERROR] renderer.render() failed (architect): {e}");
         e.into()
     })
 }
