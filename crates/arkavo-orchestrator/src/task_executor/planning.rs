@@ -79,7 +79,10 @@ impl CollaborativePlanner {
                 tool_registry,
             )
             .await
-            .map_err(|e| Error::Config(format!("LLM gather failed: {}", e)))?;
+            .map_err(|e| Error::TaskExecution {
+                operation: format!("gather context for task '{}'", task),
+                details: e.to_string(),
+            })?;
 
         Ok(response.content)
     }
@@ -105,7 +108,10 @@ impl CollaborativePlanner {
                 tool_registry,
             )
             .await
-            .map_err(|e| Error::Config(format!("LLM planning failed: {}", e)))?;
+            .map_err(|e| Error::TaskExecution {
+                operation: format!("create plan for task '{}'", task),
+                details: e.to_string(),
+            })?;
 
         Ok(response.content)
     }
@@ -126,7 +132,10 @@ impl CollaborativePlanner {
             .router
             .route_with_tools("verify plan correctness", messages, tool_registry)
             .await
-            .map_err(|e| Error::Config(format!("LLM verification failed: {}", e)))?;
+            .map_err(|e| Error::TaskExecution {
+                operation: "verify plan correctness".to_string(),
+                details: e.to_string(),
+            })?;
 
         Ok(response.content)
     }

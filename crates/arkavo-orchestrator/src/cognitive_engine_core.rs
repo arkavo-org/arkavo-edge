@@ -248,10 +248,8 @@ impl CognitiveEngine {
                 if let Err(e) = store.mark_completed(plan.id).await {
                     warn!(error = %e, "Failed to mark plan as completed");
                 }
-            } else {
-                if let Err(e) = store.mark_failed(plan.id, &final_comment).await {
-                    warn!(error = %e, "Failed to mark plan as failed");
-                }
+            } else if let Err(e) = store.mark_failed(plan.id, &final_comment).await {
+                warn!(error = %e, "Failed to mark plan as failed");
             }
         }
 

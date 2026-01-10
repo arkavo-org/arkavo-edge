@@ -737,6 +737,12 @@ impl MemoryStorage {
         Ok(results)
     }
 
+    fn sanitize_fts5_word(word: &str) -> String {
+        word.chars()
+            .filter(|c| !matches!(c, '*' | '-' | '(' | ')' | '{' | '}'))
+            .collect()
+    }
+
     async fn search_cold_fts(
         &self,
         query: &str,
@@ -744,10 +750,14 @@ impl MemoryStorage {
         category: Option<&str>,
         exclude_ids: &HashSet<Uuid>,
     ) -> Result<Vec<SearchResult>> {
-        // Build FTS5 query - escape special characters
+        // Build FTS5 query - sanitize operators and escape quotes
         let fts_query = query
             .split_whitespace()
-            .map(|word| format!("\"{}\"", word.replace('"', "\"\"")))
+            .map(|word| {
+                let sanitized = Self::sanitize_fts5_word(word);
+                format!("\"{}\"", sanitized.replace('"', "\"\""))
+            })
+            .filter(|word| word != "\"\"")
             .collect::<Vec<_>>()
             .join(" OR ");
 
@@ -1079,5 +1089,47 @@ impl MemoryStorage {
         let session_count = self.event_store.get_session_count().await?;
         let event_count = self.event_store.get_total_event_count().await?;
         Ok((session_count, event_count))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_fts5_word_removes_operators() {
+        assert_eq!(MemoryStorage::sanitize_fts5_word("hello*"), "hello");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("-exclude"), "exclude");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("(group)"), "group");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("{column}"), "column");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("test-word"), "testword");
+    }
+
+    #[test]
+    fn test_sanitize_fts5_word_preserves_normal_text() {
+        assert_eq!(MemoryStorage::sanitize_fts5_word("hello"), "hello");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("test123"), "test123");
+        assert_eq!(
+            MemoryStorage::sanitize_fts5_word("unicode_text"),
+            "unicode_text"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_fts5_word_handles_complex_input() {
+        assert_eq!(
+            MemoryStorage::sanitize_fts5_word("hello*world-test"),
+            "helloworldtest"
+        );
+        assert_eq!(MemoryStorage::sanitize_fts5_word("***"), "");
+        assert_eq!(MemoryStorage::sanitize_fts5_word("a(b)c{d}e"), "abcde");
+    }
+
+    #[test]
+    fn test_sanitize_fts5_word_preserves_quotes_for_caller() {
+        assert_eq!(
+            MemoryStorage::sanitize_fts5_word("hello\"world"),
+            "hello\"world"
+        );
     }
 }

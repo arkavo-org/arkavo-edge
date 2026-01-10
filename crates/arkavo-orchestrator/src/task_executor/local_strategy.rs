@@ -51,10 +51,10 @@ impl LocalTaskStrategy {
         if let Some(router) = &self.router {
             return Ok(router.clone());
         }
-        Router::new()
-            .await
-            .map(Arc::new)
-            .map_err(|e| Error::Config(format!("Failed to create router: {}", e)))
+        Router::new().await.map(Arc::new).map_err(|e| Error::Model {
+            operation: "create LLM router".to_string(),
+            details: e.to_string(),
+        })
     }
 
     /// Discover available local GGUF models in HuggingFace cache
@@ -329,7 +329,10 @@ impl TaskStrategy for LocalTaskStrategy {
             ui.error(
                 "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF",
             );
-            Error::Other(anyhow::anyhow!("No models available"))
+            Error::Model {
+                operation: "select models for task".to_string(),
+                details: "no local or cloud models available".to_string(),
+            }
         })?;
 
         self.show_selected(ui, &models);
@@ -403,7 +406,10 @@ impl LocalTaskStrategy {
                 .router()
                 .route_with_tools("execute plan step", conversation.clone(), tool_registry_ref)
                 .await
-                .map_err(|e| Error::Config(format!("LLM execution failed: {}", e)))?;
+                .map_err(|e| Error::TaskExecution {
+                    operation: "execute plan step via LLM".to_string(),
+                    details: e.to_string(),
+                })?;
 
             ui.progress(
                 &format!(

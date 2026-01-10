@@ -1,6 +1,39 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Runtime configuration for timeouts and limits
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    /// Timeout for mDNS agent discovery in seconds (default: 3)
+    pub mdns_discovery_timeout_secs: u64,
+    /// Timeout for A2A transport requests in milliseconds (default: 60000)
+    pub transport_timeout_ms: u64,
+    /// Maximum time to wait for task completion in seconds (default: 300)
+    pub task_execution_timeout_secs: u64,
+    /// Interval between task status polls in seconds (default: 2)
+    pub poll_interval_secs: u64,
+    /// Maximum SQLite pool connections (default: 5)
+    pub max_pool_connections: u32,
+    /// Similarity threshold for memory categorization (default: 0.3)
+    pub categorization_threshold: f32,
+    /// Maximum vectors in hot tier (default: 10000)
+    pub max_hot_vectors: usize,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            mdns_discovery_timeout_secs: 3,
+            transport_timeout_ms: 60_000,
+            task_execution_timeout_secs: 300,
+            poll_interval_secs: 2,
+            max_pool_connections: 5,
+            categorization_threshold: 0.3,
+            max_hot_vectors: 10_000,
+        }
+    }
+}
+
 /// Agent configuration parsed from AGENTS.md
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -11,6 +44,7 @@ pub struct AgentConfig {
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
     pub api_keys: HashMap<String, String>,
+    pub runtime: RuntimeConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +92,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 mdns_enabled: true, // Default to true for zero-config
                 mcp_servers: Vec::new(),
                 api_keys: HashMap::new(),
+                runtime: RuntimeConfig::default(),
             });
             in_agent_section = true;
             continue;
@@ -259,6 +294,78 @@ pub fn parse_workspace_paths(content: &str, workspace_root: &Path) -> WorkspaceP
     paths
 }
 
+/// Parse runtime configuration from AGENTS.md content.
+///
+/// Example format:
+/// ```yaml
+/// runtime:
+///   mdns_discovery_timeout_secs: 5
+///   transport_timeout_ms: 30000
+///   task_execution_timeout_secs: 600
+///   poll_interval_secs: 3
+///   max_pool_connections: 10
+///   categorization_threshold: 0.4
+///   max_hot_vectors: 20000
+/// ```
+pub fn parse_runtime_config(content: &str) -> RuntimeConfig {
+    let mut config = RuntimeConfig::default();
+    let mut in_runtime_section = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Check for runtime section header
+        if trimmed == "runtime:" {
+            in_runtime_section = true;
+            continue;
+        }
+
+        // End runtime section on non-indented line (except empty)
+        if in_runtime_section
+            && !trimmed.is_empty()
+            && !line.starts_with(' ')
+            && !line.starts_with('\t')
+        {
+            break;
+        }
+
+        // Parse runtime values
+        if in_runtime_section {
+            if let Some(val) = trimmed.strip_prefix("mdns_discovery_timeout_secs:") {
+                if let Ok(v) = val.trim().parse() {
+                    config.mdns_discovery_timeout_secs = v;
+                }
+            } else if let Some(val) = trimmed.strip_prefix("transport_timeout_ms:") {
+                if let Ok(v) = val.trim().parse() {
+                    config.transport_timeout_ms = v;
+                }
+            } else if let Some(val) = trimmed.strip_prefix("task_execution_timeout_secs:") {
+                if let Ok(v) = val.trim().parse() {
+                    config.task_execution_timeout_secs = v;
+                }
+            } else if let Some(val) = trimmed.strip_prefix("poll_interval_secs:") {
+                if let Ok(v) = val.trim().parse() {
+                    config.poll_interval_secs = v;
+                }
+            } else if let Some(val) = trimmed.strip_prefix("max_pool_connections:") {
+                if let Ok(v) = val.trim().parse() {
+                    config.max_pool_connections = v;
+                }
+            } else if let Some(val) = trimmed.strip_prefix("categorization_threshold:") {
+                if let Ok(v) = val.trim().parse::<f32>() {
+                    config.categorization_threshold = v.clamp(0.0, 1.0);
+                }
+            } else if let Some(val) = trimmed.strip_prefix("max_hot_vectors:")
+                && let Ok(v) = val.trim().parse()
+            {
+                config.max_hot_vectors = v;
+            }
+        }
+    }
+
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +419,63 @@ model: gpt-4
         let paths = parse_workspace_paths(content, &workspace_root);
 
         assert_eq!(paths.memory_db_path, None);
+    }
+
+    #[test]
+    fn test_parse_runtime_config_with_values() {
+        let content = r#"
+## Runtime Configuration
+
+runtime:
+  mdns_discovery_timeout_secs: 5
+  transport_timeout_ms: 30000
+  task_execution_timeout_secs: 600
+  poll_interval_secs: 3
+  max_pool_connections: 10
+  categorization_threshold: 0.4
+  max_hot_vectors: 20000
+"#;
+        let config = parse_runtime_config(content);
+
+        assert_eq!(config.mdns_discovery_timeout_secs, 5);
+        assert_eq!(config.transport_timeout_ms, 30000);
+        assert_eq!(config.task_execution_timeout_secs, 600);
+        assert_eq!(config.poll_interval_secs, 3);
+        assert_eq!(config.max_pool_connections, 10);
+        assert!((config.categorization_threshold - 0.4).abs() < 0.001);
+        assert_eq!(config.max_hot_vectors, 20000);
+    }
+
+    #[test]
+    fn test_parse_runtime_config_defaults() {
+        let content = r#"
+## Agent
+
+name: test-agent
+"#;
+        let config = parse_runtime_config(content);
+
+        assert_eq!(config.mdns_discovery_timeout_secs, 3);
+        assert_eq!(config.transport_timeout_ms, 60_000);
+        assert_eq!(config.task_execution_timeout_secs, 300);
+        assert_eq!(config.poll_interval_secs, 2);
+        assert_eq!(config.max_pool_connections, 5);
+        assert!((config.categorization_threshold - 0.3).abs() < 0.001);
+        assert_eq!(config.max_hot_vectors, 10_000);
+    }
+
+    #[test]
+    fn test_parse_runtime_config_partial() {
+        let content = r#"
+runtime:
+  mdns_discovery_timeout_secs: 10
+  max_hot_vectors: 5000
+"#;
+        let config = parse_runtime_config(content);
+
+        assert_eq!(config.mdns_discovery_timeout_secs, 10);
+        assert_eq!(config.max_hot_vectors, 5000);
+        // Other values should remain default
+        assert_eq!(config.transport_timeout_ms, 60_000);
     }
 }

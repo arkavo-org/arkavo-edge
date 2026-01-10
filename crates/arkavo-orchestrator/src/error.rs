@@ -17,6 +17,22 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    #[error("Task execution failed: {operation} - {details}")]
+    TaskExecution { operation: String, details: String },
+
+    #[error("Agent communication failed: {operation} with '{agent_id}' - {details}")]
+    AgentCommunication {
+        operation: String,
+        agent_id: String,
+        details: String,
+    },
+
+    #[error("Service discovery failed: {operation} - {details}")]
+    Discovery { operation: String, details: String },
+
+    #[error("Model error: {operation} - {details}")]
+    Model { operation: String, details: String },
+
     #[error("JSON parsing error: {0}")]
     Json(#[from] serde_json::Error),
 

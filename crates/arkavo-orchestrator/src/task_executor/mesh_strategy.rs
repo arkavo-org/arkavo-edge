@@ -47,11 +47,16 @@ impl MeshTaskStrategy {
 
         tracing::info!("Discovering mesh agents via mDNS...");
 
-        let mdns = ServiceDaemon::new()
-            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to create mDNS daemon: {e}")))?;
+        let mdns = ServiceDaemon::new().map_err(|e| Error::Discovery {
+            operation: "create mDNS daemon".to_string(),
+            details: e.to_string(),
+        })?;
         let receiver = mdns
             .browse("_a2a._tcp.local.")
-            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to browse mDNS: {e}")))?;
+            .map_err(|e| Error::Discovery {
+                operation: "browse A2A services".to_string(),
+                details: e.to_string(),
+            })?;
 
         let mut agents = Vec::new();
         let timeout = Duration::from_secs(3);
@@ -143,8 +148,10 @@ impl MeshTaskStrategy {
             return agents
                 .iter()
                 .find(|a| &a.agent_id == target_id)
-                .ok_or_else(|| {
-                    Error::Other(anyhow::anyhow!("Target agent {} not found", target_id))
+                .ok_or_else(|| Error::AgentCommunication {
+                    operation: "select target agent".to_string(),
+                    agent_id: target_id.clone(),
+                    details: "target agent not found in discovered agents".to_string(),
                 });
         }
 
@@ -170,12 +177,18 @@ impl MeshTaskStrategy {
             .find_best_agent("code_generation")
             .await
             .or_else(|| agents.first().map(|a| a.agent_id.clone()))
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("No suitable agent found")))?;
+            .ok_or_else(|| Error::TaskExecution {
+                operation: "select agent for task".to_string(),
+                details: "no suitable agent found with required capabilities".to_string(),
+            })?;
 
         agents
             .iter()
             .find(|a| a.agent_id == best_agent_id)
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("Selected agent not found")))
+            .ok_or_else(|| Error::TaskExecution {
+                operation: "select agent for task".to_string(),
+                details: format!("selected agent '{}' not found in list", best_agent_id),
+            })
     }
 
     /// Submit task to agent and monitor until completion
@@ -189,7 +202,11 @@ impl MeshTaskStrategy {
         let address = agent
             .address
             .as_ref()
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("Agent has no address")))?;
+            .ok_or_else(|| Error::AgentCommunication {
+                operation: "connect to agent".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: "agent has no address configured".to_string(),
+            })?;
 
         ui.section("Connecting to Agent");
         ui.status(&format!("Address: {address}"));
@@ -205,10 +222,13 @@ impl MeshTaskStrategy {
             ..Default::default()
         };
 
-        let transport = Arc::new(
-            HttpTransport::new(transport_config)
-                .map_err(|e| Error::Other(anyhow::anyhow!("Failed to create transport: {e}")))?,
-        );
+        let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Error::AgentCommunication {
+                operation: "create HTTP transport".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            }
+        })?);
 
         // Create endpoint
         let endpoint = A2aEndpoint {
@@ -221,7 +241,11 @@ impl MeshTaskStrategy {
         transport
             .connect(&endpoint)
             .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to connect: {e}")))?;
+            .map_err(|e| Error::AgentCommunication {
+                operation: "establish connection".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
 
         ui.success("Connected");
 
@@ -251,15 +275,22 @@ impl MeshTaskStrategy {
 
         let rpc_request = A2aRequest::new("message/send", serde_json::json!([send_request]));
 
-        let response = transport
-            .send_request(rpc_request)
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to send task: {e}")))?;
+        let response =
+            transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| Error::TaskExecution {
+                    operation: format!("send task to agent '{}'", agent.agent_id),
+                    details: e.to_string(),
+                })?;
 
         let task_id = match response {
             A2aResponse::Success { result, .. } => {
-                let send_response: MessageSendResponse = serde_json::from_value(result)
-                    .map_err(|e| Error::Other(anyhow::anyhow!("Failed to parse response: {e}")))?;
+                let send_response: MessageSendResponse =
+                    serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                        operation: "parse agent response".to_string(),
+                        details: e.to_string(),
+                    })?;
                 ui.success("Task submitted!");
                 ui.status(&format!("Task ID: {}", send_response.task_id));
                 ui.status(&format!("Status: {:?}", send_response.status));
@@ -267,11 +298,10 @@ impl MeshTaskStrategy {
             }
             A2aResponse::Error { error, .. } => {
                 let _ = transport.close().await;
-                return Err(Error::Other(anyhow::anyhow!(
-                    "RPC error: {} - {}",
-                    error.code,
-                    error.message
-                )));
+                return Err(Error::TaskExecution {
+                    operation: "submit task via mesh".to_string(),
+                    details: format!("RPC error {}: {}", error.code, error.message),
+                });
             }
         };
 
@@ -284,9 +314,10 @@ impl MeshTaskStrategy {
         loop {
             if start.elapsed() > timeout {
                 let _ = transport.close().await;
-                return Err(Error::Other(anyhow::anyhow!(
-                    "Task execution timed out after 5 minutes"
-                )));
+                return Err(Error::TaskExecution {
+                    operation: "execute task via mesh".to_string(),
+                    details: "task execution timed out after 5 minutes".to_string(),
+                });
             }
 
             let get_request = TaskGetRequest {
@@ -295,15 +326,22 @@ impl MeshTaskStrategy {
 
             let rpc_request = A2aRequest::new("tasks/get", serde_json::json!([get_request]));
 
-            let response = transport
-                .send_request(rpc_request)
-                .await
-                .map_err(|e| Error::Other(anyhow::anyhow!("Failed to get task status: {e}")))?;
+            let response =
+                transport
+                    .send_request(rpc_request)
+                    .await
+                    .map_err(|e| Error::TaskExecution {
+                        operation: "poll task status".to_string(),
+                        details: e.to_string(),
+                    })?;
 
             match response {
                 A2aResponse::Success { result, .. } => {
-                    let task_response: TaskGetResponse = serde_json::from_value(result)
-                        .map_err(|e| Error::Other(anyhow::anyhow!("Failed to parse: {e}")))?;
+                    let task_response: TaskGetResponse =
+                        serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                            operation: "parse task status response".to_string(),
+                            details: e.to_string(),
+                        })?;
 
                     match task_response.status {
                         TaskStatus::Completed => {
@@ -333,11 +371,10 @@ impl MeshTaskStrategy {
                 }
                 A2aResponse::Error { error, .. } => {
                     let _ = transport.close().await;
-                    return Err(Error::Other(anyhow::anyhow!(
-                        "RPC error: {} - {}",
-                        error.code,
-                        error.message
-                    )));
+                    return Err(Error::TaskExecution {
+                        operation: "poll task status".to_string(),
+                        details: format!("RPC error {}: {}", error.code, error.message),
+                    });
                 }
             }
 
@@ -365,7 +402,10 @@ impl TaskStrategy for MeshTaskStrategy {
         let agents = Self::discover_agents()?;
 
         if agents.is_empty() {
-            return Err(Error::Other(anyhow::anyhow!("No mesh agents discovered")));
+            return Err(Error::Discovery {
+                operation: "discover mesh agents".to_string(),
+                details: "no mesh agents found via mDNS".to_string(),
+            });
         }
 
         // Display discovered agents
