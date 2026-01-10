@@ -768,20 +768,25 @@ fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
 
     // Run task in async context
     let result = tokio::runtime::Runtime::new()?.block_on(async {
-        // Create tool registry with built-in tools (filesystem, git, etc.)
-        let storage = match arkavo_memory::MemoryStorage::new().await {
-            Ok(s) => Arc::new(s),
-            Err(e) => {
-                eprintln!("Warning: Failed to create memory storage: {e}");
-                return Err(arkavo_orchestrator::Error::External(format!(
-                    "Memory storage error: {e}"
-                )));
-            }
+        // Create local strategy (with tools when mcp-tools feature is enabled)
+        #[cfg(feature = "mcp-tools")]
+        let local_strategy = {
+            // Create tool registry with built-in tools (filesystem, git, etc.)
+            let storage = match arkavo_memory::MemoryStorage::new().await {
+                Ok(s) => Arc::new(s),
+                Err(e) => {
+                    eprintln!("Warning: Failed to create memory storage: {e}");
+                    return Err(arkavo_orchestrator::Error::External(format!(
+                        "Memory storage error: {e}"
+                    )));
+                }
+            };
+            let tool_registry = Arc::new(arkavo_mcp_tools::ToolRegistry::new(storage));
+            LocalTaskStrategy::new().with_tools(tool_registry)
         };
-        let tool_registry = Arc::new(arkavo_mcp_tools::ToolRegistry::new(storage));
 
-        // Create local strategy with tools
-        let local_strategy = LocalTaskStrategy::new().with_tools(tool_registry);
+        #[cfg(not(feature = "mcp-tools"))]
+        let local_strategy = LocalTaskStrategy::new();
 
         // Create executor with strategies
         let executor = TaskExecutor::new()

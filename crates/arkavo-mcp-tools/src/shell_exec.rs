@@ -282,8 +282,19 @@ impl ShellExecTool {
     ) -> Result<(bool, i32, String, String, u64)> {
         let start = Instant::now();
 
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(cmd);
+        #[cfg(unix)]
+        let mut command = {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(cmd);
+            c
+        };
+
+        #[cfg(windows)]
+        let mut command = {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(cmd);
+            c
+        };
 
         if let Some(dir) = working_dir {
             command.current_dir(dir);

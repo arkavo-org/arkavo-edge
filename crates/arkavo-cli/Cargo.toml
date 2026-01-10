@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 # Default features - portable across all platforms with pure Rust mDNS
 default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "web-ui"]
 # Default features for Windows (no C++ dependencies)
-windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
 mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mesh-tools", "arkavo-router/gemini"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
@@ -82,6 +82,10 @@ reqwest = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }
 
+# Cross-platform MCP tools (optional, enabled via mcp-tools feature)
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
+arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 reqwest = { workspace = true }
@@ -95,11 +99,6 @@ arkavo-budget = { path = "../arkavo-budget" }
 # macOS-only dependencies
 [target.'cfg(target_os = "macos")'.dependencies]
 arkavo-mcp-macos = { path = "../arkavo-mcp-macos", optional = true }
-
-# Unix dependencies (macOS and Linux)
-[target.'cfg(unix)'.dependencies]
-arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
-arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }
 
 
 [lints]
