@@ -311,31 +311,38 @@ impl MemoryStorage {
             .fetch_all(&self.pool)
             .await?;
 
-        let mut embeddings = self.embeddings.write().unwrap();
-        let index = self.index.write().unwrap();
-        let mut id_mapping = self.id_mapping.write().unwrap();
-
-        for (idx, row) in rows.iter().enumerate() {
+        let mut parsed: Vec<(Uuid, Vec<f32>)> = Vec::with_capacity(rows.len());
+        for row in rows {
             let id_str: String = row.get("id");
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
-
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
             let embedding: Vec<f32> = embedding_blob
                 .chunks_exact(4)
                 .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
                 .collect();
-
-            // Skip empty embeddings (e.g., from config entries)
-            if !embedding.is_empty() {
-                embeddings.insert(id, embedding.clone());
-                id_mapping.insert(idx, id);
-
-                let mut point_data = Vec::with_capacity(embedding.len());
-                point_data.extend_from_slice(&embedding);
-                index.insert((&point_data, idx));
-            }
+            parsed.push((id, embedding));
         }
+
+        let embeddings_clone = Arc::clone(&self.embeddings);
+        let index_clone = Arc::clone(&self.index);
+        let id_mapping_clone = Arc::clone(&self.id_mapping);
+
+        tokio::task::spawn_blocking(move || {
+            let mut embeddings = embeddings_clone.write().unwrap();
+            let index = index_clone.write().unwrap();
+            let mut id_mapping = id_mapping_clone.write().unwrap();
+
+            for (idx, (id, embedding)) in parsed.into_iter().enumerate() {
+                if !embedding.is_empty() {
+                    embeddings.insert(id, embedding.clone());
+                    id_mapping.insert(idx, id);
+                    index.insert((&embedding, idx));
+                }
+            }
+        })
+        .await
+        .map_err(|e| MemoryError::Storage(format!("Index load failed: {e}")))?;
 
         Ok(())
     }
@@ -421,12 +428,14 @@ impl MemoryStorage {
                 id_mapping.insert(next_idx, memory.id);
             }
 
-            {
-                let index = self.index.write().unwrap();
-                let mut point_data = Vec::with_capacity(memory.embedding.len());
-                point_data.extend_from_slice(&memory.embedding);
-                index.insert((&point_data, next_idx));
-            }
+            let index_clone = Arc::clone(&self.index);
+            let embedding_data = memory.embedding.clone();
+            tokio::task::spawn_blocking(move || {
+                let index = index_clone.write().unwrap();
+                index.insert((&embedding_data, next_idx));
+            })
+            .await
+            .map_err(|e| MemoryError::Storage(format!("Index insert failed: {e}")))?;
         }
 
         Ok(())
@@ -478,11 +487,15 @@ impl MemoryStorage {
     ) -> Result<Vec<SearchResult>> {
         let query_embedding = self.embedding_service.generate_embedding(query).await?;
 
-        let neighbors = {
-            let index = self.index.read().unwrap();
-            let ef_search = limit * 10;
-            index.search(&query_embedding, limit * 2, ef_search)
-        };
+        let index_clone = Arc::clone(&self.index);
+        let k = limit * 2;
+        let ef_search = limit * 10;
+        let neighbors = tokio::task::spawn_blocking(move || {
+            let index = index_clone.read().unwrap();
+            index.search(&query_embedding, k, ef_search)
+        })
+        .await
+        .map_err(|e| MemoryError::Storage(format!("Search task failed: {e}")))?;
 
         let mut neighbor_ids = Vec::new();
         {
