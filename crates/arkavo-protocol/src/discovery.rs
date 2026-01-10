@@ -2,7 +2,10 @@ use crate::error::{A2aError, Result};
 use crate::transport::A2aEndpoint;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+
+#[cfg(feature = "mdns")]
+use tracing::warn;
 
 #[cfg(feature = "mdns")]
 use crate::mdns::MdnsServiceInfo;
@@ -30,7 +33,6 @@ impl Default for DiscoveryConfig {
 #[derive(Debug, Clone)]
 pub enum DiscoveryMethod {
     Static,
-    Dns,
     Environment,
     #[cfg(feature = "mdns")]
     Mdns,
@@ -79,7 +81,6 @@ impl DiscoveryService {
                 "Agent {agent_id} not found in static registry"
             ))),
             DiscoveryMethod::Environment => self.discover_from_environment(agent_id),
-            DiscoveryMethod::Dns => self.discover_via_dns(agent_id),
             #[cfg(feature = "mdns")]
             DiscoveryMethod::Mdns => Err(A2aError::ServiceDiscovery(
                 "mDNS discovery should be initiated through AG-UI gateway".to_string(),
@@ -106,9 +107,6 @@ impl DiscoveryService {
                 if let Ok(endpoints) = self.discover_all_from_environment() {
                     all_endpoints.extend(endpoints);
                 }
-            }
-            DiscoveryMethod::Dns => {
-                warn!("DNS discovery for all agents not implemented");
             }
             #[cfg(feature = "mdns")]
             DiscoveryMethod::Mdns => {
@@ -185,16 +183,6 @@ impl DiscoveryService {
         }
 
         Ok(endpoints)
-    }
-
-    fn discover_via_dns(&self, agent_id: &str) -> Result<A2aEndpoint> {
-        warn!(
-            "DNS SRV discovery not yet implemented for agent: {}",
-            agent_id
-        );
-        Err(A2aError::ServiceDiscovery(
-            "DNS discovery not implemented".to_string(),
-        ))
     }
 
     /// Clears the discovered endpoints cache.

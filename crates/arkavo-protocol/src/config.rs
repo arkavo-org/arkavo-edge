@@ -196,7 +196,7 @@ impl A2aConfig {
         if let Some(discovery_method) = config_provider.get_config("A2A_DISCOVERY_METHOD")? {
             config.discovery.method = match discovery_method.to_lowercase().as_str() {
                 "static" => DiscoveryMethod::Static,
-                "dns" => DiscoveryMethod::Dns,
+                "environment" => DiscoveryMethod::Environment,
                 _ => {
                     warn!(method = %discovery_method, "Unknown discovery method, using static");
                     DiscoveryMethod::Static
@@ -516,8 +516,8 @@ mod tests {
         provider
             .set_config(
                 "A2A_DISCOVERY_METHOD",
-                "dns",
-                ConfigValidator::default().with_pattern(r"^(static|dns)$"),
+                "environment",
+                ConfigValidator::default().with_pattern(r"^(static|environment)$"),
             )
             .unwrap();
 
@@ -527,7 +527,10 @@ mod tests {
         assert_eq!(config.agent_id, "secure-test-agent");
         assert_eq!(config.server.port, 9999);
         assert!(config.server.enabled);
-        assert!(matches!(config.discovery.method, DiscoveryMethod::Dns));
+        assert!(matches!(
+            config.discovery.method,
+            DiscoveryMethod::Environment
+        ));
     }
 
     #[test]
