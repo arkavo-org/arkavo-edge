@@ -21,6 +21,7 @@ mod cognitive_engine_core;
 mod cognitive_engine_planning;
 mod cognitive_engine_pr;
 mod cognitive_engine_verification;
+pub mod planner_config;
 pub mod config;
 pub mod error;
 pub mod issue_analyzer;

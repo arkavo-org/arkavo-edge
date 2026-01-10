@@ -28,7 +28,7 @@ pub use architect::{
 };
 pub use classifier::{TaskCategory, TaskClassifier};
 pub use connectivity::ConnectivityChecker;
-pub use decision::{ModelChoice, RoutingDecision};
+pub use decision::{ModelChoice, PlannerTier, RoutingDecision};
 pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
 pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
@@ -282,6 +282,14 @@ impl Router {
     /// Returns None if Gemini is not available (no API key)
     pub fn get_planning_provider(&self) -> Option<arkavo_llm::GeminiProvider> {
         arkavo_llm::GeminiProvider::new().ok()
+    }
+
+    /// Get a provider for the given model choice (local or cloud)
+    ///
+    /// This creates the appropriate provider for the specified model,
+    /// supporting both local LlamaCpp models and cloud API providers.
+    pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+        self.instantiate_provider(model).await
     }
 
     /// Check if Gemini API is available

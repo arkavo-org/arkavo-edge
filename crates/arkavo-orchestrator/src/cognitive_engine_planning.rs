@@ -3,6 +3,7 @@ use crate::cognitive_engine_core::{
     ExecutionPlan, PlanStep, VerificationCheck, VerificationResult,
 };
 use crate::error::{Error, Result};
+use crate::planner_config::get_planner_config;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_llm::{Message as LlmMessage, Provider, Role};
 use arkavo_router::Router;
@@ -25,62 +26,45 @@ impl Planner {
     pub async fn plan(&self, assignment: &AgentAssignment) -> Result<ExecutionPlan> {
         debug!("Generating execution plan");
 
-        let planning_prompt = format!(
-            "Generate a detailed execution plan for this GitHub issue:\n\n\
-            Title: {}\n\n\
-            Description: {}\n\n\
-            Type: {:?}\n\
-            Complexity: {:?}\n\
-            Technologies: {:?}\n\n\
-            Return a structured plan with 3-5 concrete steps. For each step:\n\
-            1. Brief description\n\
-            2. Specific commands to execute (e.g., cargo test, cargo build, git commands)\n\
-            3. Verification checks (tests, linter, build success)\n\n\
-            Format each step as:\n\
-            STEP N: [description]\n\
-            COMMANDS: [comma-separated commands]\n\
-            VERIFY: [comma-separated: tests, linter, build, or file_constraint_400]\n\
-            CONFIDENCE: [0.0-1.0]",
-            assignment.issue_title,
-            assignment.issue_body,
-            assignment.routing_decision.analysis.issue_type,
-            assignment.routing_decision.analysis.complexity,
-            assignment.routing_decision.analysis.technologies
+        // Use a simple prompt for routing to get the model decision
+        let routing_prompt = format!(
+            "Planning task for: {} - {:?}",
+            assignment.issue_title, assignment.routing_decision.analysis.issue_type
         );
 
         let decision = self
             .router
-            .classify(&planning_prompt)
+            .classify(&routing_prompt)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Routing failed: {e}")))?;
 
+        // Get capability-appropriate planner config for adaptive prompting
+        let planner_config = get_planner_config(decision.recommended_model.capability());
+        let planning_prompt = planner_config.planning_prompt(assignment);
+
         info!(
             model = ?decision.recommended_model,
+            tier = ?planner_config.tier(),
             estimated_cost = decision.estimated_cost_usd,
             "Planning with selected model"
         );
 
-        let planning_provider: Arc<dyn Provider> = match decision.recommended_model {
-            arkavo_router::ModelChoice::LocalQwen3
-            | arkavo_router::ModelChoice::LocalMinistral3B
-            | arkavo_router::ModelChoice::LocalMinistral8B
-            | arkavo_router::ModelChoice::LocalGemma270M
-            | arkavo_router::ModelChoice::LocalGemma4B
-            | arkavo_router::ModelChoice::LocalGemma12B
-            | arkavo_router::ModelChoice::LocalDeepSeekCoder => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "Local models not yet supported for planning. Set GEMINI_API_KEY for remote planning."
-                )));
-            }
-            _ => {
-                if let Some(gemini) = self.router.get_planning_provider() {
-                    Arc::new(gemini)
-                } else {
-                    return Err(Error::Other(anyhow::anyhow!(
-                        "Planning model not available. Set GEMINI_API_KEY for remote planning."
-                    )));
-                }
-            }
+        // Get provider - supports both local and cloud models
+        let planning_provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
+            let provider = self
+                .router
+                .get_provider(&decision.recommended_model)
+                .await
+                .map_err(|e| {
+                    Error::Other(anyhow::anyhow!("Failed to create local provider: {e}"))
+                })?;
+            Arc::from(provider)
+        } else if let Some(gemini) = self.router.get_planning_provider() {
+            Arc::new(gemini)
+        } else {
+            return Err(Error::Other(anyhow::anyhow!(
+                "Planning model not available. Set GEMINI_API_KEY for remote planning."
+            )));
         };
 
         let messages = vec![LlmMessage {
@@ -100,12 +84,6 @@ impl Planner {
         let estimated_output_tokens = response.len() as u32 / 4;
         let total_tokens = estimated_input_tokens + estimated_output_tokens;
 
-        let model_name = match decision.recommended_model {
-            arkavo_router::ModelChoice::GeminiFlash => "gemini-1.5-flash",
-            arkavo_router::ModelChoice::GeminiPro => "gemini-1.5-pro",
-            _ => "unknown",
-        };
-
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
 
@@ -113,8 +91,8 @@ impl Planner {
             .budget_tracker
             .record_spending(
                 "github-orchestrator".to_string(),
-                "gemini".to_string(),
-                model_name.to_string(),
+                decision.recommended_model.provider().to_string(),
+                decision.recommended_model.name().to_string(),
                 usage,
                 cost,
             )
@@ -272,12 +250,23 @@ impl Planner {
             decision.recommended_model
         );
 
-        let provider: Arc<dyn Provider> = if let Some(gemini) = self.router.get_planning_provider()
-        {
+        // Get provider - supports both local and cloud models
+        let provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
+            let p = self
+                .router
+                .get_provider(&decision.recommended_model)
+                .await
+                .map_err(|e| {
+                    Error::Other(anyhow::anyhow!(
+                        "Failed to create local provider for adjustment: {e}"
+                    ))
+                })?;
+            Arc::from(p)
+        } else if let Some(gemini) = self.router.get_planning_provider() {
             Arc::new(gemini)
         } else {
             return Err(Error::Other(anyhow::anyhow!(
-                "Adjustment requires Gemini. Set GEMINI_API_KEY."
+                "Adjustment requires a model. Set GEMINI_API_KEY for remote planning."
             )));
         };
 
@@ -295,12 +284,6 @@ impl Planner {
         let estimated_input_tokens = adjustment_prompt.len() as u32 / 4;
         let estimated_output_tokens = response.len() as u32 / 4;
 
-        let model_name = match decision.recommended_model {
-            arkavo_router::ModelChoice::GeminiFlash => "gemini-1.5-flash",
-            arkavo_router::ModelChoice::GeminiPro => "gemini-1.5-pro",
-            _ => "unknown",
-        };
-
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
 
@@ -308,8 +291,8 @@ impl Planner {
             .budget_tracker
             .record_spending(
                 "github-orchestrator".to_string(),
-                "gemini".to_string(),
-                model_name.to_string(),
+                decision.recommended_model.provider().to_string(),
+                decision.recommended_model.name().to_string(),
                 usage,
                 cost,
             )
