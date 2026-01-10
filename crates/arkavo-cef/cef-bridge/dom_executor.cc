@@ -37,6 +37,26 @@ void DOMExecutor::Initialize(CefRefPtr<CefFrame> frame, const std::string& socke
     initialized_ = true;
 }
 
+void DOMExecutor::Shutdown() {
+    if (!initialized_) {
+        return;
+    }
+
+    std::cout << "DOMExecutor shutting down..." << std::endl;
+
+    // Disconnect UDS client first to stop listening threads
+    if (uds_client_) {
+        uds_client_->Disconnect();
+        uds_client_.reset();
+    }
+
+    // Clear frame reference
+    frame_ = nullptr;
+    initialized_ = false;
+
+    std::cout << "DOMExecutor shutdown complete" << std::endl;
+}
+
 void DOMExecutor::RegisterEventBridge() {
     if (!frame_) {
         std::cerr << "Cannot register event bridge: frame not available" << std::endl;

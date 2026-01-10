@@ -15,6 +15,7 @@ public:
     static DOMExecutor* GetInstance();
 
     void Initialize(CefRefPtr<CefFrame> frame, const std::string& socket_path);
+    void Shutdown();  // Must be called before CefShutdown() to avoid crashes
     void RegisterEventBridge();
     void PollEventQueue();
 
