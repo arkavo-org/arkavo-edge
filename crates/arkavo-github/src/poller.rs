@@ -1,8 +1,8 @@
 use crate::discovery::OrgDiscovery;
 use crate::error::Result;
 use crate::filters::RepoFilter;
+use crate::issue_handler::IssueHandler;
 use arkavo_memory::{IssueProcessingStatus, OrchestratorStateStore, RepoState, RepoStatus};
-use arkavo_orchestrator::Orchestrator;
 use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ impl Default for OrgPollerConfig {
 pub struct OrgPoller {
     org_name: String,
     github_token: Option<String>,
-    orchestrator: Arc<Orchestrator>,
+    issue_handler: Option<Arc<dyn IssueHandler>>,
     discovery: Arc<OrgDiscovery>,
     state_store: Arc<OrchestratorStateStore>,
     config: OrgPollerConfig,
@@ -58,7 +58,7 @@ impl OrgPoller {
     pub async fn new(
         org_name: String,
         github_token: Option<String>,
-        orchestrator: Arc<Orchestrator>,
+        issue_handler: Option<Arc<dyn IssueHandler>>,
         state_db_path: PathBuf,
         config: OrgPollerConfig,
     ) -> Result<Self> {
@@ -68,7 +68,7 @@ impl OrgPoller {
         Ok(Self {
             org_name,
             github_token,
-            orchestrator,
+            issue_handler,
             discovery,
             state_store,
             config,
@@ -257,7 +257,7 @@ impl OrgPoller {
             let repo_name = repo_state.repo_name.clone();
             let org_name = self.org_name.clone();
             let state_store = self.state_store.clone();
-            let orchestrator = self.orchestrator.clone();
+            let issue_handler = self.issue_handler.clone();
             let labels_filter = self.config.labels_filter.clone();
             let github_token = self.github_token.clone();
 
@@ -266,7 +266,7 @@ impl OrgPoller {
                     &org_name,
                     repo_clone,
                     state_store,
-                    orchestrator,
+                    issue_handler,
                     labels_filter,
                     github_token,
                 )
@@ -293,7 +293,7 @@ impl OrgPoller {
         org: &str,
         mut repo_state: RepoState,
         state_store: Arc<OrchestratorStateStore>,
-        _orchestrator: Arc<Orchestrator>,
+        _issue_handler: Option<Arc<dyn IssueHandler>>,
         labels_filter: Option<String>,
         github_token: Option<String>,
     ) -> Result<()> {
@@ -416,7 +416,7 @@ impl OrgPoller {
         Self {
             org_name: self.org_name.clone(),
             github_token: self.github_token.clone(),
-            orchestrator: self.orchestrator.clone(),
+            issue_handler: self.issue_handler.clone(),
             discovery: self.discovery.clone(),
             state_store: self.state_store.clone(),
             config: OrgPollerConfig {

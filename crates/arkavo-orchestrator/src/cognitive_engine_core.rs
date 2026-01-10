@@ -3,7 +3,7 @@ use crate::cognitive_engine_planning::Planner;
 use crate::cognitive_engine_pr::PrCreator;
 use crate::cognitive_engine_verification::Verifier;
 use crate::error::{Error, Result};
-use crate::github_operations::GitHubOperations;
+use arkavo_github::IssueOperations;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_llm::{Message as LlmMessage, Role};
@@ -58,7 +58,7 @@ pub struct CognitiveEngine {
     #[allow(dead_code)]
     budget_tracker: Arc<BudgetTracker>,
     event_writer: Arc<EventWriter>,
-    github_ops: Arc<GitHubOperations>,
+    github_ops: Arc<IssueOperations>,
     router: Arc<Router>,
     tool_registry: Arc<ToolRegistry>,
     session_id: String,
@@ -72,7 +72,7 @@ impl CognitiveEngine {
     pub fn new(
         budget_tracker: Arc<BudgetTracker>,
         event_writer: Arc<EventWriter>,
-        github_ops: Arc<GitHubOperations>,
+        github_ops: Arc<IssueOperations>,
         router: Arc<Router>,
         tool_registry: Arc<ToolRegistry>,
         session_id: String,
@@ -334,7 +334,8 @@ impl CognitiveEngine {
 
         self.github_ops
             .post_comment(&owner, &repo, assignment.issue_number, message)
-            .await
+            .await?;
+        Ok(())
     }
 
     async fn log_event<T: Serialize>(&self, event_type: &str, data: &T) {

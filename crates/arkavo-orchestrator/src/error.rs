@@ -38,6 +38,9 @@ pub enum Error {
     #[error("Git error: {0}")]
     Git(#[from] arkavo_git::backend::GitError),
 
+    #[error("GitHub error: {0}")]
+    GitHub(#[from] arkavo_github::GitHubError),
+
     #[error("External error: {0}")]
     External(String),
 

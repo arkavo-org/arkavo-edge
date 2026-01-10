@@ -1,8 +1,8 @@
 use crate::agent_assignment::AgentAssigner;
 use crate::cognitive_engine::CognitiveEngine;
 use crate::error::{Error, Result};
-use crate::github_operations::GitHubOperations;
 use crate::issue_router::{ExecutionStrategy, IssueRouter};
+use arkavo_github::IssueOperations;
 use crate::types::IssueEvent;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::EventWriter;
@@ -26,7 +26,7 @@ pub struct Orchestrator {
     task_executor: Arc<TaskExecutor>,
     agent_assigner: Arc<AgentAssigner>,
     cognitive_engine: Arc<CognitiveEngine>,
-    github_ops: Arc<GitHubOperations>,
+    github_ops: Arc<IssueOperations>,
     issue_to_task: Arc<RwLock<HashMap<String, Uuid>>>,
     task_retry_counts: Arc<RwLock<HashMap<Uuid, u32>>>,
 }
@@ -37,7 +37,7 @@ impl Orchestrator {
         agent_registry: Arc<AgentRegistry>,
         budget_tracker: Arc<BudgetTracker>,
         event_writer: Arc<EventWriter>,
-        github_ops: Arc<GitHubOperations>,
+        github_ops: Arc<IssueOperations>,
         session_id: String,
     ) -> Result<Self> {
         let agent_assigner = Arc::new(AgentAssigner::new(agent_registry));
@@ -310,7 +310,8 @@ impl Orchestrator {
 
         self.github_ops
             .post_comment(owner, repo, event.issue.number, &message)
-            .await
+            .await?;
+        Ok(())
     }
 
     async fn is_issue_active(&self, issue_key: &str) -> bool {

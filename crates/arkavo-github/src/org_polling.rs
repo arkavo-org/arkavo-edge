@@ -1,16 +1,7 @@
-use crate::constants::{default_state_db_path, default_tasks_db_path};
+use crate::constants::default_state_db_path;
 use crate::error::{GitHubError, Result};
 use crate::poller::{OrgPoller, OrgPollerConfig};
-use arkavo_budget::{BudgetTracker, config::BudgetConfig};
-use arkavo_events::{EventWriter, writer::EventWriterConfig};
-use arkavo_orchestrator::{GitHubApp, GitHubOperations, Orchestrator};
-use arkavo_protocol::{
-    agent_registry::AgentRegistry,
-    task_executor::{TaskExecutor, TaskExecutorConfig},
-    task_store::SqliteTaskStore,
-};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
@@ -64,8 +55,6 @@ pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
 
     let state_db_path = config.state_db_path.unwrap_or_else(default_state_db_path);
 
-    let orchestrator = create_orchestrator(&token).await?;
-
     let poller_config = OrgPollerConfig {
         poll_interval: Duration::from_secs(config.poll_interval_secs),
         max_concurrent_repos: config.max_concurrent_repos,
@@ -82,7 +71,7 @@ pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
             let poller = OrgPoller::new(
                 org.clone(),
                 Some(token.clone()),
-                orchestrator.clone(),
+                None, // Issue handler can be provided by caller if needed
                 state_db_path.clone(),
                 poller_config.clone(),
             )
@@ -118,34 +107,4 @@ pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
     }
 
     Ok(())
-}
-
-async fn create_orchestrator(token: &str) -> Result<Arc<Orchestrator>> {
-    let github_app = Arc::new(GitHubApp::new_from_token(token.to_string())?);
-    let github_ops = Arc::new(GitHubOperations::new(Arc::clone(&github_app)));
-
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let event_writer = Arc::new(EventWriter::new(EventWriterConfig::default()));
-    let budget_tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await?);
-    let agent_registry = Arc::new(AgentRegistry::new());
-
-    let task_store_path = default_tasks_db_path();
-    let task_store = Arc::new(SqliteTaskStore::new(&task_store_path).await?)
-        as Arc<dyn arkavo_protocol::task_store::TaskStore>;
-    let task_executor = Arc::new(TaskExecutor::new(task_store, TaskExecutorConfig::default()));
-
-    let orchestrator = Arc::new(
-        Orchestrator::new(
-            Arc::clone(&task_executor),
-            Arc::clone(&agent_registry),
-            Arc::clone(&budget_tracker),
-            Arc::clone(&event_writer),
-            Arc::clone(&github_ops),
-            session_id,
-        )
-        .await?,
-    );
-
-    orchestrator.initialize().await?;
-    Ok(orchestrator)
 }
