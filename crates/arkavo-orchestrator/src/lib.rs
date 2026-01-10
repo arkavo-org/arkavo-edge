@@ -5,11 +5,18 @@
 #![allow(clippy::unused_async)]
 #![allow(clippy::needless_continue)]
 #![allow(clippy::large_enum_variant)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::unnecessary_literal_bound)]
+#![allow(clippy::or_fun_call)]
+#![allow(clippy::redundant_clone)]
+#![allow(clippy::struct_excessive_bools)]
 
 pub mod agent_assignment;
 pub mod chunk_processor;
 pub mod code_solver;
 pub mod cognitive_engine;
+pub mod task_executor;
 mod cognitive_engine_core;
 mod cognitive_engine_planning;
 mod cognitive_engine_pr;
@@ -37,5 +44,9 @@ pub use github_operations::{GitHubOperations, IssueUpdate};
 pub use issue_analyzer::{Complexity, IssueAnalysis, IssueAnalyzer, IssueType};
 pub use issue_router::{ExecutionStrategy, IssueRouter, Priority, RoutingDecision};
 pub use orchestrator::Orchestrator;
+pub use task_executor::{
+    CollaborativePlanner, LocalTaskStrategy, MeshTaskStrategy, MessageType, MockUI, ModelCapability,
+    ModelInfo, SelectedModels, TaskConfig, TaskExecutor, TaskPlan, TaskResult, TaskStrategy, TaskUI,
+};
 pub use types::{GitHubEvent, IssueEvent, PullRequestEvent};
 pub use webhook::WebhookServer;

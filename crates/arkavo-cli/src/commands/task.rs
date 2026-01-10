@@ -1,4 +1,7 @@
 use arkavo_git::{GitManager, safety::RepoGuard};
+use arkavo_orchestrator::{
+    LocalTaskStrategy, MeshTaskStrategy, TaskConfig as OrchestratorConfig, TaskExecutor,
+};
 use arkavo_protocol::{
     agent_registry::{AgentInfo, AgentRegistry},
     http::HttpTransport,
@@ -16,6 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+
+use super::terminal_ui::TerminalUI;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -743,7 +748,49 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
     })
 }
 
+/// Execute task using the new TaskExecutor from arkavo-orchestrator
+///
+/// This is the new architecture that decouples task logic from CLI.
+/// Set ARKAVO_USE_EXECUTOR=1 to enable this path.
+#[allow(clippy::disallowed_methods)]
+fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let ui = TerminalUI::new();
+
+    // Convert CLI config to orchestrator config
+    let orch_config = OrchestratorConfig {
+        auto_approve: config.auto_approve,
+        push: config.push,
+        validate: config.validate,
+        commit_message: config.message.clone(),
+        use_local_only: config.use_local_only,
+        mesh_only: config.mesh_only,
+        target_agent_id: config.target_agent_id.clone(),
+    };
+
+    // Create executor with strategies
+    let executor = TaskExecutor::new()
+        .with_local_strategy(Arc::new(LocalTaskStrategy::new()))
+        .with_mesh_strategy(Arc::new(MeshTaskStrategy::new()));
+
+    // Run task in async context
+    let result = tokio::runtime::Runtime::new()?.block_on(async {
+        executor.run_task(task, &orch_config, &ui).await
+    })?;
+
+    if result.success {
+        println!("\nTask completed: {}", result.message);
+        Ok(())
+    } else {
+        Err(result.message.into())
+    }
+}
+
 fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if new executor path is enabled
+    if env::var("ARKAVO_USE_EXECUTOR").is_ok() {
+        return execute_ai_task_v2(task, config);
+    }
+
     use std::env;
 
     println!("=== Task: Plan and Execute ===\n");
