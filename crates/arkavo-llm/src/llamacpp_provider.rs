@@ -410,6 +410,24 @@ impl Provider for LlamaCppProvider {
     }
 }
 
+/// Check if GPU acceleration is available for local inference
+///
+/// Returns `true` if GPU is available or status is unknown (not yet tested).
+/// Returns `false` only if GPU has been tested and failed.
+///
+/// This is used by the router to make hardware-aware model selection decisions.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub fn is_gpu_accelerated() -> bool {
+    use arkavo_llama_cpp::{GpuStatus, gpu_status};
+    matches!(gpu_status(), GpuStatus::Available | GpuStatus::Unknown)
+}
+
+/// Stub for when llama-cpp is disabled - always returns false
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+pub fn is_gpu_accelerated() -> bool {
+    false
+}
+
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 #[async_trait]
 impl Provider for LlamaCppProvider {

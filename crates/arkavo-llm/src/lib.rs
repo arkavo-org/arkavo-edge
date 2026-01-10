@@ -55,7 +55,7 @@ mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
 #[cfg(feature = "llama-cpp")]
-pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig};
+pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
     DeltaStream, DeltaType, EndReason, StreamControl, StreamDelta, StreamError, StreamId,
