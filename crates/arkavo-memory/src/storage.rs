@@ -475,7 +475,8 @@ impl MemoryStorage {
                 DistCosine,
             );
             let mut new_mapping = HashMap::new();
-            for (idx, (embedding, id)) in active_embeddings.into_iter().zip(active_ids).enumerate() {
+            for (idx, (embedding, id)) in active_embeddings.into_iter().zip(active_ids).enumerate()
+            {
                 hnsw.insert((&embedding, idx));
                 new_mapping.insert(idx, id);
             }

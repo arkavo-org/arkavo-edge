@@ -1,6 +1,6 @@
 use crate::error::{GitHubError, Result};
 use chrono::Utc;
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -127,10 +127,7 @@ impl GitHubApp {
             )));
         }
 
-        let installations: Vec<Installation> = response
-            .json()
-            .await
-            .map_err(GitHubError::Http)?;
+        let installations: Vec<Installation> = response.json().await.map_err(GitHubError::Http)?;
         info!(
             count = installations.len(),
             "Found GitHub App installations"
@@ -176,10 +173,7 @@ impl GitHubApp {
             )));
         }
 
-        let mut token: InstallationToken = response
-            .json()
-            .await
-            .map_err(GitHubError::Http)?;
+        let mut token: InstallationToken = response.json().await.map_err(GitHubError::Http)?;
 
         let expires_at = chrono::DateTime::parse_from_rfc3339(&token.expires_at)
             .map_err(|e| GitHubError::GitHubApi(format!("Invalid expiry date: {e}")))?

@@ -161,12 +161,10 @@ impl OrchestratorStateStore {
         .await?;
 
         // Migration: Add retry_count column if it doesn't exist (for existing databases)
-        sqlx::query(
-            "ALTER TABLE processed_issues ADD COLUMN retry_count INTEGER DEFAULT 0",
-        )
-        .execute(&self.pool)
-        .await
-        .ok(); // Ignore error if column already exists
+        sqlx::query("ALTER TABLE processed_issues ADD COLUMN retry_count INTEGER DEFAULT 0")
+            .execute(&self.pool)
+            .await
+            .ok(); // Ignore error if column already exists
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_issues(processed_at)",

@@ -46,9 +46,7 @@ impl CollaborativePlanner {
 
         // Round 3: Local model verifies
         ui.progress("Local Agent verifying plan...", Some(100));
-        let verified = self
-            .round_verify(&plan_content, ui, tool_registry)
-            .await?;
+        let verified = self.round_verify(&plan_content, ui, tool_registry).await?;
 
         Ok(TaskPlan {
             task: task.to_string(),
@@ -101,7 +99,11 @@ impl CollaborativePlanner {
 
         let response = self
             .router
-            .route_with_tools(&format!("create plan for: {}", task), messages, tool_registry)
+            .route_with_tools(
+                &format!("create plan for: {}", task),
+                messages,
+                tool_registry,
+            )
             .await
             .map_err(|e| Error::Config(format!("LLM planning failed: {}", e)))?;
 

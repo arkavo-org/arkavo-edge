@@ -4,7 +4,7 @@
 //! annotations for providers that support structured outputs (e.g., Gemini).
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// JSON-serializable execution plan for structured LLM output
 #[derive(Debug, Clone, Serialize, Deserialize)]

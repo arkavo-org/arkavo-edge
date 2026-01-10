@@ -91,7 +91,11 @@ pub struct ModelInfo {
 }
 
 impl ModelInfo {
-    pub fn cloud(name: impl Into<String>, provider: impl Into<String>, model_id: impl Into<String>) -> Self {
+    pub fn cloud(
+        name: impl Into<String>,
+        provider: impl Into<String>,
+        model_id: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             provider: provider.into(),
@@ -102,7 +106,12 @@ impl ModelInfo {
         }
     }
 
-    pub fn local(name: impl Into<String>, path: PathBuf, size_gb: f64, capability: ModelCapability) -> Self {
+    pub fn local(
+        name: impl Into<String>,
+        path: PathBuf,
+        size_gb: f64,
+        capability: ModelCapability,
+    ) -> Self {
         let name = name.into();
         Self {
             model_id: path.to_string_lossy().to_string(),
@@ -150,7 +159,12 @@ mod tests {
 
     #[test]
     fn test_model_info_local() {
-        let model = ModelInfo::local("Qwen", PathBuf::from("/path/to/model.gguf"), 2.5, ModelCapability::Medium);
+        let model = ModelInfo::local(
+            "Qwen",
+            PathBuf::from("/path/to/model.gguf"),
+            2.5,
+            ModelCapability::Medium,
+        );
         assert_eq!(model.provider, "local");
         assert!(model.path.is_some());
         assert_eq!(model.size_gb, Some(2.5));

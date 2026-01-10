@@ -806,7 +806,10 @@ fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::e
 
 // Legacy code below - kept for reference but no longer used
 #[allow(dead_code)]
-fn execute_ai_task_legacy(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_ai_task_legacy(
+    task: &str,
+    config: &TaskConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     use std::env;
 
     println!("=== Task: Plan and Execute ===\n");

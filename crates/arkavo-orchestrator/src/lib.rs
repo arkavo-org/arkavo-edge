@@ -16,18 +16,18 @@ pub mod agent_assignment;
 pub mod chunk_processor;
 pub mod code_solver;
 pub mod cognitive_engine;
-pub mod task_executor;
 mod cognitive_engine_core;
 mod cognitive_engine_planning;
 mod cognitive_engine_pr;
 pub mod cognitive_engine_schema;
 mod cognitive_engine_verification;
-pub mod planner_config;
 pub mod config;
 pub mod error;
 pub mod issue_analyzer;
 pub mod issue_router;
 pub mod orchestrator;
+pub mod planner_config;
+pub mod task_executor;
 pub mod types;
 pub mod webhook;
 
@@ -45,8 +45,9 @@ pub use issue_analyzer::{Complexity, IssueAnalysis, IssueAnalyzer, IssueType};
 pub use issue_router::{ExecutionStrategy, IssueRouter, Priority, RoutingDecision};
 pub use orchestrator::Orchestrator;
 pub use task_executor::{
-    CollaborativePlanner, LocalTaskStrategy, MeshTaskStrategy, MessageType, MockUI, ModelCapability,
-    ModelInfo, SelectedModels, TaskConfig, TaskExecutor, TaskPlan, TaskResult, TaskStrategy, TaskUI,
+    CollaborativePlanner, LocalTaskStrategy, MeshTaskStrategy, MessageType, MockUI,
+    ModelCapability, ModelInfo, SelectedModels, TaskConfig, TaskExecutor, TaskPlan, TaskResult,
+    TaskStrategy, TaskUI,
 };
 pub use types::{GitHubEvent, IssueEvent, PullRequestEvent};
 pub use webhook::WebhookServer;

@@ -71,8 +71,9 @@ impl MeshTaskStrategy {
                             .unwrap_or("")
                             .to_string();
 
-                        let capabilities_str =
-                            info.get_property_val_str("capabilities").unwrap_or_default();
+                        let capabilities_str = info
+                            .get_property_val_str("capabilities")
+                            .unwrap_or_default();
                         let mut capabilities: Vec<String> = if capabilities_str.is_empty() {
                             vec![]
                         } else {
@@ -375,7 +376,10 @@ impl TaskStrategy for MeshTaskStrategy {
                 ui.status(&format!("    Purpose: {}", agent.purpose));
             }
             if !agent.capabilities.is_empty() {
-                ui.status(&format!("    Capabilities: {}", agent.capabilities.join(", ")));
+                ui.status(&format!(
+                    "    Capabilities: {}",
+                    agent.capabilities.join(", ")
+                ));
             }
         }
 

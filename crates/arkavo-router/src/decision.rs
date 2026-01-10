@@ -348,11 +348,17 @@ mod tests {
         assert_eq!(ModelChoice::LocalGemma270M.capability(), PlannerTier::Small);
 
         // Medium models (2-7B params)
-        assert_eq!(ModelChoice::LocalMinistral3B.capability(), PlannerTier::Medium);
+        assert_eq!(
+            ModelChoice::LocalMinistral3B.capability(),
+            PlannerTier::Medium
+        );
         assert_eq!(ModelChoice::LocalGemma4B.capability(), PlannerTier::Medium);
 
         // Large models (> 7B params or cloud)
-        assert_eq!(ModelChoice::LocalMinistral8B.capability(), PlannerTier::Large);
+        assert_eq!(
+            ModelChoice::LocalMinistral8B.capability(),
+            PlannerTier::Large
+        );
         assert_eq!(ModelChoice::GeminiFlash.capability(), PlannerTier::Large);
         assert_eq!(ModelChoice::ClaudeSonnet.capability(), PlannerTier::Large);
     }

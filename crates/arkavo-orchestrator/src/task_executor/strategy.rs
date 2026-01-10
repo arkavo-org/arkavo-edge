@@ -15,12 +15,8 @@ pub trait TaskStrategy: Send + Sync {
     async fn is_available(&self) -> bool;
 
     /// Execute the task using this strategy
-    async fn execute(
-        &self,
-        task: &str,
-        config: &TaskConfig,
-        ui: &dyn TaskUI,
-    ) -> Result<TaskResult>;
+    async fn execute(&self, task: &str, config: &TaskConfig, ui: &dyn TaskUI)
+    -> Result<TaskResult>;
 
     /// Get strategy name for logging/display
     fn name(&self) -> &str;

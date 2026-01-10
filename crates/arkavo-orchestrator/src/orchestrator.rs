@@ -2,10 +2,10 @@ use crate::agent_assignment::AgentAssigner;
 use crate::cognitive_engine::CognitiveEngine;
 use crate::error::{Error, Result};
 use crate::issue_router::{ExecutionStrategy, IssueRouter};
-use arkavo_github::IssueOperations;
 use crate::types::IssueEvent;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::EventWriter;
+use arkavo_github::IssueOperations;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_memory::{IssueProcessingStatus, MemoryStorage, OrchestratorStateStore, PlanStateStore};
 use arkavo_protocol::{
@@ -86,18 +86,17 @@ impl Orchestrator {
         ));
 
         // Create orchestrator state store for persistence
-        let state_store = {
-            let db_path = dirs::data_local_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("arkavo")
-                .join("orchestrator_state.db");
+        let state_store =
+            {
+                let db_path = dirs::data_local_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("arkavo")
+                    .join("orchestrator_state.db");
 
-            Arc::new(
-                OrchestratorStateStore::new(&db_path)
-                    .await
-                    .map_err(|e| Error::Other(anyhow::anyhow!("Failed to create state store: {e}")))?,
-            )
-        };
+                Arc::new(OrchestratorStateStore::new(&db_path).await.map_err(|e| {
+                    Error::Other(anyhow::anyhow!("Failed to create state store: {e}"))
+                })?)
+            };
 
         // Resume any processing issues on startup (mark as pending to re-queue)
         if let Ok(processing) = state_store

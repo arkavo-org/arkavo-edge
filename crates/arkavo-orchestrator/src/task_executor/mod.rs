@@ -80,10 +80,7 @@ impl TaskExecutor {
                                 ui.error("Mesh execution failed and --mesh-only specified");
                                 return Err(e);
                             }
-                            ui.warn(&format!(
-                                "Mesh unavailable: {}, falling back to local",
-                                e
-                            ));
+                            ui.warn(&format!("Mesh unavailable: {}, falling back to local", e));
                         }
                     }
                 } else if config.mesh_only {

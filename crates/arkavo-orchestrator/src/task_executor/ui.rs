@@ -237,8 +237,14 @@ mod tests {
 
         let messages = ui.messages();
         assert_eq!(messages.len(), 5);
-        assert_eq!(messages[0], (MessageType::Status, "Starting task".to_string()));
-        assert_eq!(messages[1], (MessageType::Progress, "[33%] Step 1".to_string()));
+        assert_eq!(
+            messages[0],
+            (MessageType::Status, "Starting task".to_string())
+        );
+        assert_eq!(
+            messages[1],
+            (MessageType::Progress, "[33%] Step 1".to_string())
+        );
         assert!(ui.has_error());
     }
 

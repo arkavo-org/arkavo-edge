@@ -1,4 +1,4 @@
-use arkavo_git::{safety::RepoGuard, GitManager};
+use arkavo_git::{GitManager, safety::RepoGuard};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_router::Router;
@@ -126,7 +126,12 @@ impl LocalTaskStrategy {
                     let size_gb = size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                     let capability = Self::infer_capability(file_name, size_gb);
 
-                    models.push(ModelInfo::local(file_name.to_string(), file_path, size_gb, capability));
+                    models.push(ModelInfo::local(
+                        file_name.to_string(),
+                        file_path,
+                        size_gb,
+                        capability,
+                    ));
                 }
             }
         }
@@ -140,8 +145,8 @@ impl LocalTaskStrategy {
 
         // Check for Gemini
         if std::env::var("GEMINI_API_KEY").is_ok() {
-            let model_id =
-                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
+            let model_id = std::env::var("GEMINI_MODEL")
+                .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
             models.push(ModelInfo::cloud("Gemini", "gemini", model_id));
         }
 
@@ -261,7 +266,10 @@ impl LocalTaskStrategy {
                     ModelCapability::Medium => "Medium",
                     ModelCapability::Large => "Large",
                 };
-                let size = model.size_gb.map(|s| format!("{s:.1} GB")).unwrap_or_default();
+                let size = model
+                    .size_gb
+                    .map(|s| format!("{s:.1} GB"))
+                    .unwrap_or_default();
                 ui.status(&format!("  - {} ({}) {}", model.name, cap_str, size));
             }
         }
@@ -318,7 +326,9 @@ impl TaskStrategy for LocalTaskStrategy {
             ui.error("No models available");
             ui.error("Please either:");
             ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
-            ui.error("  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
+            ui.error(
+                "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF",
+            );
             Error::Other(anyhow::anyhow!("No models available"))
         })?;
 
@@ -347,17 +357,13 @@ impl TaskStrategy for LocalTaskStrategy {
 
         // Step 6: Execute plan with tools
         ui.section("Step 3: Execute Plan");
-        let changes_made = self
-            .execute_plan_with_tools(&planner, &plan, ui)
-            .await?;
+        let changes_made = self.execute_plan_with_tools(&planner, &plan, ui).await?;
 
         // Step 7: Git commit (if changes were made)
         let mut result = TaskResult::success(format!("Task completed: {}", plan.task));
 
         if changes_made {
-            result = self
-                .commit_changes(config, ui, result)
-                .await?;
+            result = self.commit_changes(config, ui, result).await?;
         }
 
         ui.show_result(&result);
@@ -399,9 +405,18 @@ impl LocalTaskStrategy {
                 .await
                 .map_err(|e| Error::Config(format!("LLM execution failed: {}", e)))?;
 
-            ui.progress(&format!("Iteration {}: {}", iterations + 1,
-                if response.tool_calls.is_empty() { "No tool calls" } else { "Processing tool calls" }
-            ), Some(((iterations + 1) * 5).min(100) as u8));
+            ui.progress(
+                &format!(
+                    "Iteration {}: {}",
+                    iterations + 1,
+                    if response.tool_calls.is_empty() {
+                        "No tool calls"
+                    } else {
+                        "Processing tool calls"
+                    }
+                ),
+                Some(((iterations + 1) * 5).min(100) as u8),
+            );
 
             if response.tool_calls.is_empty() {
                 ui.status(&format!("LLM response: {}", response.content));
@@ -566,8 +581,18 @@ mod tests {
     #[test]
     fn test_select_models_local_only() {
         let local = vec![
-            ModelInfo::local("small.gguf", PathBuf::from("/small"), 0.5, ModelCapability::Small),
-            ModelInfo::local("medium.gguf", PathBuf::from("/medium"), 4.0, ModelCapability::Medium),
+            ModelInfo::local(
+                "small.gguf",
+                PathBuf::from("/small"),
+                0.5,
+                ModelCapability::Small,
+            ),
+            ModelInfo::local(
+                "medium.gguf",
+                PathBuf::from("/medium"),
+                4.0,
+                ModelCapability::Medium,
+            ),
         ];
         let cloud = vec![];
 
