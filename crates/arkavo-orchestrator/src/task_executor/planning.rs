@@ -1,48 +1,53 @@
-use super::config::{ModelInfo, SelectedModels};
+use super::config::SelectedModels;
 use super::ui::TaskUI;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use arkavo_llm::Message;
+use arkavo_mcp_tools::ToolRegistry;
+use arkavo_router::Router;
+use std::sync::Arc;
 
 /// Collaborative planner implementing 3-round planning pattern
 ///
 /// Round 1: Local model gathers information (filesystem, git status)
 /// Round 2: Cloud model creates detailed plan based on findings
 /// Round 3: Local model verifies plan correctness
-pub struct CollaborativePlanner;
-
-impl Default for CollaborativePlanner {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct CollaborativePlanner {
+    router: Arc<Router>,
 }
 
 impl CollaborativePlanner {
-    pub fn new() -> Self {
-        Self
+    pub fn new(router: Arc<Router>) -> Self {
+        Self { router }
+    }
+
+    pub fn router(&self) -> &Arc<Router> {
+        &self.router
     }
 
     /// Create a plan through 3-round collaboration
     pub async fn create_plan(
         &self,
         task: &str,
-        models: &SelectedModels,
+        _models: &SelectedModels,
         ui: &dyn TaskUI,
+        tool_registry: Option<&ToolRegistry>,
     ) -> Result<TaskPlan> {
         ui.section("Step 1: Collaborative Planning");
 
         // Round 1: Local model gathers information
         ui.progress("Local Agent gathering information...", Some(33));
-        let gather_result = self.round_gather(task, &models.gather_model, ui).await?;
+        let gather_result = self.round_gather(task, ui, tool_registry).await?;
 
         // Round 2: Cloud model creates plan
         ui.progress("Planning Agent creating plan...", Some(66));
         let plan_content = self
-            .round_plan(task, &gather_result, &models.planning_model, ui)
+            .round_plan(task, &gather_result, ui, tool_registry)
             .await?;
 
         // Round 3: Local model verifies
         ui.progress("Local Agent verifying plan...", Some(100));
         let verified = self
-            .round_verify(&plan_content, &models.verify_model, ui)
+            .round_verify(&plan_content, ui, tool_registry)
             .await?;
 
         Ok(TaskPlan {
@@ -57,25 +62,28 @@ impl CollaborativePlanner {
     async fn round_gather(
         &self,
         task: &str,
-        _model: &ModelInfo,
         ui: &dyn TaskUI,
+        tool_registry: Option<&ToolRegistry>,
     ) -> Result<String> {
         ui.status(&format!(
             "[Local Agent] Gathering information for: {}",
             task
         ));
 
-        // Build the gather prompt - this would be sent to the LLM with MCP tools
-        let _prompt = Self::build_gather_prompt(task);
+        let prompt = Self::build_gather_prompt(task);
+        let messages = vec![Message::user(prompt)];
 
-        // In full implementation, this would:
-        // 1. Create chat context with MCP tools enabled
-        // 2. Send prompt to local model
-        // 3. Execute tool calls (filesystem, git_status)
-        // 4. Return findings
+        let response = self
+            .router
+            .route_with_tools(
+                &format!("gather context for: {}", task),
+                messages,
+                tool_registry,
+            )
+            .await
+            .map_err(|e| Error::Config(format!("LLM gather failed: {}", e)))?;
 
-        // For now, return placeholder indicating prompt was generated
-        Ok(format!("Gathering findings for task: {task}"))
+        Ok(response.content)
     }
 
     /// Round 2: Create detailed plan based on findings
@@ -83,40 +91,42 @@ impl CollaborativePlanner {
         &self,
         task: &str,
         gather_result: &str,
-        _model: &ModelInfo,
         ui: &dyn TaskUI,
+        tool_registry: Option<&ToolRegistry>,
     ) -> Result<String> {
         ui.status("[Planning Agent] Creating detailed plan...");
 
-        // Build the planning prompt
-        let _prompt = Self::build_plan_prompt(task, gather_result);
+        let prompt = Self::build_plan_prompt(task, gather_result);
+        let messages = vec![Message::user(prompt)];
 
-        // In full implementation, this would:
-        // 1. Send prompt to cloud model with MCP tools
-        // 2. Allow tool calls for file reading, git operations
-        // 3. Return structured plan
+        let response = self
+            .router
+            .route_with_tools(&format!("create plan for: {}", task), messages, tool_registry)
+            .await
+            .map_err(|e| Error::Config(format!("LLM planning failed: {}", e)))?;
 
-        Ok(format!("Plan for task: {task}"))
+        Ok(response.content)
     }
 
     /// Round 3: Verify plan correctness
     async fn round_verify(
         &self,
         plan_content: &str,
-        _model: &ModelInfo,
         ui: &dyn TaskUI,
+        tool_registry: Option<&ToolRegistry>,
     ) -> Result<String> {
         ui.status("[Local Agent] Verifying plan...");
 
-        // Build verification prompt
-        let _prompt = Self::build_verify_prompt(plan_content);
+        let prompt = Self::build_verify_prompt(plan_content);
+        let messages = vec![Message::user(prompt)];
 
-        // In full implementation, this would:
-        // 1. Send prompt to local model with MCP tools
-        // 2. Read files mentioned in plan
-        // 3. Report any issues
+        let response = self
+            .router
+            .route_with_tools("verify plan correctness", messages, tool_registry)
+            .await
+            .map_err(|e| Error::Config(format!("LLM verification failed: {}", e)))?;
 
-        Ok("Plan verified".to_string())
+        Ok(response.content)
     }
 
     /// Build prompt for Round 1: Information gathering
@@ -208,39 +218,6 @@ pub struct TaskPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_executor::{MockUI, ModelCapability, ModelInfo, SelectedModels};
-    use std::path::PathBuf;
-
-    fn make_test_models() -> SelectedModels {
-        let local = ModelInfo::local(
-            "test-local",
-            PathBuf::from("/test/model.gguf"),
-            2.0,
-            ModelCapability::Medium,
-        );
-        let cloud = ModelInfo::cloud("test-cloud", "gemini", "gemini-2.0-flash");
-
-        SelectedModels {
-            gather_model: local.clone(),
-            planning_model: cloud,
-            verify_model: local,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_planner_creates_plan() {
-        let planner = CollaborativePlanner::new();
-        let ui = MockUI::new();
-        let models = make_test_models();
-
-        let result = planner
-            .create_plan("Add tests for module X", &models, &ui)
-            .await;
-
-        assert!(result.is_ok());
-        let plan = result.unwrap();
-        assert!(plan.task.contains("Add tests"));
-    }
 
     #[test]
     fn test_gather_prompt_includes_tools() {

@@ -751,7 +751,6 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
 /// Execute task using the new TaskExecutor from arkavo-orchestrator
 ///
 /// This is the new architecture that decouples task logic from CLI.
-/// Set ARKAVO_USE_EXECUTOR=1 to enable this path.
 #[allow(clippy::disallowed_methods)]
 fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
     let ui = TerminalUI::new();
@@ -767,13 +766,28 @@ fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         target_agent_id: config.target_agent_id.clone(),
     };
 
-    // Create executor with strategies
-    let executor = TaskExecutor::new()
-        .with_local_strategy(Arc::new(LocalTaskStrategy::new()))
-        .with_mesh_strategy(Arc::new(MeshTaskStrategy::new()));
-
     // Run task in async context
     let result = tokio::runtime::Runtime::new()?.block_on(async {
+        // Create tool registry with built-in tools (filesystem, git, etc.)
+        let storage = match arkavo_memory::MemoryStorage::new().await {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("Warning: Failed to create memory storage: {e}");
+                return Err(arkavo_orchestrator::Error::External(format!(
+                    "Memory storage error: {e}"
+                )));
+            }
+        };
+        let tool_registry = Arc::new(arkavo_mcp_tools::ToolRegistry::new(storage));
+
+        // Create local strategy with tools
+        let local_strategy = LocalTaskStrategy::new().with_tools(tool_registry);
+
+        // Create executor with strategies
+        let executor = TaskExecutor::new()
+            .with_local_strategy(Arc::new(local_strategy))
+            .with_mesh_strategy(Arc::new(MeshTaskStrategy::new()));
+
         executor.run_task(task, &orch_config, &ui).await
     })?;
 
@@ -786,11 +800,13 @@ fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
 }
 
 fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if new executor path is enabled
-    if env::var("ARKAVO_USE_EXECUTOR").is_ok() {
-        return execute_ai_task_v2(task, config);
-    }
+    // Use the new TaskExecutor architecture
+    execute_ai_task_v2(task, config)
+}
 
+// Legacy code below - kept for reference but no longer used
+#[allow(dead_code)]
+fn execute_ai_task_legacy(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
     use std::env;
 
     println!("=== Task: Plan and Execute ===\n");

@@ -1,4 +1,9 @@
+use arkavo_git::{safety::RepoGuard, GitManager};
+use arkavo_llm::Message;
+use arkavo_mcp_tools::ToolRegistry;
+use arkavo_router::Router;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use super::config::{ModelCapability, ModelInfo, SelectedModels, TaskConfig, TaskResult};
 use super::planning::CollaborativePlanner;
@@ -11,7 +16,8 @@ use crate::error::{Error, Result};
 /// Executes tasks using local and cloud models directly,
 /// with collaborative 3-round planning.
 pub struct LocalTaskStrategy {
-    planner: CollaborativePlanner,
+    router: Option<Arc<Router>>,
+    tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl Default for LocalTaskStrategy {
@@ -23,8 +29,32 @@ impl Default for LocalTaskStrategy {
 impl LocalTaskStrategy {
     pub fn new() -> Self {
         Self {
-            planner: CollaborativePlanner::new(),
+            router: None,
+            tool_registry: None,
         }
+    }
+
+    /// Set the router for LLM calls
+    pub fn with_router(mut self, router: Arc<Router>) -> Self {
+        self.router = Some(router);
+        self
+    }
+
+    /// Set the tool registry for MCP tool execution
+    pub fn with_tools(mut self, registry: Arc<ToolRegistry>) -> Self {
+        self.tool_registry = Some(registry);
+        self
+    }
+
+    /// Get or create the router
+    async fn get_or_create_router(&self) -> Result<Arc<Router>> {
+        if let Some(router) = &self.router {
+            return Ok(router.clone());
+        }
+        Router::new()
+            .await
+            .map(Arc::new)
+            .map_err(|e| Error::Config(format!("Failed to create router: {}", e)))
     }
 
     /// Discover available local GGUF models in HuggingFace cache
@@ -294,12 +324,20 @@ impl TaskStrategy for LocalTaskStrategy {
 
         self.show_selected(ui, &models);
 
-        // Step 3: Collaborative planning
-        let plan = self.planner.create_plan(task, &models, ui).await?;
+        // Step 3: Get or create router for LLM calls
+        let router = self.get_or_create_router().await?;
+        let planner = CollaborativePlanner::new(router.clone());
 
-        // Step 4: User approval
+        // Step 4: Collaborative planning
+        let tool_registry_ref = self.tool_registry.as_ref().map(|r| r.as_ref());
+        let plan = planner
+            .create_plan(task, &models, ui, tool_registry_ref)
+            .await?;
+
+        // Step 5: User approval
         ui.section("Step 2: Review Plan");
-        ui.status("Plan created through collaboration between local and cloud agents.");
+        ui.status(&format!("Plan content:\n{}", plan.plan_content));
+        ui.status(&format!("Verification: {}", plan.verification_notes));
 
         if !config.auto_approve {
             if !ui.confirm("Execute this plan?").await {
@@ -307,25 +345,20 @@ impl TaskStrategy for LocalTaskStrategy {
             }
         }
 
-        // Step 5: Execute plan
+        // Step 6: Execute plan with tools
         ui.section("Step 3: Execute Plan");
-        ui.status("Executing plan...");
+        let changes_made = self
+            .execute_plan_with_tools(&planner, &plan, ui)
+            .await?;
 
-        // In full implementation, this would:
-        // 1. Send execution prompt to planning model with MCP tools
-        // 2. Handle tool calls for file writes, edits
-        // 3. Track changes made
+        // Step 7: Git commit (if changes were made)
+        let mut result = TaskResult::success(format!("Task completed: {}", plan.task));
 
-        // For now, mark as placeholder success
-        ui.success("Plan execution completed");
-
-        // Step 6: Git commit (if changes were made)
-        if config.validate {
-            ui.status("Running validation checks...");
-            // Would run: cargo fmt --check, cargo clippy
+        if changes_made {
+            result = self
+                .commit_changes(config, ui, result)
+                .await?;
         }
-
-        let result = TaskResult::success(format!("Task completed: {}", plan.task));
 
         ui.show_result(&result);
         Ok(result)
@@ -333,6 +366,142 @@ impl TaskStrategy for LocalTaskStrategy {
 
     fn name(&self) -> &str {
         "local"
+    }
+}
+
+impl LocalTaskStrategy {
+    /// Execute the plan using MCP tools
+    async fn execute_plan_with_tools(
+        &self,
+        planner: &CollaborativePlanner,
+        plan: &super::planning::TaskPlan,
+        ui: &dyn TaskUI,
+    ) -> Result<bool> {
+        ui.status("Executing plan...");
+
+        let prompt = CollaborativePlanner::build_execution_prompt(&plan.task);
+        let messages = vec![Message::user(format!(
+            "{}\n\nBased on this plan:\n{}",
+            prompt, plan.plan_content
+        ))];
+
+        let tool_registry_ref = self.tool_registry.as_ref().map(|r| r.as_ref());
+
+        // Tool execution loop (max 20 iterations)
+        let mut iterations = 0;
+        let mut changes_made = false;
+        let mut conversation = messages;
+
+        while iterations < 20 {
+            let response = planner
+                .router()
+                .route_with_tools("execute plan step", conversation.clone(), tool_registry_ref)
+                .await
+                .map_err(|e| Error::Config(format!("LLM execution failed: {}", e)))?;
+
+            ui.progress(&format!("Iteration {}: {}", iterations + 1,
+                if response.tool_calls.is_empty() { "No tool calls" } else { "Processing tool calls" }
+            ), Some(((iterations + 1) * 5).min(100) as u8));
+
+            if response.tool_calls.is_empty() {
+                ui.status(&format!("LLM response: {}", response.content));
+                break;
+            }
+
+            // Execute tool calls
+            if let Some(registry) = &self.tool_registry {
+                for tool_call in &response.tool_calls {
+                    ui.status(&format!("Executing tool: {}", tool_call.tool_name));
+
+                    if let Some(tool) = registry.get(&tool_call.tool_name) {
+                        match tool.execute(tool_call.arguments.clone()).await {
+                            Ok(result) => {
+                                ui.status(&format!("Tool result: {}", result));
+                                changes_made = true;
+
+                                // Add tool result to conversation
+                                conversation.push(Message::assistant(format!(
+                                    "Called {} with result: {}",
+                                    tool_call.tool_name, result
+                                )));
+                            }
+                            Err(e) => {
+                                ui.warn(&format!("Tool {} failed: {}", tool_call.tool_name, e));
+                                conversation.push(Message::assistant(format!(
+                                    "Tool {} failed: {}",
+                                    tool_call.tool_name, e
+                                )));
+                            }
+                        }
+                    } else {
+                        ui.warn(&format!("Tool not found: {}", tool_call.tool_name));
+                        conversation.push(Message::assistant(format!(
+                            "Tool {} not found",
+                            tool_call.tool_name
+                        )));
+                    }
+                }
+            } else {
+                ui.warn("No tool registry available, skipping tool execution");
+                break;
+            }
+
+            iterations += 1;
+        }
+
+        if iterations >= 20 {
+            ui.warn("Reached maximum iteration limit");
+        }
+
+        ui.success("Plan execution completed");
+        Ok(changes_made)
+    }
+
+    /// Commit changes with optional validation
+    async fn commit_changes(
+        &self,
+        config: &TaskConfig,
+        ui: &dyn TaskUI,
+        mut result: TaskResult,
+    ) -> Result<TaskResult> {
+        ui.section("Step 4: Commit Changes");
+
+        let git_manager = GitManager::new();
+        let repo = match git_manager.open_repo(std::path::Path::new(".")) {
+            Ok(r) => r,
+            Err(e) => {
+                ui.warn(&format!("Not a git repository: {}", e));
+                return Ok(result);
+            }
+        };
+
+        let mut guard = RepoGuard::new(&repo)?;
+
+        if config.validate {
+            ui.status("Running validation checks...");
+            guard = guard.with_fmt_check().with_clippy_check();
+        }
+
+        let commit_result = guard.transaction(|repo| {
+            if let Some(msg) = &config.commit_message {
+                git_manager.add_all(repo)?;
+                git_manager.commit_changes(repo, msg)
+            } else {
+                git_manager.auto_commit(repo)
+            }
+        });
+
+        match commit_result {
+            Ok(oid) => {
+                result = result.with_commit(oid.to_string());
+                ui.success(&format!("Committed: {}", oid));
+            }
+            Err(e) => {
+                ui.error(&format!("Commit failed: {}", e));
+            }
+        }
+
+        Ok(result)
     }
 }
 

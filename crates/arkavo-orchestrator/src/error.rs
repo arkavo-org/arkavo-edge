@@ -14,6 +14,9 @@ pub enum Error {
     #[error("GitHub API error: {0}")]
     GitHubApi(String),
 
+    #[error("Configuration error: {0}")]
+    Config(String),
+
     #[error("JSON parsing error: {0}")]
     Json(#[from] serde_json::Error),
 
