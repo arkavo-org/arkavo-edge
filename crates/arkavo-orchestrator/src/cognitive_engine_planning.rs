@@ -2,24 +2,34 @@ use crate::agent_assignment::AgentAssignment;
 use crate::cognitive_engine_core::{
     ExecutionPlan, PlanStep, VerificationCheck, VerificationResult,
 };
+use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_llm::{Message as LlmMessage, Provider, Role};
+use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 pub struct Planner {
     budget_tracker: Arc<BudgetTracker>,
     router: Arc<Router>,
+    plan_store: Option<Arc<PlanStateStore>>,
 }
 
 impl Planner {
-    pub fn new(budget_tracker: Arc<BudgetTracker>, router: Arc<Router>) -> Self {
+    pub fn new(
+        budget_tracker: Arc<BudgetTracker>,
+        router: Arc<Router>,
+        plan_store: Option<Arc<PlanStateStore>>,
+    ) -> Self {
         Self {
             budget_tracker,
             router,
+            plan_store,
         }
     }
 
@@ -73,12 +83,19 @@ impl Planner {
             images: None,
         }];
 
+        // Use structured output with JSON schema if provider supports it
+        let schema = if planning_provider.supports_structured_output() {
+            Some(JsonExecutionPlan::json_schema())
+        } else {
+            None
+        };
+
         let response = planning_provider
-            .complete(messages)
+            .complete_with_schema(messages, schema, planner_config.max_tokens())
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Planning LLM call failed: {e}")))?;
 
-        let steps = self.parse_plan_from_response(&response)?;
+        let steps = self.parse_plan_json_or_text(&response)?;
 
         let estimated_input_tokens = planning_prompt.len() as u32 / 4;
         let estimated_output_tokens = response.len() as u32 / 4;
@@ -101,12 +118,37 @@ impl Planner {
             warn!(error = %e, "Failed to record budget usage for planning");
         }
 
-        Ok(ExecutionPlan {
+        let plan_id = Uuid::new_v4();
+        let plan = ExecutionPlan {
+            id: plan_id,
             issue_number: assignment.issue_number,
             repository: assignment.repository.clone(),
             steps,
             estimated_tokens: total_tokens,
-        })
+        };
+
+        // Persist the plan if store is available
+        if let Some(store) = &self.plan_store {
+            let persisted = PersistedPlan {
+                id: plan_id,
+                original_prompt: assignment.issue_body.clone(),
+                plan_json: serde_json::to_string(&plan).unwrap_or_default(),
+                status: PlanStatus::Planning,
+                current_subtask: 0,
+                total_subtasks: plan.steps.len(),
+                completed_results_json: None,
+                error_message: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            if let Err(e) = store.save_plan(&persisted).await {
+                warn!(error = %e, "Failed to persist plan to store");
+            } else {
+                debug!(plan_id = %plan_id, "Plan persisted to store");
+            }
+        }
+
+        Ok(plan)
     }
 
     fn parse_plan_from_response(&self, response: &str) -> Result<Vec<PlanStep>> {
@@ -192,6 +234,68 @@ impl Planner {
                 confidence: 0.5,
             });
         }
+
+        Ok(steps)
+    }
+
+    /// Parse plan from response, trying JSON first then falling back to text
+    fn parse_plan_json_or_text(&self, response: &str) -> Result<Vec<PlanStep>> {
+        // Try JSON parsing first (for providers with structured output)
+        if let Ok(json_plan) = serde_json::from_str::<JsonExecutionPlan>(response) {
+            debug!("Successfully parsed JSON execution plan");
+            return self.convert_json_to_plan_steps(json_plan);
+        }
+
+        // Fallback to text parsing for backward compatibility
+        debug!("JSON parsing failed, falling back to text parser");
+        self.parse_plan_from_response(response)
+    }
+
+    /// Convert JSON plan to PlanStep vector
+    fn convert_json_to_plan_steps(&self, json_plan: JsonExecutionPlan) -> Result<Vec<PlanStep>> {
+        if json_plan.steps.is_empty() {
+            warn!("Empty JSON plan received, using default");
+            return Ok(vec![PlanStep {
+                step_number: 1,
+                description: "Analyze and fix the issue".to_string(),
+                commands: vec!["echo 'Analyzing issue'".to_string()],
+                verification: vec![VerificationCheck::BuildSuccessful],
+                confidence: 0.5,
+            }]);
+        }
+
+        let steps = json_plan
+            .steps
+            .into_iter()
+            .map(|js| {
+                let verification = js
+                    .verification
+                    .into_iter()
+                    .filter_map(|v| {
+                        let check = v.to_lowercase();
+                        if check.contains("test") {
+                            Some(VerificationCheck::TestsPassing)
+                        } else if check.contains("lint") {
+                            Some(VerificationCheck::LinterClean)
+                        } else if check.contains("build") {
+                            Some(VerificationCheck::BuildSuccessful)
+                        } else if check.contains("file_constraint") {
+                            Some(VerificationCheck::FileConstraint { max_lines: 400 })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                PlanStep {
+                    step_number: js.step_number,
+                    description: js.description,
+                    commands: js.commands,
+                    verification,
+                    confidence: js.confidence,
+                }
+            })
+            .collect();
 
         Ok(steps)
     }

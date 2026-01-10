@@ -8,13 +8,16 @@ use arkavo_budget::BudgetTracker;
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_llm::{Message as LlmMessage, Role};
 use arkavo_mcp_tools::ToolRegistry;
+use arkavo_memory::{PlanStateStore, PlanStatus};
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlan {
+    pub id: Uuid,
     pub issue_number: u64,
     pub repository: String,
     pub steps: Vec<PlanStep>,
@@ -63,6 +66,7 @@ pub struct CognitiveEngine {
     tool_registry: Arc<ToolRegistry>,
     session_id: String,
     sequence: std::sync::atomic::AtomicU64,
+    plan_store: Option<Arc<PlanStateStore>>,
     planner: Planner,
     verifier: Verifier,
     pr_creator: PrCreator,
@@ -76,8 +80,9 @@ impl CognitiveEngine {
         router: Arc<Router>,
         tool_registry: Arc<ToolRegistry>,
         session_id: String,
+        plan_store: Option<Arc<PlanStateStore>>,
     ) -> Self {
-        let planner = Planner::new(budget_tracker.clone(), router.clone());
+        let planner = Planner::new(budget_tracker.clone(), router.clone(), plan_store.clone());
         let verifier = Verifier::new();
         let pr_creator = PrCreator::new(
             tool_registry.clone(),
@@ -93,6 +98,7 @@ impl CognitiveEngine {
             tool_registry,
             session_id,
             sequence: std::sync::atomic::AtomicU64::new(0),
+            plan_store,
             planner,
             verifier,
             pr_creator,
@@ -119,6 +125,13 @@ impl CognitiveEngine {
         let plan = self.planner.plan(&assignment).await?;
         total_tokens += plan.estimated_tokens;
 
+        // Update plan status to Executing
+        if let Some(store) = &self.plan_store {
+            if let Err(e) = store.update_status(plan.id, PlanStatus::Executing).await {
+                warn!(error = %e, "Failed to update plan status to Executing");
+            }
+        }
+
         self.log_event("plan_generated", &plan).await;
         self.post_progress(&assignment, "📋 Execution plan generated")
             .await?;
@@ -144,6 +157,17 @@ impl CognitiveEngine {
                 Ok(tokens) => {
                     total_tokens += tokens;
                     steps_completed += 1;
+
+                    // Update progress in plan store
+                    if let Some(store) = &self.plan_store {
+                        let results_json = serde_json::to_string(&verification_results).ok();
+                        if let Err(e) = store
+                            .update_progress(plan.id, steps_completed, results_json.as_deref())
+                            .await
+                        {
+                            warn!(error = %e, "Failed to update plan progress");
+                        }
+                    }
 
                     let check_results = self.verifier.check(step).await?;
                     verification_results.extend(check_results.clone());
@@ -217,6 +241,19 @@ impl CognitiveEngine {
         };
 
         self.post_progress(&assignment, &final_comment).await?;
+
+        // Update final plan status
+        if let Some(store) = &self.plan_store {
+            if success {
+                if let Err(e) = store.mark_completed(plan.id).await {
+                    warn!(error = %e, "Failed to mark plan as completed");
+                }
+            } else {
+                if let Err(e) = store.mark_failed(plan.id, &final_comment).await {
+                    warn!(error = %e, "Failed to mark plan as failed");
+                }
+            }
+        }
 
         if success {
             info!("Execution successful, creating pull request");

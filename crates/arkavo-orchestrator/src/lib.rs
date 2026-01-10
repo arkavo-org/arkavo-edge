@@ -20,6 +20,7 @@ pub mod task_executor;
 mod cognitive_engine_core;
 mod cognitive_engine_planning;
 mod cognitive_engine_pr;
+pub mod cognitive_engine_schema;
 mod cognitive_engine_verification;
 pub mod planner_config;
 pub mod config;

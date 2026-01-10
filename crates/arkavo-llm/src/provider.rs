@@ -55,4 +55,22 @@ pub trait Provider: Send + Sync {
             finish_reason: None,
         })
     }
+
+    /// Check if this provider supports structured JSON output with schema
+    fn supports_structured_output(&self) -> bool {
+        false
+    }
+
+    /// Complete with a JSON schema for structured output
+    /// Providers that support structured output (e.g., Gemini) will constrain
+    /// the response to match the schema. Others fall back to regular completion.
+    async fn complete_with_schema(
+        &self,
+        messages: Vec<Message>,
+        _schema: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<String> {
+        // Default: ignore schema, use regular completion
+        self.complete_with_options(messages, max_tokens).await
+    }
 }

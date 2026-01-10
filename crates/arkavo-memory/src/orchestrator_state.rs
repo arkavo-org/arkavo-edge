@@ -69,6 +69,7 @@ pub struct ProcessedIssue {
     pub processed_at: DateTime<Utc>,
     pub status: IssueProcessingStatus,
     pub error_message: Option<String>,
+    pub retry_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,12 +152,21 @@ impl OrchestratorStateStore {
                 processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
                 error_message TEXT,
+                retry_count INTEGER DEFAULT 0,
                 PRIMARY KEY (org, repo_name, issue_number)
             )
             "#,
         )
         .execute(&self.pool)
         .await?;
+
+        // Migration: Add retry_count column if it doesn't exist (for existing databases)
+        sqlx::query(
+            "ALTER TABLE processed_issues ADD COLUMN retry_count INTEGER DEFAULT 0",
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_issues(processed_at)",
@@ -458,6 +468,117 @@ impl OrchestratorStateStore {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    /// Get all issues with a given processing status
+    pub async fn get_issues_by_status(
+        &self,
+        status: IssueProcessingStatus,
+    ) -> Result<Vec<ProcessedIssue>> {
+        let rows = sqlx::query_as::<
+            _,
+            (String, String, i64, String, String, String, Option<String>, i64),
+        >(
+            r#"
+            SELECT org, repo_name, issue_number, task_id, processed_at, status, error_message, retry_count
+            FROM processed_issues
+            WHERE status = ?
+            ORDER BY processed_at DESC
+            "#,
+        )
+        .bind(status.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let parse_datetime = |s: &str| -> DateTime<Utc> {
+            DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .or_else(|_| {
+                    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                        .map(|ndt| DateTime::from_naive_utc_and_offset(ndt, Utc))
+                })
+                .unwrap_or_else(|_| Utc::now())
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|r| ProcessedIssue {
+                org: r.0,
+                repo_name: r.1,
+                issue_number: r.2 as u64,
+                task_id: Uuid::parse_str(&r.3).unwrap_or_else(|_| Uuid::nil()),
+                processed_at: parse_datetime(&r.4),
+                status: match r.5.as_str() {
+                    "pending" => IssueProcessingStatus::Pending,
+                    "processing" => IssueProcessingStatus::Processing,
+                    "completed" => IssueProcessingStatus::Completed,
+                    "failed" => IssueProcessingStatus::Failed,
+                    _ => IssueProcessingStatus::Pending,
+                },
+                error_message: r.6,
+                retry_count: r.7 as u32,
+            })
+            .collect())
+    }
+
+    /// Update the status of a processed issue
+    pub async fn update_issue_status(
+        &self,
+        org: &str,
+        repo: &str,
+        issue_number: u64,
+        status: IssueProcessingStatus,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processed_issues
+            SET status = ?, error_message = ?, processed_at = CURRENT_TIMESTAMP
+            WHERE org = ? AND repo_name = ? AND issue_number = ?
+            "#,
+        )
+        .bind(status.to_string())
+        .bind(error_message)
+        .bind(org)
+        .bind(repo)
+        .bind(issue_number as i64)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Increment retry count and return the new count
+    pub async fn increment_retry_count(
+        &self,
+        org: &str,
+        repo: &str,
+        issue_number: u64,
+    ) -> Result<u32> {
+        sqlx::query(
+            r#"
+            UPDATE processed_issues
+            SET retry_count = retry_count + 1
+            WHERE org = ? AND repo_name = ? AND issue_number = ?
+            "#,
+        )
+        .bind(org)
+        .bind(repo)
+        .bind(issue_number as i64)
+        .execute(&self.pool)
+        .await?;
+
+        // Get the new retry count
+        let result: Option<(i64,)> = sqlx::query_as(
+            "SELECT retry_count FROM processed_issues WHERE org = ? AND repo_name = ? AND issue_number = ?",
+        )
+        .bind(org)
+        .bind(repo)
+        .bind(issue_number as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(count,)| count as u32).unwrap_or(0))
     }
 
     pub async fn get_org_stats(&self, org: &str) -> Result<OrgStats> {

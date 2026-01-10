@@ -142,6 +142,58 @@ impl Provider for GeminiProvider {
         true
     }
 
+    fn supports_structured_output(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_schema(
+        &self,
+        messages: Vec<Message>,
+        schema: Option<Value>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
+        if messages.is_empty() {
+            return Err(Error::Provider("No messages provided".into()));
+        }
+
+        let last_message = messages
+            .last()
+            .ok_or_else(|| Error::Provider("No messages provided".into()))?;
+
+        let prompt = &last_message.content;
+
+        // If no schema provided, fall back to regular completion
+        let Some(schema) = schema else {
+            return self.complete_with_options(messages, None).await;
+        };
+
+        let mut gemini_stream = self
+            .client
+            .stream_generate_content_json(prompt, schema)
+            .await
+            .map_err(|e| Error::Provider(format!("Gemini JSON streaming error: {e}")))?;
+
+        let mut accumulated_text = String::new();
+
+        while let Some(chunk_result) = gemini_stream.next().await {
+            let chunk = chunk_result.map_err(|e| Error::Stream(format!("Stream error: {e}")))?;
+
+            if let Some(text) = chunk.text {
+                accumulated_text.push_str(&text);
+            }
+
+            if chunk.done {
+                break;
+            }
+        }
+
+        if accumulated_text.is_empty() {
+            return Err(Error::Provider("No JSON response from Gemini".into()));
+        }
+
+        Ok(accumulated_text)
+    }
+
     async fn complete_with_tools(
         &self,
         messages: Vec<Message>,
