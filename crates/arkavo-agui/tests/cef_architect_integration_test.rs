@@ -8,7 +8,7 @@
 //! - CEF renders two-pane architect layout
 //! - Plan resume functionality
 
-use arkavo_agui::renderer::{create_renderer, RendererType};
+use arkavo_agui::renderer::{RendererType, create_renderer};
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::ComplexityScorer;
 use chrono::Utc;
@@ -64,9 +64,7 @@ async fn test_complex_task_triggers_architect() {
         assert!(
             result.architect_recommended,
             "Complex prompt should trigger architect mode (got: recommended={}, subtasks={}, triggers={:?})",
-            result.architect_recommended,
-            result.estimated_subtasks,
-            result.complexity_triggers
+            result.architect_recommended, result.estimated_subtasks, result.complexity_triggers
         );
         assert!(
             result.estimated_subtasks >= 3,
@@ -173,7 +171,10 @@ async fn test_plan_state_persistence_lifecycle() {
         .get_resumable_plans()
         .await
         .expect("Failed to get resumable");
-    assert!(resumable_after.is_empty(), "Completed plan should not be resumable");
+    assert!(
+        resumable_after.is_empty(),
+        "Completed plan should not be resumable"
+    );
 }
 
 /// Test plan failure handling
@@ -255,7 +256,10 @@ async fn test_cef_architect_two_pane_layout() {
     // Allow time for rendering
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    assert!(renderer.is_running(), "CEF renderer should still be running");
+    assert!(
+        renderer.is_running(),
+        "CEF renderer should still be running"
+    );
 
     // Clean shutdown
     let shutdown_result = Box::new(renderer).shutdown().await;

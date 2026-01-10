@@ -27,9 +27,7 @@ fn test_simple_conversational_prompts() {
         assert!(
             !result.architect_recommended,
             "Conversational prompt '{}' should NOT trigger architect (subtasks={}, savings={})",
-            prompt,
-            result.estimated_subtasks,
-            result.estimated_savings_percent
+            prompt, result.estimated_subtasks, result.estimated_savings_percent
         );
     }
 }
@@ -81,9 +79,7 @@ fn test_complex_development_tasks() {
         assert!(
             result.architect_recommended,
             "Complex task should trigger architect mode (got: recommended={}, subtasks={}, triggers={:?})",
-            result.architect_recommended,
-            result.estimated_subtasks,
-            result.complexity_triggers
+            result.architect_recommended, result.estimated_subtasks, result.complexity_triggers
         );
     }
 }

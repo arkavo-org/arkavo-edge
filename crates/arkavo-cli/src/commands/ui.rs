@@ -630,7 +630,10 @@ async fn handle_architect_prompt(
                 <div id="subtask-list"></div>
             </div>
         </div>"#,
-        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        prompt
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;"),
         complexity.estimated_subtasks
     );
     renderer.render(&planning_html, "", "").await?;
@@ -650,8 +653,14 @@ async fn handle_architect_prompt(
                         <span style="color:#666;font-size:14px;">{}</span>
                     </div>
                 </div>"#,
-                prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
-                e.to_string().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+                prompt
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                e.to_string()
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
             );
             renderer.render(&error_html, "", "").await?;
             return Err(e.into());
@@ -728,7 +737,10 @@ async fn handle_architect_prompt(
                 <div id="subtask-list">{}</div>
             </div>
         </div>"#,
-        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        prompt
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;"),
         plan.subtasks.len(),
         plan.subtasks.len(),
         plan.estimated_savings_percent(),
@@ -759,8 +771,14 @@ async fn handle_architect_prompt(
                         <span style="color:#666;font-size:14px;">{}</span>
                     </div>
                 </div>"#,
-                prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
-                e.to_string().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+                prompt
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                e.to_string()
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
             );
             renderer.render(&error_html, "", "").await?;
             return Err(e.into());
@@ -771,7 +789,11 @@ async fn handle_architect_prompt(
     if let Some(ref store) = plan_store {
         let results_json = serde_json::to_string(&result.subtask_results).ok();
         let _ = store
-            .update_progress(plan_id, result.subtask_results.len(), results_json.as_deref())
+            .update_progress(
+                plan_id,
+                result.subtask_results.len(),
+                results_json.as_deref(),
+            )
             .await;
         let _ = store.mark_completed(plan_id).await;
     }
@@ -840,7 +862,10 @@ async fn handle_architect_prompt(
                 <div id="subtask-list">{}</div>
             </div>
         </div>"#,
-        prompt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
+        prompt
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;"),
         escaped_response,
         result.subtask_results.len(),
         result.actual_cost_usd,
