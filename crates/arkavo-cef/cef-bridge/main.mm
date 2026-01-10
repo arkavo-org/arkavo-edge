@@ -70,12 +70,12 @@
             std::cout << "Shutdown signal sent to Rust" << std::endl;
         });
 
-        // Give CEF 500ms to clean up, then force exit
+        // Give CEF 500ms to clean up, then quit message loop
+        // Do NOT call exit() - let CefRunMessageLoop() return naturally
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                       dispatch_get_main_queue(), ^{
-            std::cout << "Shutdown complete" << std::endl;
+            std::cout << "Quitting CEF message loop..." << std::endl;
             CefQuitMessageLoop();
-            exit(0);
         });
     } else {
         // Send shutdown signal async
@@ -91,12 +91,12 @@
             std::cout << "Shutdown signal sent to Rust" << std::endl;
         });
 
-        // Give Rust time to process shutdown signal
+        // Give Rust time to process shutdown signal, then quit message loop
+        // Do NOT call exit() - let CefRunMessageLoop() return naturally
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                       dispatch_get_main_queue(), ^{
-            std::cout << "Shutdown complete" << std::endl;
+            std::cout << "Quitting CEF message loop..." << std::endl;
             CefQuitMessageLoop();
-            exit(0);
         });
     }
     return NO;
@@ -305,9 +305,14 @@ int main(int argc, char* argv[]) {
 
     CefRunMessageLoop();
 
+    // Shutdown DOMExecutor BEFORE CefShutdown to avoid race conditions
+    // This stops the UDS client threads cleanly before CEF tears down
+    std::cout << "Shutting down DOMExecutor..." << std::endl;
+    DOMExecutor::GetInstance()->Shutdown();
+
     CefShutdown();
 
-    std::cout << "Arkavo CEF Renderer shutdown" << std::endl;
+    std::cout << "Arkavo CEF Renderer shutdown complete" << std::endl;
 
     return 0;
 }

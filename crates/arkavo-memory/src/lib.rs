@@ -6,6 +6,7 @@ pub mod ledger;
 pub mod mcp_tools;
 pub mod models;
 pub mod orchestrator_state;
+pub mod plan_state;
 #[cfg(feature = "vector-search")]
 pub mod storage;
 pub mod workspace_config;
@@ -15,6 +16,7 @@ pub use models::{AgentConversation, AgentDomain, CreateMemoryRequest, Memory, Se
 pub use orchestrator_state::{
     IssueProcessingStatus, OrchestratorStateStore, OrgStats, ProcessedIssue, RepoState, RepoStatus,
 };
+pub use plan_state::{PersistedPlan, PlanStateStore, PlanStatus};
 #[cfg(feature = "vector-search")]
 pub use storage::{HnswConfig, MemoryStorage};
 pub use workspace_config::WorkspaceConfig;
