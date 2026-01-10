@@ -38,7 +38,7 @@ tracing = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
 ring = "0.17"
-keyring = "3.0"
+keyring = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

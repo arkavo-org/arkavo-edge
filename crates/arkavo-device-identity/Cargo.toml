@@ -16,7 +16,7 @@ hex = "0.4"
 dirs = "5.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3.6", optional = true }
+keyring = { workspace = true, optional = true }
 hex = "0.4"
 dirs = "5.0"
 

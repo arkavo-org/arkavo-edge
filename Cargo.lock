@@ -509,7 +509,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "uuid",
 ]
@@ -525,7 +525,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "uuid",
 ]
@@ -541,7 +541,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-test",
  "tracing",
