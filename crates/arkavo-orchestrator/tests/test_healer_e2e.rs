@@ -14,6 +14,7 @@ use arkavo_orchestrator::issue_analyzer::{Complexity, IssueAnalyzer};
 use arkavo_orchestrator::issue_router::{ExecutionStrategy, IssueRouter, Priority};
 use arkavo_orchestrator::types::{Issue, IssueAction, IssueEvent, Label, Repository, User};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Check if GitHub token is available for API-based operations
 fn check_github_token() -> bool {
@@ -159,6 +160,7 @@ async fn test_healer_execution_plan() {
     let event = create_test_issue_event();
 
     let plan = ExecutionPlan {
+        id: Uuid::new_v4(),
         issue_number: event.issue.number,
         repository: event.repository.full_name.clone(),
         steps: vec![
@@ -246,6 +248,7 @@ async fn test_healer_full_flow_with_pr() {
     println!("  Repository: {}", assignment.repository);
 
     let plan = ExecutionPlan {
+        id: Uuid::new_v4(),
         issue_number: event.issue.number,
         repository: event.repository.full_name.clone(),
         steps: vec![PlanStep {

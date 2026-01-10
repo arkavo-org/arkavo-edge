@@ -7,6 +7,7 @@ use arkavo_orchestrator::cognitive_engine::{
 };
 use serde_json::json;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Check if GitHub CLI is installed and authenticated
 fn check_gh_cli() -> bool {
@@ -127,6 +128,7 @@ fn create_test_assignment() -> AgentAssignment {
 
 fn create_test_plan() -> ExecutionPlan {
     ExecutionPlan {
+        id: Uuid::new_v4(),
         issue_number: 123,
         repository: "test-org/test-repo".to_string(),
         steps: vec![

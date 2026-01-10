@@ -2,85 +2,79 @@ use crate::agent_assignment::AgentAssignment;
 use crate::cognitive_engine_core::{
     ExecutionPlan, PlanStep, VerificationCheck, VerificationResult,
 };
+use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
+use crate::planner_config::get_planner_config;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_llm::{Message as LlmMessage, Provider, Role};
+use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 pub struct Planner {
     budget_tracker: Arc<BudgetTracker>,
     router: Arc<Router>,
+    plan_store: Option<Arc<PlanStateStore>>,
 }
 
 impl Planner {
-    pub fn new(budget_tracker: Arc<BudgetTracker>, router: Arc<Router>) -> Self {
+    pub fn new(
+        budget_tracker: Arc<BudgetTracker>,
+        router: Arc<Router>,
+        plan_store: Option<Arc<PlanStateStore>>,
+    ) -> Self {
         Self {
             budget_tracker,
             router,
+            plan_store,
         }
     }
 
     pub async fn plan(&self, assignment: &AgentAssignment) -> Result<ExecutionPlan> {
         debug!("Generating execution plan");
 
-        let planning_prompt = format!(
-            "Generate a detailed execution plan for this GitHub issue:\n\n\
-            Title: {}\n\n\
-            Description: {}\n\n\
-            Type: {:?}\n\
-            Complexity: {:?}\n\
-            Technologies: {:?}\n\n\
-            Return a structured plan with 3-5 concrete steps. For each step:\n\
-            1. Brief description\n\
-            2. Specific commands to execute (e.g., cargo test, cargo build, git commands)\n\
-            3. Verification checks (tests, linter, build success)\n\n\
-            Format each step as:\n\
-            STEP N: [description]\n\
-            COMMANDS: [comma-separated commands]\n\
-            VERIFY: [comma-separated: tests, linter, build, or file_constraint_400]\n\
-            CONFIDENCE: [0.0-1.0]",
-            assignment.issue_title,
-            assignment.issue_body,
-            assignment.routing_decision.analysis.issue_type,
-            assignment.routing_decision.analysis.complexity,
-            assignment.routing_decision.analysis.technologies
+        // Use a simple prompt for routing to get the model decision
+        let routing_prompt = format!(
+            "Planning task for: {} - {:?}",
+            assignment.issue_title, assignment.routing_decision.analysis.issue_type
         );
 
         let decision = self
             .router
-            .classify(&planning_prompt)
+            .classify(&routing_prompt)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Routing failed: {e}")))?;
 
+        // Get capability-appropriate planner config for adaptive prompting
+        let planner_config = get_planner_config(decision.recommended_model.capability());
+        let planning_prompt = planner_config.planning_prompt(assignment);
+
         info!(
             model = ?decision.recommended_model,
+            tier = ?planner_config.tier(),
             estimated_cost = decision.estimated_cost_usd,
             "Planning with selected model"
         );
 
-        let planning_provider: Arc<dyn Provider> = match decision.recommended_model {
-            arkavo_router::ModelChoice::LocalQwen3
-            | arkavo_router::ModelChoice::LocalMinistral3B
-            | arkavo_router::ModelChoice::LocalMinistral8B
-            | arkavo_router::ModelChoice::LocalGemma270M
-            | arkavo_router::ModelChoice::LocalGemma4B
-            | arkavo_router::ModelChoice::LocalGemma12B
-            | arkavo_router::ModelChoice::LocalDeepSeekCoder => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "Local models not yet supported for planning. Set GEMINI_API_KEY for remote planning."
-                )));
-            }
-            _ => {
-                if let Some(gemini) = self.router.get_planning_provider() {
-                    Arc::new(gemini)
-                } else {
-                    return Err(Error::Other(anyhow::anyhow!(
-                        "Planning model not available. Set GEMINI_API_KEY for remote planning."
-                    )));
-                }
-            }
+        // Get provider - supports both local and cloud models
+        let planning_provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
+            let provider = self
+                .router
+                .get_provider(&decision.recommended_model)
+                .await
+                .map_err(|e| {
+                    Error::Other(anyhow::anyhow!("Failed to create local provider: {e}"))
+                })?;
+            Arc::from(provider)
+        } else if let Some(gemini) = self.router.get_planning_provider() {
+            Arc::new(gemini)
+        } else {
+            return Err(Error::Other(anyhow::anyhow!(
+                "Planning model not available. Set GEMINI_API_KEY for remote planning."
+            )));
         };
 
         let messages = vec![LlmMessage {
@@ -89,22 +83,23 @@ impl Planner {
             images: None,
         }];
 
+        // Use structured output with JSON schema if provider supports it
+        let schema = if planning_provider.supports_structured_output() {
+            Some(JsonExecutionPlan::json_schema())
+        } else {
+            None
+        };
+
         let response = planning_provider
-            .complete(messages)
+            .complete_with_schema(messages, schema, planner_config.max_tokens())
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Planning LLM call failed: {e}")))?;
 
-        let steps = self.parse_plan_from_response(&response)?;
+        let steps = self.parse_plan_json_or_text(&response)?;
 
         let estimated_input_tokens = planning_prompt.len() as u32 / 4;
         let estimated_output_tokens = response.len() as u32 / 4;
         let total_tokens = estimated_input_tokens + estimated_output_tokens;
-
-        let model_name = match decision.recommended_model {
-            arkavo_router::ModelChoice::GeminiFlash => "gemini-1.5-flash",
-            arkavo_router::ModelChoice::GeminiPro => "gemini-1.5-pro",
-            _ => "unknown",
-        };
 
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
@@ -113,8 +108,8 @@ impl Planner {
             .budget_tracker
             .record_spending(
                 "github-orchestrator".to_string(),
-                "gemini".to_string(),
-                model_name.to_string(),
+                decision.recommended_model.provider().to_string(),
+                decision.recommended_model.name().to_string(),
                 usage,
                 cost,
             )
@@ -123,12 +118,37 @@ impl Planner {
             warn!(error = %e, "Failed to record budget usage for planning");
         }
 
-        Ok(ExecutionPlan {
+        let plan_id = Uuid::new_v4();
+        let plan = ExecutionPlan {
+            id: plan_id,
             issue_number: assignment.issue_number,
             repository: assignment.repository.clone(),
             steps,
             estimated_tokens: total_tokens,
-        })
+        };
+
+        // Persist the plan if store is available
+        if let Some(store) = &self.plan_store {
+            let persisted = PersistedPlan {
+                id: plan_id,
+                original_prompt: assignment.issue_body.clone(),
+                plan_json: serde_json::to_string(&plan).unwrap_or_default(),
+                status: PlanStatus::Planning,
+                current_subtask: 0,
+                total_subtasks: plan.steps.len(),
+                completed_results_json: None,
+                error_message: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            if let Err(e) = store.save_plan(&persisted).await {
+                warn!(error = %e, "Failed to persist plan to store");
+            } else {
+                debug!(plan_id = %plan_id, "Plan persisted to store");
+            }
+        }
+
+        Ok(plan)
     }
 
     fn parse_plan_from_response(&self, response: &str) -> Result<Vec<PlanStep>> {
@@ -218,6 +238,68 @@ impl Planner {
         Ok(steps)
     }
 
+    /// Parse plan from response, trying JSON first then falling back to text
+    fn parse_plan_json_or_text(&self, response: &str) -> Result<Vec<PlanStep>> {
+        // Try JSON parsing first (for providers with structured output)
+        if let Ok(json_plan) = serde_json::from_str::<JsonExecutionPlan>(response) {
+            debug!("Successfully parsed JSON execution plan");
+            return self.convert_json_to_plan_steps(json_plan);
+        }
+
+        // Fallback to text parsing for backward compatibility
+        debug!("JSON parsing failed, falling back to text parser");
+        self.parse_plan_from_response(response)
+    }
+
+    /// Convert JSON plan to PlanStep vector
+    fn convert_json_to_plan_steps(&self, json_plan: JsonExecutionPlan) -> Result<Vec<PlanStep>> {
+        if json_plan.steps.is_empty() {
+            warn!("Empty JSON plan received, using default");
+            return Ok(vec![PlanStep {
+                step_number: 1,
+                description: "Analyze and fix the issue".to_string(),
+                commands: vec!["echo 'Analyzing issue'".to_string()],
+                verification: vec![VerificationCheck::BuildSuccessful],
+                confidence: 0.5,
+            }]);
+        }
+
+        let steps = json_plan
+            .steps
+            .into_iter()
+            .map(|js| {
+                let verification = js
+                    .verification
+                    .into_iter()
+                    .filter_map(|v| {
+                        let check = v.to_lowercase();
+                        if check.contains("test") {
+                            Some(VerificationCheck::TestsPassing)
+                        } else if check.contains("lint") {
+                            Some(VerificationCheck::LinterClean)
+                        } else if check.contains("build") {
+                            Some(VerificationCheck::BuildSuccessful)
+                        } else if check.contains("file_constraint") {
+                            Some(VerificationCheck::FileConstraint { max_lines: 400 })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                PlanStep {
+                    step_number: js.step_number,
+                    description: js.description,
+                    commands: js.commands,
+                    verification,
+                    confidence: js.confidence,
+                }
+            })
+            .collect();
+
+        Ok(steps)
+    }
+
     pub async fn adjust(
         &self,
         step: &PlanStep,
@@ -272,12 +354,23 @@ impl Planner {
             decision.recommended_model
         );
 
-        let provider: Arc<dyn Provider> = if let Some(gemini) = self.router.get_planning_provider()
-        {
+        // Get provider - supports both local and cloud models
+        let provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
+            let p = self
+                .router
+                .get_provider(&decision.recommended_model)
+                .await
+                .map_err(|e| {
+                    Error::Other(anyhow::anyhow!(
+                        "Failed to create local provider for adjustment: {e}"
+                    ))
+                })?;
+            Arc::from(p)
+        } else if let Some(gemini) = self.router.get_planning_provider() {
             Arc::new(gemini)
         } else {
             return Err(Error::Other(anyhow::anyhow!(
-                "Adjustment requires Gemini. Set GEMINI_API_KEY."
+                "Adjustment requires a model. Set GEMINI_API_KEY for remote planning."
             )));
         };
 
@@ -295,12 +388,6 @@ impl Planner {
         let estimated_input_tokens = adjustment_prompt.len() as u32 / 4;
         let estimated_output_tokens = response.len() as u32 / 4;
 
-        let model_name = match decision.recommended_model {
-            arkavo_router::ModelChoice::GeminiFlash => "gemini-1.5-flash",
-            arkavo_router::ModelChoice::GeminiPro => "gemini-1.5-pro",
-            _ => "unknown",
-        };
-
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
 
@@ -308,8 +395,8 @@ impl Planner {
             .budget_tracker
             .record_spending(
                 "github-orchestrator".to_string(),
-                "gemini".to_string(),
-                model_name.to_string(),
+                decision.recommended_model.provider().to_string(),
+                decision.recommended_model.name().to_string(),
                 usage,
                 cost,
             )

@@ -5,6 +5,9 @@ pub enum GitHubError {
     #[error("GitHub API error: {0}")]
     GitHubApi(String),
 
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+
     #[error("Octocrab error: {0}")]
     Octocrab(#[from] Box<octocrab::Error>),
 
@@ -22,9 +25,6 @@ pub enum GitHubError {
 
     #[error("No repositories found for organization: {0}")]
     NoRepositories(String),
-
-    #[error("Orchestrator error: {0}")]
-    Orchestrator(#[from] arkavo_orchestrator::Error),
 
     #[error("Memory store error: {0}")]
     Memory(#[from] arkavo_memory::error::MemoryError),

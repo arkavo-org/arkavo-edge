@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arkavo_budget::{BudgetTracker, config::BudgetConfig};
 use arkavo_events::{EventWriter, writer::EventWriterConfig};
-use arkavo_orchestrator::{GitHubApp, GitHubOperations, Orchestrator};
+use arkavo_orchestrator::{GitHubApp, IssueOperations, Orchestrator};
 use arkavo_protocol::{
     agent_registry::AgentRegistry,
     task_executor::{TaskExecutor, TaskExecutorConfig},
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub(super) async fn create_orchestrator(github_app: Arc<GitHubApp>) -> Result<Arc<Orchestrator>> {
-    let github_ops = Arc::new(GitHubOperations::new(Arc::clone(&github_app)));
+    let github_ops = Arc::new(IssueOperations::new(Arc::clone(&github_app)));
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let event_writer = Arc::new(EventWriter::new(EventWriterConfig::default()));

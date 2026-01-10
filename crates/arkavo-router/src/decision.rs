@@ -2,6 +2,17 @@ use crate::classifier::TaskCategory;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// Model capability tier based on parameter count
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlannerTier {
+    /// Less than 2B parameters - info gathering, simple tasks
+    Small,
+    /// 2-7B parameters - planning, tool use, reasoning
+    Medium,
+    /// Greater than 7B parameters - complex planning, multi-step
+    Large,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ModelChoice {
     GeminiFlash,
@@ -86,6 +97,26 @@ impl ModelChoice {
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
+        }
+    }
+
+    /// Get the capability tier for this model based on parameter count
+    pub fn capability(&self) -> PlannerTier {
+        match self {
+            // Small: < 2B parameters
+            Self::LocalQwen3 | Self::LocalGemma270M => PlannerTier::Small,
+            // Medium: 2-7B parameters
+            Self::LocalMinistral3B | Self::LocalGemma4B => PlannerTier::Medium,
+            // Large: > 7B parameters or cloud models
+            Self::LocalMinistral8B
+            | Self::LocalGemma12B
+            | Self::LocalDeepSeekCoder
+            | Self::GeminiFlash
+            | Self::GeminiPro
+            | Self::ClaudeSonnet
+            | Self::ClaudeOpus
+            | Self::DeepSeekV32
+            | Self::DeepSeekV32Speciale => PlannerTier::Large,
         }
     }
 }
@@ -308,5 +339,27 @@ mod tests {
         assert!(ModelChoice::DeepSeekV32Speciale.is_deepseek());
         assert!(ModelChoice::DeepSeekV32.is_cloud());
         assert!(!ModelChoice::DeepSeekV32.is_local());
+    }
+
+    #[test]
+    fn test_model_choice_capability() {
+        // Small models (< 2B params)
+        assert_eq!(ModelChoice::LocalQwen3.capability(), PlannerTier::Small);
+        assert_eq!(ModelChoice::LocalGemma270M.capability(), PlannerTier::Small);
+
+        // Medium models (2-7B params)
+        assert_eq!(
+            ModelChoice::LocalMinistral3B.capability(),
+            PlannerTier::Medium
+        );
+        assert_eq!(ModelChoice::LocalGemma4B.capability(), PlannerTier::Medium);
+
+        // Large models (> 7B params or cloud)
+        assert_eq!(
+            ModelChoice::LocalMinistral8B.capability(),
+            PlannerTier::Large
+        );
+        assert_eq!(ModelChoice::GeminiFlash.capability(), PlannerTier::Large);
+        assert_eq!(ModelChoice::ClaudeSonnet.capability(), PlannerTier::Large);
     }
 }

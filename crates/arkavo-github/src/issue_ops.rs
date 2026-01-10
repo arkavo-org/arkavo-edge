@@ -1,5 +1,5 @@
-use crate::error::{Error, Result};
-use crate::github_auth::GitHubApp;
+use crate::app_auth::GitHubApp;
+use crate::error::{GitHubError, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -28,18 +28,18 @@ pub struct IssueUpdate {
     pub assignees: Option<Vec<String>>,
 }
 
-pub struct GitHubOperations {
+pub struct IssueOperations {
     github_app: Arc<GitHubApp>,
     client: Client,
 }
 
-impl GitHubOperations {
+impl IssueOperations {
     pub fn new(github_app: Arc<GitHubApp>) -> Self {
         let client = Client::builder()
             .user_agent("arkavo-edge")
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap_or_else(|_| Client::new());
 
         Self { github_app, client }
     }
@@ -78,7 +78,7 @@ impl GitHubOperations {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to post comment: {status} - {error_text}"
             )));
         }
@@ -119,7 +119,7 @@ impl GitHubOperations {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to add labels: {status} - {error_text}"
             )));
         }
@@ -157,7 +157,7 @@ impl GitHubOperations {
         if !response.status().is_success() && response.status().as_u16() != 404 {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to remove label: {status} - {error_text}"
             )));
         }
@@ -192,7 +192,7 @@ impl GitHubOperations {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to update issue: {status} - {error_text}"
             )));
         }

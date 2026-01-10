@@ -230,18 +230,6 @@ impl MetricsCollector {
         self.active_sessions.load(Ordering::Relaxed)
     }
 
-    /// Get closing sessions count (placeholder - would integrate with session state tracking)
-    pub fn get_closing_sessions(&self) -> u64 {
-        // This would integrate with SessionState tracking in a real implementation
-        0
-    }
-
-    /// Get zombie sessions count (placeholder - would integrate with session state tracking)
-    pub fn get_zombie_sessions(&self) -> u64 {
-        // This would integrate with SessionState tracking in a real implementation
-        0
-    }
-
     /// Reset all metrics (useful for testing)
     #[cfg(test)]
     pub fn reset(&self) {

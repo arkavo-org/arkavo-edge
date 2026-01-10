@@ -34,8 +34,6 @@ pub struct MetricsSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStateBreakdown {
     pub active: u64,
-    pub closing: u64,
-    pub zombie: u64,
 }
 
 /// Error count for top errors
@@ -58,11 +56,7 @@ impl MetricsSnapshot {
             error_rate: 0.0,
             memory_usage_mb: 0.0,
             cpu_usage_percent: 0.0,
-            session_states: SessionStateBreakdown {
-                active: 0,
-                closing: 0,
-                zombie: 0,
-            },
+            session_states: SessionStateBreakdown { active: 0 },
             top_errors: Vec::new(),
         }
     }
@@ -177,8 +171,6 @@ impl MetricsSampler {
         // Get session state breakdown
         let session_states = SessionStateBreakdown {
             active: current_metrics.get_active_sessions(),
-            closing: current_metrics.get_closing_sessions(),
-            zombie: current_metrics.get_zombie_sessions(),
         };
 
         // Get top errors (simplified for now)
@@ -193,7 +185,7 @@ impl MetricsSampler {
 
         let snapshot = MetricsSnapshot {
             timestamp: now,
-            active_sessions: session_states.active + session_states.closing + session_states.zombie,
+            active_sessions: session_states.active,
             messages_per_second,
             deltas_per_second,
             p95_latency_ms: current_metrics.get_p95_latency(),

@@ -20,13 +20,13 @@ regex.workspace = true
 # External dependencies
 octocrab = "0.38"
 reqwest = { workspace = true }
+jsonwebtoken = "9"
+async-trait = { workspace = true }
+serde_json.workspace = true
 
 # Workspace crates
-arkavo-orchestrator = { path = "../arkavo-orchestrator" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-protocol = { path = "../arkavo-protocol" }
-arkavo-budget = { path = "../arkavo-budget" }
-arkavo-events = { path = "../arkavo-events" }
 
 # Additional dependencies
 uuid = { workspace = true }

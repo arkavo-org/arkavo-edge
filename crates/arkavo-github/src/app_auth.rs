@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{GitHubError, Result};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::Client;
@@ -51,12 +51,13 @@ struct Account {
 impl GitHubApp {
     pub fn new(app_id: u64, private_key_pem: &str) -> Result<Self> {
         let private_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-            .map_err(|e| Error::Other(anyhow::anyhow!("Invalid private key: {e}")))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Invalid private key: {e}")))?;
 
         let client = Client::builder()
             .user_agent("arkavo-edge")
             .timeout(std::time::Duration::from_secs(30))
-            .build()?;
+            .build()
+            .map_err(GitHubError::Http)?;
 
         Ok(Self {
             app_id,
@@ -71,7 +72,8 @@ impl GitHubApp {
         let client = Client::builder()
             .user_agent("arkavo-edge")
             .timeout(std::time::Duration::from_secs(30))
-            .build()?;
+            .build()
+            .map_err(GitHubError::Http)?;
 
         Ok(Self {
             app_id: 0,
@@ -86,7 +88,7 @@ impl GitHubApp {
         let private_key = self
             .private_key
             .as_ref()
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("GitHub App private key not available")))?;
+            .ok_or_else(|| GitHubError::GitHubApi("GitHub App private key not available".into()))?;
 
         let now = Utc::now().timestamp();
         let claims = Claims {
@@ -98,7 +100,7 @@ impl GitHubApp {
         let header = Header::new(Algorithm::RS256);
 
         encode(&header, &claims, private_key)
-            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to generate JWT: {e}")))
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to generate JWT: {e}")))
     }
 
     #[allow(dead_code)]
@@ -114,17 +116,18 @@ impl GitHubApp {
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
-            .await?;
+            .await
+            .map_err(GitHubError::Http)?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to get installations: {status} - {error_text}"
             )));
         }
 
-        let installations: Vec<Installation> = response.json().await?;
+        let installations: Vec<Installation> = response.json().await.map_err(GitHubError::Http)?;
         info!(
             count = installations.len(),
             "Found GitHub App installations"
@@ -159,28 +162,31 @@ impl GitHubApp {
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send()
-            .await?;
+            .await
+            .map_err(GitHubError::Http)?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::GitHubApi(format!(
+            return Err(GitHubError::GitHubApi(format!(
                 "Failed to get installation token: {status} - {error_text}"
             )));
         }
 
-        let mut token: InstallationToken = response.json().await?;
+        let mut token: InstallationToken = response.json().await.map_err(GitHubError::Http)?;
 
         let expires_at = chrono::DateTime::parse_from_rfc3339(&token.expires_at)
-            .map_err(|e| Error::Other(anyhow::anyhow!("Invalid expiry date: {e}")))?
+            .map_err(|e| GitHubError::GitHubApi(format!("Invalid expiry date: {e}")))?
             .timestamp();
 
         token.cached_until = expires_at - TOKEN_EXPIRY_BUFFER;
 
         let result = token.token.clone();
 
-        let mut token_guard = self.installation_token.write().await;
-        *token_guard = Some(token);
+        {
+            let mut token_guard = self.installation_token.write().await;
+            *token_guard = Some(token);
+        }
 
         info!("Obtained new installation token");
 
@@ -205,7 +211,7 @@ impl GitHubApp {
             .find_installation_by_owner(owner)
             .await?
             .ok_or_else(|| {
-                Error::Other(anyhow::anyhow!(
+                GitHubError::GitHubApi(format!(
                     "No GitHub App installation found for owner: {owner}/{repo}"
                 ))
             })?;
@@ -219,17 +225,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_jwt_generation() {
-        let private_key_pem = r#"-----BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEAy8Dbv8prpJ/0kKhlGeJYozo2t60EG8L0561g13R29LvMR5hy
-vGZlGJpmn65+A4xHXInJYiPuKzrKUnApogDQ...
------END RSA PRIVATE KEY-----"#;
-
-        let result = GitHubApp::new(12345, private_key_pem);
-        if result.is_ok() {
-            let app = result.unwrap();
-            let jwt_result = app.generate_jwt();
-            assert!(jwt_result.is_ok());
-        }
+    fn test_new_from_token() {
+        let result = GitHubApp::new_from_token("test_token".to_string());
+        assert!(result.is_ok());
     }
 }

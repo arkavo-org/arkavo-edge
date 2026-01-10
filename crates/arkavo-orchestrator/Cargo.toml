@@ -9,6 +9,8 @@ description = "GitHub webhook orchestration and issue assignment for Arkavo agen
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
+dirs = "6.0"
 tokio = { workspace = true, features = ["full"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -26,6 +28,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-github = { path = "../arkavo-github" }
 arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
@@ -33,6 +36,11 @@ arkavo-context = { path = "../arkavo-context" }
 arkavo-git = { path = "../arkavo-git" }
 hmac = "0.12"
 hex = "0.4"
+mdns-sd = { workspace = true, optional = true }
+
+[features]
+default = []
+mdns = ["mdns-sd"]
 
 [lints]
 workspace = true

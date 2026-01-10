@@ -1,22 +1,20 @@
 use crate::agent_assignment::AgentAssigner;
 use crate::cognitive_engine::CognitiveEngine;
 use crate::error::{Error, Result};
-use crate::github_operations::GitHubOperations;
 use crate::issue_router::{ExecutionStrategy, IssueRouter};
 use crate::types::IssueEvent;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::EventWriter;
+use arkavo_github::IssueOperations;
 use arkavo_mcp_tools::ToolRegistry;
-use arkavo_memory::MemoryStorage;
+use arkavo_memory::{IssueProcessingStatus, MemoryStorage, OrchestratorStateStore, PlanStateStore};
 use arkavo_protocol::{
     agent_registry::AgentRegistry,
     task_executor::TaskExecutor,
     types::{Message, MessagePart, TaskStatus},
 };
 use arkavo_router::Router;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -26,9 +24,8 @@ pub struct Orchestrator {
     task_executor: Arc<TaskExecutor>,
     agent_assigner: Arc<AgentAssigner>,
     cognitive_engine: Arc<CognitiveEngine>,
-    github_ops: Arc<GitHubOperations>,
-    issue_to_task: Arc<RwLock<HashMap<String, Uuid>>>,
-    task_retry_counts: Arc<RwLock<HashMap<Uuid, u32>>>,
+    github_ops: Arc<IssueOperations>,
+    state_store: Arc<OrchestratorStateStore>,
 }
 
 impl Orchestrator {
@@ -37,7 +34,7 @@ impl Orchestrator {
         agent_registry: Arc<AgentRegistry>,
         budget_tracker: Arc<BudgetTracker>,
         event_writer: Arc<EventWriter>,
-        github_ops: Arc<GitHubOperations>,
+        github_ops: Arc<IssueOperations>,
         session_id: String,
     ) -> Result<Self> {
         let agent_assigner = Arc::new(AgentAssigner::new(agent_registry));
@@ -56,6 +53,28 @@ impl Orchestrator {
 
         let tool_registry = Arc::new(ToolRegistry::new(storage));
 
+        // Create plan state store for persistence
+        let plan_store = {
+            let db_path = dirs::data_local_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("arkavo")
+                .join("orchestrator_plans.db");
+
+            match PlanStateStore::new(&db_path).await {
+                Ok(store) => {
+                    // Mark any "executing" plans as interrupted (orchestrator was restarted)
+                    if let Err(e) = store.mark_executing_as_interrupted().await {
+                        warn!(error = %e, "Failed to mark executing plans as interrupted");
+                    }
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to create plan state store, proceeding without persistence");
+                    None
+                }
+            }
+        };
+
         let cognitive_engine = Arc::new(CognitiveEngine::new(
             budget_tracker,
             event_writer,
@@ -63,15 +82,49 @@ impl Orchestrator {
             router,
             tool_registry,
             session_id,
+            plan_store,
         ));
+
+        // Create orchestrator state store for persistence
+        let state_store =
+            {
+                let db_path = dirs::data_local_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("arkavo")
+                    .join("orchestrator_state.db");
+
+                Arc::new(OrchestratorStateStore::new(&db_path).await.map_err(|e| {
+                    Error::Other(anyhow::anyhow!("Failed to create state store: {e}"))
+                })?)
+            };
+
+        // Resume any processing issues on startup (mark as pending to re-queue)
+        if let Ok(processing) = state_store
+            .get_issues_by_status(IssueProcessingStatus::Processing)
+            .await
+        {
+            for issue in processing {
+                if let Err(e) = state_store
+                    .update_issue_status(
+                        &issue.org,
+                        &issue.repo_name,
+                        issue.issue_number,
+                        IssueProcessingStatus::Pending,
+                        Some("Orchestrator restarted during processing"),
+                    )
+                    .await
+                {
+                    warn!(error = %e, "Failed to mark processing issue as pending on startup");
+                }
+            }
+        }
 
         Ok(Self {
             task_executor,
             agent_assigner,
             cognitive_engine,
             github_ops,
-            issue_to_task: Arc::new(RwLock::new(HashMap::new())),
-            task_retry_counts: Arc::new(RwLock::new(HashMap::new())),
+            state_store,
         })
     }
 
@@ -93,11 +146,41 @@ impl Orchestrator {
             "Processing issue event"
         );
 
-        let issue_key = format!("{}#{}", event.repository.full_name, event.issue.number);
+        // Parse org/repo from full_name (e.g., "owner/repo")
+        let parts: Vec<&str> = event.repository.full_name.split('/').collect();
+        if parts.len() != 2 {
+            return Err(Error::Other(anyhow::anyhow!(
+                "Invalid repository format: {}",
+                event.repository.full_name
+            )));
+        }
+        let (org, repo_name) = (parts[0].to_string(), parts[1].to_string());
+        let issue_number = event.issue.number;
 
-        if self.is_issue_active(&issue_key).await {
-            info!(issue_key, "Issue already has active task, skipping");
-            return Ok(());
+        // Check if issue is already being processed
+        if let Ok(Some(_task_id)) = self
+            .state_store
+            .get_issue_task_id(&org, &repo_name, issue_number)
+            .await
+        {
+            // Check if it's still in processing state
+            if let Ok(issues) = self
+                .state_store
+                .get_issues_by_status(IssueProcessingStatus::Processing)
+                .await
+            {
+                let is_processing = issues.iter().any(|i| {
+                    i.org == org && i.repo_name == repo_name && i.issue_number == issue_number
+                });
+                if is_processing {
+                    info!(
+                        issue = issue_number,
+                        repository = %event.repository.full_name,
+                        "Issue already has active task, skipping"
+                    );
+                    return Ok(());
+                }
+            }
         }
 
         let routing_decision = IssueRouter::route(&event);
@@ -141,10 +224,17 @@ impl Orchestrator {
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Failed to submit task: {e}")))?;
 
-        self.issue_to_task
-            .write()
+        // Mark issue as processing in state store
+        self.state_store
+            .mark_issue_processed(
+                &org,
+                &repo_name,
+                issue_number,
+                task_id,
+                IssueProcessingStatus::Processing,
+            )
             .await
-            .insert(issue_key.clone(), task_id);
+            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to persist issue state: {e}")))?;
 
         match routing_decision.strategy {
             ExecutionStrategy::AutoExecute | ExecutionStrategy::PlanFirst => {
@@ -155,8 +245,9 @@ impl Orchestrator {
 
                 let cognitive_engine = Arc::clone(&self.cognitive_engine);
                 let task_executor = Arc::clone(&self.task_executor);
-                let task_retry_counts = Arc::clone(&self.task_retry_counts);
-                let issue_to_task_map = Arc::clone(&self.issue_to_task);
+                let state_store = Arc::clone(&self.state_store);
+                let org_clone = org.clone();
+                let repo_clone = repo_name.clone();
 
                 tokio::spawn(async move {
                     let result = cognitive_engine.execute(assignment).await;
@@ -182,15 +273,27 @@ impl Orchestrator {
                                 {
                                     error!(task_id = %task_id, error = %e, "Failed to mark task complete");
                                 }
+
+                                // Mark issue as completed in state store
+                                if let Err(e) = state_store
+                                    .update_issue_status(
+                                        &org_clone,
+                                        &repo_clone,
+                                        issue_number,
+                                        IssueProcessingStatus::Completed,
+                                        None,
+                                    )
+                                    .await
+                                {
+                                    error!(error = %e, "Failed to update issue status to completed");
+                                }
                             } else {
                                 warn!(task_id = %task_id, "Task execution incomplete");
 
-                                let retry_count = {
-                                    let mut counts = task_retry_counts.write().await;
-                                    let count = counts.entry(task_id).or_insert(0);
-                                    *count += 1;
-                                    *count
-                                };
+                                let retry_count = state_store
+                                    .increment_retry_count(&org_clone, &repo_clone, issue_number)
+                                    .await
+                                    .unwrap_or(MAX_RETRY_ATTEMPTS);
 
                                 if retry_count < MAX_RETRY_ATTEMPTS {
                                     info!(task_id = %task_id, retry_count, "Retrying task");
@@ -214,18 +317,30 @@ impl Orchestrator {
                                     if let Err(e) = task_executor.fail_task(&task_id, error).await {
                                         error!(task_id = %task_id, error = %e, "Failed to mark task failed");
                                     }
+
+                                    // Mark issue as failed in state store
+                                    if let Err(e) = state_store
+                                        .update_issue_status(
+                                            &org_clone,
+                                            &repo_clone,
+                                            issue_number,
+                                            IssueProcessingStatus::Failed,
+                                            Some("Task exceeded max retries"),
+                                        )
+                                        .await
+                                    {
+                                        error!(error = %e, "Failed to update issue status to failed");
+                                    }
                                 }
                             }
                         }
                         Err(e) => {
                             error!(task_id = %task_id, error = %e, "Task execution failed");
 
-                            let retry_count = {
-                                let mut counts = task_retry_counts.write().await;
-                                let count = counts.entry(task_id).or_insert(0);
-                                *count += 1;
-                                *count
-                            };
+                            let retry_count = state_store
+                                .increment_retry_count(&org_clone, &repo_clone, issue_number)
+                                .await
+                                .unwrap_or(MAX_RETRY_ATTEMPTS);
 
                             if retry_count < MAX_RETRY_ATTEMPTS {
                                 info!(task_id = %task_id, retry_count, "Retrying task after error");
@@ -236,9 +351,10 @@ impl Orchestrator {
                                     error!(task_id = %task_id, error = %e, "Failed to retry task");
                                 }
                             } else {
+                                let err_msg = format!("Task failed: {e}");
                                 let error = arkavo_protocol::types::TaskError {
                                     code: "EXECUTION_ERROR".to_string(),
-                                    message: format!("Task failed: {e}"),
+                                    message: err_msg.clone(),
                                     details: Some(serde_json::json!({
                                         "retry_count": retry_count,
                                     })),
@@ -246,11 +362,23 @@ impl Orchestrator {
                                 if let Err(e) = task_executor.fail_task(&task_id, error).await {
                                     error!(task_id = %task_id, error = %e, "Failed to mark task failed");
                                 }
+
+                                // Mark issue as failed in state store
+                                if let Err(e) = state_store
+                                    .update_issue_status(
+                                        &org_clone,
+                                        &repo_clone,
+                                        issue_number,
+                                        IssueProcessingStatus::Failed,
+                                        Some(&err_msg),
+                                    )
+                                    .await
+                                {
+                                    error!(error = %e, "Failed to update issue status to failed");
+                                }
                             }
                         }
                     }
-
-                    issue_to_task_map.write().await.remove(&issue_key);
                 });
             }
             ExecutionStrategy::OrchestratorConsultation => {
@@ -310,11 +438,8 @@ impl Orchestrator {
 
         self.github_ops
             .post_comment(owner, repo, event.issue.number, &message)
-            .await
-    }
-
-    async fn is_issue_active(&self, issue_key: &str) -> bool {
-        self.issue_to_task.read().await.contains_key(issue_key)
+            .await?;
+        Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
@@ -328,8 +453,17 @@ impl Orchestrator {
     }
 
     pub async fn get_task_id_for_issue(&self, repository: &str, issue_number: u64) -> Option<Uuid> {
-        let issue_key = format!("{repository}#{issue_number}");
-        self.issue_to_task.read().await.get(&issue_key).copied()
+        let parts: Vec<&str> = repository.split('/').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let (org, repo_name) = (parts[0], parts[1]);
+
+        self.state_store
+            .get_issue_task_id(org, repo_name, issue_number)
+            .await
+            .ok()
+            .flatten()
     }
 }
 
