@@ -1,10 +1,26 @@
+/// GPU acceleration status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuStatus {
+    /// GPU not yet tested (no model loaded yet)
+    Unknown,
+    /// GPU acceleration available and working
+    Available,
+    /// GPU unavailable, running in CPU-only mode
+    Unavailable,
+}
+
 // For musl targets, provide stub implementations since llama.cpp doesn't work well with musl
 #[cfg(target_env = "musl")]
 mod stubs {
+    use super::GpuStatus;
+
     pub fn init_llama_logging() {}
     pub fn set_debug_logging(_enabled: bool) {}
     pub fn test_minimal_init() -> Result<(), String> {
         Err("llama.cpp is not supported on musl targets".to_string())
+    }
+    pub fn gpu_status() -> GpuStatus {
+        GpuStatus::Unavailable
     }
 }
 
@@ -63,6 +79,20 @@ pub fn detect_model_format(model_name: &str) -> ModelFormat {
 // 0 = not tried, 1 = GPU works, 2 = GPU failed (use CPU)
 #[cfg(not(target_env = "musl"))]
 static GPU_STATUS: AtomicU32 = AtomicU32::new(0);
+
+/// Check if GPU acceleration is available for local inference
+///
+/// Returns `Unknown` if no model has been loaded yet (GPU status not tested).
+/// Returns `Available` if GPU acceleration is working.
+/// Returns `Unavailable` if GPU failed and running in CPU-only mode.
+#[cfg(not(target_env = "musl"))]
+pub fn gpu_status() -> GpuStatus {
+    match GPU_STATUS.load(Ordering::Relaxed) {
+        0 => GpuStatus::Unknown,
+        1 => GpuStatus::Available,
+        _ => GpuStatus::Unavailable,
+    }
+}
 
 // Custom log callback that filters based on log level and our debug flag
 #[cfg(not(target_env = "musl"))]

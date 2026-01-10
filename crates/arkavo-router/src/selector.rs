@@ -30,6 +30,7 @@ impl ProviderAvailability {
 pub struct ModelSelector {
     budget_threshold: f64,
     availability: ProviderAvailability,
+    gpu_available: bool,
 }
 
 impl ModelSelector {
@@ -37,6 +38,7 @@ impl ModelSelector {
         Self {
             budget_threshold: 0.80,
             availability: ProviderAvailability::from_env(),
+            gpu_available: Self::check_gpu_status(),
         }
     }
 
@@ -44,6 +46,7 @@ impl ModelSelector {
         Self {
             budget_threshold,
             availability: ProviderAvailability::from_env(),
+            gpu_available: Self::check_gpu_status(),
         }
     }
 
@@ -53,6 +56,19 @@ impl ModelSelector {
         Self {
             budget_threshold: 0.80,
             availability,
+            gpu_available: true, // Assume GPU available in tests
+        }
+    }
+
+    /// Check GPU acceleration status via arkavo-llm
+    fn check_gpu_status() -> bool {
+        #[cfg(feature = "llama-cpp")]
+        {
+            arkavo_llm::is_gpu_accelerated()
+        }
+        #[cfg(not(feature = "llama-cpp"))]
+        {
+            false
         }
     }
 
@@ -72,8 +88,21 @@ impl ModelSelector {
         ))
     }
 
-    /// Get the best available local model, checking cache availability
+    /// Get the best available local model, checking cache availability and GPU status
+    ///
+    /// When GPU is unavailable, skips large models (8B) to avoid slow CPU-only inference.
+    /// This prevents 20+ second waits on CPU-only devices.
     fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
+        // If no GPU, skip large models to avoid slow CPU-only inference
+        if !self.gpu_available {
+            // Without GPU, prefer smaller/faster models
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+                return ModelChoice::LocalMinistral3B;
+            }
+            return ModelChoice::LocalQwen3;
+        }
+
+        // GPU available - use existing logic (prefer larger when requested)
         if prefer_larger {
             // Try larger models first, fall back to smaller if not cached
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
@@ -137,7 +166,14 @@ impl ModelSelector {
 
             TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
 
-            TaskCategory::SecurityScan => ModelChoice::LocalMinistral3B,
+            // Security scan: Use smaller model without GPU to avoid slow inference
+            TaskCategory::SecurityScan => {
+                if self.gpu_available {
+                    ModelChoice::LocalMinistral3B
+                } else {
+                    ModelChoice::LocalQwen3
+                }
+            }
 
             TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
 
@@ -151,7 +187,14 @@ impl ModelSelector {
                 self.best_cloud_model(false)
             }
 
-            TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
+            // Code generation fallback: Use smaller model without GPU
+            TaskCategory::CodeGeneration => {
+                if self.gpu_available {
+                    ModelChoice::LocalMinistral3B
+                } else {
+                    ModelChoice::LocalQwen3
+                }
+            }
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 

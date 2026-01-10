@@ -12,8 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-# Default features - portable across all platforms with pure Rust mDNS
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "web-ui"]
+# Full defaults with all providers
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui"]
+# Minimal feature set for non-typical use cases
+minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
 mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mesh-tools", "arkavo-router/gemini"]

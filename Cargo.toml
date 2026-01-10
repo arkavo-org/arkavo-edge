@@ -112,7 +112,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.53.1"
+version = "0.53.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -143,12 +143,13 @@ reqwest = { version = "0.12.20", default-features = false, features = ["rustls-t
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
+keyring = "3.6"
 
 # Common utilities
 log = "0.4"
 url = "2.5"
 http = "1.1"
-lru = "0.12"
+lru = "0.16"
 async-stream = "0.3"
 tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }
@@ -172,18 +173,9 @@ hex = "0.4"
 handlebars = "6.2"
 
 # Terminal and UI
-ratatui = "0.29.0"
+ratatui = "0.30.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 indicatif = "0.18"
-
-# Syntax highlighting (tree-sitter)
-tree-sitter = "0.24"
-tree-sitter-highlight = "0.24"
-tree-sitter-rust = "0.23"
-tree-sitter-python = "0.23"
-tree-sitter-javascript = "0.23"
-tree-sitter-typescript = "0.23"
-tree-sitter-go = "0.23"
 
 # Git and filesystem
 git2 = { version = "0.20.2", default-features = false }

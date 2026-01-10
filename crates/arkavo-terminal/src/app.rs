@@ -594,7 +594,10 @@ impl App {
     async fn run_app<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
+    {
         // Fetch available models from Ollama server
         self.fetch_available_models().await;
 
