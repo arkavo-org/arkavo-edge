@@ -341,7 +341,7 @@ jobs:
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
-            features: memory,mdns
+            features: memory,mdns,mcp-tools
             artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
           - os: ubuntu-24.04-arm
@@ -352,7 +352,7 @@ jobs:
           # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
           # See: docs/uno-q-hardware-acceleration-blockers.md for details
           - os: ubuntu-24.04-arm
-            features: llama-cpp,snpe,memory,mdns,gemini
+            features: llama-cpp,snpe,memory,mdns,gemini,mcp-tools
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
     steps:
