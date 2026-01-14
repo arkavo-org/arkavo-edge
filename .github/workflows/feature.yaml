@@ -165,10 +165,11 @@ jobs:
       fail-fast: false  # Run all groups even if one fails
       matrix:
         group:
-          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-tools, arkavo-workspace
-          - llm-heavy   # arkavo-router (no llama-cpp), arkavo-dataflow, arkavo-terminal
-          - ui-heavy    # arkavo-ui-generator, arkavo-agui (no llama-cpp)
+          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-workspace (44K LOC)
+          - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
+          - routing     # arkavo-router, arkavo-dataflow (42K LOC)
+          - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui (34K LOC)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -218,13 +219,14 @@ jobs:
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo test --locked -p arkavo-protocol
             cargo test --locked -p arkavo-observability
-            cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-workspace
-          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+          elif [ "${{ matrix.group }}" = "tools" ]; then
+            cargo test --locked -p arkavo-mcp-tools
+          elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
             cargo test --locked -p arkavo-dataflow
+          elif [ "${{ matrix.group }}" = "ui" ]; then
             cargo test --locked -p arkavo-terminal
-          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo test --locked -p arkavo-ui-generator
             cargo test --locked -p arkavo-agui --no-default-features --features mdns
           fi
@@ -243,12 +245,13 @@ jobs:
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+          elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
             cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "ui" ]; then
             cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
           fi
