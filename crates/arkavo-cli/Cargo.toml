@@ -84,6 +84,9 @@ reqwest = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # Cross-platform MCP tools (optional, enabled via mcp-tools feature)
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }

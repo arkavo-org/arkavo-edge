@@ -1,6 +1,7 @@
 pub mod builtin_mcp;
 pub mod commands;
 pub mod conversation_manager;
+pub mod first_run;
 pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
@@ -33,6 +34,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Load API keys from .arkavo/AGENTS.md if present
         arkavo_router::model_discovery::load_api_keys_from_config();
     });
+
+    // Check for verbose flag
+    let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+
+    // First-run experience: check if models are available
+    if first_run::is_first_run() {
+        // Handle first-run flow in a runtime
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(handle_first_run(verbose))?;
+    }
 
     if args.is_empty() {
         // No command provided, default to agent run
@@ -223,4 +234,50 @@ fn print_usage() {
     println!("OPTIONS:");
     println!("    -h, --help       Show help");
     println!("    -v, --version    Show version");
+}
+
+/// Handle first-run experience for new users
+async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let caps = first_run::detect_capabilities();
+
+    // Display verbose welcome with QR code if requested
+    if verbose && first_run::display_welcome_verbose().is_err() {
+        println!("Welcome Friend\n");
+    }
+
+    println!("No local AI models found.");
+    println!();
+    println!("System: {}", caps.device_profile);
+    println!(
+        "Recommended: {} ({:.1} GB)",
+        caps.recommended_model.display_name(),
+        caps.recommended_model.size_bytes() as f64 / 1_000_000_000.0
+    );
+    println!("Available disk: {:.1} GB", caps.available_disk_gb);
+
+    // Prompt for download
+    if first_run::prompt_download_confirmation(&caps) {
+        match first_run::download_model(&caps.recommended_model).await {
+            Ok(_) => {
+                // Run test query after download
+                if let Err(e) = first_run::run_test_query().await {
+                    eprintln!("Test query failed: {e}");
+                }
+            }
+            Err(e) => {
+                eprintln!("Download failed: {e}");
+                return Err(e.into());
+            }
+        }
+    } else {
+        println!();
+        println!("You can download a model later with:");
+        println!(
+            "  hf download {} {}",
+            caps.recommended_model.repo_id(),
+            caps.recommended_model.filename()
+        );
+    }
+
+    Ok(())
 }
