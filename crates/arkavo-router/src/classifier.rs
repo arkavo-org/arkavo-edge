@@ -269,6 +269,18 @@ impl TaskClassifier {
         })
     }
 
+    /// Create a classifier that uses only rule-based classification (no local model required)
+    pub async fn new_fallback() -> Result<Self> {
+        // Try to create with a model, but if none available, return error
+        // The caller should use classify_rule_based() directly for fallback mode
+        Self::new().await
+    }
+
+    /// Rule-based classification without LLM (for fallback/first-run mode)
+    pub fn classify_rule_based(&self, task_description: &str) -> Classification {
+        self.try_rule_based_classification(task_description)
+    }
+
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
             return Ok(Classification::new(

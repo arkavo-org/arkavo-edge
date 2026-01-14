@@ -75,6 +75,7 @@ async fn use_cef_renderer(
     _port: u16,
     initial_prompt: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::first_run;
     use arkavo_agui::UiRenderer;
     use arkavo_agui::renderer::async_cef_renderer::AsyncCefRendererImpl;
     use arkavo_memory::PlanStateStore;
@@ -84,10 +85,46 @@ async fn use_cef_renderer(
 
     println!("CEF window opened with prompt bar!");
 
-    // Wait for page to fully load before processing initial prompt
+    // Wait for page to fully load - reduced from 2000ms
     println!("[DEBUG] Waiting for page to load...");
-    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     println!("[DEBUG] Page should be loaded now");
+
+    // Check if this is first run and show welcome screen
+    if first_run::is_first_run() {
+        let caps = first_run::detect_capabilities();
+        let model_size_gb = caps.recommended_model.size_bytes() as f64 / 1_000_000_000.0;
+
+        let welcome_html = format!(
+            r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:calc(100vh - 80px);color:white;">
+                <h1 style="margin:0 0 16px 0;font-size:32px;">Welcome Friend</h1>
+                <p style="margin:0 0 32px 0;opacity:0.9;">Arkavo Edge needs a local AI model to run.</p>
+                <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:24px;max-width:400px;">
+                    <h3 style="margin:0 0 16px 0;font-size:18px;">Recommended Model</h3>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                        <span>{}</span>
+                        <span>{:.1} GB</span>
+                    </div>
+                    <div style="font-size:14px;opacity:0.8;margin-bottom:16px;">
+                        System: {} | Available: {:.1} GB
+                    </div>
+                    <button id="download-model-btn" onclick="window.arkavoSubmit && window.arkavoSubmit('download-model')" style="
+                        width:100%;padding:12px 24px;background:white;color:#667eea;
+                        border:none;border-radius:8px;font-size:16px;font-weight:600;
+                        cursor:pointer;transition:transform 0.2s;
+                    ">Download Model</button>
+                    <p style="font-size:12px;margin-top:12px;opacity:0.7;text-align:center;">
+                        Or enter a prompt below to start with a cloud model
+                    </p>
+                </div>
+            </div>"#,
+            caps.recommended_model.display_name(),
+            model_size_gb,
+            caps.device_profile,
+            caps.available_disk_gb
+        );
+        cef_renderer.render(&welcome_html, "", "").await?;
+    }
 
     // Check for interrupted plans that can be resumed
     let db_path = dirs::data_local_dir()
@@ -232,6 +269,51 @@ async fn use_cef_renderer(
                             .replace('>', "&gt;")
                     );
                     let _ = cef_renderer.update_element("body", &error_display).await;
+                }
+                "submit" if event.value.trim() == "download-model" => {
+                    eprintln!("[DEBUG] Processing download-model request");
+                    // Show downloading status
+                    let downloading_html = r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:calc(100vh - 80px);color:white;">
+                        <h1 style="margin:0 0 16px 0;font-size:32px;">Downloading Model...</h1>
+                        <p style="margin:0 0 32px 0;opacity:0.9;">This may take a few minutes.</p>
+                        <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:24px;max-width:400px;">
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <div style="width:8px;height:8px;background:white;border-radius:50%;animation:pulse 1.5s ease-in-out infinite;"></div>
+                                <span>Downloading from HuggingFace...</span>
+                            </div>
+                        </div>
+                    </div>"#;
+                    cef_renderer.render(downloading_html, "", "").await?;
+
+                    // Download the model
+                    let caps = first_run::detect_capabilities();
+                    match first_run::download_model(&caps.recommended_model).await {
+                        Ok(_) => {
+                            // Show success
+                            let success_html = r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:calc(100vh - 80px);color:white;">
+                                <h1 style="margin:0 0 16px 0;font-size:32px;">Download Complete!</h1>
+                                <p style="margin:0 0 32px 0;opacity:0.9;">Arkavo Edge is ready.</p>
+                                <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:24px;max-width:400px;">
+                                    <p style="margin:0;font-size:16px;">Enter a prompt below to get started.</p>
+                                </div>
+                            </div>"#;
+                            cef_renderer.render(success_html, "", "").await?;
+                        }
+                        Err(e) => {
+                            let error_html = format!(
+                                r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+                                    <div style="background:#fee;padding:20px;border-radius:8px;border-left:4px solid #f44;">
+                                        <strong style="color:#c33;">Download Failed</strong><br>
+                                        <span style="color:#666;">{}</span>
+                                    </div>
+                                </div>"#,
+                                e.replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;")
+                            );
+                            cef_renderer.render(&error_html, "", "").await?;
+                        }
+                    }
                 }
                 "submit" if !event.value.trim().is_empty() => {
                     eprintln!("[DEBUG] Processing submit event (async)");
