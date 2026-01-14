@@ -125,11 +125,11 @@ impl ModelSelector {
             }
             ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
             ),
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-8B-Instruct-2512-GGUF",
-                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
             ),
             _ => false,
         }

@@ -556,11 +556,11 @@ impl Router {
             }
             ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
             ),
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-8B-Instruct-2512-GGUF",
-                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
             ),
             ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
                 "unsloth/gemma-3-270m-it-GGUF",
@@ -978,11 +978,11 @@ impl Router {
             }
             ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
             ),
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-8B-Instruct-2512-GGUF",
-                "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
             ),
             ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
                 "unsloth/gemma-3-270m-it-GGUF",
@@ -1088,7 +1088,7 @@ impl Router {
             ModelChoice::LocalMinistral3B => {
                 let model_path = model_discovery::find_gguf_model(
                     "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                    "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                    "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
                 )
                 .await
                 .map_err(Error::ModelExecution)?;
@@ -1109,8 +1109,8 @@ impl Router {
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalMinistral8B => {
                 let model_path = model_discovery::find_gguf_model(
-                    "mistralai/Ministral-8B-Instruct-2512-GGUF",
-                    "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+                    "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                    "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
                 )
                 .await
                 .map_err(Error::ModelExecution)?;
