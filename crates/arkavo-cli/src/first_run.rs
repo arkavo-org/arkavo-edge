@@ -8,10 +8,12 @@ use std::path::PathBuf;
 /// Device profile based on system capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceProfile {
-    /// Raspberry Pi 5 or similar (≤4 cores, 8GB RAM)
+    /// Raspberry Pi 5 or similar (≤4 cores)
     RaspberryPi5,
-    /// Desktop/laptop (>4 cores)
+    /// Desktop/laptop (5-8 cores)
     Desktop,
+    /// Workstation (>8 cores)
+    Workstation,
 }
 
 impl std::fmt::Display for DeviceProfile {
@@ -19,6 +21,7 @@ impl std::fmt::Display for DeviceProfile {
         match self {
             DeviceProfile::RaspberryPi5 => write!(f, "Embedded (RPi5-class)"),
             DeviceProfile::Desktop => write!(f, "Desktop"),
+            DeviceProfile::Workstation => write!(f, "Workstation"),
         }
     }
 }
@@ -157,6 +160,8 @@ pub fn detect_capabilities() -> SystemCapabilities {
 
     let device_profile = if is_rpi || cpu_cores <= 4 {
         DeviceProfile::RaspberryPi5
+    } else if cpu_cores > 8 {
+        DeviceProfile::Workstation
     } else {
         DeviceProfile::Desktop
     };
@@ -164,6 +169,7 @@ pub fn detect_capabilities() -> SystemCapabilities {
     let recommended_model = match device_profile {
         DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen3_0_6B,
         DeviceProfile::Desktop => RecommendedModel::Ministral3B,
+        DeviceProfile::Workstation => RecommendedModel::Ministral8B,
     };
 
     let available_disk_gb = get_available_disk_space();
