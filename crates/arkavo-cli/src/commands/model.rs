@@ -240,10 +240,10 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                         println!("    Path: {}", path.display());
                     }
                 }
-                println!("\nDownload models with: hf download <repo> <file.gguf>");
+                println!("\nDownload more models with: arkavo model download <name>");
             } else {
                 println!("  No GGUF models found in HuggingFace cache");
-                println!("  Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf");
+                println!("  Download with: arkavo model download");
             }
         }
 
@@ -256,12 +256,31 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
         }
 
         ModelSubcommand::Download { name } => {
-            // Model downloading was removed with the local feature
-            // Users should download models manually from HuggingFace
-            let _ = name; // Suppress unused warning
-            anyhow::bail!(
-                "Model downloading has been removed. Please download GGUF models manually from HuggingFace."
-            );
+            use crate::first_run::{RecommendedModel, detect_capabilities, download_model};
+
+            let model = match name.as_deref() {
+                Some("qwen3-0.6b" | "qwen" | "qwen3") => RecommendedModel::Qwen3_0_6B,
+                Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
+                Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
+                Some(other) => {
+                    println!("Unknown model: {other}");
+                    println!();
+                    println!("Available models:");
+                    println!("  qwen3-0.6b    - Qwen3 0.6B (~650 MB) - Best for embedded");
+                    println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
+                    println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
+                    return Ok(());
+                }
+                None => {
+                    let caps = detect_capabilities();
+                    println!("No model specified, using recommended: {}", caps.recommended_model.display_name());
+                    caps.recommended_model
+                }
+            };
+
+            println!("Downloading {} ({:.1} GB)...", model.display_name(), model.size_bytes() as f64 / 1_000_000_000.0);
+            download_model(&model).await.map_err(|e| anyhow::anyhow!(e))?;
+            println!("\nModel ready! Run 'arkavo' to start.");
         }
 
         ModelSubcommand::Add { path, name } => {

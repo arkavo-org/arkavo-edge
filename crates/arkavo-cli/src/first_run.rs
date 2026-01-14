@@ -184,15 +184,18 @@ pub fn get_available_disk_space() -> f64 {
 
     let cache_path = get_hf_cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
-    // Ensure parent directory exists for statvfs
-    let check_path = if cache_path.exists() {
-        cache_path
-    } else {
-        cache_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("/"))
-    };
+    // Find an existing directory to check disk space (walk up until we find one)
+    let mut check_path = cache_path.clone();
+    while !check_path.exists() {
+        match check_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => check_path = parent.to_path_buf(),
+            _ => {
+                // Fall back to home directory or root
+                check_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                break;
+            }
+        }
+    }
 
     let path_cstr = match CString::new(check_path.to_string_lossy().as_bytes()) {
         Ok(s) => s,

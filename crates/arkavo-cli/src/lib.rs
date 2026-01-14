@@ -243,26 +243,25 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     // Display verbose welcome with QR code if requested
     if verbose && first_run::display_welcome_verbose().is_err() {
         println!("Welcome Friend\n");
+    } else if !verbose {
+        println!("Welcome Friend\n");
     }
 
-    println!("No local AI models found.");
+    println!("To run AI locally, you'll need to download a model.");
     println!();
-    println!("System: {}", caps.device_profile);
+    println!("  System:      {}", caps.device_profile);
     println!(
-        "Recommended: {} ({:.1} GB)",
+        "  Recommended: {} ({:.1} GB)",
         caps.recommended_model.display_name(),
         caps.recommended_model.size_bytes() as f64 / 1_000_000_000.0
     );
-    println!("Available disk: {:.1} GB", caps.available_disk_gb);
+    println!("  Disk space:  {:.1} GB available", caps.available_disk_gb);
 
     // Prompt for download
     if first_run::prompt_download_confirmation(&caps) {
         match first_run::download_model(&caps.recommended_model).await {
             Ok(_) => {
-                // Run test query after download
-                if let Err(e) = first_run::run_test_query().await {
-                    eprintln!("Test query failed: {e}");
-                }
+                println!("\nModel ready! Run 'arkavo' to start.");
             }
             Err(e) => {
                 eprintln!("Download failed: {e}");
@@ -272,12 +271,11 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     } else {
         println!();
         println!("You can download a model later with:");
-        println!(
-            "  hf download {} {}",
-            caps.recommended_model.repo_id(),
-            caps.recommended_model.filename()
-        );
+        println!("  arkavo model download");
+        println!();
+        println!("Or use a cloud provider with an API key:");
+        println!("  GEMINI_API_KEY=your-key arkavo chat --prompt \"Hello\"");
     }
 
-    Ok(())
+    std::process::exit(0);
 }

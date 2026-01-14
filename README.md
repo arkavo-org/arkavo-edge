@@ -126,8 +126,36 @@ mDNS discovery uses pure Rust implementation (mdns-sd crate) with no system depe
 
 ## Building from Source
 
+### Prerequisites
+
+Install required build tools:
+
 ```bash
-cargo build --release
+# macOS
+brew install cmake ccache
+
+# Linux (Debian/Ubuntu)
+sudo apt install cmake ccache build-essential
+
+# Linux (Fedora)
+sudo dnf install cmake ccache gcc-c++
+```
+
+### Setup llama.cpp
+
+Clone the llama.cpp dependency (not tracked in git):
+
+```bash
+git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+cd vendor/llama.cpp
+git checkout ecf74a841
+cd ../..
+```
+
+### Build
+
+```bash
+cargo build
 ```
 
 The default build includes mDNS discovery using a pure Rust implementation (`mdns-sd` crate) that doesn't require system libraries like Avahi or Bonjour. This provides true portability across all platforms.
