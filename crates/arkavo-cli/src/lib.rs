@@ -38,8 +38,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check for verbose flag
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
 
+    // Skip first-run for help/version commands
+    let is_help_or_version = args
+        .first()
+        .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
+
     // First-run experience: check if models are available
-    if first_run::is_first_run() {
+    if !is_help_or_version && first_run::is_first_run() {
         // Handle first-run flow in a runtime
         let runtime = tokio::runtime::Runtime::new()?;
         runtime.block_on(handle_first_run(verbose))?;
