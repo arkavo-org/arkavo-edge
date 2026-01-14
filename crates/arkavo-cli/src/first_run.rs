@@ -304,6 +304,28 @@ pub fn prompt_download_confirmation(caps: &SystemCapabilities) -> bool {
     input.is_empty() || input == "y" || input == "yes"
 }
 
+/// Prompt user for downloading both small and large models
+pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
+    if caps.available_disk_gb < total_gb * 1.2 {
+        eprintln!(
+            "Warning: Low disk space. Need {:.1} GB, have {:.1} GB available.",
+            total_gb, caps.available_disk_gb
+        );
+        return false;
+    }
+
+    print!("\nDownload both models ({:.1} GB total)? (Y/n) ", total_gb);
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+
+    let input = input.trim().to_lowercase();
+    input.is_empty() || input == "y" || input == "yes"
+}
+
 /// Display welcome message with QR code (verbose mode)
 pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_crypto::AgentKeypair;

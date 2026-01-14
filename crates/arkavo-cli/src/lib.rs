@@ -238,6 +238,8 @@ fn print_usage() {
 
 /// Handle first-run experience for new users
 async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use first_run::RecommendedModel;
+
     let caps = first_run::detect_capabilities();
 
     // Display verbose welcome with QR code if requested
@@ -247,21 +249,40 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("Welcome Friend\n");
     }
 
-    println!("To run AI locally, you'll need to download a model.");
+    // Small model for classification, large model based on system
+    let small_model = RecommendedModel::Qwen3_0_6B;
+    let large_model = caps.recommended_model;
+
+    let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;
+    let large_gb = large_model.size_bytes() as f64 / 1_000_000_000.0;
+    let total_gb = small_gb + large_gb;
+
+    println!("To run AI locally, you'll need to download two models:");
+    println!();
+    println!("  Small (fast routing):  {} ({:.1} GB)", small_model.display_name(), small_gb);
+    println!("  Large (inference):     {} ({:.1} GB)", large_model.display_name(), large_gb);
     println!();
     println!("  System:      {}", caps.device_profile);
-    println!(
-        "  Recommended: {} ({:.1} GB)",
-        caps.recommended_model.display_name(),
-        caps.recommended_model.size_bytes() as f64 / 1_000_000_000.0
-    );
+    println!("  Total size:  {:.1} GB", total_gb);
     println!("  Disk space:  {:.1} GB available", caps.available_disk_gb);
 
     // Prompt for download
-    if first_run::prompt_download_confirmation(&caps) {
-        match first_run::download_model(&caps.recommended_model).await {
+    if first_run::prompt_download_both(&caps, total_gb) {
+        // Download small model first (faster)
+        println!();
+        match first_run::download_model(&small_model).await {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Download failed: {e}");
+                return Err(e.into());
+            }
+        }
+
+        // Download large model
+        println!();
+        match first_run::download_model(&large_model).await {
             Ok(_) => {
-                println!("\nModel ready! Run 'arkavo' to start.");
+                println!("\nModels ready! Run 'arkavo' to start.");
             }
             Err(e) => {
                 eprintln!("Download failed: {e}");
@@ -270,7 +291,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         }
     } else {
         println!();
-        println!("You can download a model later with:");
+        println!("You can download models later with:");
         println!("  arkavo model download");
         println!();
         println!("Or use a cloud provider with an API key:");
