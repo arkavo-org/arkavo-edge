@@ -723,8 +723,8 @@ impl Router {
                                     continue;
                                 }
                                 return Err(Error::ModelExecution(format!(
-                                    "Max retries exceeded. Judge rejected: {:?}",
-                                    judgment.issue_type
+                                    "Max retries exceeded. Judge rejected: {}",
+                                    judgment.reason.as_deref().unwrap_or("unspecified reason")
                                 )));
                             }
                         }
