@@ -191,7 +191,7 @@ pub fn get_available_disk_space() -> f64 {
     let cache_path = get_hf_cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
     // Find an existing directory to check disk space (walk up until we find one)
-    let mut check_path = cache_path.clone();
+    let mut check_path = cache_path;
     while !check_path.exists() {
         match check_path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => check_path = parent.to_path_buf(),
@@ -314,7 +314,7 @@ pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
         return false;
     }
 
-    print!("\nDownload both models ({:.1} GB total)? (Y/n) ", total_gb);
+    print!("\nDownload both models ({total_gb:.1} GB total)? (Y/n) ");
     let _ = io::stdout().flush();
 
     let mut input = String::new();

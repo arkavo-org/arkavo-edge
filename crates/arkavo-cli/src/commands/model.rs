@@ -273,13 +273,22 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 }
                 None => {
                     let caps = detect_capabilities();
-                    println!("No model specified, using recommended: {}", caps.recommended_model.display_name());
+                    println!(
+                        "No model specified, using recommended: {}",
+                        caps.recommended_model.display_name()
+                    );
                     caps.recommended_model
                 }
             };
 
-            println!("Downloading {} ({:.1} GB)...", model.display_name(), model.size_bytes() as f64 / 1_000_000_000.0);
-            download_model(&model).await.map_err(|e| anyhow::anyhow!(e))?;
+            println!(
+                "Downloading {} ({:.1} GB)...",
+                model.display_name(),
+                model.size_bytes() as f64 / 1_000_000_000.0
+            );
+            download_model(&model)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
             println!("\nModel ready! Run 'arkavo' to start.");
         }
 

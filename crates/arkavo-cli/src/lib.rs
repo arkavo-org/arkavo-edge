@@ -243,9 +243,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     let caps = first_run::detect_capabilities();
 
     // Display verbose welcome with QR code if requested
-    if verbose && first_run::display_welcome_verbose().is_err() {
-        println!("Welcome Friend\n");
-    } else if !verbose {
+    if !verbose || first_run::display_welcome_verbose().is_err() {
         println!("Welcome Friend\n");
     }
 
@@ -259,11 +257,19 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
 
     println!("To run AI locally, you'll need to download two models:");
     println!();
-    println!("  Small (fast routing):  {} ({:.1} GB)", small_model.display_name(), small_gb);
-    println!("  Large (inference):     {} ({:.1} GB)", large_model.display_name(), large_gb);
+    println!(
+        "  Small (fast routing):  {} ({:.1} GB)",
+        small_model.display_name(),
+        small_gb
+    );
+    println!(
+        "  Large (inference):     {} ({:.1} GB)",
+        large_model.display_name(),
+        large_gb
+    );
     println!();
     println!("  System:      {}", caps.device_profile);
-    println!("  Total size:  {:.1} GB", total_gb);
+    println!("  Total size:  {total_gb:.1} GB");
     println!("  Disk space:  {:.1} GB available", caps.available_disk_gb);
 
     // Prompt for download

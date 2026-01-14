@@ -128,6 +128,7 @@ async fn test_calibration_workflow() {
 }
 
 #[tokio::test]
+#[ignore = "Requires a booted iOS simulator"]
 async fn test_calibration_with_real_simulator() {
     println!("\n=== Real Simulator Calibration Demo ===\n");
 
