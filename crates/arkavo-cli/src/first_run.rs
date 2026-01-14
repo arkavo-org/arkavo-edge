@@ -8,10 +8,12 @@ use std::path::PathBuf;
 /// Device profile based on system capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceProfile {
-    /// Raspberry Pi 5 or similar (≤4 cores, 8GB RAM)
+    /// Raspberry Pi 5 or similar (≤4 cores)
     RaspberryPi5,
-    /// Desktop/laptop (>4 cores)
+    /// Desktop/laptop (5-8 cores)
     Desktop,
+    /// Workstation (>8 cores)
+    Workstation,
 }
 
 impl std::fmt::Display for DeviceProfile {
@@ -19,6 +21,7 @@ impl std::fmt::Display for DeviceProfile {
         match self {
             DeviceProfile::RaspberryPi5 => write!(f, "Embedded (RPi5-class)"),
             DeviceProfile::Desktop => write!(f, "Desktop"),
+            DeviceProfile::Workstation => write!(f, "Workstation"),
         }
     }
 }
@@ -157,6 +160,8 @@ pub fn detect_capabilities() -> SystemCapabilities {
 
     let device_profile = if is_rpi || cpu_cores <= 4 {
         DeviceProfile::RaspberryPi5
+    } else if cpu_cores > 8 {
+        DeviceProfile::Workstation
     } else {
         DeviceProfile::Desktop
     };
@@ -164,6 +169,7 @@ pub fn detect_capabilities() -> SystemCapabilities {
     let recommended_model = match device_profile {
         DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen3_0_6B,
         DeviceProfile::Desktop => RecommendedModel::Ministral3B,
+        DeviceProfile::Workstation => RecommendedModel::Ministral8B,
     };
 
     let available_disk_gb = get_available_disk_space();
@@ -184,15 +190,18 @@ pub fn get_available_disk_space() -> f64 {
 
     let cache_path = get_hf_cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
-    // Ensure parent directory exists for statvfs
-    let check_path = if cache_path.exists() {
-        cache_path
-    } else {
-        cache_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("/"))
-    };
+    // Find an existing directory to check disk space (walk up until we find one)
+    let mut check_path = cache_path;
+    while !check_path.exists() {
+        match check_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => check_path = parent.to_path_buf(),
+            _ => {
+                // Fall back to home directory or root
+                check_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                break;
+            }
+        }
+    }
 
     let path_cstr = match CString::new(check_path.to_string_lossy().as_bytes()) {
         Ok(s) => s,
@@ -284,6 +293,28 @@ pub fn prompt_download_confirmation(caps: &SystemCapabilities) -> bool {
         caps.recommended_model.display_name(),
         model_size_gb
     );
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+
+    let input = input.trim().to_lowercase();
+    input.is_empty() || input == "y" || input == "yes"
+}
+
+/// Prompt user for downloading both small and large models
+pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
+    if caps.available_disk_gb < total_gb * 1.2 {
+        eprintln!(
+            "Warning: Low disk space. Need {:.1} GB, have {:.1} GB available.",
+            total_gb, caps.available_disk_gb
+        );
+        return false;
+    }
+
+    print!("\nDownload both models ({total_gb:.1} GB total)? (Y/n) ");
     let _ = io::stdout().flush();
 
     let mut input = String::new();

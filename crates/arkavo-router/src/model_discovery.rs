@@ -239,11 +239,11 @@ fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
 
-    // Priority order: prefer TØRG-compatible models (Qwen3, Ministral)
+    // Priority order: prefer larger models first for better quality
     let preferred_repos = [
-        "models--Qwen--Qwen3-0.6B-GGUF",
-        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
+        "models--Qwen--Qwen3-0.6B-GGUF",
     ];
 
     // Check preferred repos first

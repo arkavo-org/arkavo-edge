@@ -38,8 +38,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check for verbose flag
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
 
+    // Skip first-run for help/version commands
+    let is_help_or_version = args
+        .first()
+        .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
+
     // First-run experience: check if models are available
-    if first_run::is_first_run() {
+    if !is_help_or_version && first_run::is_first_run() {
         // Handle first-run flow in a runtime
         let runtime = tokio::runtime::Runtime::new()?;
         runtime.block_on(handle_first_run(verbose))?;
@@ -238,31 +243,57 @@ fn print_usage() {
 
 /// Handle first-run experience for new users
 async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use first_run::RecommendedModel;
+
     let caps = first_run::detect_capabilities();
 
     // Display verbose welcome with QR code if requested
-    if verbose && first_run::display_welcome_verbose().is_err() {
+    if !verbose || first_run::display_welcome_verbose().is_err() {
         println!("Welcome Friend\n");
     }
 
-    println!("No local AI models found.");
+    // Small model for classification, large model based on system
+    let small_model = RecommendedModel::Qwen3_0_6B;
+    let large_model = caps.recommended_model;
+
+    let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;
+    let large_gb = large_model.size_bytes() as f64 / 1_000_000_000.0;
+    let total_gb = small_gb + large_gb;
+
+    println!("To run AI locally, you'll need to download two models:");
     println!();
-    println!("System: {}", caps.device_profile);
     println!(
-        "Recommended: {} ({:.1} GB)",
-        caps.recommended_model.display_name(),
-        caps.recommended_model.size_bytes() as f64 / 1_000_000_000.0
+        "  Small (fast routing):  {} ({:.1} GB)",
+        small_model.display_name(),
+        small_gb
     );
-    println!("Available disk: {:.1} GB", caps.available_disk_gb);
+    println!(
+        "  Large (inference):     {} ({:.1} GB)",
+        large_model.display_name(),
+        large_gb
+    );
+    println!();
+    println!("  System:      {}", caps.device_profile);
+    println!("  Total size:  {total_gb:.1} GB");
+    println!("  Disk space:  {:.1} GB available", caps.available_disk_gb);
 
     // Prompt for download
-    if first_run::prompt_download_confirmation(&caps) {
-        match first_run::download_model(&caps.recommended_model).await {
+    if first_run::prompt_download_both(&caps, total_gb) {
+        // Download small model first (faster)
+        println!();
+        match first_run::download_model(&small_model).await {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Download failed: {e}");
+                return Err(e.into());
+            }
+        }
+
+        // Download large model
+        println!();
+        match first_run::download_model(&large_model).await {
             Ok(_) => {
-                // Run test query after download
-                if let Err(e) = first_run::run_test_query().await {
-                    eprintln!("Test query failed: {e}");
-                }
+                println!("\nModels ready! Run 'arkavo' to start.");
             }
             Err(e) => {
                 eprintln!("Download failed: {e}");
@@ -271,13 +302,12 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         }
     } else {
         println!();
-        println!("You can download a model later with:");
-        println!(
-            "  hf download {} {}",
-            caps.recommended_model.repo_id(),
-            caps.recommended_model.filename()
-        );
+        println!("You can download models later with:");
+        println!("  arkavo model download");
+        println!();
+        println!("Or use a cloud provider with an API key:");
+        println!("  GEMINI_API_KEY=your-key arkavo chat --prompt \"Hello\"");
     }
 
-    Ok(())
+    std::process::exit(0);
 }

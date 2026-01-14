@@ -532,7 +532,9 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
 
-        eprintln!("[Notifications] Starting push-based notification handler");
+        if std::env::var("ARKAVO_DEBUG").is_ok() {
+            eprintln!("[Notifications] Starting push-based notification handler");
+        }
 
         let handle = tokio::spawn(async move {
             loop {
