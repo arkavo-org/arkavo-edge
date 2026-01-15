@@ -1,9 +1,8 @@
-use crate::server::Tool;
-use crate::{Result, ToolError};
-use arkavo_mcp::ToolSchema;
+use super::server::{Tool, ToolSchema};
+use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -83,10 +82,13 @@ impl Tool for DebugAttachTool {
     async fn execute(&self, params: Value) -> Result<Value> {
         let pid = params.get("pid").and_then(|v| v.as_i64());
         let name = params.get("name").and_then(|v| v.as_str());
-        let wait_for = params.get("wait_for").and_then(|v| v.as_bool()).unwrap_or(false);
+        let wait_for = params
+            .get("wait_for")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         if pid.is_none() && name.is_none() {
-            return Err(ToolError::InvalidParams(
+            return Err(TestError::Mcp(
                 "Either 'pid' or 'name' is required".to_string(),
             ));
         }
@@ -107,12 +109,12 @@ impl Tool for DebugAttachTool {
             }
             format!("name:{}", n)
         } else {
-            return Err(ToolError::InvalidParams("No target specified".to_string()));
+            return Err(TestError::Mcp("No target specified".to_string()));
         };
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| ToolError::Execution(format!("Failed to start LLDB: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to start LLDB: {}", e)))?;
 
         let output_buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let output_clone = Arc::clone(&output_buffer);
@@ -218,9 +220,10 @@ impl Default for DebugBreakpointAddTool {
 #[async_trait]
 impl Tool for DebugBreakpointAddTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         let file = params.get("file").and_then(|v| v.as_str());
         let line = params.get("line").and_then(|v| v.as_u64());
@@ -232,7 +235,7 @@ impl Tool for DebugBreakpointAddTool {
         } else if let Some(func) = function {
             format!("breakpoint set --name {}", func)
         } else {
-            return Err(ToolError::InvalidParams(
+            return Err(TestError::Mcp(
                 "Either 'file' and 'line', or 'function' is required".to_string(),
             ));
         };
@@ -301,9 +304,10 @@ impl Default for DebugContinueTool {
 #[async_trait]
 impl Tool for DebugContinueTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         let output = send_lldb_command(session_id, "continue").await?;
 
@@ -363,11 +367,15 @@ impl Default for DebugStepTool {
 #[async_trait]
 impl Tool for DebugStepTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
-        let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("over");
+        let mode = params
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("over");
 
         let command = match mode {
             "into" => "step",
@@ -433,9 +441,10 @@ impl Default for DebugStackTool {
 #[async_trait]
 impl Tool for DebugStackTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         let limit = params.get("limit").and_then(|v| v.as_u64());
 
@@ -507,12 +516,16 @@ impl Default for DebugVariablesTool {
 #[async_trait]
 impl Tool for DebugVariablesTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         let expression = params.get("expression").and_then(|v| v.as_str());
-        let scope = params.get("scope").and_then(|v| v.as_str()).unwrap_or("locals");
+        let scope = params
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("locals");
 
         let command = if let Some(expr) = expression {
             format!("expression {}", expr)
@@ -579,9 +592,10 @@ impl Default for DebugDetachTool {
 #[async_trait]
 impl Tool for DebugDetachTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         // Send quit command
         let _ = send_lldb_command(session_id, "detach").await;
@@ -648,13 +662,15 @@ impl Default for DebugCommandTool {
 #[async_trait]
 impl Tool for DebugCommandTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let session_id = params.get("session_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'session_id' is required".to_string())
-        })?;
+        let session_id = params
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
-        let command = params.get("command").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'command' is required".to_string())
-        })?;
+        let command = params
+            .get("command")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'command' is required".to_string()))?;
 
         let output = send_lldb_command(session_id, command).await?;
 
@@ -676,15 +692,15 @@ async fn send_lldb_command(session_id: &str, command: &str) -> Result<String> {
     // Get stdin and write command
     {
         let mut sessions = DEBUG_SESSIONS.lock().await;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ToolError::Execution(format!("Session '{}' not found", session_id)))?;
+        let session = sessions.get_mut(session_id).ok_or_else(|| {
+            TestError::Execution(format!("Session '{}' not found", session_id))
+        })?;
 
         if let Some(ref mut stdin) = session.stdin {
             stdin
                 .write_all(format!("{}\n", command).as_bytes())
                 .await
-                .map_err(|e| ToolError::Execution(format!("Failed to send command: {}", e)))?;
+                .map_err(|e| TestError::Execution(format!("Failed to send command: {}", e)))?;
             stdin.flush().await.ok();
         }
     }
@@ -696,7 +712,7 @@ async fn send_lldb_command(session_id: &str, command: &str) -> Result<String> {
     let sessions = DEBUG_SESSIONS.lock().await;
     let session = sessions
         .get(session_id)
-        .ok_or_else(|| ToolError::Execution(format!("Session '{}' not found", session_id)))?;
+        .ok_or_else(|| TestError::Execution(format!("Session '{}' not found", session_id)))?;
 
     let output = session
         .output_buffer
@@ -739,7 +755,11 @@ mod tests {
         let tool = DebugBreakpointAddTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_breakpoint_add");
-        assert!(schema.aliases.as_ref().unwrap().contains(&"bp".to_string()));
+        assert!(schema
+            .aliases
+            .as_ref()
+            .unwrap()
+            .contains(&"bp".to_string()));
     }
 
     #[test]
@@ -761,7 +781,11 @@ mod tests {
         let tool = DebugStackTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_stack");
-        assert!(schema.aliases.as_ref().unwrap().contains(&"bt".to_string()));
+        assert!(schema
+            .aliases
+            .as_ref()
+            .unwrap()
+            .contains(&"bt".to_string()));
     }
 
     #[test]
@@ -783,7 +807,11 @@ mod tests {
         let tool = DebugCommandTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_command");
-        assert!(schema.aliases.as_ref().unwrap().contains(&"lldb".to_string()));
+        assert!(schema
+            .aliases
+            .as_ref()
+            .unwrap()
+            .contains(&"lldb".to_string()));
     }
 
     #[test]

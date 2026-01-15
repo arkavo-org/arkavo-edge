@@ -1,8 +1,7 @@
-use crate::server::Tool;
-use crate::{Result, ToolError};
-use arkavo_mcp::ToolSchema;
+use super::server::{Tool, ToolSchema};
+use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -15,18 +14,18 @@ async fn run_simctl_ui(args: &[&str]) -> Result<String> {
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| ToolError::Execution(format!("Failed to run simctl: {}", e)))?;
+        .map_err(|e| TestError::Execution(format!("Failed to run simctl: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ToolError::Execution(format!("simctl failed: {}", stderr)));
+        return Err(TestError::Execution(format!("simctl failed: {}", stderr)));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 // ============================================================================
-// UiTapTool - Tap on screen coordinates or element
+// UiTapTool - Tap on screen coordinates
 // ============================================================================
 
 pub struct UiTapTool {
@@ -77,13 +76,15 @@ impl Tool for UiTapTool {
             .and_then(|v| v.as_str())
             .unwrap_or("booted");
 
-        let x = params.get("x").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'x' coordinate is required".to_string())
-        })?;
+        let x = params
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'x' coordinate is required".to_string()))?;
 
-        let y = params.get("y").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'y' coordinate is required".to_string())
-        })?;
+        let y = params
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'y' coordinate is required".to_string()))?;
 
         let x_str = x.to_string();
         let y_str = y.to_string();
@@ -167,34 +168,46 @@ impl Tool for UiSwipeTool {
             .and_then(|v| v.as_str())
             .unwrap_or("booted");
 
-        let start_x = params.get("start_x").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'start_x' is required".to_string())
-        })?;
-        let start_y = params.get("start_y").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'start_y' is required".to_string())
-        })?;
-        let end_x = params.get("end_x").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'end_x' is required".to_string())
-        })?;
-        let end_y = params.get("end_y").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'end_y' is required".to_string())
-        })?;
+        let start_x = params
+            .get("start_x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'start_x' is required".to_string()))?;
+        let start_y = params
+            .get("start_y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'start_y' is required".to_string()))?;
+        let end_x = params
+            .get("end_x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'end_x' is required".to_string()))?;
+        let end_y = params
+            .get("end_y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'end_y' is required".to_string()))?;
 
-        let duration = params.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.5);
+        let duration = params
+            .get("duration")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
 
-        // Use touch sequence for swipe
         let start_x_str = start_x.to_string();
         let start_y_str = start_y.to_string();
         let end_x_str = end_x.to_string();
         let end_y_str = end_y.to_string();
         let dur_str = duration.to_string();
 
-        // simctl io swipe command
         run_simctl_ui(&[
-            "io", simulator_id, "swipe",
-            &start_x_str, &start_y_str, &end_x_str, &end_y_str,
-            "--duration", &dur_str,
-        ]).await?;
+            "io",
+            simulator_id,
+            "swipe",
+            &start_x_str,
+            &start_y_str,
+            &end_x_str,
+            &end_y_str,
+            "--duration",
+            &dur_str,
+        ])
+        .await?;
 
         Ok(json!({
             "success": true,
@@ -266,24 +279,34 @@ impl Tool for UiLongPressTool {
             .and_then(|v| v.as_str())
             .unwrap_or("booted");
 
-        let x = params.get("x").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'x' is required".to_string())
-        })?;
-        let y = params.get("y").and_then(|v| v.as_f64()).ok_or_else(|| {
-            ToolError::InvalidParams("'y' is required".to_string())
-        })?;
+        let x = params
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'x' is required".to_string()))?;
+        let y = params
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| TestError::Mcp("'y' is required".to_string()))?;
 
-        let duration = params.get("duration").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        let duration = params
+            .get("duration")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
 
         let x_str = x.to_string();
         let y_str = y.to_string();
         let dur_str = duration.to_string();
 
         run_simctl_ui(&[
-            "io", simulator_id, "touch",
-            &x_str, &y_str,
-            "--duration", &dur_str,
-        ]).await?;
+            "io",
+            simulator_id,
+            "touch",
+            &x_str,
+            &y_str,
+            "--duration",
+            &dur_str,
+        ])
+        .await?;
 
         Ok(json!({
             "success": true,
@@ -347,9 +370,10 @@ impl Tool for UiTypeTextTool {
             .and_then(|v| v.as_str())
             .unwrap_or("booted");
 
-        let text = params.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
-            ToolError::InvalidParams("'text' is required".to_string())
-        })?;
+        let text = params
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TestError::Mcp("'text' is required".to_string()))?;
 
         run_simctl_ui(&["io", simulator_id, "input", "text", text]).await?;
 
@@ -420,13 +444,12 @@ impl Tool for UiKeyPressTool {
         let keycode = params.get("keycode").and_then(|v| v.as_u64());
 
         if key.is_none() && keycode.is_none() {
-            return Err(ToolError::InvalidParams(
+            return Err(TestError::Mcp(
                 "Either 'key' or 'keycode' is required".to_string(),
             ));
         }
 
         if let Some(k) = key {
-            // Map common key names to keycodes or use special command
             let key_arg = match k.to_lowercase().as_str() {
                 "return" | "enter" => "36",
                 "delete" | "backspace" => "51",
@@ -472,7 +495,8 @@ impl UiDescribeTool {
             schema: ToolSchema {
                 name: "ui_describe".to_string(),
                 aliases: Some(vec!["describe_ui".to_string(), "accessibility".to_string()]),
-                description: "Get the UI accessibility hierarchy from an iOS simulator.".to_string(),
+                description: "Get the UI accessibility hierarchy from an iOS simulator."
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -507,8 +531,6 @@ impl Tool for UiDescribeTool {
 
         let bundle_id = params.get("bundle_id").and_then(|v| v.as_str());
 
-        // Use accessibility inspector via simctl or fbsimctl
-        // Note: Full accessibility hierarchy requires additional tooling
         let mut args = vec!["ui", simulator_id, "describe"];
 
         if let Some(bid) = bundle_id {
@@ -516,9 +538,9 @@ impl Tool for UiDescribeTool {
             args.push(bid);
         }
 
-        // Try to get UI description
         let output = run_simctl_ui(&args).await.unwrap_or_else(|_| {
-            "UI describe requires additional tooling (e.g., AXe or Accessibility Inspector)".to_string()
+            "UI describe requires additional tooling (e.g., AXe or Accessibility Inspector)"
+                .to_string()
         });
 
         Ok(json!({
@@ -535,7 +557,7 @@ impl Tool for UiDescribeTool {
 }
 
 // ============================================================================
-// UiScreenshotTool - Take screenshot with annotations
+// UiScreenshotTool - Take screenshot
 // ============================================================================
 
 pub struct UiScreenshotTool {
@@ -597,10 +619,14 @@ impl Tool for UiScreenshotTool {
             .unwrap_or("png");
 
         run_simctl_ui(&[
-            "io", simulator_id, "screenshot",
-            "--type", format,
+            "io",
+            simulator_id,
+            "screenshot",
+            "--type",
+            format,
             output_path,
-        ]).await?;
+        ])
+        .await?;
 
         Ok(json!({
             "success": true,
@@ -623,7 +649,11 @@ mod tests {
         let tool = UiTapTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "ui_tap");
-        assert!(schema.aliases.as_ref().unwrap().contains(&"tap".to_string()));
+        assert!(schema
+            .aliases
+            .as_ref()
+            .unwrap()
+            .contains(&"tap".to_string()));
     }
 
     #[test]

@@ -80,6 +80,12 @@ pub mod xcode_info_tool;
 pub mod xcode_unavailable_tool;
 pub mod xcode_version;
 pub mod xcodebuild_wrapper;
+
+// Extended tools for Apple platform development
+pub mod debugger_tools;
+pub mod simulator_extended;
+pub mod ui_automation_tools;
+
 pub mod xctest_app_runner;
 pub mod xctest_compiler;
 pub mod xctest_direct_runner;

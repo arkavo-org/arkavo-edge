@@ -897,6 +897,7 @@ dependencies = [
  "glob",
  "handlebars",
  "jsonschema",
+ "lazy_static",
  "libc",
  "rand 0.8.5",
  "regex",
