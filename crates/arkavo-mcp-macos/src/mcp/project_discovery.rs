@@ -1,7 +1,7 @@
 use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::Stdio;
@@ -71,10 +71,7 @@ impl Default for DiscoverProjectsTool {
 #[async_trait]
 impl Tool for DiscoverProjectsTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let path = params
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let max_depth = params
             .get("max_depth")
@@ -88,9 +85,15 @@ impl Tool for DiscoverProjectsTool {
 
         // Directories to skip
         let skip_dirs: HashSet<&str> = if include_pods {
-            ["build", "DerivedData", ".git", "node_modules"].iter().copied().collect()
+            ["build", "DerivedData", ".git", "node_modules"]
+                .iter()
+                .copied()
+                .collect()
         } else {
-            ["build", "DerivedData", ".git", "node_modules", "Pods"].iter().copied().collect()
+            ["build", "DerivedData", ".git", "node_modules", "Pods"]
+                .iter()
+                .copied()
+                .collect()
         };
 
         let mut projects = Vec::new();
@@ -125,7 +128,9 @@ impl Tool for DiscoverProjectsTool {
                 }
 
                 // Check if path contains any skip directories
-                let should_skip = skip_dirs.iter().any(|skip| line.contains(&format!("/{}/", skip)));
+                let should_skip = skip_dirs
+                    .iter()
+                    .any(|skip| line.contains(&format!("/{}/", skip)));
                 if should_skip {
                     continue;
                 }
@@ -218,8 +223,8 @@ impl Tool for GetAppBundleIdTool {
         // macOS: AppName.app/Contents/Info.plist
         // iOS/watchOS/tvOS: AppName.app/Info.plist
         let info_plist_paths = [
-            format!("{}/Contents/Info.plist", app_path),  // macOS
-            format!("{}/Info.plist", app_path),           // iOS/watchOS/tvOS/visionOS
+            format!("{}/Contents/Info.plist", app_path), // macOS
+            format!("{}/Info.plist", app_path),          // iOS/watchOS/tvOS/visionOS
         ];
 
         for plist_path in &info_plist_paths {
@@ -228,7 +233,9 @@ impl Tool for GetAppBundleIdTool {
                 if let Ok(output) = run_command(
                     "/usr/libexec/PlistBuddy",
                     &["-c", "Print :CFBundleIdentifier", plist_path],
-                ).await {
+                )
+                .await
+                {
                     let bundle_id = output.trim().to_string();
                     if !bundle_id.is_empty() {
                         return Ok(json!({
@@ -242,10 +249,9 @@ impl Tool for GetAppBundleIdTool {
 
                 // Fallback to defaults command
                 let info_path = plist_path.trim_end_matches(".plist");
-                if let Ok(output) = run_command(
-                    "defaults",
-                    &["read", info_path, "CFBundleIdentifier"],
-                ).await {
+                if let Ok(output) =
+                    run_command("defaults", &["read", info_path, "CFBundleIdentifier"]).await
+                {
                     let bundle_id = output.trim().to_string();
                     if !bundle_id.is_empty() {
                         return Ok(json!({
@@ -537,7 +543,9 @@ impl Tool for ShowBuildSettingsTool {
 
         // Extract commonly used settings for convenience
         let product_name = settings.get("PRODUCT_NAME").and_then(|v| v.as_str());
-        let bundle_id = settings.get("PRODUCT_BUNDLE_IDENTIFIER").and_then(|v| v.as_str());
+        let bundle_id = settings
+            .get("PRODUCT_BUNDLE_IDENTIFIER")
+            .and_then(|v| v.as_str());
         let built_products_dir = settings.get("BUILT_PRODUCTS_DIR").and_then(|v| v.as_str());
 
         Ok(json!({
@@ -570,7 +578,8 @@ impl GetProjectInfoTool {
             schema: ToolSchema {
                 name: "get_project_info".to_string(),
                 aliases: Some(vec!["project_info".to_string(), "xcode_info".to_string()]),
-                description: "Get comprehensive information about an Xcode project or workspace.".to_string(),
+                description: "Get comprehensive information about an Xcode project or workspace."
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -652,7 +661,11 @@ impl Tool for GetProjectInfoTool {
             let schemes: Vec<String> = workspace_info
                 .get("schemes")
                 .and_then(|s| s.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             (schemes, Vec::new(), Vec::new())
         } else {
@@ -660,17 +673,29 @@ impl Tool for GetProjectInfoTool {
             let schemes: Vec<String> = project_info
                 .get("schemes")
                 .and_then(|s| s.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let targets: Vec<String> = project_info
                 .get("targets")
                 .and_then(|t| t.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let configurations: Vec<String> = project_info
                 .get("configurations")
                 .and_then(|c| c.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             (schemes, targets, configurations)
         };
@@ -702,11 +727,13 @@ mod tests {
         let tool = DiscoverProjectsTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "discover_projects");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"discover_projs".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"discover_projs".to_string())
+        );
     }
 
     #[test]

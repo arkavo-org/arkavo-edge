@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -692,9 +692,9 @@ async fn send_lldb_command(session_id: &str, command: &str) -> Result<String> {
     // Get stdin and write command
     {
         let mut sessions = DEBUG_SESSIONS.lock().await;
-        let session = sessions.get_mut(session_id).ok_or_else(|| {
-            TestError::Execution(format!("Session '{}' not found", session_id))
-        })?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| TestError::Execution(format!("Session '{}' not found", session_id)))?;
 
         if let Some(ref mut stdin) = session.stdin {
             stdin
@@ -755,11 +755,7 @@ mod tests {
         let tool = DebugBreakpointAddTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_breakpoint_add");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"bp".to_string()));
+        assert!(schema.aliases.as_ref().unwrap().contains(&"bp".to_string()));
     }
 
     #[test]
@@ -781,11 +777,7 @@ mod tests {
         let tool = DebugStackTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_stack");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"bt".to_string()));
+        assert!(schema.aliases.as_ref().unwrap().contains(&"bt".to_string()));
     }
 
     #[test]
@@ -807,11 +799,13 @@ mod tests {
         let tool = DebugCommandTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "debug_command");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"lldb".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"lldb".to_string())
+        );
     }
 
     #[test]

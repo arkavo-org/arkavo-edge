@@ -1,7 +1,7 @@
 use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -548,14 +548,8 @@ impl Tool for MacosTestTool {
 
         // Parse test results
         let tests_passed = stdout.contains("Test Suite") && stdout.contains("passed");
-        let test_count = stdout
-            .lines()
-            .filter(|l| l.contains("Test Case"))
-            .count();
-        let failed_count = stdout
-            .lines()
-            .filter(|l| l.contains("failed"))
-            .count();
+        let test_count = stdout.lines().filter(|l| l.contains("Test Case")).count();
+        let failed_count = stdout.lines().filter(|l| l.contains("failed")).count();
 
         Ok(json!({
             "success": success && tests_passed,
@@ -768,9 +762,7 @@ impl Tool for MacosStopTool {
                     .arg(&script)
                     .output()
                     .await
-                    .map_err(|e| {
-                        TestError::Execution(format!("Failed to run osascript: {}", e))
-                    })?;
+                    .map_err(|e| TestError::Execution(format!("Failed to run osascript: {}", e)))?;
 
                 if output.status.success() {
                     return Ok(json!({
@@ -1233,8 +1225,7 @@ impl MacosListSchemesTool {
             schema: ToolSchema {
                 name: "macos_list_schemes".to_string(),
                 aliases: Some(vec!["list_schemes".to_string()]),
-                description: "List available Xcode schemes for a project or workspace."
-                    .to_string(),
+                description: "List available Xcode schemes for a project or workspace.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -1361,10 +1352,7 @@ impl Default for MacosDiscoverProjectsTool {
 #[async_trait]
 impl Tool for MacosDiscoverProjectsTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let path = params
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
         let recursive = params
             .get("recursive")
@@ -1454,11 +1442,13 @@ mod tests {
         let tool = MacosBuildTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "macos_build");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"build_macos".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"build_macos".to_string())
+        );
     }
 
     #[test]
@@ -1473,11 +1463,13 @@ mod tests {
         let tool = MacosTestTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "macos_test");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"test_macos".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"test_macos".to_string())
+        );
     }
 
     #[test]

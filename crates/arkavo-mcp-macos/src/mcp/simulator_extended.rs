@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -98,7 +98,10 @@ impl SimListTool {
         Self {
             schema: ToolSchema {
                 name: "sim_list".to_string(),
-                aliases: Some(vec!["list_simulators".to_string(), "simulators".to_string()]),
+                aliases: Some(vec![
+                    "list_simulators".to_string(),
+                    "simulators".to_string(),
+                ]),
                 description: "List available iOS simulators with status, runtime, and device type."
                     .to_string(),
                 parameters: json!({
@@ -210,9 +213,8 @@ impl Tool for SimBootTool {
         let output = run_simctl(&["list", "-j", "devices"]).await?;
         let simulators = parse_simctl_list(&output);
 
-        let sim = find_simulator(&simulators, id_or_name).ok_or_else(|| {
-            TestError::Execution(format!("Simulator '{}' not found", id_or_name))
-        })?;
+        let sim = find_simulator(&simulators, id_or_name)
+            .ok_or_else(|| TestError::Execution(format!("Simulator '{}' not found", id_or_name)))?;
 
         if sim.state == "Booted" {
             return Ok(json!({
@@ -286,10 +288,7 @@ impl Default for SimShutdownTool {
 #[async_trait]
 impl Tool for SimShutdownTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let shutdown_all = params
-            .get("all")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let shutdown_all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
 
         if shutdown_all {
             run_simctl(&["shutdown", "all"]).await?;
@@ -313,9 +312,8 @@ impl Tool for SimShutdownTool {
         let output = run_simctl(&["list", "-j", "devices"]).await?;
         let simulators = parse_simctl_list(&output);
 
-        let sim = find_simulator(&simulators, id_or_name).ok_or_else(|| {
-            TestError::Execution(format!("Simulator '{}' not found", id_or_name))
-        })?;
+        let sim = find_simulator(&simulators, id_or_name)
+            .ok_or_else(|| TestError::Execution(format!("Simulator '{}' not found", id_or_name)))?;
 
         run_simctl(&["shutdown", &sim.udid]).await?;
 
@@ -392,10 +390,7 @@ impl Tool for SimScreenshotTool {
             .and_then(|v| v.as_str())
             .unwrap_or("/tmp/simulator_screenshot.png");
 
-        let image_type = params
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("png");
+        let image_type = params.get("type").and_then(|v| v.as_str()).unwrap_or("png");
 
         let args = vec![
             "io",
@@ -673,10 +668,7 @@ impl Default for SimEraseTool {
 #[async_trait]
 impl Tool for SimEraseTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let erase_all = params
-            .get("all")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let erase_all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
 
         if erase_all {
             run_simctl(&["erase", "all"]).await?;
@@ -720,8 +712,8 @@ impl SimOpenTool {
             schema: ToolSchema {
                 name: "sim_open".to_string(),
                 aliases: Some(vec!["open_simulator".to_string()]),
-                description:
-                    "Open the Simulator.app GUI, optionally for a specific simulator.".to_string(),
+                description: "Open the Simulator.app GUI, optionally for a specific simulator."
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

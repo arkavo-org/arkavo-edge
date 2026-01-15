@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -50,7 +50,10 @@ async fn run_devicectl(args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(TestError::Execution(format!("devicectl failed: {}", stderr)));
+        return Err(TestError::Execution(format!(
+            "devicectl failed: {}",
+            stderr
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -96,7 +99,10 @@ impl DeviceListTool {
         Self {
             schema: ToolSchema {
                 name: "device_list".to_string(),
-                aliases: Some(vec!["list_devices".to_string(), "physical_devices".to_string()]),
+                aliases: Some(vec![
+                    "list_devices".to_string(),
+                    "physical_devices".to_string(),
+                ]),
                 description: "List connected physical Apple devices (iPhone, iPad, Apple Watch)."
                     .to_string(),
                 parameters: json!({
@@ -127,8 +133,7 @@ impl Tool for DeviceListTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let output =
-            run_devicectl(&["list", "devices", "--json-output", "/dev/stdout"]).await?;
+        let output = run_devicectl(&["list", "devices", "--json-output", "/dev/stdout"]).await?;
 
         let json_output: Value = serde_json::from_str(&output).unwrap_or(json!({}));
 
@@ -382,15 +387,8 @@ impl Tool for DeviceInstallTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("'app_path' is required".to_string()))?;
 
-        let output = run_devicectl(&[
-            "device",
-            "install",
-            "app",
-            "--device",
-            device_id,
-            app_path,
-        ])
-        .await?;
+        let output =
+            run_devicectl(&["device", "install", "app", "--device", device_id, app_path]).await?;
 
         Ok(json!({
             "success": true,
@@ -478,12 +476,7 @@ impl Tool for DeviceLaunchTool {
             .unwrap_or(false);
 
         let mut args = vec![
-            "device",
-            "process",
-            "launch",
-            "--device",
-            device_id,
-            bundle_id,
+            "device", "process", "launch", "--device", device_id, bundle_id,
         ];
 
         if wait_for_debugger {
@@ -604,15 +597,8 @@ impl Tool for DeviceStopTool {
                     if let Some(pid) = process.get("processIdentifier").and_then(|p| p.as_i64()) {
                         let pid_str = pid.to_string();
                         let _ = run_devicectl(&[
-                            "device",
-                            "process",
-                            "signal",
-                            "--device",
-                            device_id,
-                            "--pid",
-                            &pid_str,
-                            "--signal",
-                            signal,
+                            "device", "process", "signal", "--device", device_id, "--pid",
+                            &pid_str, "--signal", signal,
                         ])
                         .await;
 
@@ -924,9 +910,9 @@ impl Tool for DeviceLogStopTool {
             .ok_or_else(|| TestError::Mcp("'session_id' is required".to_string()))?;
 
         let mut sessions = DEVICE_LOG_SESSIONS.lock().await;
-        let session = sessions.remove(session_id).ok_or_else(|| {
-            TestError::Execution(format!("Session '{}' not found", session_id))
-        })?;
+        let session = sessions
+            .remove(session_id)
+            .ok_or_else(|| TestError::Execution(format!("Session '{}' not found", session_id)))?;
 
         let duration_secs = session.start_time.elapsed().as_secs();
 
@@ -1109,10 +1095,7 @@ impl Tool for DeviceTestTool {
 
         // Parse test results from output
         let tests_passed = stdout.contains("Test Suite") && stdout.contains("passed");
-        let test_count = stdout
-            .lines()
-            .filter(|l| l.contains("Test Case"))
-            .count();
+        let test_count = stdout.lines().filter(|l| l.contains("Test Case")).count();
 
         Ok(json!({
             "success": success && tests_passed,
@@ -1220,11 +1203,13 @@ mod tests {
         let tool = DeviceListTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "device_list");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"list_devices".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"list_devices".to_string())
+        );
     }
 
     #[test]
@@ -1281,11 +1266,13 @@ mod tests {
         let tool = DeviceTestTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "device_test");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"test_device".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"test_device".to_string())
+        );
     }
 
     #[test]

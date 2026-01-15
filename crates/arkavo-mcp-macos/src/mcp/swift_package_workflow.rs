@@ -1,7 +1,7 @@
 use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
@@ -39,7 +39,9 @@ async fn run_swift(args: &[&str], timeout_secs: u64) -> Result<(bool, String, St
 
     let output = tokio::time::timeout(timeout_duration, child.wait_with_output())
         .await
-        .map_err(|_| TestError::Execution(format!("Swift timed out after {} seconds", timeout_secs)))?
+        .map_err(|_| {
+            TestError::Execution(format!("Swift timed out after {} seconds", timeout_secs))
+        })?
         .map_err(|e| TestError::Execution(format!("swift failed: {}", e)))?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -275,7 +277,11 @@ impl Tool for SwiftPackageRunTool {
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        let mut args = vec!["run".to_string(), "--package-path".to_string(), package_path.to_string()];
+        let mut args = vec![
+            "run".to_string(),
+            "--package-path".to_string(),
+            package_path.to_string(),
+        ];
 
         if let Some(c) = params.get("configuration").and_then(|v| v.as_str()) {
             if c == "release" {
@@ -503,10 +509,7 @@ impl Tool for SwiftPackageTestTool {
 
         // Parse test results
         let tests_passed = stdout.contains("Test Suite") && stdout.contains("passed");
-        let test_count = stdout
-            .lines()
-            .filter(|l| l.contains("Test Case"))
-            .count();
+        let test_count = stdout.lines().filter(|l| l.contains("Test Case")).count();
 
         Ok(json!({
             "success": success && tests_passed,
@@ -635,7 +638,8 @@ impl Tool for SwiftPackageStopTool {
         let pid = params
             .get("pid")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| TestError::Mcp("'pid' is required".to_string()))? as u32;
+            .ok_or_else(|| TestError::Mcp("'pid' is required".to_string()))?
+            as u32;
 
         let mut processes = SPM_PROCESSES.lock().await;
 
@@ -647,10 +651,7 @@ impl Tool for SwiftPackageStopTool {
                 let _ = child.kill().await;
             } else {
                 // Try to kill by PID directly
-                let _ = Command::new("kill")
-                    .arg(pid.to_string())
-                    .output()
-                    .await;
+                let _ = Command::new("kill").arg(pid.to_string()).output().await;
             }
 
             Ok(json!({
@@ -838,7 +839,9 @@ impl Tool for SwiftPackageInitTool {
             .stderr(Stdio::piped())
             .output()
             .await
-            .map_err(|e| TestError::Execution(format!("Failed to run swift package init: {}", e)))?;
+            .map_err(|e| {
+                TestError::Execution(format!("Failed to run swift package init: {}", e))
+            })?;
 
         let success = output.status.success();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -866,11 +869,13 @@ mod tests {
         let tool = SwiftPackageBuildTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "swift_package_build");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"spm_build".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"spm_build".to_string())
+        );
     }
 
     #[test]
@@ -885,11 +890,13 @@ mod tests {
         let tool = SwiftPackageTestTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "swift_package_test");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"spm_test".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"spm_test".to_string())
+        );
     }
 
     #[test]

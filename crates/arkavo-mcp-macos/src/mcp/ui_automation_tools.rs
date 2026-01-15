@@ -1,7 +1,7 @@
 use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -649,11 +649,13 @@ mod tests {
         let tool = UiTapTool::new();
         let schema = tool.schema();
         assert_eq!(schema.name, "ui_tap");
-        assert!(schema
-            .aliases
-            .as_ref()
-            .unwrap()
-            .contains(&"tap".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"tap".to_string())
+        );
     }
 
     #[test]
