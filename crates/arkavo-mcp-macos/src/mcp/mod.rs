@@ -83,6 +83,7 @@ pub mod xcodebuild_wrapper;
 
 // Extended tools for Apple platform development
 pub mod debugger_tools;
+pub mod device_workflow;
 pub mod simulator_extended;
 pub mod ui_automation_tools;
 
