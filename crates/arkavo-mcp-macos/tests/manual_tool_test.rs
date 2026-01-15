@@ -226,7 +226,12 @@ async fn test_all_tools() {
         "swift_package_clean",
     )
     .await;
-    test_tool(SwiftPackageStopTool::new(), json!({"pid": 99999}), "swift_package_stop").await;
+    test_tool(
+        SwiftPackageStopTool::new(),
+        json!({"pid": 99999}),
+        "swift_package_stop",
+    )
+    .await;
     test_tool(SwiftPackageListTool::new(), json!({}), "swift_package_list").await;
     test_tool(
         SwiftPackageInitTool::new(),
@@ -313,12 +318,7 @@ async fn test_all_tools() {
     println!("############################################################");
 
     test_tool(SimListTool::new(), json!({}), "sim_list").await;
-    test_tool(
-        SimBootTool::new(),
-        json!({"udid": "fake-udid"}),
-        "sim_boot",
-    )
-    .await;
+    test_tool(SimBootTool::new(), json!({"udid": "fake-udid"}), "sim_boot").await;
     test_tool(
         SimShutdownTool::new(),
         json!({"udid": "fake-udid"}),
@@ -366,12 +366,7 @@ async fn test_all_tools() {
     println!("# UI AUTOMATION TOOLS");
     println!("############################################################");
 
-    test_tool(
-        UiTapTool::new(),
-        json!({"x": 100, "y": 100}),
-        "ui_tap",
-    )
-    .await;
+    test_tool(UiTapTool::new(), json!({"x": 100, "y": 100}), "ui_tap").await;
     test_tool(
         UiSwipeTool::new(),
         json!({"start_x": 100, "start_y": 100, "end_x": 200, "end_y": 200}),
