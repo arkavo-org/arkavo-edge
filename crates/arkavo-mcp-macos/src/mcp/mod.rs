@@ -85,6 +85,7 @@ pub mod xcodebuild_wrapper;
 pub mod debugger_tools;
 pub mod device_workflow;
 pub mod macos_workflow;
+pub mod project_discovery;
 pub mod simulator_extended;
 pub mod swift_package_workflow;
 pub mod ui_automation_tools;
