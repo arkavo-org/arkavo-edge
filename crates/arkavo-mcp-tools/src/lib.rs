@@ -4,6 +4,7 @@ pub mod browser;
 pub mod code_analysis;
 pub mod code_review;
 pub mod context_control;
+pub mod debugger;
 pub mod device;
 pub mod context_tools;
 pub mod filesystem;
@@ -33,6 +34,7 @@ pub mod tdf;
 pub mod test_runner;
 pub mod time_sync;
 pub mod tui;
+pub mod ui_automation;
 pub mod web_search;
 
 #[cfg(feature = "ntp-server")]

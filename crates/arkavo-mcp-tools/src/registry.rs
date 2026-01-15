@@ -1,6 +1,10 @@
 use crate::browser::BrowserTool;
 use crate::code_review::CodeReviewTool;
 use crate::context_control::ContextRestoreTool;
+use crate::debugger::{
+    DebugAttachTool, DebugBreakpointAddTool, DebugCommandTool, DebugContinueTool,
+    DebugDetachTool, DebugStackTool, DebugStepTool, DebugVariablesTool,
+};
 use crate::device::{DeviceInstallAppTool, DeviceLaunchAppTool, DeviceListTool, DeviceStopAppTool};
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
@@ -37,6 +41,10 @@ use crate::tdf::{TdfEncryptTool, TdfHelpTool, TdfInfoTool};
 use crate::tdf::{TdfFetchTool, TdfStageTool};
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
+use crate::ui_automation::{
+    UiDescribeTool, UiKeyPressTool, UiLongPressTool, UiScreenshotTool, UiSwipeTool, UiTapTool,
+    UiTypeTextTool,
+};
 use crate::web_search::WebSearchTool;
 use arkavo_mcp::{McpClient, ToolSchema};
 use arkavo_memory::MemoryStorage;
@@ -356,6 +364,31 @@ impl ToolRegistry {
             self.register("device_launch_app", Box::new(DeviceLaunchAppTool::new()));
             self.register("device_stop_app", Box::new(DeviceStopAppTool::new()));
         }
+
+        // LLDB debugging tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("debug_attach", Box::new(DebugAttachTool::new()));
+            self.register("debug_breakpoint_add", Box::new(DebugBreakpointAddTool::new()));
+            self.register("debug_continue", Box::new(DebugContinueTool::new()));
+            self.register("debug_step", Box::new(DebugStepTool::new()));
+            self.register("debug_stack", Box::new(DebugStackTool::new()));
+            self.register("debug_variables", Box::new(DebugVariablesTool::new()));
+            self.register("debug_detach", Box::new(DebugDetachTool::new()));
+            self.register("debug_command", Box::new(DebugCommandTool::new()));
+        }
+
+        // UI automation tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("ui_tap", Box::new(UiTapTool::new()));
+            self.register("ui_swipe", Box::new(UiSwipeTool::new()));
+            self.register("ui_long_press", Box::new(UiLongPressTool::new()));
+            self.register("ui_type_text", Box::new(UiTypeTextTool::new()));
+            self.register("ui_key_press", Box::new(UiKeyPressTool::new()));
+            self.register("ui_describe", Box::new(UiDescribeTool::new()));
+            self.register("ui_screenshot", Box::new(UiScreenshotTool::new()));
+        }
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -664,6 +697,8 @@ impl ToolRegistry {
             n if n.starts_with("spm_") => "Swift Package".to_string(),
             n if n.starts_with("log_") => "Logging".to_string(),
             n if n.starts_with("device_") => "Device".to_string(),
+            n if n.starts_with("debug_") => "Debugging".to_string(),
+            n if n.starts_with("ui_") => "UI Automation".to_string(),
             n if n.contains("time") || n.contains("sync") => "System".to_string(),
             _ => "General".to_string(),
         }
