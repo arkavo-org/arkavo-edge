@@ -86,6 +86,7 @@ pub mod debugger_tools;
 pub mod device_workflow;
 pub mod macos_workflow;
 pub mod simulator_extended;
+pub mod swift_package_workflow;
 pub mod ui_automation_tools;
 
 pub mod xctest_app_runner;
