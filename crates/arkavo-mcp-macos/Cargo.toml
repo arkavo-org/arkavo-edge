@@ -19,7 +19,10 @@ embeddings = ["memory", "arkavo-memory/embeddings"]
 
 [dependencies]
 # Async runtime
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "time", "io-util"] }
+
+# Lazy static for global state
+lazy_static = "1.5"
 
 # Error handling
 thiserror = { workspace = true }

@@ -15,7 +15,10 @@ arkavo-git = { path = "../arkavo-git" }
 arkavo-browser = { path = "../arkavo-browser" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-memory = { path = "../arkavo-memory" }
+async-recursion = "1.1"
 async-trait = { workspace = true }
+lazy_static = "1.5"
+uuid = { version = "1.11", features = ["v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }

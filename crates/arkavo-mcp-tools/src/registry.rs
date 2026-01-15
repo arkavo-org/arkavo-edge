@@ -282,6 +282,9 @@ impl ToolRegistry {
             "context_restore",
             Box::new(ContextRestoreTool::new(storage)),
         );
+
+        // Note: Apple platform tools (simulator, Xcode, debugger, UI automation)
+        // have been moved to arkavo-mcp-macos crate for better organization.
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
