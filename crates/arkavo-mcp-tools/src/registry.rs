@@ -1,6 +1,7 @@
 use crate::browser::BrowserTool;
 use crate::code_review::CodeReviewTool;
 use crate::context_control::ContextRestoreTool;
+use crate::device::{DeviceInstallAppTool, DeviceLaunchAppTool, DeviceListTool, DeviceStopAppTool};
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
 use crate::github::GitHubRepoCloneKit;
@@ -14,11 +15,23 @@ use crate::github_org_knowledge::{
 };
 use crate::github_review::GitHubReviewTool;
 use crate::health_check::HealthCheckTool;
+use crate::log_capture::{LogGetSimTool, LogListSessionsTool, LogStartSimTool, LogStopSimTool};
 use crate::osv::OsvTool;
 use crate::semgrep::SemgrepTool;
 use crate::server::Tool;
 use crate::shell_exec::ShellExecTool;
+use crate::simulator::{SimBootTool, SimListTool, SimScreenshotTool, SimShutdownTool};
+use crate::simulator_config::{
+    SimEraseTool, SimOpenTool, SimResetLocationTool, SimSetAppearanceTool, SimSetLocationTool,
+};
+use crate::swift_package::{SpmBuildTool, SpmCleanTool, SpmListTool, SpmRunTool, SpmTestTool};
 use crate::syft::SyftTool;
+use crate::xcode_build::{
+    XcodeBuildDeviceTool, XcodeBuildMacosTool, XcodeBuildSimTool, XcodeCleanTool, XcodeTestTool,
+};
+use crate::xcode_discovery::{
+    XcodeDiscoverTool, XcodeGetBundleIdTool, XcodeListSchemesTool, XcodeShowSettingsTool,
+};
 use crate::tdf::{TdfEncryptTool, TdfHelpTool, TdfInfoTool};
 #[cfg(feature = "iroh")]
 use crate::tdf::{TdfFetchTool, TdfStageTool};
@@ -282,6 +295,67 @@ impl ToolRegistry {
             "context_restore",
             Box::new(ContextRestoreTool::new(storage)),
         );
+
+        // iOS Simulator tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("sim_list", Box::new(SimListTool::new()));
+            self.register("sim_boot", Box::new(SimBootTool::new()));
+            self.register("sim_shutdown", Box::new(SimShutdownTool::new()));
+            self.register("sim_screenshot", Box::new(SimScreenshotTool::new()));
+            self.register("sim_set_location", Box::new(SimSetLocationTool::new()));
+            self.register("sim_reset_location", Box::new(SimResetLocationTool::new()));
+            self.register("sim_set_appearance", Box::new(SimSetAppearanceTool::new()));
+            self.register("sim_erase", Box::new(SimEraseTool::new()));
+            self.register("sim_open", Box::new(SimOpenTool::new()));
+        }
+
+        // Xcode project discovery tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("xcode_discover", Box::new(XcodeDiscoverTool::new()));
+            self.register("xcode_list_schemes", Box::new(XcodeListSchemesTool::new()));
+            self.register("xcode_show_settings", Box::new(XcodeShowSettingsTool::new()));
+            self.register("xcode_get_bundle_id", Box::new(XcodeGetBundleIdTool::new()));
+        }
+
+        // Xcode build tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("xcode_build_sim", Box::new(XcodeBuildSimTool::new()));
+            self.register("xcode_build_device", Box::new(XcodeBuildDeviceTool::new()));
+            self.register("xcode_build_macos", Box::new(XcodeBuildMacosTool::new()));
+            self.register("xcode_clean", Box::new(XcodeCleanTool::new()));
+            self.register("xcode_test", Box::new(XcodeTestTool::new()));
+        }
+
+        // Swift Package Manager tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("spm_build", Box::new(SpmBuildTool::new()));
+            self.register("spm_run", Box::new(SpmRunTool::new()));
+            self.register("spm_test", Box::new(SpmTestTool::new()));
+            self.register("spm_clean", Box::new(SpmCleanTool::new()));
+            self.register("spm_list", Box::new(SpmListTool::new()));
+        }
+
+        // Log capture tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("log_start_sim", Box::new(LogStartSimTool::new()));
+            self.register("log_stop_sim", Box::new(LogStopSimTool::new()));
+            self.register("log_get_sim", Box::new(LogGetSimTool::new()));
+            self.register("log_list_sessions", Box::new(LogListSessionsTool::new()));
+        }
+
+        // Device management tools (only register on macOS)
+        #[cfg(target_os = "macos")]
+        {
+            self.register("device_list", Box::new(DeviceListTool::new()));
+            self.register("device_install_app", Box::new(DeviceInstallAppTool::new()));
+            self.register("device_launch_app", Box::new(DeviceLaunchAppTool::new()));
+            self.register("device_stop_app", Box::new(DeviceStopAppTool::new()));
+        }
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -585,6 +659,11 @@ impl ToolRegistry {
             n if n.starts_with("filesystem") => "File System".to_string(),
             n if n.starts_with("shell_") || n == "bash" || n == "exec" => "Shell".to_string(),
             n if n.starts_with("web_") || n == "search" => "Web".to_string(),
+            n if n.starts_with("sim_") => "Simulator".to_string(),
+            n if n.starts_with("xcode_") => "Xcode".to_string(),
+            n if n.starts_with("spm_") => "Swift Package".to_string(),
+            n if n.starts_with("log_") => "Logging".to_string(),
+            n if n.starts_with("device_") => "Device".to_string(),
             n if n.contains("time") || n.contains("sync") => "System".to_string(),
             _ => "General".to_string(),
         }
