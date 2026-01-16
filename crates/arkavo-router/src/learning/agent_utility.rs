@@ -138,6 +138,7 @@ pub struct AgentUtility {
     #[serde(default)]
     pub window_prior: BetaPrior,
     /// Task category performance (category -> BetaPrior)
+    /// Also used for format learning via "format:fence", "format:xml", etc.
     pub category_priors: HashMap<String, BetaPrior>,
     /// When the agent was first seen
     pub created_at: DateTime<Utc>,
@@ -307,6 +308,22 @@ impl AgentUtility {
 }
 
 /// Burst-level (immediate) feedback
+///
+/// # Format Learning
+///
+/// To track tool call format success, use category naming convention:
+/// - `"format:fence"` - for fence-based tool calls (```tool_name)
+/// - `"format:xml"` - for XML-style tool calls (<tool_call>)
+/// - `"format:json"` - for raw JSON tool calls
+/// - `"format:python"` - for Python function call syntax
+///
+/// Example:
+/// ```ignore
+/// let feedback = BurstFeedback::success(burst_id, "format:fence".to_string(), latency_ms);
+/// ```
+///
+/// The existing `category_priors` in `AgentUtility` will automatically track
+/// format-specific success rates via Thompson Sampling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BurstFeedback {
     /// Burst identifier
@@ -320,6 +337,7 @@ pub struct BurstFeedback {
     /// Optional quality score (0.0 to 1.0)
     pub quality_score: Option<f64>,
     /// Task category for category-specific learning
+    /// Use "format:<type>" for format learning (e.g., "format:fence")
     pub task_category: String,
     /// Cost incurred
     pub cost_usd: f64,

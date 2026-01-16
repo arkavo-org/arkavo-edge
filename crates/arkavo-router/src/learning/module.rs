@@ -2,6 +2,7 @@
 
 use super::agent_utility::{AgentUtility, BurstFeedback, FinalTaskReport};
 use super::config::LearningConfig;
+use super::tool_patterns::ToolCallFormat;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -291,6 +292,49 @@ impl LearningModule {
             .first()
             .map(|(id, score)| (id.clone(), *score, false))
     }
+
+    /// Select the best tool call format for an agent using Thompson Sampling
+    ///
+    /// Uses the existing category_priors mechanism with "format:<type>" keys
+    /// to learn which formats work best for each agent/model.
+    ///
+    /// Returns `(format, score)` where score is the Thompson sample.
+    pub async fn sample_format(&self, agent_id: &str) -> (ToolCallFormat, f64) {
+        let mut best_format = ToolCallFormat::Fence; // Default
+        let mut best_score = 0.0;
+
+        for format in ToolCallFormat::all() {
+            let category = format.to_category_key();
+            let score = self.thompson_sample(agent_id, Some(&category)).await;
+
+            if score > best_score {
+                best_score = score;
+                best_format = *format;
+            }
+        }
+
+        (best_format, best_score)
+    }
+
+    /// Get format statistics for an agent
+    ///
+    /// Returns a map of format -> (expected_value, observations) for analysis.
+    pub async fn get_format_stats(&self, agent_id: &str) -> HashMap<ToolCallFormat, (f64, u64)> {
+        let agents = self.agents.read().await;
+        let mut stats = HashMap::new();
+
+        if let Some(utility) = agents.get(agent_id) {
+            for format in ToolCallFormat::all() {
+                let key = format.to_category_key();
+                if let Some(prior) = utility.category_priors.get(&key) {
+                    let obs = prior.total_observations() as u64;
+                    stats.insert(*format, (prior.expected_value(), obs));
+                }
+            }
+        }
+
+        stats
+    }
 }
 
 impl Default for LearningModule {
@@ -562,5 +606,79 @@ mod tests {
             good_selected >= 5,
             "Good agent should be selected most times"
         );
+    }
+
+    #[tokio::test]
+    async fn test_format_learning_via_categories() {
+        use crate::learning::ToolCallFormat;
+
+        let module = LearningModule::new();
+
+        // Record successes for fence format
+        for _ in 0..10 {
+            module
+                .immediate_update(
+                    "model-a",
+                    &BurstFeedback::success(
+                        Uuid::new_v4(),
+                        ToolCallFormat::Fence.to_category_key(),
+                        100,
+                    ),
+                )
+                .await;
+        }
+
+        // Record failures for xml format
+        for _ in 0..10 {
+            module
+                .immediate_update(
+                    "model-a",
+                    &BurstFeedback::failure(
+                        Uuid::new_v4(),
+                        ToolCallFormat::Xml.to_category_key(),
+                        100,
+                    ),
+                )
+                .await;
+        }
+
+        // Sample format - fence should win most of the time
+        let mut fence_wins = 0;
+        for _ in 0..20 {
+            let (format, _) = module.sample_format("model-a").await;
+            if format == ToolCallFormat::Fence {
+                fence_wins += 1;
+            }
+        }
+
+        assert!(fence_wins > 10, "Fence should be selected most times");
+    }
+
+    #[tokio::test]
+    async fn test_get_format_stats() {
+        use crate::learning::ToolCallFormat;
+
+        let module = LearningModule::new();
+
+        // Add some format observations
+        for _ in 0..5 {
+            module
+                .immediate_update(
+                    "model-b",
+                    &BurstFeedback::success(
+                        Uuid::new_v4(),
+                        ToolCallFormat::Json.to_category_key(),
+                        100,
+                    ),
+                )
+                .await;
+        }
+
+        let stats = module.get_format_stats("model-b").await;
+        assert!(stats.contains_key(&ToolCallFormat::Json));
+
+        let (ev, obs) = stats[&ToolCallFormat::Json];
+        assert!(ev > 0.6, "Expected value should be high for successful format");
+        assert_eq!(obs, 5);
     }
 }
