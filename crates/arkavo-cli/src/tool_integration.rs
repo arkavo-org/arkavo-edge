@@ -5,9 +5,9 @@ use arkavo_mcp_tools::{McpClient as McpClientTrait, ToolRegistry};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use arkavo_router::Router;
 #[cfg(all(unix, feature = "mcp-tools"))]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(all(unix, feature = "mcp-tools"))]
 use std::collections::HashSet;
+#[cfg(all(unix, feature = "mcp-tools"))]
+use std::collections::hash_map::DefaultHasher;
 #[cfg(all(unix, feature = "mcp-tools"))]
 use std::hash::{Hash, Hasher};
 #[cfg(all(unix, feature = "mcp-tools"))]

@@ -67,9 +67,7 @@ pub async fn handle_agent_specialize(
 
     // For now, we accept the specialization and return success
     // Full implementation requires KAS client integration
-    warn!(
-        "TDF decryption requires KAS integration - specialization stored but not yet applied"
-    );
+    warn!("TDF decryption requires KAS integration - specialization stored but not yet applied");
 
     let response = AgentSpecializeResponse {
         session_id,

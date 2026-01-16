@@ -1,7 +1,7 @@
 use arkavo_config_encryption::AgentIdentity;
 use arkavo_protocol::get_service_ip;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -83,7 +83,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         Some("run") | None => {
             // Run agent with optional config and verbose flag
-            run_agent_with_options(config_path.as_deref(), verbose, override_port, override_name)
+            run_agent_with_options(
+                config_path.as_deref(),
+                verbose,
+                override_port,
+                override_name,
+            )
         }
         _ => unreachable!(),
     }
@@ -373,11 +378,7 @@ fn run_agent_with_options(
     // Apply command-line overrides
     if let Some(port) = override_port {
         // Parse the current listen address to get the host part
-        let host = agent_config
-            .listen
-            .split(':')
-            .next()
-            .unwrap_or("0.0.0.0");
+        let host = agent_config.listen.split(':').next().unwrap_or("0.0.0.0");
         agent_config.listen = format!("{host}:{port}");
     }
     if let Some(name) = override_name {

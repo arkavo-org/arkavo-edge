@@ -7,7 +7,7 @@
 
 #![cfg(feature = "llama-cpp")]
 
-use arkavo_llm::{LlamaCppProvider, Message, Provider, Role, SamplingConfig, LocalToolFormat};
+use arkavo_llm::{LlamaCppProvider, LocalToolFormat, Message, Provider, Role, SamplingConfig};
 use arkavo_router::learning::{BurstFeedback, LearningModule, ToolCallFormat};
 use arkavo_router::model_discovery;
 use std::time::Instant;
@@ -99,7 +99,9 @@ async fn test_format_with_model(
 ) -> (bool, u64) {
     let format_instruction = match format {
         ToolCallFormat::Fence => "Use fence format: ```tool_name\\nkey: value\\n```",
-        ToolCallFormat::Xml => "Use XML format: <tool_call><name>tool</name><arguments>{}</arguments></tool_call>",
+        ToolCallFormat::Xml => {
+            "Use XML format: <tool_call><name>tool</name><arguments>{}</arguments></tool_call>"
+        }
         ToolCallFormat::Json => r#"Use JSON format: {"name": "tool", "arguments": {...}}"#,
         ToolCallFormat::PythonCall => "Use Python format: tool_name(key=value)",
     };
@@ -187,13 +189,9 @@ async fn test_format_learning_ministral() {
         tool_format: LocalToolFormat::Fence,
     };
 
-    let provider = LlamaCppProvider::new_with_config(
-        "ministral-3b".to_string(),
-        model_path,
-        None,
-        config,
-    )
-    .expect("Failed to load Ministral 3B model");
+    let provider =
+        LlamaCppProvider::new_with_config("ministral-3b".to_string(), model_path, None, config)
+            .expect("Failed to load Ministral 3B model");
 
     let learning = LearningModule::new();
     let model_id = "ministral-3b";
@@ -216,12 +214,17 @@ async fn test_format_learning_ministral() {
         println!("Testing {} format (3 iterations):", format);
 
         for i in 0..3 {
-            let (success, _latency) = test_format_with_model(&provider, model_id, *format, &learning).await;
+            let (success, _latency) =
+                test_format_with_model(&provider, model_id, *format, &learning).await;
             if success {
                 successes += 1;
             }
             total += 1;
-            println!("  Iteration {}: {}", i + 1, if success { "success" } else { "failure" });
+            println!(
+                "  Iteration {}: {}",
+                i + 1,
+                if success { "success" } else { "failure" }
+            );
         }
 
         results.push((*format, successes, total));
@@ -237,7 +240,11 @@ async fn test_format_learning_ministral() {
         let learned = stats.get(format).map(|(ev, obs)| (*ev, *obs));
         println!(
             "{}: {}/{} success rate={:.0}%, learned={:?}",
-            format, successes, total, success_rate * 100.0, learned
+            format,
+            successes,
+            total,
+            success_rate * 100.0,
+            learned
         );
     }
 
@@ -273,13 +280,9 @@ async fn test_format_learning_qwen() {
         tool_format: LocalToolFormat::Fence,
     };
 
-    let provider = LlamaCppProvider::new_with_config(
-        "qwen3-0.6b".to_string(),
-        model_path,
-        None,
-        config,
-    )
-    .expect("Failed to load Qwen3 0.6B model");
+    let provider =
+        LlamaCppProvider::new_with_config("qwen3-0.6b".to_string(), model_path, None, config)
+            .expect("Failed to load Qwen3 0.6B model");
 
     let learning = LearningModule::new();
     let model_id = "qwen3-0.6b";
@@ -302,12 +305,17 @@ async fn test_format_learning_qwen() {
         println!("Testing {} format (3 iterations):", format);
 
         for i in 0..3 {
-            let (success, _latency) = test_format_with_model(&provider, model_id, *format, &learning).await;
+            let (success, _latency) =
+                test_format_with_model(&provider, model_id, *format, &learning).await;
             if success {
                 successes += 1;
             }
             total += 1;
-            println!("  Iteration {}: {}", i + 1, if success { "success" } else { "failure" });
+            println!(
+                "  Iteration {}: {}",
+                i + 1,
+                if success { "success" } else { "failure" }
+            );
         }
 
         results.push((*format, successes, total));
@@ -323,7 +331,11 @@ async fn test_format_learning_qwen() {
         let learned = stats.get(format).map(|(ev, obs)| (*ev, *obs));
         println!(
             "{}: {}/{} success rate={:.0}%, learned={:?}",
-            format, successes, total, success_rate * 100.0, learned
+            format,
+            successes,
+            total,
+            success_rate * 100.0,
+            learned
         );
     }
 
@@ -355,12 +367,9 @@ async fn test_format_learning_comparison() {
             tool_format: LocalToolFormat::Fence,
         };
 
-        if let Ok(provider) = LlamaCppProvider::new_with_config(
-            "ministral-3b".to_string(),
-            model_path,
-            None,
-            config,
-        ) {
+        if let Ok(provider) =
+            LlamaCppProvider::new_with_config("ministral-3b".to_string(), model_path, None, config)
+        {
             for format in ToolCallFormat::all() {
                 let _ = test_format_with_model(&provider, "ministral-3b", *format, &learning).await;
             }
@@ -380,12 +389,9 @@ async fn test_format_learning_comparison() {
             tool_format: LocalToolFormat::Fence,
         };
 
-        if let Ok(provider) = LlamaCppProvider::new_with_config(
-            "qwen3-0.6b".to_string(),
-            model_path,
-            None,
-            config,
-        ) {
+        if let Ok(provider) =
+            LlamaCppProvider::new_with_config("qwen3-0.6b".to_string(), model_path, None, config)
+        {
             for format in ToolCallFormat::all() {
                 let _ = test_format_with_model(&provider, "qwen3-0.6b", *format, &learning).await;
             }
@@ -401,7 +407,10 @@ async fn test_format_learning_comparison() {
             println!("{}:", model_id);
             for format in ToolCallFormat::all() {
                 if let Some((ev, obs)) = stats.get(format) {
-                    println!("  {}: expected_value={:.3}, observations={}", format, ev, obs);
+                    println!(
+                        "  {}: expected_value={:.3}, observations={}",
+                        format, ev, obs
+                    );
                 }
             }
 

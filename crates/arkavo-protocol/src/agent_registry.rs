@@ -370,11 +370,7 @@ impl AgentRegistry {
     }
 
     /// Set agent's public key
-    pub async fn set_public_key(
-        &self,
-        agent_id: &str,
-        public_key: String,
-    ) -> Result<(), String> {
+    pub async fn set_public_key(&self, agent_id: &str, public_key: String) -> Result<(), String> {
         let mut agents = self.agents.write().await;
         if let Some(agent) = agents.get_mut(agent_id) {
             agent.public_key = Some(public_key);

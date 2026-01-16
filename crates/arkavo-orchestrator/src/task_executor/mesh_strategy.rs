@@ -129,7 +129,10 @@ impl MeshTaskStrategy {
                         tracing::debug!(
                             "Discovered agent: {} (has_public_key={})",
                             name,
-                            agents.last().map(|a| a.public_key.is_some()).unwrap_or(false)
+                            agents
+                                .last()
+                                .map(|a| a.public_key.is_some())
+                                .unwrap_or(false)
                         );
                     }
                 }
@@ -549,11 +552,14 @@ impl MeshTaskStrategy {
         &self,
         agent: &AgentInfo,
     ) -> Result<arkavo_protocol::types::AgentCapabilitiesGetResponse> {
-        let address = agent.address.as_ref().ok_or_else(|| Error::AgentCommunication {
-            operation: "query capabilities".to_string(),
-            agent_id: agent.agent_id.clone(),
-            details: "agent has no address configured".to_string(),
-        })?;
+        let address = agent
+            .address
+            .as_ref()
+            .ok_or_else(|| Error::AgentCommunication {
+                operation: "query capabilities".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: "agent has no address configured".to_string(),
+            })?;
 
         let transport_config = TransportConfig {
             timeout_ms: 10000,
@@ -590,14 +596,15 @@ impl MeshTaskStrategy {
 
         let rpc_request = A2aRequest::new("agent.capabilities.get", serde_json::json!({}));
 
-        let response = transport
-            .send_request(rpc_request)
-            .await
-            .map_err(|e| Error::AgentCommunication {
-                operation: "send capability query".to_string(),
-                agent_id: agent.agent_id.clone(),
-                details: e.to_string(),
-            })?;
+        let response =
+            transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| Error::AgentCommunication {
+                    operation: "send capability query".to_string(),
+                    agent_id: agent.agent_id.clone(),
+                    details: e.to_string(),
+                })?;
 
         let _ = transport.close().await;
 
@@ -632,11 +639,14 @@ impl MeshTaskStrategy {
         encrypted_bundle: String,
         task_context: Option<String>,
     ) -> Result<arkavo_protocol::types::AgentSpecializeResponse> {
-        let address = agent.address.as_ref().ok_or_else(|| Error::AgentCommunication {
-            operation: "specialize agent".to_string(),
-            agent_id: agent.agent_id.clone(),
-            details: "agent has no address configured".to_string(),
-        })?;
+        let address = agent
+            .address
+            .as_ref()
+            .ok_or_else(|| Error::AgentCommunication {
+                operation: "specialize agent".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: "agent has no address configured".to_string(),
+            })?;
 
         let transport_config = TransportConfig {
             timeout_ms: 30000,
@@ -680,14 +690,15 @@ impl MeshTaskStrategy {
 
         let rpc_request = A2aRequest::new("agent.specialize", serde_json::to_value(&request)?);
 
-        let response = transport
-            .send_request(rpc_request)
-            .await
-            .map_err(|e| Error::AgentCommunication {
-                operation: "send specialization request".to_string(),
-                agent_id: agent.agent_id.clone(),
-                details: e.to_string(),
-            })?;
+        let response =
+            transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| Error::AgentCommunication {
+                    operation: "send specialization request".to_string(),
+                    agent_id: agent.agent_id.clone(),
+                    details: e.to_string(),
+                })?;
 
         let _ = transport.close().await;
 

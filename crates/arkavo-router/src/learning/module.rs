@@ -678,7 +678,10 @@ mod tests {
         assert!(stats.contains_key(&ToolCallFormat::Json));
 
         let (ev, obs) = stats[&ToolCallFormat::Json];
-        assert!(ev > 0.6, "Expected value should be high for successful format");
+        assert!(
+            ev > 0.6,
+            "Expected value should be high for successful format"
+        );
         assert_eq!(obs, 5);
     }
 }
