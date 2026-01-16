@@ -1226,7 +1226,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         println!("HRM Conductor integrated for A2A task execution");
     }
 
-    let handle = server.start().await?;
+    let (handle, actual_port) = server.start_with_port().await?;
 
     // Generate and display QR code for registration
     if !quiet {
@@ -1296,6 +1296,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         let handle = std::thread::spawn(move || {
             if let Err(e) = broadcast_agent_mdns_sync(
                 &config_clone,
+                actual_port,
                 shutdown_flag_clone,
                 Some(tx),
                 peer_tx_clone,
@@ -1574,6 +1575,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
 fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
+    #[allow(unused_variables)] actual_port: u16,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
     #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool, Option<String>)>,
@@ -1585,12 +1587,7 @@ fn broadcast_agent_mdns_sync(
         use std::thread;
         use std::time::Duration;
 
-        let port: u16 = config
-            .listen
-            .split(':')
-            .nth(1)
-            .ok_or_else(|| format!("Invalid listen address format: {}", config.listen))?
-            .parse()?;
+        let port = actual_port;
         let service_ip = get_service_ip();
 
         // Create mDNS daemon

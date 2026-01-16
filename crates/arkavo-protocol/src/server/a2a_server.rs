@@ -675,7 +675,15 @@ impl A2aServer {
         Some(handle)
     }
 
+    /// Start the server and return the handle along with the actual bound port
     pub async fn start(&self) -> Result<ServerHandle> {
+        let (handle, _actual_port) = self.start_with_port().await?;
+        Ok(handle)
+    }
+
+    /// Start the server and return both the handle and the actual bound port
+    /// This is useful when binding to port 0 for dynamic port allocation
+    pub async fn start_with_port(&self) -> Result<(ServerHandle, u16)> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind_address, self.config.port)
             .parse()
             .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid bind address: {e}")))?;
@@ -687,6 +695,16 @@ impl A2aServer {
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
+
+        // Get the actual bound address (important when using port 0)
+        let actual_addr = server.local_addr().map_err(|e| {
+            A2aError::Transport(format!("Failed to get local address: {e}"))
+        })?;
+        let actual_port = actual_addr.port();
+
+        if self.config.port == 0 {
+            info!("Server bound to dynamic port: {}", actual_port);
+        }
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
@@ -775,9 +793,9 @@ impl A2aServer {
 
         let handle = server.start(rpc_impl.into_rpc());
 
-        info!("A2A server started successfully on {}", addr);
+        info!("A2A server started successfully on {}", actual_addr);
         info!("OpenRPC schema available via JSON-RPC method: rpc.discover");
 
-        Ok(handle)
+        Ok((handle, actual_port))
     }
 }
