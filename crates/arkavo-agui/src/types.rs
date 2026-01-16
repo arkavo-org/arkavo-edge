@@ -294,6 +294,45 @@ pub enum AgUiEvent {
     SaveSession {
         name: String,
     },
+
+    // Mesh dashboard events
+    RequestMeshStatus,
+    MeshStatus {
+        agents: Vec<MeshAgentInfo>,
+        timestamp: String,
+    },
+    AgentDiscovered {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        endpoint: String,
+        purpose: String,
+        model: String,
+        timestamp: String,
+    },
+    AgentLost {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        reason: String,
+        timestamp: String,
+    },
+    #[serde(rename = "a2aMessage")]
+    A2AMessage {
+        #[serde(rename = "fromAgent")]
+        from_agent: String,
+        #[serde(rename = "toAgent")]
+        to_agent: String,
+        method: String,
+        direction: String,
+        timestamp: String,
+    },
+    TelemetryEvent {
+        #[serde(rename = "eventType")]
+        event_type: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        details: Value,
+        timestamp: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,6 +340,15 @@ pub struct UiPlanPart {
     pub id: String,
     pub name: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshAgentInfo {
+    pub id: String,
+    pub endpoint: String,
+    pub purpose: String,
+    pub model: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
+    <title>Arkavo Mesh Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2a2a2a;
+            --bg-tertiary: #333;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888;
+            --border-color: #3a3a3a;
+            --accent: #4a9eff;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        #connection-status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: var(--bg-tertiary);
+        }
+
+        #connection-status.connected { background: var(--success); color: #000; }
+        #connection-status.disconnected { background: var(--error); color: #fff; }
+
+        #stats {
+            margin-left: auto;
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value { color: var(--text-primary); font-weight: 500; }
+
+        main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .panel:last-child { border-right: none; }
+
+        .panel-header {
+            background: var(--bg-secondary);
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        #mesh-panel { width: 320px; }
+        #messages-panel { flex: 1; min-width: 400px; }
+        #telemetry-panel { width: 380px; }
+
+        /* Agent cards */
+        .agent-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: border-color 0.2s;
+        }
+
+        .agent-card:hover { border-color: var(--accent); }
+
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .agent-id {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .agent-status {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--success);
+            color: #000;
+        }
+
+        .agent-status.reconnecting { background: var(--warning); }
+        .agent-status.disconnected { background: var(--error); color: #fff; }
+
+        .agent-purpose {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .agent-endpoint {
+            font-size: 11px;
+            font-family: monospace;
+            color: var(--text-secondary);
+        }
+
+        .agent-model {
+            font-size: 11px;
+            color: var(--accent);
+            margin-top: 4px;
+        }
+
+        /* A2A Messages */
+        .message-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .message-route {
+            font-weight: 500;
+        }
+
+        .message-route .arrow { color: var(--accent); margin: 0 6px; }
+
+        .message-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .message-method {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--warning);
+        }
+
+        .message-direction {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+        }
+
+        .message-direction.inbound { background: #2563eb33; color: #60a5fa; }
+        .message-direction.outbound { background: #16a34a33; color: #4ade80; }
+
+        /* Telemetry events */
+        .telemetry-item {
+            padding: 8px 10px;
+            border-left: 3px solid var(--border-color);
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .telemetry-item.agent-connected { border-left-color: var(--success); }
+        .telemetry-item.agent-disconnected { border-left-color: var(--error); }
+        .telemetry-item.agent-reconnecting { border-left-color: var(--warning); }
+        .telemetry-item.tool-call { border-left-color: var(--accent); }
+        .telemetry-item.state-change { border-left-color: #a855f7; }
+        .telemetry-item.message-routed { border-left-color: #06b6d4; }
+
+        .telemetry-time {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .telemetry-type {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .telemetry-details {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        /* Empty states */
+        .empty-state {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 40px 20px;
+        }
+
+        .empty-state h3 {
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 12px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Arkavo Mesh Dashboard</h1>
+        <span id="connection-status" class="disconnected">Connecting...</span>
+        <div id="stats">
+            <span>Agents: <span class="stat-value" id="agent-count">0</span></span>
+            <span>Messages: <span class="stat-value" id="message-count">0</span></span>
+            <span>Events: <span class="stat-value" id="event-count">0</span></span>
+        </div>
+    </header>
+
+    <main>
+        <div class="panel" id="mesh-panel">
+            <div class="panel-header">Agent Mesh</div>
+            <div class="panel-content" id="agents-container">
+                <div class="empty-state">
+                    <h3>No Agents Discovered</h3>
+                    <p>Start agents with mDNS enabled to see them here</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" id="messages-panel">
+            <div class="panel-header">A2A Message Flow</div>
+            <div class="panel-content" id="messages-container">
+                <div class="empty-state">
+                    <h3>No Messages Yet</h3>
+                    <p>Agent-to-agent messages will appear here</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" id="telemetry-panel">
+            <div class="panel-header">Telemetry Stream</div>
+            <div class="panel-content" id="telemetry-container">
+                <div class="empty-state">
+                    <h3>Waiting for Events</h3>
+                    <p>Telemetry events will stream here</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const state = {
+            agents: {},
+            messages: [],
+            telemetry: [],
+            messageCount: 0,
+            eventCount: 0
+        };
+
+        const MAX_MESSAGES = 100;
+        const MAX_TELEMETRY = 200;
+
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        function connect() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${location.host}/ws`;
+            console.log('Connecting to WebSocket:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                setConnectionStatus('connected', 'Connected');
+                reconnectAttempts = 0;
+                const msg = JSON.stringify({ type: 'requestMeshStatus' });
+                console.log('Sending:', msg);
+                ws.send(msg);
+            };
+
+            ws.onmessage = (e) => {
+                console.log('Received:', e.data);
+                const event = JSON.parse(e.data);
+                handleEvent(event);
+            };
+
+            ws.onerror = () => setConnectionStatus('disconnected', 'Error');
+
+            ws.onclose = () => {
+                setConnectionStatus('disconnected', 'Disconnected');
+                reconnect();
+            };
+        }
+
+        function reconnect() {
+            const delay = Math.min(500 * Math.pow(2, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connect, delay);
+        }
+
+        function setConnectionStatus(cls, text) {
+            const el = document.getElementById('connection-status');
+            el.className = cls;
+            el.textContent = text;
+        }
+
+        function handleEvent(event) {
+            switch (event.type) {
+                case 'meshStatus':
+                    handleMeshStatus(event);
+                    break;
+                case 'agentDiscovered':
+                    addAgent(event);
+                    break;
+                case 'agentLost':
+                    removeAgent(event);
+                    break;
+                case 'a2aMessage':
+                    addA2AMessage(event);
+                    break;
+                case 'telemetryEvent':
+                    addTelemetry(event);
+                    break;
+                case 'statusUpdate':
+                    // System status updates (LLMs, health, etc.) - show in telemetry
+                    addTelemetry({
+                        eventType: 'heartbeat',
+                        agentId: 'system',
+                        details: { health: event.health?.status, components: event.health?.components?.length },
+                        timestamp: event.timestamp || new Date().toISOString()
+                    });
+                    break;
+                default:
+                    // Log unknown events as telemetry
+                    if (event.type) {
+                        addTelemetry({
+                            eventType: event.type,
+                            agentId: event.agentId || 'system',
+                            details: event,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+            }
+        }
+
+        function handleMeshStatus(event) {
+            state.agents = {};
+            if (event.agents) {
+                event.agents.forEach(agent => {
+                    state.agents[agent.id || agent.agent_id] = agent;
+                });
+            }
+            renderAgents();
+        }
+
+        function addAgent(event) {
+            const id = event.agentId || event.agent_id;
+            state.agents[id] = {
+                id: id,
+                endpoint: event.endpoint,
+                purpose: event.purpose,
+                model: event.model,
+                status: 'connected'
+            };
+            renderAgents();
+            addTelemetry({
+                eventType: 'agent-connected',
+                agentId: id,
+                details: { endpoint: event.endpoint },
+                timestamp: event.timestamp || new Date().toISOString()
+            });
+        }
+
+        function removeAgent(event) {
+            const id = event.agentId || event.agent_id;
+            delete state.agents[id];
+            renderAgents();
+            addTelemetry({
+                eventType: 'agent-disconnected',
+                agentId: id,
+                details: { reason: event.reason },
+                timestamp: event.timestamp || new Date().toISOString()
+            });
+        }
+
+        function addA2AMessage(event) {
+            state.messages.unshift(event);
+            if (state.messages.length > MAX_MESSAGES) {
+                state.messages.pop();
+            }
+            state.messageCount++;
+            renderMessages();
+            updateStats();
+        }
+
+        function addTelemetry(event) {
+            state.telemetry.unshift(event);
+            if (state.telemetry.length > MAX_TELEMETRY) {
+                state.telemetry.pop();
+            }
+            state.eventCount++;
+            renderTelemetry();
+            updateStats();
+        }
+
+        function renderAgents() {
+            const container = document.getElementById('agents-container');
+            const agents = Object.values(state.agents);
+
+            if (agents.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No Agents Discovered</h3>
+                        <p>Start agents with mDNS enabled to see them here</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = agents.map(agent => `
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <span class="agent-id">${agent.id || agent.name || 'Unknown'}</span>
+                        <span class="agent-status ${agent.status || 'connected'}">${agent.status || 'connected'}</span>
+                    </div>
+                    <div class="agent-purpose">${agent.purpose || 'No purpose specified'}</div>
+                    <div class="agent-endpoint">${agent.endpoint || 'Unknown endpoint'}</div>
+                    ${agent.model ? `<div class="agent-model">${agent.model}</div>` : ''}
+                </div>
+            `).join('');
+
+            document.getElementById('agent-count').textContent = agents.length;
+        }
+
+        function renderMessages() {
+            const container = document.getElementById('messages-container');
+
+            if (state.messages.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No Messages Yet</h3>
+                        <p>Agent-to-agent messages will appear here</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = state.messages.map(msg => `
+                <div class="message-item">
+                    <div class="message-header">
+                        <span class="message-route">
+                            ${msg.fromAgent || msg.from_agent || '?'}
+                            <span class="arrow">→</span>
+                            ${msg.toAgent || msg.to_agent || '?'}
+                        </span>
+                        <span class="message-time">${formatTime(msg.timestamp)}</span>
+                    </div>
+                    <span class="message-method">${msg.method || 'unknown'}</span>
+                    <span class="message-direction ${msg.direction || 'outbound'}">${msg.direction || 'outbound'}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderTelemetry() {
+            const container = document.getElementById('telemetry-container');
+
+            if (state.telemetry.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>Waiting for Events</h3>
+                        <p>Telemetry events will stream here</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = state.telemetry.map(evt => {
+                const typeClass = (evt.eventType || evt.event_type || '').replace(/_/g, '-');
+                return `
+                    <div class="telemetry-item ${typeClass}">
+                        <div class="telemetry-time">${formatTime(evt.timestamp)}</div>
+                        <div class="telemetry-type">${evt.eventType || evt.event_type || 'event'}</div>
+                        <div class="telemetry-details">
+                            ${evt.agentId || evt.agent_id || ''}
+                            ${evt.details ? ` - ${JSON.stringify(evt.details).slice(0, 60)}` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateStats() {
+            document.getElementById('message-count').textContent = state.messageCount;
+            document.getElementById('event-count').textContent = state.eventCount;
+        }
+
+        function formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts);
+            return d.toLocaleTimeString();
+        }
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>

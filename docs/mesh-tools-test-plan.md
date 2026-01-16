@@ -1,6 +1,6 @@
 # Mesh Tools Test Plan
 
-Test plan for `arkavo-mesh-tools` crate - MCP tools for agent mesh orchestration.
+Test plan for `arkavo-mcp-mesh` crate - MCP tools for agent mesh orchestration.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Test plan for `arkavo-mesh-tools` crate - MCP tools for agent mesh orchestration
 Run existing unit tests:
 
 ```bash
-cargo test -p arkavo-mesh-tools
+cargo test -p arkavo-mcp-mesh
 ```
 
 Expected: All schema tests pass (4 tests)
@@ -277,6 +277,6 @@ Future: Add these tests to CI pipeline via:
 jobs:
   test:
     steps:
-      - run: cargo test -p arkavo-mesh-tools
+      - run: cargo test -p arkavo-mcp-mesh
       - run: cargo run -p arkavo -- task "Use list_agents to verify tool registration"
 ```

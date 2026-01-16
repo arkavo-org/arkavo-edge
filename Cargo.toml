@@ -44,7 +44,7 @@ members = [
     "crates/arkavo-registration",
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
-    "crates/arkavo-mesh-tools",
+    "crates/arkavo-mcp-mesh",
     "crates/arkavo-config-bundle",
     "crates/arkavo-config-encryption",
     "crates/arkavo-config-transport",

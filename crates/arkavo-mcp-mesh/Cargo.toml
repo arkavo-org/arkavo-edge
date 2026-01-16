@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-mesh-tools"
+name = "arkavo-mcp-mesh"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

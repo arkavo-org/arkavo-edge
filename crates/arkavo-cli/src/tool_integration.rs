@@ -71,8 +71,8 @@ pub async fn process_with_tools(
     arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
 
     // Register mesh orchestration tools for agent coordination
-    let mesh_state = std::sync::Arc::new(arkavo_mesh_tools::MeshToolsState::new());
-    arkavo_mesh_tools::register_tools(&mut tool_registry, mesh_state);
+    let mesh_state = std::sync::Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+    arkavo_mcp_mesh::register_tools(&mut tool_registry, mesh_state);
 
     // Register HRM orchestration tools (Conductor API)
     let hrm_state = std::sync::Arc::new(tokio::sync::RwLock::new(

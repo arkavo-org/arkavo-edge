@@ -274,19 +274,11 @@ fn run_agent_with_options(
 
         let agent_name = format!("{hostname}-{folder_name}");
 
-        // Use random high port (49152-65535 range)
-        use std::net::TcpListener;
-        let port = TcpListener::bind("127.0.0.1:0")
-            .ok()
-            .and_then(|listener| listener.local_addr().ok())
-            .map(|addr| addr.port())
-            .unwrap_or(8342);
-
         vec![AgentConfig {
             name: agent_name,
             purpose: "A general-purpose AI agent".to_string(),
             model: String::new(), // Empty model - let arkavo-router decide
-            listen: format!("0.0.0.0:{port}"),
+            listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
             mdns_enabled: true,
             mcp_servers: Vec::new(),
             api_keys: std::collections::HashMap::new(),
@@ -326,18 +318,11 @@ fn run_agent_with_options(
 
                 let agent_name = format!("{hostname}-{folder_name}");
 
-                use std::net::TcpListener;
-                let port = TcpListener::bind("127.0.0.1:0")
-                    .ok()
-                    .and_then(|listener| listener.local_addr().ok())
-                    .map(|addr| addr.port())
-                    .unwrap_or(8342);
-
                 vec![AgentConfig {
                     name: agent_name,
                     purpose: "A general-purpose AI agent".to_string(),
                     model: String::new(),
-                    listen: format!("0.0.0.0:{port}"),
+                    listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -397,18 +382,11 @@ fn run_agent_with_options(
                 .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
                 .unwrap_or_else(|| "unknown".to_string());
 
-            use std::net::TcpListener;
-            let port = TcpListener::bind("127.0.0.1:0")
-                .ok()
-                .and_then(|listener| listener.local_addr().ok())
-                .map(|addr| addr.port())
-                .unwrap_or(8342);
-
             let default_config = AgentConfig {
                 name: format!("{hostname}-{folder_name}"),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
-                listen: format!("0.0.0.0:{port}"),
+                listen: "0.0.0.0:0".to_string(), // Dynamic port
                 mdns_enabled: true,
                 mcp_servers: Vec::new(),
                 api_keys: std::collections::HashMap::new(),
@@ -508,7 +486,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                    listen: "0.0.0.0:8342".to_string(), // Default listen address
+                    listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -558,7 +536,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         name: section_name.clone(),
                         purpose: String::new(),
                         model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                        listen: "0.0.0.0:8342".to_string(), // Default listen address
+                        listen: "0.0.0.0:0".to_string(), // Dynamic port
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
@@ -673,18 +651,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 // Use a default name that will be overridden by explicit name: field
                 let name = header_text.to_string();
 
-                // Get a random port for this agent
-                let port = std::net::TcpListener::bind("127.0.0.1:0")
-                    .ok()
-                    .and_then(|listener| listener.local_addr().ok())
-                    .map(|addr| addr.port())
-                    .unwrap_or(8342);
-
                 current_agent = Some(AgentConfig {
                     name,
                     purpose: String::new(),
                     model: String::new(),
-                    listen: format!("0.0.0.0:{port}"),
+                    listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true, // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),

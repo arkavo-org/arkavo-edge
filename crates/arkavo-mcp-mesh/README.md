@@ -1,4 +1,4 @@
-# arkavo-mesh-tools
+# arkavo-mcp-mesh
 
 MCP tools for decentralized agent discovery and mesh network orchestration.
 

@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use arkavo_mesh_tools::{MeshToolsState, register_tools};
+//! use arkavo_mcp_mesh::{MeshToolsState, register_tools};
 //! use arkavo_mcp_tools::ToolRegistry;
 //! use std::sync::Arc;
 //!

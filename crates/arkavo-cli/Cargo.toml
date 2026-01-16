@@ -18,7 +18,7 @@ default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
-mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mesh-tools", "arkavo-router/gemini"]
+mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
@@ -89,7 +89,7 @@ libc = { workspace = true }
 
 # Cross-platform MCP tools (optional, enabled via mcp-tools feature)
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
-arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }
+arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

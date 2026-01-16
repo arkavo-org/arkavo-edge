@@ -442,10 +442,10 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-macos",
+ "arkavo-mcp-mesh",
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
  "arkavo-memory",
- "arkavo-mesh-tools",
  "arkavo-observability",
  "arkavo-orchestrator",
  "arkavo-protocol",
@@ -912,6 +912,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp-mesh"
+version = "0.54.0"
+dependencies = [
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
+ "arkavo-protocol",
+ "async-trait",
+ "chrono",
+ "mdns-sd 0.11.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-mcp-runtime"
 version = "0.54.0"
 dependencies = [
@@ -987,23 +1004,6 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "arkavo-mesh-tools"
-version = "0.54.0"
-dependencies = [
- "arkavo-mcp",
- "arkavo-mcp-tools",
- "arkavo-protocol",
- "async-trait",
- "chrono",
- "mdns-sd 0.11.5",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
 ]
 
 [[package]]
