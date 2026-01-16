@@ -552,10 +552,10 @@ async fn handle_websocket(
     // Spawn task to forward messages from channel to WebSocket write half
     let forward_task = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&event) {
-                if ws_write.send(Message::Text(json)).await.is_err() {
-                    break; // WebSocket closed
-                }
+            if let Ok(json) = serde_json::to_string(&event)
+                && ws_write.send(Message::Text(json)).await.is_err()
+            {
+                break; // WebSocket closed
             }
         }
     });
