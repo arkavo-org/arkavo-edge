@@ -406,6 +406,11 @@ fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> 
                         metadata.insert("model".to_string(), model.to_string());
                     }
 
+                    // Extract public key for TDF encryption
+                    let public_key = info
+                        .get_property_val_str("public_key")
+                        .map(|s| s.to_string());
+
                     agents.push(AgentInfo {
                         agent_id,
                         name: name.clone(),
@@ -417,6 +422,10 @@ fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> 
                         load: 0.0,
                         is_available: true,
                         address,
+                        public_key,
+                        capability_manifest: None,
+                        capabilities_queried_at: None,
+                        last_specialized_at: None,
                     });
 
                     debug!("Discovered agent: {}", name);

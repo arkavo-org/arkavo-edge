@@ -43,6 +43,8 @@ pub struct A2aServer {
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// Learning bus for gossip-based learning propagation
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
+    /// Base64-encoded ECDSA P-256 public key for TDF encryption
+    public_key: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 impl A2aServer {
@@ -71,7 +73,18 @@ impl A2aServer {
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
+            public_key: Arc::new(tokio::sync::RwLock::new(None)),
         }
+    }
+
+    /// Set the agent's public key for TDF encryption
+    pub async fn set_public_key(&self, key: String) {
+        *self.public_key.write().await = Some(key);
+    }
+
+    /// Get the agent's public key
+    pub async fn public_key(&self) -> Option<String> {
+        self.public_key.read().await.clone()
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
@@ -791,6 +804,7 @@ impl A2aServer {
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: self.learning_bus.read().await.clone(),
+            public_key: self.public_key.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

@@ -43,6 +43,18 @@ pub struct AgentInfo {
 
     /// Network address if remote
     pub address: Option<String>,
+
+    /// Base64-encoded ECDSA P-256 public key for TDF encryption
+    pub public_key: Option<String>,
+
+    /// Full capabilities manifest queried via RPC
+    pub capability_manifest: Option<crate::types::AgentCapabilitiesGetResponse>,
+
+    /// When capabilities were last queried via RPC
+    pub capabilities_queried_at: Option<DateTime<Utc>>,
+
+    /// When the agent was last specialized
+    pub last_specialized_at: Option<DateTime<Utc>>,
 }
 
 impl AgentRegistry {
@@ -83,6 +95,10 @@ impl AgentRegistry {
             load: 0.0,
             is_available: true,
             address,
+            public_key: None,
+            capability_manifest: None,
+            capabilities_queried_at: None,
+            last_specialized_at: None,
         };
 
         // Store agent info
@@ -307,6 +323,141 @@ impl AgentRegistry {
         } else {
             Err(format!("Agent {agent_id} not found"))
         }
+    }
+
+    /// Check if an agent's capabilities need to be refreshed via RPC
+    pub async fn needs_capability_refresh(&self, agent_id: &str, max_age_seconds: i64) -> bool {
+        let agents = self.agents.read().await;
+        if let Some(agent) = agents.get(agent_id) {
+            match agent.capabilities_queried_at {
+                Some(queried_at) => {
+                    let age = (Utc::now() - queried_at).num_seconds();
+                    age > max_age_seconds
+                }
+                None => true, // Never queried
+            }
+        } else {
+            true // Agent not found, needs query
+        }
+    }
+
+    /// Update agent's capabilities from an RPC query response
+    pub async fn update_capabilities(
+        &self,
+        agent_id: &str,
+        manifest: crate::types::AgentCapabilitiesGetResponse,
+    ) -> Result<(), String> {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            // Update capabilities from manifest
+            agent.capabilities.clone_from(&manifest.capabilities);
+            agent.public_key = Some(manifest.public_key.clone());
+            agent.load = manifest.load;
+            agent.is_available = manifest.accepting_tasks;
+            agent.capability_manifest = Some(manifest);
+            agent.capabilities_queried_at = Some(Utc::now());
+            agent.last_seen = Utc::now();
+
+            info!(
+                agent.id = %agent_id,
+                capabilities = %agent.capabilities.len(),
+                "Agent capabilities updated from RPC"
+            );
+            Ok(())
+        } else {
+            Err(format!("Agent {agent_id} not found"))
+        }
+    }
+
+    /// Set agent's public key
+    pub async fn set_public_key(
+        &self,
+        agent_id: &str,
+        public_key: String,
+    ) -> Result<(), String> {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.public_key = Some(public_key);
+            agent.last_seen = Utc::now();
+            Ok(())
+        } else {
+            Err(format!("Agent {agent_id} not found"))
+        }
+    }
+
+    /// Mark agent as specialized
+    pub async fn mark_specialized(&self, agent_id: &str) -> Result<(), String> {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.last_specialized_at = Some(Utc::now());
+            agent.last_seen = Utc::now();
+            info!(agent.id = %agent_id, "Agent marked as specialized");
+            Ok(())
+        } else {
+            Err(format!("Agent {agent_id} not found"))
+        }
+    }
+
+    /// Register agent with extended information including public key
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_agent_with_key(
+        &self,
+        agent_id: String,
+        name: String,
+        purpose: String,
+        capabilities: Vec<String>,
+        device_caps: Option<DeviceCapabilities>,
+        metadata: HashMap<String, String>,
+        address: Option<String>,
+        public_key: Option<String>,
+    ) -> Result<(), String> {
+        info!(
+            agent.id = %agent_id,
+            capabilities = %capabilities.join(", "),
+            has_public_key = %public_key.is_some(),
+            "Registering agent with key"
+        );
+
+        let agent_info = AgentInfo {
+            agent_id: agent_id.clone(),
+            name,
+            purpose,
+            capabilities: capabilities.clone(),
+            device_caps,
+            metadata,
+            last_seen: Utc::now(),
+            load: 0.0,
+            is_available: true,
+            address,
+            public_key,
+            capability_manifest: None,
+            capabilities_queried_at: None,
+            last_specialized_at: None,
+        };
+
+        // Store agent info
+        {
+            let mut agents = self.agents.write().await;
+            agents.insert(agent_id.clone(), agent_info);
+        }
+
+        // Update capability index
+        {
+            let mut index = self.capability_index.write().await;
+            for capability in &capabilities {
+                index
+                    .entry(capability.clone())
+                    .or_insert_with(Vec::new)
+                    .push(agent_id.clone());
+            }
+        }
+
+        debug!(
+            agent.id = %agent_id,
+            "Agent registered with key successfully"
+        );
+
+        Ok(())
     }
 }
 

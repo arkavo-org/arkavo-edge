@@ -104,8 +104,13 @@ impl MeshTaskStrategy {
                             metadata.insert("model".to_string(), model.to_string());
                         }
 
+                        // Extract public key for TDF encryption
+                        let public_key = info
+                            .get_property_val_str("public_key")
+                            .map(|s| s.to_string());
+
                         agents.push(AgentInfo {
-                            agent_id,
+                            agent_id: agent_id.clone(),
                             name: name.clone(),
                             purpose,
                             capabilities,
@@ -115,9 +120,17 @@ impl MeshTaskStrategy {
                             load: 0.0,
                             is_available: true,
                             address,
+                            public_key,
+                            capability_manifest: None,
+                            capabilities_queried_at: None,
+                            last_specialized_at: None,
                         });
 
-                        tracing::debug!("Discovered agent: {}", name);
+                        tracing::debug!(
+                            "Discovered agent: {} (has_public_key={})",
+                            name,
+                            agents.last().map(|a| a.public_key.is_some()).unwrap_or(false)
+                        );
                     }
                 }
                 Err(_) => {
@@ -529,6 +542,181 @@ impl MeshTaskStrategy {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
+
+    /// Query agent capabilities via RPC
+    #[allow(dead_code)]
+    async fn query_capabilities(
+        &self,
+        agent: &AgentInfo,
+    ) -> Result<arkavo_protocol::types::AgentCapabilitiesGetResponse> {
+        let address = agent.address.as_ref().ok_or_else(|| Error::AgentCommunication {
+            operation: "query capabilities".to_string(),
+            agent_id: agent.agent_id.clone(),
+            details: "agent has no address configured".to_string(),
+        })?;
+
+        let transport_config = TransportConfig {
+            timeout_ms: 10000,
+            max_retries: 1,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Error::AgentCommunication {
+                operation: "create HTTP transport for capability query".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            }
+        })?);
+
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: agent.agent_id.clone(),
+            public_key: agent.public_key.clone(),
+        };
+
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "connect for capability query".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let rpc_request = A2aRequest::new("agent.capabilities.get", serde_json::json!({}));
+
+        let response = transport
+            .send_request(rpc_request)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "send capability query".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let _ = transport.close().await;
+
+        match response {
+            A2aResponse::Success { result, .. } => {
+                let manifest: arkavo_protocol::types::AgentCapabilitiesGetResponse =
+                    serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                        operation: "parse capability response".to_string(),
+                        details: e.to_string(),
+                    })?;
+                tracing::info!(
+                    "Queried capabilities for '{}': {} capabilities, {} MCP tools",
+                    agent.agent_id,
+                    manifest.capabilities.len(),
+                    manifest.mcp_tools.len()
+                );
+                Ok(manifest)
+            }
+            A2aResponse::Error { error, .. } => Err(Error::AgentCommunication {
+                operation: "query capabilities".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: format!("RPC error {}: {}", error.code, error.message),
+            }),
+        }
+    }
+
+    /// Send specialization request to agent with TDF-encrypted configuration
+    #[allow(dead_code)]
+    async fn specialize_agent(
+        &self,
+        agent: &AgentInfo,
+        encrypted_bundle: String,
+        task_context: Option<String>,
+    ) -> Result<arkavo_protocol::types::AgentSpecializeResponse> {
+        let address = agent.address.as_ref().ok_or_else(|| Error::AgentCommunication {
+            operation: "specialize agent".to_string(),
+            agent_id: agent.agent_id.clone(),
+            details: "agent has no address configured".to_string(),
+        })?;
+
+        let transport_config = TransportConfig {
+            timeout_ms: 30000,
+            max_retries: 1,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Error::AgentCommunication {
+                operation: "create HTTP transport for specialization".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            }
+        })?);
+
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: agent.agent_id.clone(),
+            public_key: agent.public_key.clone(),
+        };
+
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "connect for specialization".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let request = arkavo_protocol::types::AgentSpecializeRequest {
+            requester_id: "mesh-orchestrator".to_string(),
+            encrypted_bundle,
+            task_context,
+            session_id: None,
+        };
+
+        let rpc_request = A2aRequest::new("agent.specialize", serde_json::to_value(&request)?);
+
+        let response = transport
+            .send_request(rpc_request)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "send specialization request".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let _ = transport.close().await;
+
+        match response {
+            A2aResponse::Success { result, .. } => {
+                let spec_response: arkavo_protocol::types::AgentSpecializeResponse =
+                    serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                        operation: "parse specialization response".to_string(),
+                        details: e.to_string(),
+                    })?;
+                tracing::info!(
+                    "Agent '{}' specialization {}: session={}",
+                    agent.agent_id,
+                    if spec_response.accepted {
+                        "accepted"
+                    } else {
+                        "rejected"
+                    },
+                    spec_response.session_id
+                );
+                Ok(spec_response)
+            }
+            A2aResponse::Error { error, .. } => Err(Error::AgentCommunication {
+                operation: "specialize agent".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: format!("RPC error {}: {}", error.code, error.message),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -559,7 +747,15 @@ impl TaskStrategy for MeshTaskStrategy {
         // Display discovered agents
         ui.section("Discovered Mesh Agents");
         for agent in &agents {
-            ui.status(&format!("  - {} ({})", agent.name, agent.agent_id));
+            let key_indicator = if agent.public_key.is_some() {
+                " [TDF-ready]"
+            } else {
+                ""
+            };
+            ui.status(&format!(
+                "  - {} ({}){key_indicator}",
+                agent.name, agent.agent_id
+            ));
             if !agent.purpose.is_empty() {
                 ui.status(&format!("    Purpose: {}", agent.purpose));
             }

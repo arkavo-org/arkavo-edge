@@ -34,6 +34,9 @@ arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-context = { path = "../arkavo-context" }
 arkavo-git = { path = "../arkavo-git" }
+arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+arkavo-config-encryption = { path = "../arkavo-config-encryption" }
+base64 = { workspace = true }
 hmac = "0.12"
 hex = "0.4"
 mdns-sd = { workspace = true, optional = true }
