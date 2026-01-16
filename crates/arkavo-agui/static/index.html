@@ -320,6 +320,12 @@
             font-weight: 600;
         }
 
+        .modal-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
         /* Chat Panel */
         #chat-panel {
             display: none;
@@ -610,17 +616,12 @@
             <h3>Add New Task</h3>
             <div class="modal-field">
                 <label>Task Description</label>
-                <textarea id="task-description" placeholder="Describe the task..."></textarea>
+                <textarea id="task-description" placeholder="Describe what you want to accomplish..."></textarea>
             </div>
-            <div class="modal-field">
-                <label>Target Agent (Optional)</label>
-                <select id="task-target-agent">
-                    <option value="">Auto-select</option>
-                </select>
-            </div>
+            <p class="modal-hint">Tasks are sent to the orchestrator for decomposition and delegation.</p>
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="hideAddTaskModal()">Cancel</button>
-                <button class="btn-submit" onclick="submitTask()">Submit Task</button>
+                <button class="btn-submit" onclick="submitTask()">Submit to Orchestrator</button>
             </div>
         </div>
     </div>
@@ -823,14 +824,6 @@
             `).join('');
 
             document.getElementById('agent-count').textContent = agents.length;
-            updateAgentSelector();
-        }
-
-        function updateAgentSelector() {
-            const select = document.getElementById('task-target-agent');
-            const agents = Object.values(state.agents);
-            select.innerHTML = '<option value="">Auto-select</option>' +
-                agents.map(a => `<option value="${a.id}">${a.id}</option>`).join('');
         }
 
         function renderTelemetry() {
@@ -971,27 +964,21 @@
         function hideAddTaskModal() {
             document.getElementById('add-task-modal').classList.remove('active');
             document.getElementById('task-description').value = '';
-            document.getElementById('task-target-agent').value = '';
         }
 
         function submitTask() {
             const description = document.getElementById('task-description').value.trim();
-            const targetAgent = document.getElementById('task-target-agent').value;
 
             if (!description) {
                 alert('Please enter a task description');
                 return;
             }
 
-            const msg = {
+            // All human tasks go to orchestrator for decomposition
+            ws.send(JSON.stringify({
                 type: 'submitTask',
                 description: description
-            };
-            if (targetAgent) {
-                msg.targetAgent = targetAgent;
-            }
-
-            ws.send(JSON.stringify(msg));
+            }));
             hideAddTaskModal();
         }
 

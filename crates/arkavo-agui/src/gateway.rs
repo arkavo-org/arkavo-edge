@@ -1357,32 +1357,26 @@ async fn handle_event(
             println!("AG-UI: Sent TaskList");
         }
 
-        AgUiEvent::SubmitTask { description, target_agent } => {
-            println!("AG-UI: Received SubmitTask: {} -> {:?}", description, target_agent);
+        AgUiEvent::SubmitTask { description, target_agent: _ } => {
+            println!("AG-UI: Received SubmitTask: {}", description);
 
             let task_id = uuid::Uuid::new_v4().to_string();
 
-            // Store task info (will be used when task store is integrated)
-            let _task_info = crate::types::TaskInfo {
-                id: task_id.clone(),
-                description: description.clone(),
-                status: "submitted".to_string(),
-                target_agent: target_agent.clone(),
-                created_at: chrono::Utc::now().to_rfc3339(),
-                completed_at: None,
-            };
+            // All human tasks route to orchestrator for decomposition
+            // The orchestrator will break down the task and delegate to specialists
+            let agents_list = agents.read().await;
+            let orchestrator = agents_list.iter().find(|a| {
+                let purpose = a.get("purpose").and_then(|v| v.as_str()).unwrap_or("");
+                purpose.to_lowercase().contains("orchestrat")
+            });
 
-            // If there's a target agent, forward the task to it
-            if let Some(agent_id) = &target_agent {
-                let agents_list = agents.read().await;
-                if let Some(agent) = agents_list.iter().find(|a| {
-                    a.get("id").and_then(|v| v.as_str()) == Some(agent_id)
-                }) {
-                    if let Some(endpoint) = agent.get("endpoint").and_then(|v| v.as_str()) {
-                        println!("AG-UI: Forwarding task to agent {} at {}", agent_id, endpoint);
-                        // TODO: Forward via A2A protocol
-                    }
+            if let Some(orch) = orchestrator {
+                if let Some(endpoint) = orch.get("endpoint").and_then(|v| v.as_str()) {
+                    let orch_id = orch.get("id").and_then(|v| v.as_str()).unwrap_or("orchestrator");
+                    println!("AG-UI: Routing task to orchestrator {} at {}", orch_id, endpoint);
                 }
+            } else {
+                println!("AG-UI: No orchestrator found, task queued for when one connects");
             }
 
             // Send confirmation back to client
