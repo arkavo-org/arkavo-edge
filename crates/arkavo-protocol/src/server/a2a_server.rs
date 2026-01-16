@@ -703,9 +703,9 @@ impl A2aServer {
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
 
         // Get the actual bound address (important when using port 0)
-        let actual_addr = server.local_addr().map_err(|e| {
-            A2aError::Transport(format!("Failed to get local address: {e}"))
-        })?;
+        let actual_addr = server
+            .local_addr()
+            .map_err(|e| A2aError::Transport(format!("Failed to get local address: {e}")))?;
         let actual_port = actual_addr.port();
 
         if self.config.port == 0 {

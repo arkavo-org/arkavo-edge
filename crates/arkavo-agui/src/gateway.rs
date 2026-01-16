@@ -342,9 +342,10 @@ impl AgUiGateway {
 
                 // Find new agents
                 for agent_id in current_agents.difference(&previous_agents) {
-                    if let Some(agent) = agents_list.iter().find(|a| {
-                        a.get("id").and_then(|v| v.as_str()) == Some(agent_id.as_str())
-                    }) {
+                    if let Some(agent) = agents_list
+                        .iter()
+                        .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(agent_id.as_str()))
+                    {
                         let event = AgUiEvent::AgentDiscovered {
                             agent_id: agent_id.clone(),
                             endpoint: agent
@@ -537,8 +538,8 @@ async fn handle_websocket(
     budget_handler: Arc<RwLock<BudgetHandler>>,
     initial_prompt: Arc<RwLock<Option<String>>>,
 ) {
-    use futures::stream::StreamExt;
     use futures::sink::SinkExt;
+    use futures::stream::StreamExt;
 
     let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -1342,12 +1343,17 @@ async fn handle_event(
 
             // Get tasks from connection info or return empty list
             let conn_guard = connections.read().await;
-            let tasks: Vec<crate::types::TaskInfo> = if let Some(conn_info) = conn_guard.get(session_id) {
-                // Get tasks associated with this session
-                conn_info.subscriptions.iter().filter_map(|_| None).collect()
-            } else {
-                Vec::new()
-            };
+            let tasks: Vec<crate::types::TaskInfo> =
+                if let Some(conn_info) = conn_guard.get(session_id) {
+                    // Get tasks associated with this session
+                    conn_info
+                        .subscriptions
+                        .iter()
+                        .filter_map(|_| None)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
             let task_list = AgUiEvent::TaskList {
                 tasks,
@@ -1357,7 +1363,10 @@ async fn handle_event(
             println!("AG-UI: Sent TaskList");
         }
 
-        AgUiEvent::SubmitTask { description, target_agent: _ } => {
+        AgUiEvent::SubmitTask {
+            description,
+            target_agent: _,
+        } => {
             println!("AG-UI: Received SubmitTask: {}", description);
 
             let task_id = uuid::Uuid::new_v4().to_string();
@@ -1372,8 +1381,14 @@ async fn handle_event(
 
             if let Some(orch) = orchestrator {
                 if let Some(endpoint) = orch.get("endpoint").and_then(|v| v.as_str()) {
-                    let orch_id = orch.get("id").and_then(|v| v.as_str()).unwrap_or("orchestrator");
-                    println!("AG-UI: Routing task to orchestrator {} at {}", orch_id, endpoint);
+                    let orch_id = orch
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("orchestrator");
+                    println!(
+                        "AG-UI: Routing task to orchestrator {} at {}",
+                        orch_id, endpoint
+                    );
                 }
             } else {
                 println!("AG-UI: No orchestrator found, task queued for when one connects");

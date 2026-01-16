@@ -486,7 +486,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                    listen: "0.0.0.0:0".to_string(), // Dynamic port
+                    listen: "0.0.0.0:0".to_string(),                          // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -536,7 +536,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         name: section_name.clone(),
                         purpose: String::new(),
                         model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                        listen: "0.0.0.0:0".to_string(), // Dynamic port
+                        listen: "0.0.0.0:0".to_string(),                          // Dynamic port
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
@@ -656,7 +656,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     purpose: String::new(),
                     model: String::new(),
                     listen: "0.0.0.0:0".to_string(), // Dynamic port
-                    mdns_enabled: true, // Default to true for zero-config
+                    mdns_enabled: true,              // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
                     quiet: true, // Default is quiet
