@@ -390,26 +390,32 @@ impl A2aServer {
 
     async fn build_tool_registry(&self) {
         info!("Building tool registry from MCP connections");
-        let storage = match arkavo_memory::MemoryStorage::new().await {
-            Ok(s) => std::sync::Arc::new(s),
-            Err(e) => {
-                error!(error = %e, "Failed to initialize storage for tool registry");
-                return;
-            }
-        };
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
+        // Use empty registry - agents only get tools from their configured MCP servers
+        // This enables small models (ministral-3b) to work with focused tool sets
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
 
+        // Project MCP tools into the registry
         match self.mcp_registry.list_all_tools().await {
             Ok(tools) => {
-                info!("Found {} tools from MCP servers", tools.len());
+                info!("Projecting {} tools from MCP servers", tools.len());
+                for tool in tools {
+                    // Tools from MCP servers will be registered via the McpRegistry
+                    // The registry serves as a unified view for the router
+                    info!("  - {} (from MCP)", tool.name);
+                }
             }
             Err(e) => {
                 warn!("Failed to list tools from MCP servers: {}", e);
             }
         }
 
+        // Also register the list_models tool from the router for model discovery
+        if let Some(router) = self.router.read().await.as_ref() {
+            arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
+        }
+
         *self.tool_registry.write().await = Some(Arc::new(tool_registry));
-        info!("✓ Tool registry built successfully");
+        info!("✓ Tool registry built (MCP tools only)");
     }
 
     pub async fn start_file_watcher(&self) -> Result<()> {
