@@ -640,6 +640,14 @@
         const MAX_MESSAGES = 100;
         const MAX_TELEMETRY = 200;
 
+        // Escape HTML to prevent XSS attacks
+        function escapeHtml(text) {
+            if (text == null) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
         let currentChat = null;
         let chatMessages = [];
 
@@ -811,17 +819,21 @@
                 return;
             }
 
-            container.innerHTML = agents.map(agent => `
-                <div class="agent-card" onclick="openAgentChat('${agent.id || agent.name}')">
+            container.innerHTML = agents.map(agent => {
+                const agentId = escapeHtml(agent.id || agent.name);
+                const status = escapeHtml(agent.status || 'connected');
+                return `
+                <div class="agent-card" onclick="openAgentChat('${agentId.replace(/'/g, "\\'")}')">
                     <div class="agent-header">
-                        <span class="agent-id">${agent.id || agent.name || 'Unknown'}</span>
-                        <span class="agent-status ${agent.status || 'connected'}">${agent.status || 'connected'}</span>
+                        <span class="agent-id">${agentId || 'Unknown'}</span>
+                        <span class="agent-status ${status}">${status}</span>
                     </div>
-                    <div class="agent-purpose">${agent.purpose || 'No purpose specified'}</div>
-                    <div class="agent-endpoint">${agent.endpoint || 'Unknown endpoint'}</div>
-                    ${agent.model ? `<div class="agent-model">${agent.model}</div>` : ''}
+                    <div class="agent-purpose">${escapeHtml(agent.purpose) || 'No purpose specified'}</div>
+                    <div class="agent-endpoint">${escapeHtml(agent.endpoint) || 'Unknown endpoint'}</div>
+                    ${agent.model ? `<div class="agent-model">${escapeHtml(agent.model)}</div>` : ''}
                 </div>
-            `).join('');
+            `;
+            }).join('');
 
             document.getElementById('agent-count').textContent = agents.length;
         }
@@ -840,14 +852,15 @@
             }
 
             container.innerHTML = state.telemetry.map(evt => {
-                const typeClass = (evt.eventType || evt.event_type || '').replace(/_/g, '-');
+                const eventType = evt.eventType || evt.event_type || '';
+                const typeClass = eventType.replace(/_/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
                 return `
                     <div class="telemetry-item ${typeClass}">
-                        <div class="telemetry-time">${formatTime(evt.timestamp)}</div>
-                        <div class="telemetry-type">${evt.eventType || evt.event_type || 'event'}</div>
+                        <div class="telemetry-time">${escapeHtml(formatTime(evt.timestamp))}</div>
+                        <div class="telemetry-type">${escapeHtml(eventType) || 'event'}</div>
                         <div class="telemetry-details">
-                            ${evt.agentId || evt.agent_id || ''}
-                            ${evt.details ? ` - ${JSON.stringify(evt.details).slice(0, 60)}` : ''}
+                            ${escapeHtml(evt.agentId || evt.agent_id || '')}
+                            ${evt.details ? ` - ${escapeHtml(JSON.stringify(evt.details).slice(0, 60))}` : ''}
                         </div>
                     </div>
                 `;
@@ -934,24 +947,31 @@
 
             tasks.sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
 
-            container.innerHTML = tasks.map(task => `
+            container.innerHTML = tasks.map(task => {
+                const taskId = escapeHtml((task.id || '').slice(0, 8));
+                const status = escapeHtml(task.status || '');
+                const statusClass = status.replace(/[^a-zA-Z0-9-]/g, '');
+                const targetAgent = task.target_agent || task.targetAgent;
+                const progress = typeof task.progress === 'number' ? Math.min(100, Math.max(0, task.progress * 100)) : null;
+                return `
                 <div class="task-card">
                     <div class="task-header">
-                        <span class="task-id">#${(task.id || '').slice(0, 8)}</span>
-                        <span class="task-status ${task.status}">${task.status}</span>
+                        <span class="task-id">#${taskId}</span>
+                        <span class="task-status ${statusClass}">${status}</span>
                     </div>
-                    <div class="task-description">${task.description || 'Task'}</div>
+                    <div class="task-description">${escapeHtml(task.description) || 'Task'}</div>
                     <div class="task-meta">
-                        ${task.target_agent || task.targetAgent ? `Agent: ${task.target_agent || task.targetAgent}` : 'Auto-assigned'}
-                        ${task.created_at || task.createdAt ? ` | ${formatTime(task.created_at || task.createdAt)}` : ''}
+                        ${targetAgent ? `Agent: ${escapeHtml(targetAgent)}` : 'Auto-assigned'}
+                        ${task.created_at || task.createdAt ? ` | ${escapeHtml(formatTime(task.created_at || task.createdAt))}` : ''}
                     </div>
-                    ${task.progress !== undefined ? `
+                    ${progress !== null ? `
                         <div class="task-progress">
-                            <div class="task-progress-bar" style="width: ${task.progress * 100}%"></div>
+                            <div class="task-progress-bar" style="width: ${progress}%"></div>
                         </div>
                     ` : ''}
                 </div>
-            `).join('');
+            `;
+            }).join('');
 
             document.getElementById('task-count').textContent = tasks.length;
         }
@@ -1034,12 +1054,16 @@
 
         function renderChatMessages() {
             const container = document.getElementById('chat-messages');
-            container.innerHTML = chatMessages.map(msg => `
-                <div class="chat-message ${msg.role}">
-                    <div class="chat-message-role">${msg.role}</div>
-                    <div class="chat-message-content">${msg.content}</div>
+            container.innerHTML = chatMessages.map(msg => {
+                const role = escapeHtml(msg.role || 'unknown');
+                const roleClass = role.replace(/[^a-zA-Z0-9-]/g, '');
+                return `
+                <div class="chat-message ${roleClass}">
+                    <div class="chat-message-role">${role}</div>
+                    <div class="chat-message-content">${escapeHtml(msg.content)}</div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
             container.scrollTop = container.scrollHeight;
         }
 

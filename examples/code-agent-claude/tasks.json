@@ -1,0 +1,18 @@
+{
+  "scenario": "code-agent-claude",
+  "description": "AI coding assistant using Claude API",
+  "tasks": [
+    {
+      "id": "explain-code",
+      "description": "Explain what this function does: def fibonacci(n): return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)"
+    },
+    {
+      "id": "review-code",
+      "description": "Review this code for bugs: for i in range(len(lst)): lst.remove(lst[i])"
+    },
+    {
+      "id": "write-test",
+      "description": "Write a unit test for a function that validates email addresses"
+    }
+  ]
+}

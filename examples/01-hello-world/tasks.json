@@ -1,0 +1,10 @@
+{
+  "scenario": "hello-world",
+  "description": "Your first agent - a simple greeting",
+  "tasks": [
+    {
+      "id": "greeting",
+      "description": "Introduce yourself briefly. What are you and what can you help with?"
+    }
+  ]
+}

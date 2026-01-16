@@ -1,0 +1,18 @@
+{
+  "scenario": "code-agent-gemini",
+  "description": "AI coding assistant using Gemini API",
+  "tasks": [
+    {
+      "id": "explain-algorithm",
+      "description": "Explain the time complexity of quicksort and when to use it"
+    },
+    {
+      "id": "debug-code",
+      "description": "Find the bug: def binary_search(arr, target): left, right = 0, len(arr); while left < right: mid = (left + right) // 2; if arr[mid] == target: return mid; elif arr[mid] < target: left = mid; else: right = mid; return -1"
+    },
+    {
+      "id": "optimize",
+      "description": "Optimize this code: result = []; for item in items: if item not in result: result.append(item)"
+    }
+  ]
+}

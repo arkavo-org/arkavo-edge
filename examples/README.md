@@ -1,145 +1,247 @@
 # Arkavo Examples
 
-This directory contains example configurations demonstrating Arkavo's agent capabilities.
+Learn to build AI agent systems through hands-on examples.
 
-## Available Examples
-
-| Example | Description | Complexity |
-|---------|-------------|------------|
-| [code-agent-claude](code-agent-claude/) | AI coding assistant with Claude | Single agent |
-| [code-agent-gemini](code-agent-gemini/) | AI coding assistant with Gemini | Single agent |
-| [orchestrator-agent](orchestrator-agent/) | Central task router for agent mesh | Single agent |
-| [fleet-immunity](fleet-immunity/) | Multi-rover learning through adversity | Multi-agent mesh |
-| [family-travel-mesh](family-travel-mesh/) | HRM-style hierarchical orchestration | Multi-agent mesh |
-| [software-development-lifecycle](software-development-lifecycle/) | 12-agent SDLC collaboration | Multi-agent mesh |
-| [software-development-simple](software-development-simple/) | Simplified 3-agent development team | Multi-agent mesh |
-| [minecraft](minecraft/) | Minecraft bot controlled via MCP | Single agent + MCP |
-| [rlm-large-context](rlm-large-context/) | RLM handling 100K+ token contexts | Single agent + RLM |
-
-## Example Categories
-
-### Single Agent Examples
-Demonstrate individual agent capabilities with specific LLM backends:
-- `code-agent-claude` - Uses Anthropic Claude API
-- `code-agent-gemini` - Uses Google Gemini API
-- `orchestrator-agent` - Central coordinator (works with any LLM)
-- `minecraft` - Game bot controlled via MCP tools
-- `rlm-large-context` - RLM for contexts 100x beyond model limits
-
-### Multi-Agent Mesh Examples
-Demonstrate agent-to-agent collaboration:
-- `fleet-immunity` - Learning propagation between rovers
-- `family-travel-mesh` - Hierarchical Reasoning Model (HRM) pattern
-- `software-development-lifecycle` - Domain specialist collaboration
-- `software-development-simple` - Minimal multi-agent setup
-
-## Standard Example Structure
-
-Each example should include:
-
-```
-example-name/
-├── README.md              # Overview, architecture, quick start
-├── RUNBOOK.md             # Step-by-step execution guide
-├── AGENTS.md              # Agent configuration (single agent)
-├── agents/                # Agent configurations (multi-agent)
-│   └── agent-name/
-│       └── AGENTS.md
-├── launch_*.sh            # Startup script with prereq checks
-├── stop_*.sh              # Graceful shutdown script
-├── logs/                  # Runtime logs (gitignored)
-└── test_example.sh        # Automated validation (optional)
-```
-
-## RUNBOOK.md Format
-
-Every example includes a RUNBOOK.md with:
-
-1. **What This Example Demonstrates** - Key capabilities shown
-2. **Prerequisites** - Build commands, port checks
-3. **Step-by-Step Execution** - Commands with "what to watch for"
-4. **Automated Validation** - Script for CI/CD testing
-5. **Common Failure Modes** - Troubleshooting guide
-6. **Architecture Notes** - Design decisions
-
-## Running Examples
-
-### Quick Start
+## Quick Start (5 minutes)
 
 ```bash
-# Build Arkavo
+# 1. Build Arkavo (from repo root)
 cargo build
 
-# Run any example
-cd examples/<example-name>
-./launch_*.sh
-
-# Follow the RUNBOOK.md for detailed steps
+# 2. Run your first agent
+cd examples/01-hello-world
+./run.sh
 ```
 
-### Environment Variables
+## Learning Path
 
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Required for code-agent-claude |
-| `GEMINI_API_KEY` | Required for code-agent-gemini |
-| `RUST_LOG` | Debug logging (e.g., `RUST_LOG=debug`) |
+Progress from simple to complex, building skills incrementally.
 
-## Agent Discovery
+| Level | Examples | What You'll Learn | Time |
+|-------|----------|-------------------|------|
+| **01-hello-world** | Minimal agent | Agent basics, AGENTS.md config | 5 min |
+| **02-single-agent** | Claude, Gemini, secure | LLM backends, API keys, policies | 30 min |
+| **03-multi-agent-basics** | Dev team, orchestrator | Agent collaboration, A2A protocol | 1 hr |
+| **04-advanced-patterns** | HRM, fleet, hyperforum | Orchestration, learning, discourse | 2 hr |
+| **05-production** | SDLC, minecraft | Full systems, MCP tools | 2+ hr |
+| **06-specialized** | RLM | Large context handling | 1 hr |
 
-All multi-agent examples use mDNS for zero-configuration discovery:
-- Service type: `_a2a._tcp.local.`
-- Agents advertise their capabilities automatically
-- No hardcoded peer addresses required
+## All Examples
 
-Check discovery status:
+### 01-hello-world
+Your first agent. Start here.
+- Single agent responding to a greeting
+- No API keys needed (uses local model)
+
+### 02-single-agent
+Individual agent patterns with different backends.
+
+| Example | Description | Requirements |
+|---------|-------------|--------------|
+| `code-agent-claude` | Coding with Claude | `ANTHROPIC_API_KEY` |
+| `code-agent-gemini` | Coding with Gemini | `GEMINI_API_KEY` |
+| `secure-agent` | Preflight policy enforcement | None |
+
+### 03-multi-agent-basics
+Simple multi-agent collaboration.
+
+| Example | Agents | Description |
+|---------|--------|-------------|
+| `software-development-simple` | 3 | Project manager, coder, tester |
+| `orchestrator-agent` | 1+ | Central task routing |
+
+### 04-advanced-patterns
+Advanced orchestration and learning patterns.
+
+| Example | Pattern | Description |
+|---------|---------|-------------|
+| `family-travel-mesh` | HRM | Hierarchical orchestration with Thompson Sampling |
+| `fleet-immunity` | Gossip | Peer-to-peer learning between rovers |
+| `hyperforum-council` | Discourse | AI-powered discussion management |
+| `autonomous_refactor` | Ledger | Context tracking for code refactoring |
+
+### 05-production
+Production-ready multi-agent systems.
+
+| Example | Agents | Description |
+|---------|--------|-------------|
+| `software-development-lifecycle` | 12 | Full SDLC with domain specialists |
+| `minecraft` | 5 | Game bot with MCP tools |
+
+### 06-specialized
+Special capabilities.
+
+| Example | Description |
+|---------|-------------|
+| `rlm-large-context` | Handle 100K+ token contexts |
+
+## Core Concepts
+
+Read [CONCEPTS.md](CONCEPTS.md) to understand:
+
+- **Agent Architecture** - What agents are and how they work
+- **AGENTS.md** - Configuration format
+- **mDNS Discovery** - Zero-config agent discovery
+- **A2A Protocol** - Agent-to-agent communication
+- **HRM Pattern** - Hierarchical orchestration
+- **Thompson Sampling** - Intelligent agent selection
+- **Gossip Learning** - Peer-to-peer knowledge sharing
+- **MCP Integration** - External tool usage
+- **Preflight Policies** - Input validation and safety
+
+## Prerequisites
+
+### Required
+
 ```bash
+# Rust toolchain
+rustup --version
+
+# Build the project
+cargo build
+```
+
+### For Cloud LLMs
+
+```bash
+# Claude examples
+export ANTHROPIC_API_KEY="your-key"
+
+# Gemini examples
+export GEMINI_API_KEY="your-key"
+```
+
+### Verify Setup
+
+```bash
+# Check binary exists
+ls target/debug/arkavo
+
+# Check mDNS works (macOS)
 dns-sd -B _a2a._tcp local.
+
+# Check mDNS works (Linux)
+avahi-browse -art | grep a2a
+```
+
+## Demo Mode
+
+Run an interactive showcase of all capabilities:
+
+```bash
+./demo.sh
+```
+
+Or run a specific scenario:
+
+```bash
+./transition.sh software-development-simple
+```
+
+## Management Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `demo.sh` | Run all demo scenarios sequentially |
+| `mesh.sh` | Manage a generic agent mesh (start/stop/status) |
+| `transition.sh` | Run tasks from a single scenario |
+
+### mesh.sh Usage
+
+```bash
+# Start 8 agents
+./mesh.sh start 8
+
+# Check status
+./mesh.sh status
+
+# Stop all agents
+./mesh.sh stop
 ```
 
 ## Port Conventions
 
-| Port Range | Purpose |
-|------------|---------|
-| 8340-8341 | Orchestrator agents |
-| 8342-8353 | SDLC domain specialists |
-| 8401-8412 | HRM mesh (conductor, router, specialists) |
-| Dynamic | Fleet immunity rovers (mDNS-assigned) |
+| Range | Purpose | Examples |
+|-------|---------|----------|
+| 8340-8341 | Orchestrators | orchestrator-agent |
+| 8342-8353 | SDLC specialists | software-development-* |
+| 8401-8412 | HRM mesh | family-travel-mesh |
+| Dynamic | Fleet/mesh | fleet-immunity, mesh.sh |
+
+Use `lsof -i :PORT` to check if a port is in use.
+
+## Standard Example Structure
+
+Each example follows this structure:
+
+```
+example-name/
+├── README.md        # Overview and quick start
+├── RUNBOOK.md       # Step-by-step guide
+├── AGENTS.md        # Agent config (single) or agents/ (multi)
+├── tasks.json       # Demo tasks
+├── launch.sh        # Start the example
+└── stop.sh          # Stop the example
+```
 
 ## Creating New Examples
 
-1. Copy an existing example as a template
-2. Update AGENTS.md with your agent's purpose and model
-3. Create launch/stop scripts using the standard pattern
-4. Write a RUNBOOK.md with "what to watch for" guidance
-5. Add to this README.md
+1. Copy `01-hello-world` as a template
+2. Update `AGENTS.md` with your agent config
+3. Add tasks to `tasks.json`
+4. Write `README.md` and `RUNBOOK.md`
+5. Create `launch.sh` and `stop.sh`
+6. Add to this README
 
-### Script Template
+## Troubleshooting
+
+### Agent Won't Start
 
 ```bash
-#!/bin/bash
-# launch_example.sh
+# Kill orphan processes
+pkill -f "arkavo agent"
 
-set -e
+# Check for port conflicts
+lsof -i :8342
+```
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+### Model Download Fails
 
-# Check prerequisites
-if [ ! -f "$BINARY" ]; then
-    echo "ERROR: Build arkavo first: cargo build"
-    exit 1
-fi
+```bash
+# Check connectivity
+curl -I https://huggingface.co
 
-# Start agent
-cd "$SCRIPT_DIR"
-"$BINARY" agent run
+# Enable debug logging
+RUST_LOG=debug ./launch.sh
+```
+
+### mDNS Discovery Fails
+
+```bash
+# macOS: Check Bonjour
+dns-sd -B _a2a._tcp local.
+
+# Linux: Check Avahi
+systemctl status avahi-daemon
+```
+
+### API Key Errors
+
+```bash
+# Verify key is set
+echo $ANTHROPIC_API_KEY
+echo $GEMINI_API_KEY
+
+# Set for current session
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 ## Contributing
 
 When adding or modifying examples:
-- Test the full RUNBOOK.md manually
-- Verify mDNS discovery works
-- Check port conflicts with other examples
-- Update this README.md if adding new examples
+
+1. Test the RUNBOOK.md manually from a fresh state
+2. Ensure mDNS discovery works
+3. Check for port conflicts with other examples
+4. Update this README with your example
+5. Add to the appropriate learning level

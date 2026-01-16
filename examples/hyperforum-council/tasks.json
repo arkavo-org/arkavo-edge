@@ -1,0 +1,18 @@
+{
+  "scenario": "hyperforum-council",
+  "description": "AI discourse management with specialist council",
+  "tasks": [
+    {
+      "id": "moderate-discussion",
+      "description": "A user posted: 'This product is terrible and the company should be ashamed.' Moderate this comment."
+    },
+    {
+      "id": "summarize-thread",
+      "description": "Summarize the key points from this discussion thread about climate change policy"
+    },
+    {
+      "id": "identify-consensus",
+      "description": "Identify areas of agreement and disagreement in this debate about remote work policies"
+    }
+  ]
+}

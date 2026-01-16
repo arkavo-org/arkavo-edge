@@ -1,0 +1,18 @@
+{
+  "scenario": "orchestrator-agent",
+  "description": "Central task router for agent mesh",
+  "tasks": [
+    {
+      "id": "route-task",
+      "description": "Route this task to the appropriate specialist: Review the login authentication code for security vulnerabilities"
+    },
+    {
+      "id": "decompose-task",
+      "description": "Break down this complex task into subtasks: Build a user registration system with email verification"
+    },
+    {
+      "id": "coordinate",
+      "description": "Coordinate between agents to complete: Deploy the new feature to staging and run integration tests"
+    }
+  ]
+}
