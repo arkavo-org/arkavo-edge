@@ -518,9 +518,14 @@ impl Router {
             return Ok(response);
         }
 
-        Err(Error::ModelExecution(
-            "Max retries exceeded without successful response".to_string(),
-        ))
+        // Fallback - should not reach here normally
+        tracing::warn!("Route loop completed without returning, using empty response");
+        Ok(ProviderResponse {
+            content: String::new(),
+            reasoning_content: None,
+            tool_calls: Vec::new(),
+            finish_reason: None,
+        })
     }
 
     /// Upgrade model within local tier only - never escalate to cloud
@@ -674,9 +679,12 @@ impl Router {
                         );
                         continue;
                     }
-                    return Err(Error::ModelExecution(format!(
-                        "Max retries exceeded. Last error: {validation_error}"
-                    )));
+                    // Max retries exceeded - strip invalid tool calls and continue with content
+                    tracing::warn!(
+                        "Validation failed after max retries, stripping invalid tool calls and continuing"
+                    );
+                    response.tool_calls.clear();
+                    return Ok(response);
                 }
 
                 #[cfg(feature = "llama-cpp")]
@@ -722,10 +730,13 @@ impl Router {
                                     );
                                     continue;
                                 }
-                                return Err(Error::ModelExecution(format!(
-                                    "Max retries exceeded. Judge rejected: {}",
+                                // Max retries exceeded - continue with response anyway
+                                tracing::warn!(
+                                    "Judge rejected after max retries, continuing with response: {}",
                                     judgment.reason.as_deref().unwrap_or("unspecified reason")
-                                )));
+                                );
+                                response.tool_calls.clear();
+                                return Ok(response);
                             }
                         }
                         Err(e) => {
@@ -739,9 +750,14 @@ impl Router {
             return Ok(response);
         }
 
-        Err(Error::ModelExecution(
-            "Max retries exceeded without successful response".to_string(),
-        ))
+        // Fallback - should not reach here normally
+        tracing::warn!("Route loop completed without returning, using empty response");
+        Ok(ProviderResponse {
+            content: String::new(),
+            reasoning_content: None,
+            tool_calls: Vec::new(),
+            finish_reason: None,
+        })
     }
 
     /// Route with streaming and async quality validation

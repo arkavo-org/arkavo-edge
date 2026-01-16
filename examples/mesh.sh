@@ -30,18 +30,12 @@ start_mesh() {
     for i in $(seq 0 $((count - 1))); do
         local agent_dir="$SCRIPT_DIR/mesh/agent-$i"
 
+        # Create agent directory if needed
         if [ ! -d "$agent_dir" ]; then
-            echo -e "${RED}Agent directory not found: $agent_dir${NC}"
-            continue
+            mkdir -p "$agent_dir"
         fi
 
-        # Skip agents without AGENTS.md config
-        if [ ! -f "$agent_dir/AGENTS.md" ]; then
-            echo -e "  agent-$i... ${YELLOW}SKIPPED (no config)${NC}"
-            continue
-        fi
-
-        # Clean persisted .arkavo config to use fresh AGENTS.md
+        # Clean persisted .arkavo config to use fresh AGENTS.md if present
         rm -rf "$agent_dir/.arkavo" 2>/dev/null
 
         echo -n "  agent-$i... "
