@@ -31,6 +31,6 @@ fi
 echo -e "${GREEN}Starting hello-agent...${NC}"
 echo ""
 
-# Run the agent with the task
+# Run a simple chat query (no repo context for simple greeting)
 cd "$SCRIPT_DIR"
-"$BINARY" task --yes "Introduce yourself briefly. What are you and what can you help with?"
+"$BINARY" chat --repo-context off --prompt "Hello! Please introduce yourself briefly. What are you and what can you help with?"

@@ -4,9 +4,9 @@ Step-by-step guide to running your first agent.
 
 ## What This Demonstrates
 
-- Single agent startup and configuration
-- Local model loading (ministral-3b)
-- Basic task execution
+- Simple chat interaction with a local model
+- Basic agent response without tools
+- Quick validation that your setup works
 
 ## Prerequisites
 
@@ -36,23 +36,22 @@ cd examples/01-hello-world
 ```
 
 **What to watch for:**
-- "Loading model ministral-3b..." (first run downloads ~1.5GB)
-- "Agent hello-agent started on port XXXX"
-- Agent response to the greeting task
+- First run may download the model (~1.5GB)
+- A friendly greeting response from the agent
 
 ### Step 3: Observe Output
 
 You should see output like:
 ```
-Starting hello-agent...
-Loading model: ministral-3b
-Agent started on port 52341
-Processing task: Introduce yourself
+Hello World Agent
+=================
 
-Hello! I'm hello-agent, a friendly AI assistant. I'm here to help
-answer your questions and have a conversation. What would you like
-to talk about?
+Starting hello-agent...
+
+Hello! I'm here to help. What can I do for you?
 ```
+
+The exact wording may vary, but you should get a friendly greeting response.
 
 ### Step 4: Stop the Agent
 

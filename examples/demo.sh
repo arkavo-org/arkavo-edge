@@ -158,9 +158,12 @@ run_scenario() {
     echo -e "${CYAN}Description:${NC} $desc"
     echo ""
 
+    # Check scenario type (chat or task, default to task)
+    local scenario_type=$(jq -r '.type // "task"' "$tasks_file")
+
     # Read and execute tasks
     local task_count=$(jq '.tasks | length' "$tasks_file")
-    echo "Running $task_count tasks..."
+    echo "Running $task_count tasks (type: $scenario_type)..."
     echo ""
 
     for i in $(seq 0 $((task_count - 1))); do
@@ -171,8 +174,12 @@ run_scenario() {
         echo "  $task_desc"
         echo ""
 
-        # Send task with auto-approve (uses local models, mDNS discovery)
-        "$BINARY" task --yes "$task_desc" 2>&1 || true
+        # Use chat or task based on scenario type
+        if [ "$scenario_type" = "chat" ]; then
+            "$BINARY" chat --repo-context off --prompt "$task_desc" 2>&1 || true
+        else
+            "$BINARY" task --yes "$task_desc" 2>&1 || true
+        fi
 
         echo ""
         echo "---"
