@@ -333,6 +333,34 @@ pub enum AgUiEvent {
         details: Value,
         timestamp: String,
     },
+
+    // Task management events
+    RequestTaskList,
+    TaskList {
+        tasks: Vec<TaskInfo>,
+        timestamp: String,
+    },
+    SubmitTask {
+        description: String,
+        #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
+        target_agent: Option<String>,
+    },
+    TaskSubmitted {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        status: String,
+        timestamp: String,
+    },
+    TaskStatusChanged {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        progress: Option<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<String>,
+        timestamp: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,6 +377,19 @@ pub struct MeshAgentInfo {
     pub purpose: String,
     pub model: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInfo {
+    pub id: String,
+    pub description: String,
+    pub status: String,
+    #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
+    pub target_agent: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "completedAt", skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

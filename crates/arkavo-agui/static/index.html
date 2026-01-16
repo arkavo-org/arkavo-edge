@@ -64,6 +64,13 @@
 
         .stat-value { color: var(--text-primary); font-weight: 500; }
 
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
         main {
             flex: 1;
             display: flex;
@@ -88,6 +95,9 @@
             letter-spacing: 0.5px;
             color: var(--text-secondary);
             border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .panel-content {
@@ -97,7 +107,7 @@
         }
 
         #mesh-panel { width: 320px; }
-        #messages-panel { flex: 1; min-width: 400px; }
+        #tasks-panel { flex: 1; min-width: 400px; }
         #telemetry-panel { width: 380px; }
 
         /* Agent cards */
@@ -108,6 +118,7 @@
             padding: 12px;
             margin-bottom: 10px;
             transition: border-color 0.2s;
+            cursor: pointer;
         }
 
         .agent-card:hover { border-color: var(--accent); }
@@ -152,6 +163,286 @@
             color: var(--accent);
             margin-top: 4px;
         }
+
+        /* Task cards */
+        .task-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .task-id {
+            font-size: 11px;
+            font-family: monospace;
+            color: var(--text-secondary);
+        }
+
+        .task-status {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            text-transform: capitalize;
+        }
+
+        .task-status.submitted { background: var(--accent); color: #000; }
+        .task-status.working { background: var(--warning); color: #000; }
+        .task-status.completed { background: var(--success); color: #000; }
+        .task-status.failed { background: var(--error); color: #fff; }
+
+        .task-description {
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+
+        .task-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .task-progress {
+            margin-top: 8px;
+            height: 4px;
+            background: var(--bg-tertiary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .task-progress-bar {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+
+        /* Add Task Button */
+        .add-btn {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .add-btn:hover { opacity: 0.9; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            width: 400px;
+            max-width: 90vw;
+        }
+
+        .modal h3 {
+            margin-bottom: 16px;
+            font-size: 16px;
+        }
+
+        .modal-field {
+            margin-bottom: 16px;
+        }
+
+        .modal-field label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .modal-field input,
+        .modal-field textarea,
+        .modal-field select {
+            width: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .modal-field textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .modal-actions button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .btn-cancel {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-submit {
+            background: var(--accent);
+            border: none;
+            color: #000;
+            font-weight: 600;
+        }
+
+        /* Chat Panel */
+        #chat-panel {
+            display: none;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            height: 300px;
+            flex-direction: column;
+        }
+
+        #chat-panel.active { display: flex; }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .chat-header-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .chat-agent-name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .chat-agent-status {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--success);
+            color: #000;
+        }
+
+        .chat-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+
+        .chat-close:hover { color: var(--text-primary); }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+        }
+
+        .chat-message {
+            margin-bottom: 12px;
+            max-width: 80%;
+        }
+
+        .chat-message.user {
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .chat-message-role {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .chat-message-content {
+            background: var(--bg-tertiary);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+
+        .chat-message.user .chat-message-content {
+            background: var(--accent);
+            color: #000;
+        }
+
+        .chat-message.assistant .chat-message-content {
+            border: 1px solid var(--border-color);
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .chat-input {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px 12px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .chat-send {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .chat-send:hover { opacity: 0.9; }
+        .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* A2A Messages */
         .message-item {
@@ -256,54 +547,100 @@
         <span id="connection-status" class="disconnected">Connecting...</span>
         <div id="stats">
             <span>Agents: <span class="stat-value" id="agent-count">0</span></span>
-            <span>Messages: <span class="stat-value" id="message-count">0</span></span>
+            <span>Tasks: <span class="stat-value" id="task-count">0</span></span>
             <span>Events: <span class="stat-value" id="event-count">0</span></span>
         </div>
     </header>
 
-    <main>
-        <div class="panel" id="mesh-panel">
-            <div class="panel-header">Agent Mesh</div>
-            <div class="panel-content" id="agents-container">
-                <div class="empty-state">
-                    <h3>No Agents Discovered</h3>
-                    <p>Start agents with mDNS enabled to see them here</p>
+    <div class="main-container">
+        <main>
+            <div class="panel" id="mesh-panel">
+                <div class="panel-header">Agent Mesh</div>
+                <div class="panel-content" id="agents-container">
+                    <div class="empty-state">
+                        <h3>No Agents Discovered</h3>
+                        <p>Click an agent to chat</p>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="panel" id="messages-panel">
-            <div class="panel-header">A2A Message Flow</div>
-            <div class="panel-content" id="messages-container">
-                <div class="empty-state">
-                    <h3>No Messages Yet</h3>
-                    <p>Agent-to-agent messages will appear here</p>
+            <div class="panel" id="tasks-panel">
+                <div class="panel-header">
+                    <span>Task Queue</span>
+                    <button class="add-btn" onclick="showAddTaskModal()">+ Add Task</button>
+                </div>
+                <div class="panel-content" id="tasks-container">
+                    <div class="empty-state">
+                        <h3>No Tasks</h3>
+                        <p>Click "+ Add Task" to submit work</p>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="panel" id="telemetry-panel">
-            <div class="panel-header">Telemetry Stream</div>
-            <div class="panel-content" id="telemetry-container">
-                <div class="empty-state">
-                    <h3>Waiting for Events</h3>
-                    <p>Telemetry events will stream here</p>
+            <div class="panel" id="telemetry-panel">
+                <div class="panel-header"><span>Telemetry Stream</span></div>
+                <div class="panel-content" id="telemetry-container">
+                    <div class="empty-state">
+                        <h3>Waiting for Events</h3>
+                        <p>Telemetry events will stream here</p>
+                    </div>
                 </div>
             </div>
+        </main>
+
+        <div id="chat-panel">
+            <div class="chat-header">
+                <div class="chat-header-info">
+                    <span class="chat-agent-name" id="chat-agent-name">Agent</span>
+                    <span class="chat-agent-status">connected</span>
+                </div>
+                <button class="chat-close" onclick="closeChat()">&times;</button>
+            </div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input-container">
+                <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKeypress(event)">
+                <button class="chat-send" id="chat-send" onclick="sendChatMessage()">Send</button>
+            </div>
         </div>
-    </main>
+    </div>
+
+    <!-- Add Task Modal -->
+    <div class="modal-overlay" id="add-task-modal">
+        <div class="modal">
+            <h3>Add New Task</h3>
+            <div class="modal-field">
+                <label>Task Description</label>
+                <textarea id="task-description" placeholder="Describe the task..."></textarea>
+            </div>
+            <div class="modal-field">
+                <label>Target Agent (Optional)</label>
+                <select id="task-target-agent">
+                    <option value="">Auto-select</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="hideAddTaskModal()">Cancel</button>
+                <button class="btn-submit" onclick="submitTask()">Submit Task</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const state = {
             agents: {},
+            tasks: {},
             messages: [],
             telemetry: [],
             messageCount: 0,
-            eventCount: 0
+            eventCount: 0,
+            taskCount: 0
         };
 
         const MAX_MESSAGES = 100;
         const MAX_TELEMETRY = 200;
+
+        let currentChat = null;
+        let chatMessages = [];
 
         let ws = null;
         let reconnectAttempts = 0;
@@ -318,9 +655,8 @@
                 console.log('WebSocket connected');
                 setConnectionStatus('connected', 'Connected');
                 reconnectAttempts = 0;
-                const msg = JSON.stringify({ type: 'requestMeshStatus' });
-                console.log('Sending:', msg);
-                ws.send(msg);
+                ws.send(JSON.stringify({ type: 'requestMeshStatus' }));
+                ws.send(JSON.stringify({ type: 'requestTaskList' }));
             };
 
             ws.onmessage = (e) => {
@@ -367,7 +703,6 @@
                     addTelemetry(event);
                     break;
                 case 'statusUpdate':
-                    // System status updates (LLMs, health, etc.) - show in telemetry
                     addTelemetry({
                         eventType: 'heartbeat',
                         agentId: 'system',
@@ -375,8 +710,22 @@
                         timestamp: event.timestamp || new Date().toISOString()
                     });
                     break;
+                case 'taskList':
+                    handleTaskList(event);
+                    break;
+                case 'taskSubmitted':
+                    handleTaskSubmitted(event);
+                    break;
+                case 'taskStatusChanged':
+                    handleTaskStatusChanged(event);
+                    break;
+                case 'messagesSnapshot':
+                    handleMessagesSnapshot(event);
+                    break;
+                case 'messageDelta':
+                    handleMessageDelta(event);
+                    break;
                 default:
-                    // Log unknown events as telemetry
                     if (event.type) {
                         addTelemetry({
                             eventType: event.type,
@@ -429,13 +778,12 @@
         }
 
         function addA2AMessage(event) {
-            state.messages.unshift(event);
-            if (state.messages.length > MAX_MESSAGES) {
-                state.messages.pop();
-            }
-            state.messageCount++;
-            renderMessages();
-            updateStats();
+            addTelemetry({
+                eventType: 'a2a-message',
+                agentId: event.fromAgent || event.from_agent,
+                details: { to: event.toAgent || event.to_agent, method: event.method },
+                timestamp: event.timestamp || new Date().toISOString()
+            });
         }
 
         function addTelemetry(event) {
@@ -456,14 +804,14 @@
                 container.innerHTML = `
                     <div class="empty-state">
                         <h3>No Agents Discovered</h3>
-                        <p>Start agents with mDNS enabled to see them here</p>
+                        <p>Click an agent to chat</p>
                     </div>
                 `;
                 return;
             }
 
             container.innerHTML = agents.map(agent => `
-                <div class="agent-card">
+                <div class="agent-card" onclick="openAgentChat('${agent.id || agent.name}')">
                     <div class="agent-header">
                         <span class="agent-id">${agent.id || agent.name || 'Unknown'}</span>
                         <span class="agent-status ${agent.status || 'connected'}">${agent.status || 'connected'}</span>
@@ -475,35 +823,14 @@
             `).join('');
 
             document.getElementById('agent-count').textContent = agents.length;
+            updateAgentSelector();
         }
 
-        function renderMessages() {
-            const container = document.getElementById('messages-container');
-
-            if (state.messages.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <h3>No Messages Yet</h3>
-                        <p>Agent-to-agent messages will appear here</p>
-                    </div>
-                `;
-                return;
-            }
-
-            container.innerHTML = state.messages.map(msg => `
-                <div class="message-item">
-                    <div class="message-header">
-                        <span class="message-route">
-                            ${msg.fromAgent || msg.from_agent || '?'}
-                            <span class="arrow">→</span>
-                            ${msg.toAgent || msg.to_agent || '?'}
-                        </span>
-                        <span class="message-time">${formatTime(msg.timestamp)}</span>
-                    </div>
-                    <span class="message-method">${msg.method || 'unknown'}</span>
-                    <span class="message-direction ${msg.direction || 'outbound'}">${msg.direction || 'outbound'}</span>
-                </div>
-            `).join('');
+        function updateAgentSelector() {
+            const select = document.getElementById('task-target-agent');
+            const agents = Object.values(state.agents);
+            select.innerHTML = '<option value="">Auto-select</option>' +
+                agents.map(a => `<option value="${a.id}">${a.id}</option>`).join('');
         }
 
         function renderTelemetry() {
@@ -535,14 +862,223 @@
         }
 
         function updateStats() {
-            document.getElementById('message-count').textContent = state.messageCount;
             document.getElementById('event-count').textContent = state.eventCount;
+            document.getElementById('task-count').textContent = Object.keys(state.tasks).length;
         }
 
         function formatTime(ts) {
             if (!ts) return '';
             const d = new Date(ts);
             return d.toLocaleTimeString();
+        }
+
+        // Task Management
+        function handleTaskList(event) {
+            state.tasks = {};
+            if (event.tasks) {
+                event.tasks.forEach(task => {
+                    state.tasks[task.id] = task;
+                });
+            }
+            renderTasks();
+        }
+
+        function handleTaskSubmitted(event) {
+            const task = {
+                id: event.taskId || event.task_id,
+                description: 'New task',
+                status: event.status || 'submitted',
+                created_at: event.timestamp
+            };
+            state.tasks[task.id] = task;
+            state.taskCount++;
+            renderTasks();
+            updateStats();
+            addTelemetry({
+                eventType: 'task-submitted',
+                agentId: 'system',
+                details: { taskId: task.id },
+                timestamp: event.timestamp
+            });
+        }
+
+        function handleTaskStatusChanged(event) {
+            const id = event.taskId || event.task_id;
+            if (state.tasks[id]) {
+                state.tasks[id].status = event.status;
+                if (event.progress !== undefined) {
+                    state.tasks[id].progress = event.progress;
+                }
+                if (event.result) {
+                    state.tasks[id].result = event.result;
+                }
+                if (event.status === 'completed') {
+                    state.tasks[id].completed_at = event.timestamp;
+                }
+            }
+            renderTasks();
+            addTelemetry({
+                eventType: 'task-' + event.status,
+                agentId: event.targetAgent || 'system',
+                details: { taskId: id, progress: event.progress },
+                timestamp: event.timestamp
+            });
+        }
+
+        function renderTasks() {
+            const container = document.getElementById('tasks-container');
+            const tasks = Object.values(state.tasks);
+
+            if (tasks.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No Tasks</h3>
+                        <p>Click "+ Add Task" to submit work</p>
+                    </div>
+                `;
+                return;
+            }
+
+            tasks.sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
+
+            container.innerHTML = tasks.map(task => `
+                <div class="task-card">
+                    <div class="task-header">
+                        <span class="task-id">#${(task.id || '').slice(0, 8)}</span>
+                        <span class="task-status ${task.status}">${task.status}</span>
+                    </div>
+                    <div class="task-description">${task.description || 'Task'}</div>
+                    <div class="task-meta">
+                        ${task.target_agent || task.targetAgent ? `Agent: ${task.target_agent || task.targetAgent}` : 'Auto-assigned'}
+                        ${task.created_at || task.createdAt ? ` | ${formatTime(task.created_at || task.createdAt)}` : ''}
+                    </div>
+                    ${task.progress !== undefined ? `
+                        <div class="task-progress">
+                            <div class="task-progress-bar" style="width: ${task.progress * 100}%"></div>
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            document.getElementById('task-count').textContent = tasks.length;
+        }
+
+        function showAddTaskModal() {
+            document.getElementById('add-task-modal').classList.add('active');
+            document.getElementById('task-description').focus();
+        }
+
+        function hideAddTaskModal() {
+            document.getElementById('add-task-modal').classList.remove('active');
+            document.getElementById('task-description').value = '';
+            document.getElementById('task-target-agent').value = '';
+        }
+
+        function submitTask() {
+            const description = document.getElementById('task-description').value.trim();
+            const targetAgent = document.getElementById('task-target-agent').value;
+
+            if (!description) {
+                alert('Please enter a task description');
+                return;
+            }
+
+            const msg = {
+                type: 'submitTask',
+                description: description
+            };
+            if (targetAgent) {
+                msg.targetAgent = targetAgent;
+            }
+
+            ws.send(JSON.stringify(msg));
+            hideAddTaskModal();
+        }
+
+        // Agent Chat
+        function openAgentChat(agentId) {
+            currentChat = agentId;
+            chatMessages = [];
+            document.getElementById('chat-agent-name').textContent = agentId;
+            document.getElementById('chat-messages').innerHTML = '';
+            document.getElementById('chat-panel').classList.add('active');
+            document.getElementById('chat-input').focus();
+
+            ws.send(JSON.stringify({
+                type: 'chatOpen',
+                agentId: agentId
+            }));
+        }
+
+        function closeChat() {
+            if (currentChat) {
+                ws.send(JSON.stringify({
+                    type: 'chatClose',
+                    agentId: currentChat
+                }));
+            }
+            currentChat = null;
+            chatMessages = [];
+            document.getElementById('chat-panel').classList.remove('active');
+        }
+
+        function handleMessagesSnapshot(event) {
+            if (event.messages) {
+                chatMessages = event.messages;
+                renderChatMessages();
+            }
+        }
+
+        function handleMessageDelta(event) {
+            if (event.agentId !== currentChat && event.agent_id !== currentChat) return;
+
+            const delta = event.delta;
+            if (delta && delta.type === 'text') {
+                const msgId = event.messageId || event.message_id;
+                let existingMsg = chatMessages.find(m => m.id === msgId);
+                if (!existingMsg) {
+                    existingMsg = { id: msgId, role: 'assistant', content: '' };
+                    chatMessages.push(existingMsg);
+                }
+                existingMsg.content += delta.text || '';
+                renderChatMessages();
+            }
+        }
+
+        function renderChatMessages() {
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = chatMessages.map(msg => `
+                <div class="chat-message ${msg.role}">
+                    <div class="chat-message-role">${msg.role}</div>
+                    <div class="chat-message-content">${msg.content}</div>
+                </div>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const content = input.value.trim();
+
+            if (!content || !currentChat) return;
+
+            chatMessages.push({ id: Date.now().toString(), role: 'user', content });
+            renderChatMessages();
+
+            ws.send(JSON.stringify({
+                type: 'userMessage',
+                agentId: currentChat,
+                content: content
+            }));
+
+            input.value = '';
+        }
+
+        function handleChatKeypress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChatMessage();
+            }
         }
 
         // Start connection

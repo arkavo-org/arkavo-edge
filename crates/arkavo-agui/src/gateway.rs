@@ -1337,6 +1337,78 @@ async fn handle_event(
             });
         }
 
+        AgUiEvent::RequestTaskList => {
+            println!("AG-UI: Received RequestTaskList");
+
+            // Get tasks from connection info or return empty list
+            let conn_guard = connections.read().await;
+            let tasks: Vec<crate::types::TaskInfo> = if let Some(conn_info) = conn_guard.get(session_id) {
+                // Get tasks associated with this session
+                conn_info.subscriptions.iter().filter_map(|_| None).collect()
+            } else {
+                Vec::new()
+            };
+
+            let task_list = AgUiEvent::TaskList {
+                tasks,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            tx.send(task_list).await?;
+            println!("AG-UI: Sent TaskList");
+        }
+
+        AgUiEvent::SubmitTask { description, target_agent } => {
+            println!("AG-UI: Received SubmitTask: {} -> {:?}", description, target_agent);
+
+            let task_id = uuid::Uuid::new_v4().to_string();
+
+            // Store task info (will be used when task store is integrated)
+            let _task_info = crate::types::TaskInfo {
+                id: task_id.clone(),
+                description: description.clone(),
+                status: "submitted".to_string(),
+                target_agent: target_agent.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                completed_at: None,
+            };
+
+            // If there's a target agent, forward the task to it
+            if let Some(agent_id) = &target_agent {
+                let agents_list = agents.read().await;
+                if let Some(agent) = agents_list.iter().find(|a| {
+                    a.get("id").and_then(|v| v.as_str()) == Some(agent_id)
+                }) {
+                    if let Some(endpoint) = agent.get("endpoint").and_then(|v| v.as_str()) {
+                        println!("AG-UI: Forwarding task to agent {} at {}", agent_id, endpoint);
+                        // TODO: Forward via A2A protocol
+                    }
+                }
+            }
+
+            // Send confirmation back to client
+            let task_submitted = AgUiEvent::TaskSubmitted {
+                task_id: task_id.clone(),
+                status: "submitted".to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            tx.send(task_submitted).await?;
+
+            // Also send task status changed to update the list
+            let status_changed = AgUiEvent::TaskStatusChanged {
+                task_id,
+                status: "submitted".to_string(),
+                progress: Some(0.0),
+                result: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            // Broadcast to all connections
+            let conns = connections.read().await;
+            for (_, conn_info) in conns.iter() {
+                let _ = conn_info._ws_tx.send(status_changed.clone()).await;
+            }
+        }
+
         _ => {
             println!("AG-UI: Received event: {event:?}");
         }
