@@ -11,11 +11,21 @@ Demonstrates preflight policy configuration for input moderation.
 
 ## Quick Start
 
+To test policy enforcement, run the agent standalone:
+
 ```bash
 ./launch.sh
 ```
 
-Then test with different inputs to see policies in action.
+Then in another terminal, test with different inputs:
+
+```bash
+arkavo chat --prompt "My SSN is 123-45-6789"  # Should be blocked
+arkavo chat --prompt "What is the weather?"   # Should pass
+```
+
+**Note:** The demo.sh runner uses generic agents without policies.
+To see actual policy enforcement, run this agent standalone.
 
 ## Architecture
 
