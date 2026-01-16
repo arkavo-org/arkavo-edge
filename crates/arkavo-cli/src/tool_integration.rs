@@ -5,7 +5,11 @@ use arkavo_mcp_tools::{McpClient as McpClientTrait, ToolRegistry};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use arkavo_router::Router;
 #[cfg(all(unix, feature = "mcp-tools"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(all(unix, feature = "mcp-tools"))]
 use std::collections::HashSet;
+#[cfg(all(unix, feature = "mcp-tools"))]
+use std::hash::{Hash, Hasher};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use std::sync::Arc;
 
@@ -101,6 +105,81 @@ pub async fn process_with_tools(
     let mut last_tool_call: Option<String> = None;
     let mut same_tool_count = 0;
     const MAX_SAME_TOOL_CALLS: usize = 3;
+
+    // Track repeated content to detect model output loops
+    let mut last_content_hash: Option<u64> = None;
+    let mut same_content_count = 0;
+    const MAX_SAME_CONTENT: usize = 2; // Lower threshold - repeated content is a clear sign of loop
+
+    // Helper to detect format confusion (model generating conversation markers)
+    fn detect_format_confusion(content: &str) -> Option<&'static str> {
+        // Strip think blocks first to avoid false positives in reasoning
+        let content_without_think = {
+            let mut result = content.to_string();
+            while let Some(start) = result.find("<think>") {
+                if let Some(end) = result.find("</think>") {
+                    let end_pos = end + "</think>".len();
+                    result = format!("{}{}", &result[..start], &result[end_pos..]);
+                } else {
+                    result = result[..start].to_string();
+                    break;
+                }
+            }
+            result
+        };
+
+        // Model should NEVER generate "Human:" marker - it's a user turn indicator
+        // Check for it appearing after any think block or at start of response
+        if content_without_think.contains("Human:") {
+            return Some("'Human:' marker in model output - format confusion");
+        }
+
+        // Model shouldn't generate "Assistant:" markers in its own output
+        if content_without_think.contains("Assistant:") {
+            return Some("'Assistant:' marker in output - format confusion");
+        }
+
+        // Detect repeated multi-line blocks (looking for repeated code fence patterns)
+        // This catches models that output the same instructions/examples repeatedly
+        let lines: Vec<&str> = content_without_think.lines().collect();
+        if lines.len() >= 6 {
+            // Look for repeating patterns of 2-5 lines
+            for pattern_len in 2..=5 {
+                let mut i = 0;
+                while i + pattern_len * 3 <= lines.len() {
+                    let pattern: Vec<&str> = lines[i..i + pattern_len].to_vec();
+                    let pattern_text = pattern.join("\n").trim().to_string();
+
+                    // Skip empty or very short patterns
+                    if pattern_text.len() < 10 {
+                        i += 1;
+                        continue;
+                    }
+
+                    // Count consecutive occurrences
+                    let mut count = 1;
+                    let mut j = i + pattern_len;
+                    while j + pattern_len <= lines.len() {
+                        let next_pattern: Vec<&str> = lines[j..j + pattern_len].to_vec();
+                        let next_text = next_pattern.join("\n").trim().to_string();
+                        if next_text == pattern_text {
+                            count += 1;
+                            j += pattern_len;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if count >= 3 {
+                        return Some("Repeated block pattern detected");
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        None
+    }
 
     loop {
         // Absolute safeguard against runaway loops
@@ -259,6 +338,42 @@ pub async fn process_with_tools(
                 }
             }
         };
+
+        // Check for format confusion (model generating conversation markers)
+        if let Some(confusion_reason) = detect_format_confusion(&response.content) {
+            tracing::warn!("Format confusion detected: {}", confusion_reason);
+            return Ok(ToolIntegrationResult {
+                final_response: format!(
+                    "Loop detected: {}. The model appears confused about the conversation format. Please try rephrasing your request.",
+                    confusion_reason
+                ),
+                tool_executions: all_tool_executions,
+                total_iterations: iteration,
+            });
+        }
+
+        // Check for repeated content (model output loop detection)
+        let mut hasher = DefaultHasher::new();
+        response.content.hash(&mut hasher);
+        let content_hash = hasher.finish();
+
+        if Some(content_hash) == last_content_hash {
+            same_content_count += 1;
+            if same_content_count >= MAX_SAME_CONTENT {
+                tracing::warn!(
+                    "Model generated same content {} times in a row, breaking loop",
+                    same_content_count + 1
+                );
+                return Ok(ToolIntegrationResult {
+                    final_response: "Loop detected: model is generating repetitive content. Please try rephrasing your request.".to_string(),
+                    tool_executions: all_tool_executions,
+                    total_iterations: iteration,
+                });
+            }
+        } else {
+            same_content_count = 0;
+            last_content_hash = Some(content_hash);
+        }
 
         // Check if LLM is requesting tools via REQUEST_TOOL protocol
         let requested_keywords =
