@@ -229,3 +229,130 @@ pub async fn handle_rpc_discover(
         }
     }
 }
+
+/// Handle agent.capabilities.get RPC method
+/// Returns comprehensive agent metadata for orchestrator onboarding
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_agent_capabilities_get(
+    metrics: &Arc<MetricsCollector>,
+    rate_limiter: &RateLimiter,
+    mcp_registry: &Arc<McpRegistry>,
+    agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
+    public_key: Option<&str>,
+) -> Result<crate::types::AgentCapabilitiesGetResponse, ErrorObjectOwned> {
+    use crate::types::{AgentCapabilitiesGetResponse, InteractionMode, McpToolInfo};
+
+    let timer = RpcTimer::new("agent.capabilities.get".to_string(), metrics.clone());
+
+    if let Err(e) = rate_limiter.check_rate_limit() {
+        metrics.record_rate_limit_blocked(None);
+        timer.error();
+        return Err(e);
+    }
+
+    // Get agent metadata
+    let metadata = agent_metadata.read().await;
+    let agent_id = metadata.name.clone();
+    let name = metadata.name.clone();
+    let purpose = metadata.purpose.clone();
+    let model = metadata.model.clone();
+    drop(metadata);
+
+    // Get MCP tools with details
+    let mcp_tools = match mcp_registry.list_all_tools().await {
+        Ok(tools) => tools
+            .into_iter()
+            .map(|t| McpToolInfo {
+                name: t.name,
+                description: t.description,
+                server: None,
+                input_schema: t.input_schema,
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
+    // Infer capabilities from purpose
+    let capabilities = infer_capabilities_from_purpose(&name, &purpose);
+
+    let response = AgentCapabilitiesGetResponse {
+        agent_id,
+        name,
+        purpose,
+        model,
+        capabilities,
+        mcp_tools,
+        load: 0.0, // Could be tracked dynamically
+        accepting_tasks: true,
+        public_key: public_key.unwrap_or_default().to_string(),
+        version: "1.0".to_string(),
+        interaction_modes: vec![
+            InteractionMode::Synchronous,
+            InteractionMode::Streaming,
+            InteractionMode::Asynchronous,
+        ],
+    };
+
+    timer.success();
+    Ok(response)
+}
+
+/// Infer capabilities from agent name and purpose
+fn infer_capabilities_from_purpose(name: &str, purpose: &str) -> Vec<String> {
+    let mut capabilities = Vec::new();
+    let combined = format!("{} {}", name.to_lowercase(), purpose.to_lowercase());
+
+    // Domain-specific capabilities
+    if combined.contains("orchestrat") {
+        capabilities.push("orchestration".to_string());
+        capabilities.push("task_decomposition".to_string());
+        capabilities.push("agent_coordination".to_string());
+    }
+    if combined.contains("security") {
+        capabilities.push("security_analysis".to_string());
+        capabilities.push("vulnerability_detection".to_string());
+    }
+    if combined.contains("code") || combined.contains("review") {
+        capabilities.push("code_review".to_string());
+        capabilities.push("pattern_analysis".to_string());
+    }
+    if combined.contains("database") || combined.contains("sql") {
+        capabilities.push("database_optimization".to_string());
+        capabilities.push("schema_design".to_string());
+    }
+    if combined.contains("test") {
+        capabilities.push("test_generation".to_string());
+        capabilities.push("coverage_analysis".to_string());
+    }
+    if combined.contains("doc") {
+        capabilities.push("documentation_generation".to_string());
+        capabilities.push("api_documentation".to_string());
+    }
+    if combined.contains("performance") || combined.contains("profil") {
+        capabilities.push("performance_analysis".to_string());
+        capabilities.push("optimization".to_string());
+    }
+    if combined.contains("devops") || combined.contains("deploy") {
+        capabilities.push("ci_cd".to_string());
+        capabilities.push("deployment_strategies".to_string());
+    }
+    if combined.contains("frontend") || combined.contains("ui") || combined.contains("ux") {
+        capabilities.push("ui_ux_analysis".to_string());
+        capabilities.push("accessibility".to_string());
+    }
+    if combined.contains("architect") || combined.contains("design") {
+        capabilities.push("system_design".to_string());
+        capabilities.push("scalability_patterns".to_string());
+    }
+    if combined.contains("data") || combined.contains("science") || combined.contains("ml") {
+        capabilities.push("data_analysis".to_string());
+        capabilities.push("ml_modeling".to_string());
+    }
+
+    // Default if no matches
+    if capabilities.is_empty() {
+        capabilities.push("general".to_string());
+    }
+
+    capabilities
+}

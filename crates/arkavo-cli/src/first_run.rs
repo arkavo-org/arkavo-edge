@@ -360,10 +360,11 @@ pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "localhost".to_string());
 
     // Create agent descriptor with public key
+    // Endpoint uses mDNS name - actual port determined at runtime
     let short_id = &public_key.to_base64()[..7.min(public_key.to_base64().len())];
     let descriptor = AgentDescriptor::new(
         public_key,
-        format!("http://{hostname}:8342"),
+        format!("{hostname}._a2a._tcp.local."), // mDNS name, port discovered via mDNS
         Some(format!("{hostname}._a2a._tcp.local.")),
         short_id.to_string(),
     );

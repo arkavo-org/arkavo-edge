@@ -1,0 +1,24 @@
+{
+  "scenario": "fleet-immunity",
+  "description": "Fleet learning with gossip-based knowledge propagation",
+  "tasks": [
+    {
+      "id": "task-1",
+      "description": "Navigate your assigned route and report sector conditions",
+      "target": "all",
+      "expected_flow": ["rover-alpha", "rover-beta", "rover-gamma"]
+    },
+    {
+      "id": "task-2",
+      "description": "Hazard detected in sector 4: black ice. Broadcast lesson to fleet.",
+      "target": "rover-alpha",
+      "expected_flow": ["rover-alpha", "rover-beta", "rover-gamma"]
+    },
+    {
+      "id": "task-3",
+      "description": "Apply learned lessons and adjust speed for hazardous sectors",
+      "target": "all",
+      "expected_flow": ["rover-alpha", "rover-beta", "rover-gamma"]
+    }
+  ]
+}

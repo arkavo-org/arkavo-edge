@@ -44,6 +44,24 @@ impl std::str::FromStr for ToolCallFormat {
 }
 
 impl ToolCallFormat {
+    /// Get all format variants for iteration
+    pub fn all() -> &'static [Self] {
+        &[Self::Fence, Self::Xml, Self::Json, Self::PythonCall]
+    }
+
+    /// Generate category key for HRM learning system
+    ///
+    /// Returns a string like "format:fence" that can be used as a
+    /// task_category in BurstFeedback to track format-specific success.
+    pub fn to_category_key(&self) -> String {
+        format!("format:{self}")
+    }
+
+    /// Parse a category key back to format (if it's a format category)
+    pub fn from_category_key(key: &str) -> Option<Self> {
+        key.strip_prefix("format:").and_then(|s| s.parse().ok())
+    }
+
     /// Generate a few-shot example for a tool call
     pub fn format_example(&self, tool_name: &str, args: &serde_json::Value) -> String {
         match self {
@@ -161,5 +179,40 @@ mod tests {
         assert_eq!(sanitized["api_key"], "<REDACTED>");
         assert_eq!(sanitized["sector_id"], 4);
         assert_eq!(sanitized["user"], "test");
+    }
+
+    #[test]
+    fn test_format_category_key() {
+        assert_eq!(ToolCallFormat::Fence.to_category_key(), "format:fence");
+        assert_eq!(ToolCallFormat::Xml.to_category_key(), "format:xml");
+        assert_eq!(ToolCallFormat::Json.to_category_key(), "format:json");
+        assert_eq!(
+            ToolCallFormat::PythonCall.to_category_key(),
+            "format:python"
+        );
+    }
+
+    #[test]
+    fn test_format_from_category_key() {
+        assert_eq!(
+            ToolCallFormat::from_category_key("format:fence"),
+            Some(ToolCallFormat::Fence)
+        );
+        assert_eq!(
+            ToolCallFormat::from_category_key("format:xml"),
+            Some(ToolCallFormat::Xml)
+        );
+        assert_eq!(ToolCallFormat::from_category_key("task:code"), None);
+        assert_eq!(ToolCallFormat::from_category_key("fence"), None);
+    }
+
+    #[test]
+    fn test_format_all() {
+        let all = ToolCallFormat::all();
+        assert_eq!(all.len(), 4);
+        assert!(all.contains(&ToolCallFormat::Fence));
+        assert!(all.contains(&ToolCallFormat::Xml));
+        assert!(all.contains(&ToolCallFormat::Json));
+        assert!(all.contains(&ToolCallFormat::PythonCall));
     }
 }

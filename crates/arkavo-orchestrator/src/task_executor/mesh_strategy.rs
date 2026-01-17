@@ -104,8 +104,13 @@ impl MeshTaskStrategy {
                             metadata.insert("model".to_string(), model.to_string());
                         }
 
+                        // Extract public key for TDF encryption
+                        let public_key = info
+                            .get_property_val_str("public_key")
+                            .map(|s| s.to_string());
+
                         agents.push(AgentInfo {
-                            agent_id,
+                            agent_id: agent_id.clone(),
                             name: name.clone(),
                             purpose,
                             capabilities,
@@ -115,9 +120,20 @@ impl MeshTaskStrategy {
                             load: 0.0,
                             is_available: true,
                             address,
+                            public_key,
+                            capability_manifest: None,
+                            capabilities_queried_at: None,
+                            last_specialized_at: None,
                         });
 
-                        tracing::debug!("Discovered agent: {}", name);
+                        tracing::debug!(
+                            "Discovered agent: {} (has_public_key={})",
+                            name,
+                            agents
+                                .last()
+                                .map(|a| a.public_key.is_some())
+                                .unwrap_or(false)
+                        );
                     }
                 }
                 Err(_) => {
@@ -137,9 +153,132 @@ impl MeshTaskStrategy {
         Ok(Vec::new())
     }
 
-    /// Select best agent for the task
+    /// Infer required capabilities from task content
+    fn infer_capabilities(task: &str) -> Vec<&'static str> {
+        let task_lower = task.to_lowercase();
+        let mut capabilities = Vec::new();
+
+        // Security-related keywords
+        if task_lower.contains("security")
+            || task_lower.contains("vulnerab")
+            || task_lower.contains("auth")
+            || task_lower.contains("injection")
+            || task_lower.contains("xss")
+            || task_lower.contains("csrf")
+        {
+            capabilities.push("security_analysis");
+            capabilities.push("vulnerability_detection");
+        }
+
+        // Testing-related keywords
+        if task_lower.contains("test")
+            || task_lower.contains("coverage")
+            || task_lower.contains("unit test")
+            || task_lower.contains("integration test")
+        {
+            capabilities.push("test_generation");
+            capabilities.push("coverage_analysis");
+        }
+
+        // Performance-related keywords
+        if task_lower.contains("performance")
+            || task_lower.contains("optimize")
+            || task_lower.contains("profil")
+            || task_lower.contains("bottleneck")
+            || task_lower.contains("slow")
+        {
+            capabilities.push("performance_analysis");
+            capabilities.push("optimization");
+        }
+
+        // Database-related keywords
+        if task_lower.contains("database")
+            || task_lower.contains("sql")
+            || task_lower.contains("query")
+            || task_lower.contains("schema")
+            || task_lower.contains("index")
+        {
+            capabilities.push("database_optimization");
+            capabilities.push("schema_design");
+        }
+
+        // Documentation-related keywords
+        if task_lower.contains("document")
+            || task_lower.contains("readme")
+            || task_lower.contains("api doc")
+            || task_lower.contains("comment")
+        {
+            capabilities.push("documentation_generation");
+            capabilities.push("api_documentation");
+        }
+
+        // Architecture-related keywords
+        if task_lower.contains("architect")
+            || task_lower.contains("design")
+            || task_lower.contains("scalab")
+            || task_lower.contains("microservice")
+        {
+            capabilities.push("system_design");
+            capabilities.push("scalability_patterns");
+        }
+
+        // Code review keywords
+        if task_lower.contains("review")
+            || task_lower.contains("refactor")
+            || task_lower.contains("pattern")
+            || task_lower.contains("quality")
+        {
+            capabilities.push("code_review");
+            capabilities.push("pattern_analysis");
+        }
+
+        // Frontend-related keywords
+        if task_lower.contains("frontend")
+            || task_lower.contains("ui")
+            || task_lower.contains("ux")
+            || task_lower.contains("accessib")
+            || task_lower.contains("responsive")
+        {
+            capabilities.push("ui_ux_analysis");
+            capabilities.push("accessibility");
+        }
+
+        // DevOps-related keywords
+        if task_lower.contains("devops")
+            || task_lower.contains("ci/cd")
+            || task_lower.contains("deploy")
+            || task_lower.contains("pipeline")
+            || task_lower.contains("docker")
+            || task_lower.contains("kubernetes")
+        {
+            capabilities.push("ci_cd");
+            capabilities.push("deployment_strategies");
+        }
+
+        // Data science keywords
+        if task_lower.contains("machine learning")
+            || task_lower.contains("ml")
+            || task_lower.contains("data analy")
+            || task_lower.contains("model")
+            || task_lower.contains("feature")
+        {
+            capabilities.push("data_analysis");
+            capabilities.push("ml_modeling");
+        }
+
+        // Default fallback
+        if capabilities.is_empty() {
+            capabilities.push("code_generation");
+            capabilities.push("code_review");
+        }
+
+        capabilities
+    }
+
+    /// Select best agent for the task based on task content analysis
     async fn select_agent<'a>(
         &self,
+        task: &str,
         agents: &'a [AgentInfo],
         config: &TaskConfig,
     ) -> Result<&'a AgentInfo> {
@@ -171,24 +310,49 @@ impl MeshTaskStrategy {
                 .await;
         }
 
-        // Find best agent for code generation
-        let best_agent_id = self
-            .registry
-            .find_best_agent("code_generation")
-            .await
-            .or_else(|| agents.first().map(|a| a.agent_id.clone()))
-            .ok_or_else(|| Error::TaskExecution {
-                operation: "select agent for task".to_string(),
-                details: "no suitable agent found with required capabilities".to_string(),
-            })?;
+        // Infer required capabilities from task content
+        let required_capabilities = Self::infer_capabilities(task);
+        tracing::debug!(
+            "Inferred capabilities for task: {:?}",
+            required_capabilities
+        );
 
-        agents
-            .iter()
-            .find(|a| a.agent_id == best_agent_id)
-            .ok_or_else(|| Error::TaskExecution {
-                operation: "select agent for task".to_string(),
-                details: format!("selected agent '{}' not found in list", best_agent_id),
-            })
+        // Try each inferred capability in order
+        for capability in &required_capabilities {
+            if let Some(agent_id) = self.registry.find_best_agent(capability).await {
+                tracing::info!(
+                    "Selected agent '{}' for capability '{}'",
+                    agent_id,
+                    capability
+                );
+                if let Some(agent) = agents.iter().find(|a| a.agent_id == agent_id) {
+                    return Ok(agent);
+                }
+            }
+        }
+
+        // Fallback: find agent by matching purpose keywords
+        let task_lower = task.to_lowercase();
+        for agent in agents {
+            let purpose_lower = agent.purpose.to_lowercase();
+            // Check if any significant word from the task appears in the agent's purpose
+            for word in task_lower.split_whitespace() {
+                if word.len() > 4 && purpose_lower.contains(word) {
+                    tracing::info!(
+                        "Selected agent '{}' by purpose keyword match: '{}'",
+                        agent.agent_id,
+                        word
+                    );
+                    return Ok(agent);
+                }
+            }
+        }
+
+        // Last resort: first agent
+        agents.first().ok_or_else(|| Error::TaskExecution {
+            operation: "select agent for task".to_string(),
+            details: "no suitable agent found with required capabilities".to_string(),
+        })
     }
 
     /// Submit task to agent and monitor until completion
@@ -381,6 +545,189 @@ impl MeshTaskStrategy {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
+
+    /// Query agent capabilities via RPC
+    #[allow(dead_code)]
+    async fn query_capabilities(
+        &self,
+        agent: &AgentInfo,
+    ) -> Result<arkavo_protocol::types::AgentCapabilitiesGetResponse> {
+        let address = agent
+            .address
+            .as_ref()
+            .ok_or_else(|| Error::AgentCommunication {
+                operation: "query capabilities".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: "agent has no address configured".to_string(),
+            })?;
+
+        let transport_config = TransportConfig {
+            timeout_ms: 10000,
+            max_retries: 1,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Error::AgentCommunication {
+                operation: "create HTTP transport for capability query".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            }
+        })?);
+
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: agent.agent_id.clone(),
+            public_key: agent.public_key.clone(),
+        };
+
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "connect for capability query".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let rpc_request = A2aRequest::new("agent.capabilities.get", serde_json::json!({}));
+
+        let response =
+            transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| Error::AgentCommunication {
+                    operation: "send capability query".to_string(),
+                    agent_id: agent.agent_id.clone(),
+                    details: e.to_string(),
+                })?;
+
+        let _ = transport.close().await;
+
+        match response {
+            A2aResponse::Success { result, .. } => {
+                let manifest: arkavo_protocol::types::AgentCapabilitiesGetResponse =
+                    serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                        operation: "parse capability response".to_string(),
+                        details: e.to_string(),
+                    })?;
+                tracing::info!(
+                    "Queried capabilities for '{}': {} capabilities, {} MCP tools",
+                    agent.agent_id,
+                    manifest.capabilities.len(),
+                    manifest.mcp_tools.len()
+                );
+                Ok(manifest)
+            }
+            A2aResponse::Error { error, .. } => Err(Error::AgentCommunication {
+                operation: "query capabilities".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: format!("RPC error {}: {}", error.code, error.message),
+            }),
+        }
+    }
+
+    /// Send specialization request to agent with TDF-encrypted configuration
+    #[allow(dead_code)]
+    async fn specialize_agent(
+        &self,
+        agent: &AgentInfo,
+        encrypted_bundle: String,
+        task_context: Option<String>,
+    ) -> Result<arkavo_protocol::types::AgentSpecializeResponse> {
+        let address = agent
+            .address
+            .as_ref()
+            .ok_or_else(|| Error::AgentCommunication {
+                operation: "specialize agent".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: "agent has no address configured".to_string(),
+            })?;
+
+        let transport_config = TransportConfig {
+            timeout_ms: 30000,
+            max_retries: 1,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+            Error::AgentCommunication {
+                operation: "create HTTP transport for specialization".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            }
+        })?);
+
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: agent.agent_id.clone(),
+            public_key: agent.public_key.clone(),
+        };
+
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| Error::AgentCommunication {
+                operation: "connect for specialization".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: e.to_string(),
+            })?;
+
+        let request = arkavo_protocol::types::AgentSpecializeRequest {
+            requester_id: "mesh-orchestrator".to_string(),
+            encrypted_bundle,
+            task_context,
+            session_id: None,
+        };
+
+        let rpc_request = A2aRequest::new("agent.specialize", serde_json::to_value(&request)?);
+
+        let response =
+            transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| Error::AgentCommunication {
+                    operation: "send specialization request".to_string(),
+                    agent_id: agent.agent_id.clone(),
+                    details: e.to_string(),
+                })?;
+
+        let _ = transport.close().await;
+
+        match response {
+            A2aResponse::Success { result, .. } => {
+                let spec_response: arkavo_protocol::types::AgentSpecializeResponse =
+                    serde_json::from_value(result).map_err(|e| Error::TaskExecution {
+                        operation: "parse specialization response".to_string(),
+                        details: e.to_string(),
+                    })?;
+                tracing::info!(
+                    "Agent '{}' specialization {}: session={}",
+                    agent.agent_id,
+                    if spec_response.accepted {
+                        "accepted"
+                    } else {
+                        "rejected"
+                    },
+                    spec_response.session_id
+                );
+                Ok(spec_response)
+            }
+            A2aResponse::Error { error, .. } => Err(Error::AgentCommunication {
+                operation: "specialize agent".to_string(),
+                agent_id: agent.agent_id.clone(),
+                details: format!("RPC error {}: {}", error.code, error.message),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -411,7 +758,15 @@ impl TaskStrategy for MeshTaskStrategy {
         // Display discovered agents
         ui.section("Discovered Mesh Agents");
         for agent in &agents {
-            ui.status(&format!("  - {} ({})", agent.name, agent.agent_id));
+            let key_indicator = if agent.public_key.is_some() {
+                " [TDF-ready]"
+            } else {
+                ""
+            };
+            ui.status(&format!(
+                "  - {} ({}){key_indicator}",
+                agent.name, agent.agent_id
+            ));
             if !agent.purpose.is_empty() {
                 ui.status(&format!("    Purpose: {}", agent.purpose));
             }
@@ -423,8 +778,8 @@ impl TaskStrategy for MeshTaskStrategy {
             }
         }
 
-        // Select agent
-        let agent = self.select_agent(&agents, config).await?;
+        // Select agent based on task content
+        let agent = self.select_agent(task, &agents, config).await?;
 
         ui.section("Selected Agent");
         ui.status(&format!("Agent: {} ({})", agent.name, agent.agent_id));

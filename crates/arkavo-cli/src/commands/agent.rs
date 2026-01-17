@@ -1,7 +1,12 @@
+use arkavo_config_encryption::AgentIdentity;
 use arkavo_protocol::get_service_ip;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -10,6 +15,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut verbose = false;
     let mut subcommand: Option<&str> = None;
     let mut init_name: Option<String> = None;
+    let mut override_port: Option<u16> = None;
+    let mut override_name: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -18,6 +25,23 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "-c" | "--config" => {
                 if i + 1 < args.len() && !args[i + 1].starts_with('-') {
                     config_path = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "-p" | "--port" => {
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    if let Ok(port) = args[i + 1].parse::<u16>() {
+                        override_port = Some(port);
+                    } else {
+                        eprintln!("Error: Invalid port number '{}'", args[i + 1]);
+                        return Err("Invalid port number".into());
+                    }
+                    i += 1;
+                }
+            }
+            "-n" | "--name" => {
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    override_name = Some(args[i + 1].clone());
                     i += 1;
                 }
             }
@@ -59,7 +83,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         Some("run") | None => {
             // Run agent with optional config and verbose flag
-            run_agent_with_options(config_path.as_deref(), verbose)
+            run_agent_with_options(
+                config_path.as_deref(),
+                verbose,
+                override_port,
+                override_name,
+            )
         }
         _ => unreachable!(),
     }
@@ -81,12 +110,15 @@ fn print_usage() {
     println!(
         "    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)"
     );
+    println!("    -p, --port <PORT>   Override the listen port (default: random available port)");
+    println!("    -n, --name <NAME>   Override the agent name");
     println!("    -v, --verbose       Show startup messages and status");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo agent                           # Run with auto-discovery");
     println!("    arkavo agent --config AGENTS.md        # Run with specific config");
-    println!("    arkavo agent --config AGENTS.md -v     # Run with verbose output");
+    println!("    arkavo agent --port 8343 -v            # Run on specific port with verbose");
+    println!("    arkavo agent -n my-agent -p 8343       # Run with custom name and port");
 }
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
@@ -242,6 +274,8 @@ Your agent will start and be available at the configured address."#
 fn run_agent_with_options(
     config_file: Option<&str>,
     verbose: bool,
+    override_port: Option<u16>,
+    override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
 
@@ -274,19 +308,11 @@ fn run_agent_with_options(
 
         let agent_name = format!("{hostname}-{folder_name}");
 
-        // Use random high port (49152-65535 range)
-        use std::net::TcpListener;
-        let port = TcpListener::bind("127.0.0.1:0")
-            .ok()
-            .and_then(|listener| listener.local_addr().ok())
-            .map(|addr| addr.port())
-            .unwrap_or(8342);
-
         vec![AgentConfig {
             name: agent_name,
             purpose: "A general-purpose AI agent".to_string(),
             model: String::new(), // Empty model - let arkavo-router decide
-            listen: format!("0.0.0.0:{port}"),
+            listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
             mdns_enabled: true,
             mcp_servers: Vec::new(),
             api_keys: std::collections::HashMap::new(),
@@ -326,18 +352,11 @@ fn run_agent_with_options(
 
                 let agent_name = format!("{hostname}-{folder_name}");
 
-                use std::net::TcpListener;
-                let port = TcpListener::bind("127.0.0.1:0")
-                    .ok()
-                    .and_then(|listener| listener.local_addr().ok())
-                    .map(|addr| addr.port())
-                    .unwrap_or(8342);
-
                 vec![AgentConfig {
                     name: agent_name,
                     purpose: "A general-purpose AI agent".to_string(),
                     model: String::new(),
-                    listen: format!("0.0.0.0:{port}"),
+                    listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -355,6 +374,16 @@ fn run_agent_with_options(
         .into_iter()
         .next()
         .ok_or("No agent configuration available")?;
+
+    // Apply command-line overrides
+    if let Some(port) = override_port {
+        // Parse the current listen address to get the host part
+        let host = agent_config.listen.split(':').next().unwrap_or("0.0.0.0");
+        agent_config.listen = format!("{host}:{port}");
+    }
+    if let Some(name) = override_name {
+        agent_config.name = name;
+    }
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;
@@ -397,18 +426,11 @@ fn run_agent_with_options(
                 .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
                 .unwrap_or_else(|| "unknown".to_string());
 
-            use std::net::TcpListener;
-            let port = TcpListener::bind("127.0.0.1:0")
-                .ok()
-                .and_then(|listener| listener.local_addr().ok())
-                .map(|addr| addr.port())
-                .unwrap_or(8342);
-
             let default_config = AgentConfig {
                 name: format!("{hostname}-{folder_name}"),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
-                listen: format!("0.0.0.0:{port}"),
+                listen: "0.0.0.0:0".to_string(), // Dynamic port
                 mdns_enabled: true,
                 mcp_servers: Vec::new(),
                 api_keys: std::collections::HashMap::new(),
@@ -508,7 +530,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                    listen: "0.0.0.0:8342".to_string(), // Default listen address
+                    listen: "0.0.0.0:0".to_string(),                          // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -558,7 +580,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         name: section_name.clone(),
                         purpose: String::new(),
                         model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                        listen: "0.0.0.0:8342".to_string(), // Default listen address
+                        listen: "0.0.0.0:0".to_string(),                          // Dynamic port
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
@@ -673,19 +695,12 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 // Use a default name that will be overridden by explicit name: field
                 let name = header_text.to_string();
 
-                // Get a random port for this agent
-                let port = std::net::TcpListener::bind("127.0.0.1:0")
-                    .ok()
-                    .and_then(|listener| listener.local_addr().ok())
-                    .map(|addr| addr.port())
-                    .unwrap_or(8342);
-
                 current_agent = Some(AgentConfig {
                     name,
                     purpose: String::new(),
                     model: String::new(),
-                    listen: format!("0.0.0.0:{port}"),
-                    mdns_enabled: true, // Default to true for zero-config
+                    listen: "0.0.0.0:0".to_string(), // Dynamic port
+                    mdns_enabled: true,              // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
                     quiet: true, // Default is quiet
@@ -1030,9 +1045,28 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         LearningBus, start_anti_entropy_loop, start_lesson_propagation_loop,
     };
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
+
+    // Create AgentIdentity for TDF encryption/decryption
+    let mut identity_attributes = HashMap::new();
+    identity_attributes.insert("agent.id".to_string(), config.name.clone());
+    let agent_identity = Arc::new(
+        AgentIdentity::new(config.name.clone(), identity_attributes)
+            .map_err(|e| format!("Failed to create AgentIdentity: {e}"))?,
+    );
+
+    // Encode public key as base64 for mDNS broadcast
+    let public_key_b64 = BASE64_STANDARD.encode(agent_identity.public_key.as_bytes());
+
+    let debug_mode = std::env::var("ARKAVO_DEBUG").is_ok();
+    if debug_mode {
+        println!(
+            "[Identity] Created AgentIdentity for agent '{}' with public key: {}...",
+            config.name,
+            &public_key_b64[..20.min(public_key_b64.len())]
+        );
+    }
 
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
@@ -1063,6 +1097,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     };
 
     let server = A2aServer::new(server_config);
+
+    // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
+    server.set_public_key(public_key_b64.clone()).await;
 
     // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
@@ -1255,7 +1292,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         println!("HRM Conductor integrated for A2A task execution");
     }
 
-    let handle = server.start().await?;
+    let (handle, actual_port) = server.start_with_port().await?;
 
     // Generate and display QR code for registration
     if !quiet {
@@ -1320,14 +1357,17 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let peer_tx_clone = peer_tx.clone();
+        let public_key_clone = public_key_b64.clone();
 
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
             if let Err(e) = broadcast_agent_mdns_sync(
                 &config_clone,
+                actual_port,
                 shutdown_flag_clone,
                 Some(tx),
                 peer_tx_clone,
+                Some(public_key_clone),
             ) {
                 eprintln!("mDNS broadcast error: {e}");
             }
@@ -1551,7 +1591,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     }
 
     if !quiet {
-        println!("Ready at {}", config.listen);
+        // Display the actual bound address (using actual_port from OS if port was 0)
+        let listen_host = config.listen.split(':').next().unwrap_or("0.0.0.0");
+        println!("Ready at {listen_host}:{actual_port}");
     }
 
     // Keep the server running
@@ -1603,9 +1645,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
 fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
+    #[allow(unused_variables)] actual_port: u16,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
     #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool, Option<String>)>,
+    #[allow(unused_variables)] public_key: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -1614,12 +1658,7 @@ fn broadcast_agent_mdns_sync(
         use std::thread;
         use std::time::Duration;
 
-        let port: u16 = config
-            .listen
-            .split(':')
-            .nth(1)
-            .ok_or_else(|| format!("Invalid listen address format: {}", config.listen))?
-            .parse()?;
+        let port = actual_port;
         let service_ip = get_service_ip();
 
         // Create mDNS daemon
@@ -1703,20 +1742,33 @@ fn broadcast_agent_mdns_sync(
             }
         });
 
-        // Prepare properties
+        // Prepare properties - minimal mDNS, full capabilities via RPC
         let mut properties = HashMap::new();
         properties.insert("agent_id".to_string(), config.name.clone());
-        properties.insert("purpose".to_string(), config.purpose.clone());
-        properties.insert("model".to_string(), config.model.clone());
         properties.insert("ip".to_string(), service_ip.to_string());
+        properties.insert("version".to_string(), "1.0".to_string());
 
-        // Add capabilities based on agent name/purpose
+        // Add public key for TDF encryption (agents broadcast their ECDSA P-256 public key)
+        if let Some(pk) = &public_key {
+            properties.insert("public_key".to_string(), pk.clone());
+        }
+
+        // Retain purpose and model for backward compatibility with existing orchestrators
+        // Full capability details should be queried via agent.capabilities.get RPC
+        if !config.purpose.is_empty() {
+            properties.insert("purpose".to_string(), config.purpose.clone());
+        }
+        if !config.model.is_empty() {
+            properties.insert("model".to_string(), config.model.clone());
+        }
+
+        // Add capabilities based on agent name/purpose (for backward compatibility)
         let capabilities = get_agent_capabilities(&config.name, &config.purpose);
         if !capabilities.is_empty() {
             properties.insert("capabilities".to_string(), capabilities.join(","));
         }
 
-        // Add MCP servers as capabilities
+        // Add MCP servers as capabilities (for backward compatibility)
         if !config.mcp_servers.is_empty() {
             let mcp_tools: Vec<String> =
                 config.mcp_servers.iter().map(|s| s.name.clone()).collect();

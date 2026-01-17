@@ -1,0 +1,11 @@
+{
+  "scenario": "hello-world",
+  "description": "Your first agent - a simple greeting",
+  "type": "chat",
+  "tasks": [
+    {
+      "id": "greeting",
+      "description": "Hello! Please introduce yourself briefly. What are you and what can you help with?"
+    }
+  ]
+}

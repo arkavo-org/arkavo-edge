@@ -1,0 +1,24 @@
+{
+  "scenario": "software-development-simple",
+  "description": "Basic software development workflow with 3 agents",
+  "tasks": [
+    {
+      "id": "task-1",
+      "description": "Create a REST API endpoint for user registration",
+      "target": "project-manager",
+      "expected_flow": ["project-manager", "coding-agent", "testing-agent"]
+    },
+    {
+      "id": "task-2",
+      "description": "Add input validation to the login form",
+      "target": "project-manager",
+      "expected_flow": ["project-manager", "coding-agent", "testing-agent"]
+    },
+    {
+      "id": "task-3",
+      "description": "Write unit tests for the authentication module",
+      "target": "testing-agent",
+      "expected_flow": ["testing-agent"]
+    }
+  ]
+}

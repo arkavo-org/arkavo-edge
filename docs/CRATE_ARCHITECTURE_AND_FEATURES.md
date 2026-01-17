@@ -55,7 +55,7 @@ Crates implementing the Model Context Protocol and providing tools for agents.
 | **`arkavo-mcp-runtime`** | **MCP Server Runtime**<br>- Dynamic client management.<br>- JSON-RPC server implementation.<br>- Built-in toolsets.<br>- Runtime persistence and discovery. |
 | **`arkavo-mcp-tools`** | **Standard Tool Registry**<br>- **Security**: Semgrep, OSV, Syft.<br>- **GitHub**: PR reviews, checks, issues.<br>- **Testing**: Multi-language runners.<br>- **Git/FS**: Repo and file operations.<br>- **Context**: Web search, time, OS info. |
 | **`arkavo-mcp-macos`** | **macOS Specific Tools**<br>- iOS Simulator management.<br>- XCUITest automation bridge.<br>- Diagnostic reporting.<br>- Non-interactive UI automation. |
-| **`arkavo-mesh-tools`** | **Mesh Network Tools**<br>- mDNS agent discovery.<br>- Capability-based agent querying.<br>- Secure task delegation.<br>- Load-aware routing tools. |
+| **`arkavo-mcp-mesh`** | **Mesh Network Tools**<br>- mDNS agent discovery.<br>- Capability-based agent querying.<br>- Secure task delegation.<br>- Load-aware routing tools. |
 | **`arkavo-code-search`** | **Code Analysis Tools**<br>- Ripgrep integration for fast search.<br>- Structural search/replace (Comby).<br>- Tree-sitter AST parsing.<br>- Multi-language support. |
 | **`arkavo-browser`** | **Browser Automation**<br>- Chromium automation via WebDriver.<br>- Live DOM injection.<br>- Screenshot and visual state capture.<br>- Async interaction model. |
 | **`arkavo-git`** | **Git Operations**<br>- Autonomous repo management.<br>- AI-generated commit messages.<br>- Unified diff generation.<br>- Safety checks and rollbacks. |

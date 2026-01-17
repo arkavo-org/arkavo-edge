@@ -795,6 +795,98 @@ pub enum ConfigError {
     Unauthorized,
 }
 
+/// Response containing full agent capabilities for onboarding
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentCapabilitiesGetResponse {
+    /// Unique agent identifier
+    pub agent_id: String,
+
+    /// Human-readable agent name
+    pub name: String,
+
+    /// Agent's declared purpose
+    pub purpose: String,
+
+    /// LLM model being used
+    pub model: String,
+
+    /// List of capabilities this agent provides
+    pub capabilities: Vec<String>,
+
+    /// MCP tools available to this agent
+    pub mcp_tools: Vec<McpToolInfo>,
+
+    /// Current load (0.0 to 1.0)
+    pub load: f32,
+
+    /// Whether the agent is accepting new tasks
+    pub accepting_tasks: bool,
+
+    /// Base64-encoded ECDSA P-256 public key for TDF encryption
+    pub public_key: String,
+
+    /// Agent version
+    pub version: String,
+
+    /// Supported interaction modes
+    #[serde(default)]
+    pub interaction_modes: Vec<InteractionMode>,
+}
+
+/// Information about an MCP tool
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct McpToolInfo {
+    /// Tool name
+    pub name: String,
+
+    /// Tool description
+    pub description: String,
+
+    /// Tool server/provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+
+    /// Input schema for the tool
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+/// Request to specialize an agent with encrypted configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentSpecializeRequest {
+    /// Orchestrator/requester agent ID
+    pub requester_id: String,
+
+    /// TDF-encrypted ConfigurationBundle (base64-encoded)
+    pub encrypted_bundle: String,
+
+    /// Task context for specialization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_context: Option<String>,
+
+    /// Session ID for tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Response to agent specialization request
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentSpecializeResponse {
+    /// Session ID for the specialization
+    pub session_id: String,
+
+    /// Whether specialization was accepted
+    pub accepted: bool,
+
+    /// Message with additional details
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+
+    /// Capabilities activated by this specialization
+    #[serde(default)]
+    pub activated_capabilities: Vec<String>,
+}
+
 /// Request to get agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentConfigGetRequest {

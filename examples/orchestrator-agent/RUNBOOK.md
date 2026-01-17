@@ -15,14 +15,11 @@ The scenario: An intelligent coordinator that routes human requests to specializ
 ## Prerequisites
 
 ```bash
-# Build the binary and mesh tools
+# Build the binary
 cargo build
 
 # Verify port 8340 is free
 lsof -i :8340 && echo "Port 8340 is in use!"
-
-# Verify mesh tools are built
-ls -la target/debug/arkavo-mesh-tools
 ```
 
 ## Step-by-Step Execution
@@ -170,13 +167,6 @@ lsof -ti :8340 | xargs kill -9
 **Fix:** Start specialist agents first, verify mDNS
 ```bash
 dns-sd -B _a2a._tcp local.
-```
-
-### MCP tools not found
-**Symptom:** Error about arkavo-mesh-tools
-**Fix:** Build the mesh tools crate
-```bash
-cargo build -p arkavo-mesh-tools
 ```
 
 ### Agent discovery timeout

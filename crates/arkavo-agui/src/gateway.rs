@@ -323,6 +323,76 @@ impl AgUiGateway {
             }
         });
 
+        // Monitor agent changes and broadcast AgentDiscovered/AgentLost events
+        let connections_for_agents = self.connections.clone();
+        let agents_for_monitor = discovered_agents.clone();
+        tokio::spawn(async move {
+            let mut previous_agents: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+
+            loop {
+                interval.tick().await;
+
+                let agents_list = agents_for_monitor.read().await;
+                let current_agents: std::collections::HashSet<String> = agents_list
+                    .iter()
+                    .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .collect();
+
+                // Find new agents
+                for agent_id in current_agents.difference(&previous_agents) {
+                    if let Some(agent) = agents_list
+                        .iter()
+                        .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(agent_id.as_str()))
+                    {
+                        let event = AgUiEvent::AgentDiscovered {
+                            agent_id: agent_id.clone(),
+                            endpoint: agent
+                                .get("endpoint")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            purpose: agent
+                                .get("purpose")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            model: agent
+                                .get("model")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        };
+
+                        let conns = connections_for_agents.read().await;
+                        for (_, conn_info) in conns.iter() {
+                            let _ = conn_info._ws_tx.send(event.clone()).await;
+                        }
+                        println!("AG-UI: Broadcast AgentDiscovered: {}", agent_id);
+                    }
+                }
+
+                // Find lost agents
+                for agent_id in previous_agents.difference(&current_agents) {
+                    let event = AgUiEvent::AgentLost {
+                        agent_id: agent_id.clone(),
+                        reason: "Agent no longer discovered".to_string(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    let conns = connections_for_agents.read().await;
+                    for (_, conn_info) in conns.iter() {
+                        let _ = conn_info._ws_tx.send(event.clone()).await;
+                    }
+                    println!("AG-UI: Broadcast AgentLost: {}", agent_id);
+                }
+
+                previous_agents = current_agents;
+            }
+        });
+
         // Create shared state for handlers
         let telemetry_rx = self
             .telemetry_rx
@@ -370,7 +440,7 @@ impl AgUiGateway {
 }
 
 async fn index_handler() -> Html<&'static str> {
-    Html(include_str!("../static/shell.html"))
+    Html(include_str!("../static/index.html"))
 }
 
 async fn static_js_handler() -> Response {
@@ -383,7 +453,7 @@ async fn static_js_handler() -> Response {
 }
 
 async fn chat_ui_handler() -> Html<&'static str> {
-    Html(include_str!("../static/index-agui.html"))
+    Html(include_str!("../static/index.html"))
 }
 
 async fn websocket_handler(
@@ -468,26 +538,44 @@ async fn handle_websocket(
     budget_handler: Arc<RwLock<BudgetHandler>>,
     initial_prompt: Arc<RwLock<Option<String>>>,
 ) {
+    use futures::sink::SinkExt;
+    use futures::stream::StreamExt;
+
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // Create bounded channel for back-pressure handling
     let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
 
-    // Spawn task to forward messages from channel to WebSocket
-    let ws_clone = Arc::new(tokio::sync::Mutex::new(ws));
-    let ws_for_forward = ws_clone.clone();
+    // Split WebSocket into read and write halves to avoid deadlock
+    let (mut ws_write, mut ws_read) = ws.split();
+
+    // Spawn task to forward messages from channel to WebSocket write half
     let forward_task = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&event) {
-                let mut ws_guard = ws_for_forward.lock().await;
-                if ws_guard.send(Message::Text(json)).await.is_err() {
-                    break; // WebSocket closed
-                }
+            if let Ok(json) = serde_json::to_string(&event)
+                && ws_write.send(Message::Text(json)).await.is_err()
+            {
+                break; // WebSocket closed
             }
         }
     });
 
     println!("AG-UI: New WebSocket connection: {session_id}");
+
+    // Register connection immediately so it receives broadcasts (heartbeats, agent discovery)
+    {
+        let conn_info = ConnectionInfo {
+            _ws_tx: tx.clone(),
+            _agent_id: None,
+            subscriptions: Vec::new(),
+            current_plan: None,
+            current_prompt: None,
+        };
+        connections
+            .write()
+            .await
+            .insert(session_id.clone(), conn_info);
+    }
 
     // If there's an initial prompt, send it automatically
     let prompt_guard = initial_prompt.read().await;
@@ -513,13 +601,9 @@ async fn handle_websocket(
         }
     }
 
-    // Handle incoming messages
-    let ws_for_recv = ws_clone.clone();
+    // Handle incoming messages from WebSocket read half
     loop {
-        let msg = {
-            let mut ws_guard = ws_for_recv.lock().await;
-            ws_guard.recv().await
-        };
+        let msg = ws_read.next().await;
 
         match msg {
             Some(Ok(Message::Text(text))) => match serde_json::from_str::<AgUiEvent>(&text) {
@@ -1104,6 +1188,50 @@ async fn handle_event(
             }
         }
 
+        AgUiEvent::RequestMeshStatus => {
+            println!("AG-UI: Received RequestMeshStatus");
+
+            let agents_list = agents.read().await;
+            let mesh_agents: Vec<crate::types::MeshAgentInfo> = agents_list
+                .iter()
+                .map(|a| crate::types::MeshAgentInfo {
+                    id: a
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    endpoint: a
+                        .get("endpoint")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    purpose: a
+                        .get("purpose")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    model: a
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: "connected".to_string(),
+                })
+                .collect();
+
+            let mesh_status = AgUiEvent::MeshStatus {
+                agents: mesh_agents,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            // Debug: print JSON
+            if let Ok(json) = serde_json::to_string(&mesh_status) {
+                println!("AG-UI: MeshStatus JSON: {}", &json[..json.len().min(500)]);
+            }
+            tx.send(mesh_status).await?;
+            println!("AG-UI: Sent MeshStatus with {} agents", agents_list.len());
+        }
+
         AgUiEvent::ApplyPart { part_id } => {
             println!("AG-UI: Received ApplyPart: {part_id}");
 
@@ -1208,6 +1336,86 @@ async fn handle_event(
                     part_id_clone
                 );
             });
+        }
+
+        AgUiEvent::RequestTaskList => {
+            println!("AG-UI: Received RequestTaskList");
+
+            // Get tasks from connection info or return empty list
+            let conn_guard = connections.read().await;
+            let tasks: Vec<crate::types::TaskInfo> =
+                if let Some(conn_info) = conn_guard.get(session_id) {
+                    // Get tasks associated with this session
+                    conn_info
+                        .subscriptions
+                        .iter()
+                        .filter_map(|_| None)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+            let task_list = AgUiEvent::TaskList {
+                tasks,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            tx.send(task_list).await?;
+            println!("AG-UI: Sent TaskList");
+        }
+
+        AgUiEvent::SubmitTask {
+            description,
+            target_agent: _,
+        } => {
+            println!("AG-UI: Received SubmitTask: {}", description);
+
+            let task_id = uuid::Uuid::new_v4().to_string();
+
+            // All human tasks route to orchestrator for decomposition
+            // The orchestrator will break down the task and delegate to specialists
+            let agents_list = agents.read().await;
+            let orchestrator = agents_list.iter().find(|a| {
+                let purpose = a.get("purpose").and_then(|v| v.as_str()).unwrap_or("");
+                purpose.to_lowercase().contains("orchestrat")
+            });
+
+            if let Some(orch) = orchestrator {
+                if let Some(endpoint) = orch.get("endpoint").and_then(|v| v.as_str()) {
+                    let orch_id = orch
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("orchestrator");
+                    println!(
+                        "AG-UI: Routing task to orchestrator {} at {}",
+                        orch_id, endpoint
+                    );
+                }
+            } else {
+                println!("AG-UI: No orchestrator found, task queued for when one connects");
+            }
+
+            // Send confirmation back to client
+            let task_submitted = AgUiEvent::TaskSubmitted {
+                task_id: task_id.clone(),
+                status: "submitted".to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            tx.send(task_submitted).await?;
+
+            // Also send task status changed to update the list
+            let status_changed = AgUiEvent::TaskStatusChanged {
+                task_id,
+                status: "submitted".to_string(),
+                progress: Some(0.0),
+                result: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            // Broadcast to all connections
+            let conns = connections.read().await;
+            for (_, conn_info) in conns.iter() {
+                let _ = conn_info._ws_tx.send(status_changed.clone()).await;
+            }
         }
 
         _ => {

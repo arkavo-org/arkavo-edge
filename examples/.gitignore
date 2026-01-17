@@ -1,0 +1,4 @@
+# Runtime files
+.pool_pids
+.orchestrator_pid
+logs/*.log

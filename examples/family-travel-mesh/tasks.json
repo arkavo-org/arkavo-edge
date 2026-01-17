@@ -1,0 +1,24 @@
+{
+  "scenario": "family-travel-mesh",
+  "description": "HRM-based travel planning with specialist agents",
+  "tasks": [
+    {
+      "id": "task-1",
+      "description": "Plan a 3-day Vegas trip for family of 4 with a $2000 budget",
+      "target": "conductor",
+      "expected_flow": ["conductor", "router", "vegas-guide", "family-activities", "budget-optimizer", "critic"]
+    },
+    {
+      "id": "task-2",
+      "description": "Find family-friendly shows and activities for kids ages 8 and 12",
+      "target": "conductor",
+      "expected_flow": ["conductor", "router", "family-activities", "critic"]
+    },
+    {
+      "id": "task-3",
+      "description": "Optimize hotel and dining to maximize savings",
+      "target": "conductor",
+      "expected_flow": ["conductor", "router", "budget-optimizer", "critic"]
+    }
+  ]
+}

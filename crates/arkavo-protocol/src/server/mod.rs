@@ -40,13 +40,14 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::TaskExecutor;
 use crate::task_store::TaskStore;
 use crate::types::{
-    AgentBroadcast, AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigRestoreRequest,
-    AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
-    AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter,
-    AgentQueryRequest, AgentQueryResponse, ChatOpenRequest, ChatRequest, ChatSession,
-    DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent, MessageSendRequest,
-    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
-    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, UserMessage,
+    AgentBroadcast, AgentCapabilitiesGetResponse, AgentConfigGetRequest, AgentConfigGetResponse,
+    AgentConfigRestoreRequest, AgentConfigRestoreResponse, AgentConfigUpdateRequest,
+    AgentConfigUpdateResponse, AgentConfigValidateRequest, AgentConfigValidateResponse,
+    AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, AgentSpecializeRequest,
+    AgentSpecializeResponse, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
+    DiscoverFeaturesQuery, DiscoveredAgent, MessageSendRequest, MessageSendResponse,
+    TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
+    TaskGetResponse, TaskResponse, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
@@ -208,28 +209,41 @@ pub trait A2aRpc {
     /// Check behavior policy for a sector based on learned lessons
     #[method(name = "learning/checkPolicy")]
     async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice>;
+
+    /// Get agent capabilities for orchestrator onboarding
+    #[method(name = "agent.capabilities.get")]
+    async fn agent_capabilities_get(&self) -> RpcResult<AgentCapabilitiesGetResponse>;
+
+    /// Specialize agent with TDF-encrypted configuration
+    #[method(name = "agent.specialize")]
+    async fn agent_specialize(
+        &self,
+        request: AgentSpecializeRequest,
+    ) -> RpcResult<AgentSpecializeResponse>;
 }
 
 pub struct A2aRpcImpl {
-    rate_limiter: Arc<RateLimiter>,
-    metrics: Arc<MetricsCollector>,
-    mcp_registry: Arc<McpRegistry>,
-    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
-    llm_adapter: Option<Arc<LlmClientAdapter>>,
-    chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
-    task_store: Arc<dyn TaskStore>,
-    task_executor: Arc<TaskExecutor>,
-    event_writer: Option<Arc<EventWriter>>,
-    session_id: String,
-    event_sequence: Arc<tokio::sync::RwLock<u64>>,
-    auth_backend: Arc<dyn AuthBackend>,
-    registration_service: Arc<crate::registration::RegistrationService>,
+    pub(crate) rate_limiter: Arc<RateLimiter>,
+    pub(crate) metrics: Arc<MetricsCollector>,
+    pub(crate) mcp_registry: Arc<McpRegistry>,
+    pub(crate) agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    pub(crate) llm_adapter: Option<Arc<LlmClientAdapter>>,
+    pub(crate) chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
+    pub(crate) task_store: Arc<dyn TaskStore>,
+    pub(crate) task_executor: Arc<TaskExecutor>,
+    pub(crate) event_writer: Option<Arc<EventWriter>>,
+    pub(crate) session_id: String,
+    pub(crate) event_sequence: Arc<tokio::sync::RwLock<u64>>,
+    pub(crate) auth_backend: Arc<dyn AuthBackend>,
+    pub(crate) registration_service: Arc<crate::registration::RegistrationService>,
     /// HRM Conductor for task orchestration
-    conductor: Arc<Conductor<InMemoryTaskStore>>,
+    pub(crate) conductor: Arc<Conductor<InMemoryTaskStore>>,
     /// Router for LLM calls during HRM task execution
-    router: Option<Arc<arkavo_router::Router>>,
+    pub(crate) router: Option<Arc<arkavo_router::Router>>,
     /// Learning bus for gossip-based learning propagation
-    learning_bus: Option<Arc<LearningBus>>,
+    pub(crate) learning_bus: Option<Arc<LearningBus>>,
+    /// Base64-encoded ECDSA P-256 public key for TDF encryption
+    pub(crate) public_key: Option<String>,
 }
 
 #[async_trait]
@@ -685,5 +699,30 @@ impl A2aRpcServer for A2aRpcImpl {
                 Ok(learning_bus::BehaviorAdvice::Default)
             }
         }
+    }
+
+    async fn agent_capabilities_get(&self) -> RpcResult<AgentCapabilitiesGetResponse> {
+        handlers::discovery::handle_agent_capabilities_get(
+            &self.metrics,
+            &self.rate_limiter,
+            &self.mcp_registry,
+            &self.agent_metadata,
+            self.public_key.as_deref(),
+        )
+        .await
+    }
+
+    async fn agent_specialize(
+        &self,
+        request: AgentSpecializeRequest,
+    ) -> RpcResult<AgentSpecializeResponse> {
+        handlers::specialization::handle_agent_specialize(
+            &self.metrics,
+            &self.rate_limiter,
+            &self.mcp_registry,
+            &self.agent_metadata,
+            request,
+        )
+        .await
     }
 }

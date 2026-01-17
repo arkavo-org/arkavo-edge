@@ -43,6 +43,8 @@ pub struct A2aServer {
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// Learning bus for gossip-based learning propagation
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
+    /// Base64-encoded ECDSA P-256 public key for TDF encryption
+    public_key: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 impl A2aServer {
@@ -71,7 +73,18 @@ impl A2aServer {
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
+            public_key: Arc::new(tokio::sync::RwLock::new(None)),
         }
+    }
+
+    /// Set the agent's public key for TDF encryption
+    pub async fn set_public_key(&self, key: String) {
+        *self.public_key.write().await = Some(key);
+    }
+
+    /// Get the agent's public key
+    pub async fn public_key(&self) -> Option<String> {
+        self.public_key.read().await.clone()
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
@@ -390,26 +403,32 @@ impl A2aServer {
 
     async fn build_tool_registry(&self) {
         info!("Building tool registry from MCP connections");
-        let storage = match arkavo_memory::MemoryStorage::new().await {
-            Ok(s) => std::sync::Arc::new(s),
-            Err(e) => {
-                error!(error = %e, "Failed to initialize storage for tool registry");
-                return;
-            }
-        };
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
+        // Use empty registry - agents only get tools from their configured MCP servers
+        // This enables small models (ministral-3b) to work with focused tool sets
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
 
+        // Project MCP tools into the registry
         match self.mcp_registry.list_all_tools().await {
             Ok(tools) => {
-                info!("Found {} tools from MCP servers", tools.len());
+                info!("Projecting {} tools from MCP servers", tools.len());
+                for tool in tools {
+                    // Tools from MCP servers will be registered via the McpRegistry
+                    // The registry serves as a unified view for the router
+                    info!("  - {} (from MCP)", tool.name);
+                }
             }
             Err(e) => {
                 warn!("Failed to list tools from MCP servers: {}", e);
             }
         }
 
+        // Also register the list_models tool from the router for model discovery
+        if let Some(router) = self.router.read().await.as_ref() {
+            arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
+        }
+
         *self.tool_registry.write().await = Some(Arc::new(tool_registry));
-        info!("✓ Tool registry built successfully");
+        info!("✓ Tool registry built (MCP tools only)");
     }
 
     pub async fn start_file_watcher(&self) -> Result<()> {
@@ -675,7 +694,15 @@ impl A2aServer {
         Some(handle)
     }
 
+    /// Start the server and return the handle along with the actual bound port
     pub async fn start(&self) -> Result<ServerHandle> {
+        let (handle, _actual_port) = self.start_with_port().await?;
+        Ok(handle)
+    }
+
+    /// Start the server and return both the handle and the actual bound port
+    /// This is useful when binding to port 0 for dynamic port allocation
+    pub async fn start_with_port(&self) -> Result<(ServerHandle, u16)> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind_address, self.config.port)
             .parse()
             .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid bind address: {e}")))?;
@@ -687,6 +714,16 @@ impl A2aServer {
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
+
+        // Get the actual bound address (important when using port 0)
+        let actual_addr = server
+            .local_addr()
+            .map_err(|e| A2aError::Transport(format!("Failed to get local address: {e}")))?;
+        let actual_port = actual_addr.port();
+
+        if self.config.port == 0 {
+            info!("Server bound to dynamic port: {}", actual_port);
+        }
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
@@ -767,6 +804,7 @@ impl A2aServer {
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: self.learning_bus.read().await.clone(),
+            public_key: self.public_key.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -775,9 +813,9 @@ impl A2aServer {
 
         let handle = server.start(rpc_impl.into_rpc());
 
-        info!("A2A server started successfully on {}", addr);
+        info!("A2A server started successfully on {}", actual_addr);
         info!("OpenRPC schema available via JSON-RPC method: rpc.discover");
 
-        Ok(handle)
+        Ok((handle, actual_port))
     }
 }

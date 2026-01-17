@@ -18,10 +18,10 @@ default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
-mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mesh-tools", "arkavo-router/gemini"]
+mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
-mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
+mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote"]
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
@@ -60,6 +60,9 @@ arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
+arkavo-config-encryption = { path = "../arkavo-config-encryption" }
+arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }
@@ -89,7 +92,7 @@ libc = { workspace = true }
 
 # Cross-platform MCP tools (optional, enabled via mcp-tools feature)
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
-arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }
+arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

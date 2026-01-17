@@ -1,0 +1,15 @@
+{
+  "scenario": "secure-agent",
+  "description": "Preflight policies demo (run standalone for enforcement)",
+  "type": "chat",
+  "tasks": [
+    {
+      "id": "safe-query",
+      "description": "What is the capital of France?"
+    },
+    {
+      "id": "explain-policies",
+      "description": "Explain what preflight policies are used for in AI agents."
+    }
+  ]
+}
