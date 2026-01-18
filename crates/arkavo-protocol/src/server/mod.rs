@@ -14,6 +14,7 @@ mod synthesis;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
+mod well_known;
 
 pub use a2a_server::A2aServer;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
@@ -32,6 +33,7 @@ pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
 pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
+pub use well_known::{WellKnownState, start_well_known_server};
 
 use crate::auth::AuthBackend;
 use crate::mcp_registry::McpRegistry;

@@ -99,13 +99,13 @@ check_npx() {
     return 0
 }
 
-# Health check for an agent endpoint
+# Health check for an agent endpoint (uses /.well-known/agent.json per A2A spec)
 check_health() {
     local url="$1"
     local name="${2:-Agent}"
     local timeout="${3:-5}"
 
-    if curl -sf --connect-timeout "$timeout" "$url/health" >/dev/null 2>&1; then
+    if curl -sf --connect-timeout "$timeout" "$url/.well-known/agent.json" >/dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} $name is healthy"
         return 0
     else
@@ -114,7 +114,7 @@ check_health() {
     fi
 }
 
-# Wait for agent to become healthy
+# Wait for agent to become healthy (uses /.well-known/agent.json per A2A spec)
 wait_for_health() {
     local url="$1"
     local name="${2:-Agent}"
@@ -123,7 +123,7 @@ wait_for_health() {
 
     echo -n "Waiting for $name..."
     for ((i=1; i<=max_attempts; i++)); do
-        if curl -sf --connect-timeout 2 "$url/health" >/dev/null 2>&1; then
+        if curl -sf --connect-timeout 2 "$url/.well-known/agent.json" >/dev/null 2>&1; then
             echo -e " ${GREEN}OK${NC}"
             return 0
         fi

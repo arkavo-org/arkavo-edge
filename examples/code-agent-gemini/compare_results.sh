@@ -43,7 +43,7 @@ check_agents() {
     print_status "Checking agent availability..."
 
     if [[ "$model1" == gemini* ]]; then
-        if ! curl -s "http://localhost:$GEMINI_PORT/health" > /dev/null 2>&1; then
+        if ! curl -s "http://localhost:$GEMINI_PORT/.well-known/agent.json" > /dev/null 2>&1; then
             print_error "Gemini agent not running on port $GEMINI_PORT"
             echo "Start it with: ./launch_agent.sh"
             exit 1
@@ -52,7 +52,7 @@ check_agents() {
     fi
 
     if [[ "$model2" == claude* ]]; then
-        if ! curl -s "http://localhost:$CLAUDE_PORT/health" > /dev/null 2>&1; then
+        if ! curl -s "http://localhost:$CLAUDE_PORT/.well-known/agent.json" > /dev/null 2>&1; then
             print_error "Claude agent not running on port $CLAUDE_PORT"
             echo "Start it with: cd ../claude-code-agent && ./launch_agent.sh"
             exit 1

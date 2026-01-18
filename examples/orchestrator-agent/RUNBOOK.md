@@ -70,7 +70,7 @@ mDNS: Discovered code-review agent at ...
 dns-sd -B _a2a._tcp local.
 
 # Check orchestrator is running
-curl -s http://localhost:8340/health
+curl -s http://localhost:8340/.well-known/agent.json
 
 # Check which agents are discovered
 lsof -i -P | grep arkavo
@@ -134,7 +134,7 @@ ORCHESTRATOR_PID=$!
 sleep 5
 
 # Verify orchestrator is healthy
-if ! curl -sSf http://localhost:8340/health > /dev/null 2>&1; then
+if ! curl -sSf http://localhost:8340/.well-known/agent.json > /dev/null 2>&1; then
     echo "FAIL: Orchestrator not responding"
     kill $ORCHESTRATOR_PID $SPECIALIST_PID 2>/dev/null
     exit 1

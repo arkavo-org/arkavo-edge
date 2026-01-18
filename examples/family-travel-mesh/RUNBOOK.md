@@ -115,7 +115,7 @@ lsof -i :8401 -i :8402 -i :8403 -i :8404 -i :8410 -i :8411 -i :8412
 sleep 15
 
 # Verify conductor is healthy
-if ! curl -sSf http://localhost:8401/health > /dev/null; then
+if ! curl -sSf http://localhost:8401/.well-known/agent.json > /dev/null; then
     echo "FAIL: Conductor not responding"
     ./stop_mesh.sh
     exit 1

@@ -32,6 +32,10 @@ governor = { workspace = true, features = ["std", "jitter"] }
 dashmap = { workspace = true }
 crossbeam-queue = { workspace = true }
 
+# HTTP server for well-known endpoints
+axum = { workspace = true }
+tower = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }

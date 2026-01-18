@@ -84,7 +84,7 @@ start_agent() {
     local max_attempts=15
     local attempt=0
     while [ $attempt -lt $max_attempts ]; do
-        if curl -s "http://localhost:$port/health" > /dev/null 2>&1; then
+        if curl -s "http://localhost:$port/.well-known/agent.json" > /dev/null 2>&1; then
             print_status "SUCCESS" "$name started (PID: $pid)"
             return 0
         fi
@@ -105,7 +105,7 @@ verify_mesh() {
 
     for agent in "${agents[@]}"; do
         IFS=':' read -r name port <<< "$agent"
-        if curl -s "http://localhost:$port/health" > /dev/null 2>&1; then
+        if curl -s "http://localhost:$port/.well-known/agent.json" > /dev/null 2>&1; then
             print_status "SUCCESS" "$name is healthy"
         else
             print_status "ERROR" "$name is not responding"

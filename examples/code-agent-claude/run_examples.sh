@@ -36,7 +36,7 @@ print_error() {
 }
 
 check_agent() {
-    if ! curl -s "$AGENT_URL/health" > /dev/null 2>&1; then
+    if ! curl -s "$AGENT_URL/.well-known/agent.json" > /dev/null 2>&1; then
         print_error "Agent not running. Please start it first:"
         echo "  ./launch_agent.sh start"
         exit 1

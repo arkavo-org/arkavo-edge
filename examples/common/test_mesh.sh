@@ -79,14 +79,14 @@ sleep "$STARTUP_WAIT"
 
 # Health check
 echo -e "${BLUE}Checking health on port $PRIMARY_PORT...${NC}"
-if curl -sf "http://localhost:$PRIMARY_PORT/health" >/dev/null 2>&1; then
+if curl -sf "http://localhost:$PRIMARY_PORT/.well-known/agent.json" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Primary agent healthy${NC}"
 else
     echo -e "${RED}✗ Primary agent not responding on port $PRIMARY_PORT${NC}"
 
     # Check common ports
     for port in 8340 8341 8342 8343 8344 8401 8402 8403; do
-        if curl -sf "http://localhost:$port/health" >/dev/null 2>&1; then
+        if curl -sf "http://localhost:$port/.well-known/agent.json" >/dev/null 2>&1; then
             echo -e "${YELLOW}  Found agent on port $port${NC}"
         fi
     done

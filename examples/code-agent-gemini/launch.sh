@@ -157,7 +157,7 @@ start_agent() {
 
         # Test health endpoint
         sleep 1
-        if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
+        if curl -s "http://localhost:$AGENT_PORT/.well-known/agent.json" > /dev/null 2>&1; then
             print_status "Health check passed ✓"
         else
             print_warning "Health check failed - agent may still be initializing"
@@ -204,7 +204,7 @@ status_agent() {
             print_status "Agent is running (PID: $PID)"
 
             # Check health
-            if curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
+            if curl -s "http://localhost:$AGENT_PORT/.well-known/agent.json" > /dev/null 2>&1; then
                 print_status "Health check: HEALTHY"
             else
                 print_warning "Health check: UNREACHABLE"
