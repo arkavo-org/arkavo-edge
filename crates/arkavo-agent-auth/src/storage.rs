@@ -10,7 +10,9 @@ fn get_token_path() -> Result<PathBuf, AgentAuthError> {
     } else if cfg!(target_os = "windows") {
         dirs::data_local_dir()
             .map(|p| p.join("arkavo"))
-            .ok_or_else(|| AgentAuthError::Storage("Could not determine local data directory".into()))?
+            .ok_or_else(|| {
+                AgentAuthError::Storage("Could not determine local data directory".into())
+            })?
     } else {
         // Linux and other Unix-like systems
         dirs::data_dir()

@@ -22,9 +22,7 @@ impl AgentAuthClient {
 
     /// Create a new authentication client with custom configuration.
     pub fn with_config(config: AgentAuthConfig) -> Result<Self, AgentAuthError> {
-        let http_client = reqwest::Client::builder()
-            .timeout(config.timeout)
-            .build()?;
+        let http_client = reqwest::Client::builder().timeout(config.timeout).build()?;
 
         Ok(Self {
             config,
@@ -61,12 +59,7 @@ impl AgentAuthClient {
     async fn request_token(&self, request: &TokenRequest) -> Result<TokenResponse, AgentAuthError> {
         let url = format!("{}/agents/token", self.config.base_url);
 
-        let response = self
-            .http_client
-            .post(&url)
-            .json(request)
-            .send()
-            .await?;
+        let response = self.http_client.post(&url).json(request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -88,7 +81,10 @@ impl AgentAuthClient {
     /// 2. Sign the challenge with the keypair
     /// 3. Submit the signed challenge to get a token
     /// 4. Store the token locally
-    pub async fn authenticate(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
+    pub async fn authenticate(
+        &self,
+        keypair: &AgentKeypair,
+    ) -> Result<StoredToken, AgentAuthError> {
         let public_key = keypair.public_key();
         let did = public_key.to_did_key();
 
@@ -96,9 +92,8 @@ impl AgentAuthClient {
         let mut last_error = None;
         for retry in 0..=self.config.max_retries {
             if retry > 0 {
-                let delay = Duration::from_millis(
-                    self.config.retry_base_delay_ms * (1 << retry.min(5)),
-                );
+                let delay =
+                    Duration::from_millis(self.config.retry_base_delay_ms * (1 << retry.min(5)));
                 tokio::time::sleep(delay).await;
             }
 

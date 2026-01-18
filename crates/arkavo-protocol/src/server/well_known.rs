@@ -1,10 +1,4 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -145,7 +139,10 @@ mod tests {
         let card = build_agent_card(&state).await;
 
         assert_eq!(card.name, "test-agent");
-        assert_eq!(card.description, Some("Test agent for unit tests".to_string()));
+        assert_eq!(
+            card.description,
+            Some("Test agent for unit tests".to_string())
+        );
         assert_eq!(card.url, "http://localhost:8080");
         assert!(card.capabilities.streaming);
         assert!(card.protocol_versions.contains(&"0.3".to_string()));

@@ -122,7 +122,10 @@ impl AgentPublicKey {
             .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base58 decode error: {}", e)))?;
 
         // Check multicodec prefix
-        if decoded.len() < 2 || decoded[0] != ED25519_MULTICODEC[0] || decoded[1] != ED25519_MULTICODEC[1] {
+        if decoded.len() < 2
+            || decoded[0] != ED25519_MULTICODEC[0]
+            || decoded[1] != ED25519_MULTICODEC[1]
+        {
             return Err(CryptoError::InvalidKeyFormat(
                 "Invalid Ed25519 multicodec prefix".to_string(),
             ));
@@ -229,7 +232,11 @@ mod tests {
         let did = public_key.to_did_key();
 
         // DID:key format should start with "did:key:z6Mk" for Ed25519 keys
-        assert!(did.starts_with("did:key:z6Mk"), "DID should start with 'did:key:z6Mk', got: {}", did);
+        assert!(
+            did.starts_with("did:key:z6Mk"),
+            "DID should start with 'did:key:z6Mk', got: {}",
+            did
+        );
     }
 
     #[test]

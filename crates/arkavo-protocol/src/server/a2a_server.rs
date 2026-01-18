@@ -836,11 +836,7 @@ impl A2aServer {
 
     /// Start the well-known HTTP server for agent discovery
     /// Serves /.well-known/agent.json per A2A protocol spec
-    pub async fn start_well_known_server(
-        &self,
-        http_port: u16,
-        rpc_port: u16,
-    ) -> Result<u16> {
+    pub async fn start_well_known_server(&self, http_port: u16, rpc_port: u16) -> Result<u16> {
         let bind_addr: SocketAddr = format!("{}:{}", self.config.bind_address, http_port)
             .parse()
             .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid HTTP bind address: {e}")))?;

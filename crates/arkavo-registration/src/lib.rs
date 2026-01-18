@@ -66,10 +66,7 @@ impl AgentDescriptor {
     /// Format: `arkavo://agent/authorize?did=...&name=...&entitlements=...`
     pub fn to_authorization_url(&self) -> String {
         let did = self.did_key.as_deref().unwrap_or("");
-        let mut url = format!(
-            "arkavo://agent/authorize?did={}",
-            urlencoding::encode(did)
-        );
+        let mut url = format!("arkavo://agent/authorize?did={}", urlencoding::encode(did));
 
         if let Some(name) = &self.name {
             url.push_str(&format!("&name={}", urlencoding::encode(name)));
