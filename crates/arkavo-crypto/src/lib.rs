@@ -86,6 +86,53 @@ impl AgentPublicKey {
         Self::from_bytes(&bytes)
     }
 
+    /// Convert to DID:key format for Ed25519 public keys.
+    ///
+    /// Format: `did:key:z{base58btc(0xed01 || public_key_bytes)}`
+    /// - `z` = multibase prefix for base58btc
+    /// - `0xed01` = multicodec prefix for Ed25519 public key
+    pub fn to_did_key(&self) -> String {
+        // Ed25519 public key multicodec prefix
+        const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
+
+        let pk_bytes = self.verifying_key.to_bytes();
+        let mut prefixed = Vec::with_capacity(2 + pk_bytes.len());
+        prefixed.extend_from_slice(&ED25519_MULTICODEC);
+        prefixed.extend_from_slice(&pk_bytes);
+
+        // base58btc encode with 'z' multibase prefix
+        let encoded = bs58::encode(&prefixed).into_string();
+        format!("did:key:z{encoded}")
+    }
+
+    /// Parse a DID:key string back to an `AgentPublicKey`.
+    ///
+    /// Expects format: `did:key:z{base58btc(0xed01 || public_key_bytes)}`
+    pub fn from_did_key(did: &str) -> Result<Self, CryptoError> {
+        const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
+
+        // Validate prefix
+        let encoded = did
+            .strip_prefix("did:key:z")
+            .ok_or_else(|| CryptoError::InvalidKeyFormat("Invalid DID:key prefix".to_string()))?;
+
+        // Decode base58btc
+        let decoded = bs58::decode(encoded)
+            .into_vec()
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base58 decode error: {}", e)))?;
+
+        // Check multicodec prefix
+        if decoded.len() < 2 || decoded[0] != ED25519_MULTICODEC[0] || decoded[1] != ED25519_MULTICODEC[1] {
+            return Err(CryptoError::InvalidKeyFormat(
+                "Invalid Ed25519 multicodec prefix".to_string(),
+            ));
+        }
+
+        // Extract public key bytes
+        let pk_bytes = &decoded[2..];
+        Self::from_bytes(pk_bytes)
+    }
+
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), CryptoError> {
         if signature.len() != 64 {
             return Err(CryptoError::InvalidSignature);
@@ -173,5 +220,51 @@ mod tests {
             public_key.verify(message, &bad_sig),
             Err(CryptoError::InvalidSignature)
         ));
+    }
+
+    #[test]
+    fn test_did_key_format() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let did = public_key.to_did_key();
+
+        // DID:key format should start with "did:key:z6Mk" for Ed25519 keys
+        assert!(did.starts_with("did:key:z6Mk"), "DID should start with 'did:key:z6Mk', got: {}", did);
+    }
+
+    #[test]
+    fn test_did_key_roundtrip() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let did = public_key.to_did_key();
+
+        let decoded = AgentPublicKey::from_did_key(&did).expect("Failed to parse DID:key");
+        assert_eq!(public_key.to_bytes(), decoded.to_bytes());
+    }
+
+    #[test]
+    fn test_did_key_invalid_prefix() {
+        let result = AgentPublicKey::from_did_key("invalid:key:z123");
+        assert!(matches!(result, Err(CryptoError::InvalidKeyFormat(_))));
+    }
+
+    #[test]
+    fn test_did_key_invalid_multicodec() {
+        // Create a DID with wrong multicodec prefix
+        let bad_did = "did:key:z11111111111111111111111111111111111111";
+        let result = AgentPublicKey::from_did_key(bad_did);
+        assert!(matches!(result, Err(CryptoError::InvalidKeyFormat(_))));
+    }
+
+    #[test]
+    fn test_did_key_deterministic() {
+        // Create keypair from fixed bytes
+        let fixed_bytes = [42u8; 32];
+        let keypair = AgentKeypair::from_bytes(&fixed_bytes).unwrap();
+        let public_key = keypair.public_key();
+
+        let did1 = public_key.to_did_key();
+        let did2 = public_key.to_did_key();
+        assert_eq!(did1, did2, "DID generation should be deterministic");
     }
 }

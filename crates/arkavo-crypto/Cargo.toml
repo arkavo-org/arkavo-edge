@@ -11,6 +11,7 @@ rand = { workspace = true }
 serde = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
+bs58 = "0.5"
 
 [dev-dependencies]
 hex = { workspace = true }

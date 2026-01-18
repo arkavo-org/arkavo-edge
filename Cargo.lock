@@ -239,6 +239,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-agent-auth"
+version = "0.54.1"
+dependencies = [
+ "arkavo-crypto",
+ "base64 0.22.1",
+ "chrono",
+ "dirs 6.0.0",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "urlencoding",
+]
+
+[[package]]
 name = "arkavo-agui"
 version = "0.54.1"
 dependencies = [
@@ -425,6 +442,7 @@ name = "arkavo-cli"
 version = "0.54.1"
 dependencies = [
  "anyhow",
+ "arkavo-agent-auth",
  "arkavo-agui",
  "arkavo-budget",
  "arkavo-cef",
@@ -594,6 +612,7 @@ name = "arkavo-crypto"
 version = "0.54.1"
 dependencies = [
  "base64 0.22.1",
+ "bs58",
  "ed25519-dalek 2.2.0",
  "hex",
  "rand 0.8.5",
@@ -1907,6 +1926,15 @@ name = "borrow-or-share"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
+
+[[package]]
+name = "bs58"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "bstr"

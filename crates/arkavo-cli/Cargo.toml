@@ -58,6 +58,7 @@ arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
+arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
