@@ -26,7 +26,7 @@ tracing = { workspace = true }
 opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, features = ["rustls-tls"], optional = true }
 
 # KAS server crypto operations from opentdf-rs
-opentdf-kas = { git = "https://github.com/arkavo-org/opentdf-rs", branch = "feature/kas-server", optional = true }
+opentdf-kas = { git = "https://github.com/arkavo-org/opentdf-rs", optional = true }
 
 # HTTP client for KAS (optional)
 reqwest = { workspace = true, optional = true }
