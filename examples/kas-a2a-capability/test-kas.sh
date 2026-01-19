@@ -27,14 +27,14 @@ cat <<EOF
   "jsonrpc": "2.0",
   "id": 1,
   "method": "kas.publicKey",
-  "params": {}
+  "params": {"request": {}}
 }
 EOF
 echo ""
 echo "Response:"
 RESPONSE=$(curl -s -X POST "${BASE_URL}" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"kas.publicKey","params":{}}')
+  -d '{"jsonrpc":"2.0","id":1,"method":"kas.publicKey","params":{"request":{}}}')
 echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
 echo ""
 
@@ -54,19 +54,19 @@ cat <<EOF
   "jsonrpc": "2.0",
   "id": 2,
   "method": "kas.publicKey",
-  "params": {"algorithm": "RSA-OAEP"}
+  "params": {"request": {"algorithm": "ec:secp256r1"}}
 }
 EOF
 echo ""
 echo "Response:"
 RESPONSE=$(curl -s -X POST "${BASE_URL}" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"kas.publicKey","params":{"algorithm":"RSA-OAEP"}}')
+  -d '{"jsonrpc":"2.0","id":2,"method":"kas.publicKey","params":{"request":{"algorithm":"ec:secp256r1"}}}')
 echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
 echo ""
 
-# Test 3: kas.rewrap (expected to fail without handler)
-echo -e "${YELLOW}Test 3: kas.rewrap (expecting error without handler)${NC}"
+# Test 3: kas.rewrap (expected to fail without valid delegation)
+echo -e "${YELLOW}Test 3: kas.rewrap (expecting error - delegation verification)${NC}"
 echo "Request:"
 cat <<EOF
 {
@@ -74,11 +74,13 @@ cat <<EOF
   "id": 3,
   "method": "kas.rewrap",
   "params": {
-    "wrapped_key": "dGVzdC13cmFwcGVkLWtleQ==",
-    "policy_binding": {"alg": "HS256", "hash": "dGVzdC1oYXNo"},
-    "policy": "eyJhdHRyaWJ1dGVzIjpbXX0=",
-    "delegation_token": "{}",
-    "client_public_key": "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----"
+    "request": {
+      "wrapped_key": "dGVzdC13cmFwcGVkLWtleQ==",
+      "policy_binding": {"alg": "HS256", "hash": "dGVzdC1oYXNo"},
+      "policy": "eyJhdHRyaWJ1dGVzIjpbXX0=",
+      "delegation_token": "{}",
+      "client_public_key": "<base64 EC public key>"
+    }
   }
 }
 EOF
@@ -91,19 +93,21 @@ RESPONSE=$(curl -s -X POST "${BASE_URL}" \
     "id":3,
     "method":"kas.rewrap",
     "params":{
-      "wrapped_key":"dGVzdC13cmFwcGVkLWtleQ==",
-      "policy_binding":{"alg":"HS256","hash":"dGVzdC1oYXNo"},
-      "policy":"eyJhdHRyaWJ1dGVzIjpbXX0=",
-      "delegation_token":"{}",
-      "client_public_key":"-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----"
+      "request":{
+        "wrapped_key":"dGVzdC13cmFwcGVkLWtleQ==",
+        "policy_binding":{"alg":"HS256","hash":"dGVzdC1oYXNo"},
+        "policy":"eyJhdHRyaWJ1dGVzIjpbXX0=",
+        "delegation_token":"{}",
+        "client_public_key":"BDofKtS/8RSUXjX7whN2MRyBvT0FxVKKmCRpruhNg3CyaFJoCo2KeMSYf4mka5qOtvpMq9qZx7Xi0kU+ePuhFLM="
+      }
     }
   }')
 echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
 echo ""
 
-# Check for expected error
-if echo "$RESPONSE" | jq -e '.error.code == -32603' > /dev/null 2>&1; then
-    echo -e "${GREEN}[PASS] kas.rewrap returned expected error (KAS not configured)${NC}"
+# Check for expected error (delegation verification should fail)
+if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+    echo -e "${GREEN}[PASS] kas.rewrap returned expected error (delegation verification)${NC}"
 else
     echo -e "${YELLOW}[INFO] kas.rewrap returned unexpected response${NC}"
 fi

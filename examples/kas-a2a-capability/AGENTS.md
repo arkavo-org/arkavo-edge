@@ -17,7 +17,7 @@ kas:
 
   # Key configuration
   key_id: "kas-demo-key-1"
-  algorithm: "RSA-OAEP"
+  algorithm: "ec:secp256r1"
 
   # Trusted root authorities for delegation chains
   # These DIDs are trusted to issue delegation tokens

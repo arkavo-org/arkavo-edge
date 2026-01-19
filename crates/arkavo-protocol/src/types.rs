@@ -1364,3 +1364,53 @@ pub struct Citation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }
+
+/// Policy binding for TDF key access
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasPolicyBinding {
+    /// HMAC algorithm (typically "HS256")
+    pub alg: String,
+    /// HMAC hash of policy bound to key
+    pub hash: String,
+}
+
+/// Request to rewrap a TDF encryption key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasRewrapRequest {
+    /// Base64-encoded wrapped key from the TDF manifest
+    pub wrapped_key: String,
+    /// Policy binding from the TDF manifest
+    pub policy_binding: KasPolicyBinding,
+    /// Base64-encoded policy JSON from the TDF manifest
+    pub policy: String,
+    /// NTDF delegation token chain (JSON)
+    pub delegation_token: String,
+    /// Client's public key in PEM format for rewrapping
+    pub client_public_key: String,
+}
+
+/// Response containing the rewrapped key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasRewrapResponse {
+    /// Key rewrapped for the client's public key
+    pub entity_wrapped_key: String,
+}
+
+/// Request to retrieve the KAS public key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct KasPublicKeyRequest {
+    /// Requested algorithm (e.g., "RSA-OAEP")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub algorithm: Option<String>,
+}
+
+/// Response containing the KAS public key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasPublicKeyResponse {
+    /// PEM-encoded public key
+    pub public_key: String,
+    /// Key identifier
+    pub key_id: String,
+    /// Algorithm this key supports
+    pub algorithm: String,
+}

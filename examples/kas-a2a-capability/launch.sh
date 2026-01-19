@@ -41,4 +41,4 @@ echo '    -d '"'"'{"jsonrpc":"2.0","id":1,"method":"kas.publicKey","params":{}}'
 echo ""
 
 cd "$SCRIPT_DIR"
-"$BINARY" agent run
+"$BINARY" agent run --port 8080 --verbose

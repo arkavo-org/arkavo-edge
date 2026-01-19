@@ -25,6 +25,7 @@ async fn build_agent_card(state: &WellKnownState) -> AgentCard {
     let metadata = state.agent_metadata.read().await;
 
     // Get MCP tools to build skills list
+    #[allow(unused_mut)]
     let mut skills: Vec<AgentSkill> = match state.mcp_registry.list_all_tools().await {
         Ok(tools) => tools
             .into_iter()

@@ -23,6 +23,9 @@ use super::tool_memory::ToolMemory;
 use super::well_known::{WellKnownState, start_well_known_server};
 use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
 
+#[cfg(feature = "kas")]
+use arkavo_tdf::KasA2aHandler;
+
 pub struct A2aServer {
     config: ServerConfig,
     buffer_config: BufferConfig,
@@ -810,7 +813,7 @@ impl A2aServer {
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
             #[cfg(feature = "kas")]
-            kas_handler: None,
+            kas_handler: Some(Arc::new(KasA2aHandler::with_defaults())),
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -848,7 +851,7 @@ impl A2aServer {
             mcp_registry: self.mcp_registry.clone(),
             rpc_port,
             #[cfg(feature = "kas")]
-            kas_enabled: false,
+            kas_enabled: true,
         };
 
         let (handle, actual_http_port) = start_well_known_server(bind_addr, state)

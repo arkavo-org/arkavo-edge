@@ -2,7 +2,8 @@
 
 use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::rate_limit::RateLimiter;
-use arkavo_tdf::{KasA2aHandler, KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse};
+use crate::types::{KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse};
+use arkavo_tdf::KasA2aHandler;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
@@ -37,10 +38,24 @@ pub async fn handle_kas_rewrap(
         }
     };
 
-    match handler.handle_rewrap(request, caller_did).await {
+    // Convert local types to arkavo_tdf types
+    let tdf_request = arkavo_tdf::KasRewrapRequest {
+        wrapped_key: request.wrapped_key,
+        policy_binding: arkavo_tdf::PolicyBinding {
+            alg: request.policy_binding.alg,
+            hash: request.policy_binding.hash,
+        },
+        policy: request.policy,
+        delegation_token: request.delegation_token,
+        client_public_key: request.client_public_key,
+    };
+
+    match handler.handle_rewrap(tdf_request, caller_did).await {
         Ok(response) => {
             timer.success();
-            Ok(response)
+            Ok(KasRewrapResponse {
+                entity_wrapped_key: response.entity_wrapped_key,
+            })
         }
         Err(e) => {
             timer.error();
@@ -89,10 +104,19 @@ pub async fn handle_kas_public_key(
         }
     };
 
-    match handler.handle_public_key(request).await {
+    // Convert local types to arkavo_tdf types
+    let tdf_request = arkavo_tdf::KasPublicKeyRequest {
+        algorithm: request.algorithm,
+    };
+
+    match handler.handle_public_key(tdf_request).await {
         Ok(response) => {
             timer.success();
-            Ok(response)
+            Ok(KasPublicKeyResponse {
+                public_key: response.public_key,
+                key_id: response.key_id,
+                algorithm: response.algorithm,
+            })
         }
         Err(e) => {
             timer.error();
@@ -110,7 +134,7 @@ mod tests {
     use super::*;
     use crate::metrics::MetricsCollector;
     use crate::rate_limit::{RateLimitConfig, RateLimiter};
-    use arkavo_tdf::PolicyBinding;
+    use crate::types::KasPolicyBinding;
     use std::sync::Arc;
 
     fn create_test_metrics() -> Arc<MetricsCollector> {
@@ -128,7 +152,10 @@ mod tests {
 
         let request = KasRewrapRequest {
             wrapped_key: "dGVzdA==".to_string(),
-            policy_binding: PolicyBinding::new("hash"),
+            policy_binding: KasPolicyBinding {
+                alg: "HS256".to_string(),
+                hash: "hash".to_string(),
+            },
             policy: "eyJhdHRyaWJ1dGVzIjpbXX0=".to_string(),
             delegation_token: "{}".to_string(),
             client_public_key: "-----BEGIN PUBLIC KEY-----".to_string(),

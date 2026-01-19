@@ -615,6 +615,7 @@ dependencies = [
  "bs58",
  "ed25519-dalek 2.2.0",
  "hex",
+ "p256",
  "rand 0.8.5",
  "serde",
  "thiserror 2.0.17",

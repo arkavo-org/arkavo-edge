@@ -83,7 +83,7 @@ Expected response:
   "result": {
     "public_key": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----",
     "key_id": "kas-demo-key-1",
-    "algorithm": "RSA-OAEP"
+    "algorithm": "ec:secp256r1"
   }
 }
 ```

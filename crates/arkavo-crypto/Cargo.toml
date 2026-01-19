@@ -12,6 +12,7 @@ serde = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
 bs58 = "0.5"
+p256 = { version = "0.13", features = ["ecdh", "pem"] }
 
 [dev-dependencies]
 hex = { workspace = true }

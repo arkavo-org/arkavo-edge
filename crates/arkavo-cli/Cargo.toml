@@ -31,6 +31,7 @@ snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["dep:arkavo-tdf-iroh"]
+kas = ["arkavo-protocol/kas"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }

@@ -1,5 +1,7 @@
 use base64::{Engine as _, engine::general_purpose};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::{PublicKey as P256PublicKey, SecretKey as P256SecretKey};
 use std::fmt;
 use thiserror::Error;
 
@@ -158,6 +160,123 @@ impl fmt::Display for AgentPublicKey {
 impl fmt::Debug for AgentPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AgentPublicKey")
+            .field("base64", &self.to_base64())
+            .finish()
+    }
+}
+
+/// EC P-256 keypair for KAS key wrapping operations.
+///
+/// Used for ECDH-based key agreement in TDF encryption.
+pub struct KasEcKeypair {
+    secret_key: P256SecretKey,
+    public_key: P256PublicKey,
+}
+
+impl KasEcKeypair {
+    /// Generate a new random EC P-256 keypair.
+    pub fn generate() -> Self {
+        let secret_key = P256SecretKey::random(&mut rand::thread_rng());
+        let public_key = secret_key.public_key();
+        Self {
+            secret_key,
+            public_key,
+        }
+    }
+
+    /// Create a keypair from raw secret key bytes (32 bytes).
+    pub fn from_secret_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let secret_key = P256SecretKey::from_slice(bytes)
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Invalid EC secret key: {e}")))?;
+        let public_key = secret_key.public_key();
+        Ok(Self {
+            secret_key,
+            public_key,
+        })
+    }
+
+    /// Get the secret key bytes (32 bytes).
+    pub fn secret_bytes(&self) -> Vec<u8> {
+        self.secret_key.to_bytes().to_vec()
+    }
+
+    /// Get the public key in SEC1 uncompressed format.
+    pub fn public_key_sec1(&self) -> Vec<u8> {
+        self.public_key.to_encoded_point(false).as_bytes().to_vec()
+    }
+
+    /// Get the public key in SEC1 compressed format.
+    pub fn public_key_sec1_compressed(&self) -> Vec<u8> {
+        self.public_key.to_encoded_point(true).as_bytes().to_vec()
+    }
+
+    /// Get the public key as base64-encoded SEC1 uncompressed.
+    pub fn public_key_base64(&self) -> String {
+        general_purpose::STANDARD.encode(self.public_key_sec1())
+    }
+
+    /// Get the public key component.
+    pub fn public_key(&self) -> KasEcPublicKey {
+        KasEcPublicKey {
+            public_key: self.public_key,
+        }
+    }
+
+    /// Perform ECDH key agreement with a peer's public key.
+    ///
+    /// Returns the shared secret (32 bytes).
+    pub fn diffie_hellman(&self, peer_public: &KasEcPublicKey) -> Vec<u8> {
+        use p256::ecdh::diffie_hellman;
+        let shared = diffie_hellman(
+            self.secret_key.to_nonzero_scalar(),
+            peer_public.public_key.as_affine(),
+        );
+        shared.raw_secret_bytes().to_vec()
+    }
+}
+
+/// EC P-256 public key for KAS operations.
+#[derive(Clone)]
+pub struct KasEcPublicKey {
+    public_key: P256PublicKey,
+}
+
+impl KasEcPublicKey {
+    /// Create from SEC1-encoded bytes (compressed or uncompressed).
+    pub fn from_sec1_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let public_key = P256PublicKey::from_sec1_bytes(bytes)
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Invalid EC public key: {e}")))?;
+        Ok(Self { public_key })
+    }
+
+    /// Create from base64-encoded SEC1 bytes.
+    pub fn from_base64(s: &str) -> Result<Self, CryptoError> {
+        let bytes = general_purpose::STANDARD
+            .decode(s)
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base64 decode error: {e}")))?;
+        Self::from_sec1_bytes(&bytes)
+    }
+
+    /// Get as SEC1 uncompressed bytes.
+    pub fn to_sec1_bytes(&self) -> Vec<u8> {
+        self.public_key.to_encoded_point(false).as_bytes().to_vec()
+    }
+
+    /// Get as base64-encoded SEC1 uncompressed.
+    pub fn to_base64(&self) -> String {
+        general_purpose::STANDARD.encode(self.to_sec1_bytes())
+    }
+}
+
+impl fmt::Display for KasEcPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_base64())
+    }
+}
+
+impl fmt::Debug for KasEcPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KasEcPublicKey")
             .field("base64", &self.to_base64())
             .finish()
     }

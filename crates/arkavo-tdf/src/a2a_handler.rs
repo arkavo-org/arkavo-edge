@@ -4,6 +4,7 @@
 //! the A2A JSON-RPC protocol. It integrates delegation verification, ABAC
 //! policy evaluation, and cryptographic key rewrapping.
 
+use arkavo_crypto::{KasEcKeypair, KasEcPublicKey};
 use base64::{Engine as _, engine::general_purpose};
 use thiserror::Error;
 
@@ -63,62 +64,70 @@ impl Default for KasA2aConfig {
     fn default() -> Self {
         Self {
             key_id: "kas-key-1".to_string(),
-            algorithm: "RSA-OAEP".to_string(),
+            algorithm: "ec:secp256r1".to_string(),
         }
     }
 }
 
-/// KAS keypair for key wrapping operations.
+/// Wrapper for EC P-256 keypair used in KAS operations.
 ///
-/// This is a placeholder that can be implemented with actual RSA
-/// operations using opentdf-rs or another crypto library.
+/// Wraps arkavo_crypto::KasEcKeypair to provide key rewrapping
+/// via ECDH key agreement.
 pub struct KasKeypair {
-    /// PEM-encoded public key
-    public_key_pem: String,
-    /// Private key material (opaque, implementation-specific)
-    #[allow(dead_code)]
-    private_key_material: Vec<u8>,
+    keypair: KasEcKeypair,
 }
 
 impl KasKeypair {
-    /// Create a new KAS keypair from PEM-encoded keys.
-    pub fn from_pem(public_key_pem: &str, private_key_pem: &str) -> Result<Self, KasError> {
-        // Store the private key material for later use
-        let private_key_material = private_key_pem.as_bytes().to_vec();
-
-        Ok(Self {
-            public_key_pem: public_key_pem.to_string(),
-            private_key_material,
-        })
+    /// Generate a new random EC P-256 keypair.
+    pub fn generate() -> Self {
+        Self {
+            keypair: KasEcKeypair::generate(),
+        }
     }
 
-    /// Get the PEM-encoded public key.
-    pub fn public_key_pem(&self) -> &str {
-        &self.public_key_pem
+    /// Create from secret key bytes (32 bytes).
+    pub fn from_secret_bytes(bytes: &[u8]) -> Result<Self, KasError> {
+        let keypair = KasEcKeypair::from_secret_bytes(bytes)
+            .map_err(|e| KasError::InvalidKeyFormat(e.to_string()))?;
+        Ok(Self { keypair })
     }
 
-    /// Rewrap a key: decrypt with KAS private key, re-encrypt for client.
+    /// Get the public key as base64-encoded SEC1 uncompressed format.
+    pub fn public_key_base64(&self) -> String {
+        self.keypair.public_key_base64()
+    }
+
+    /// Get the secret key bytes for persistence.
+    pub fn secret_bytes(&self) -> Vec<u8> {
+        self.keypair.secret_bytes()
+    }
+
+    /// Rewrap a key: perform ECDH with client's public key.
     ///
-    /// This is a placeholder that returns a mock rewrapped key.
-    /// Real implementation would use RSA-OAEP decryption/encryption.
+    /// For TDF NanoTDF format, this performs ECDH key agreement:
+    /// 1. Parse client's EC public key from base64 SEC1 format
+    /// 2. Compute shared secret via ECDH
+    /// 3. Return the shared secret (used for key derivation)
     pub fn rewrap(
         &self,
         wrapped_key_base64: &str,
-        _client_public_key_pem: &str,
+        client_public_key_base64: &str,
     ) -> Result<String, KasError> {
-        // Validate input is valid base64
-        general_purpose::STANDARD
+        // Validate wrapped key is valid base64
+        let _wrapped_key = general_purpose::STANDARD
             .decode(wrapped_key_base64)
             .map_err(|e| KasError::CryptoError(format!("Invalid wrapped key: {e}")))?;
 
-        // In a real implementation, this would:
-        // 1. Decrypt wrapped_key with KAS private key
-        // 2. Re-encrypt the payload key for client_public_key
-        // 3. Return the new wrapped key
+        // Parse client's EC public key
+        let client_public = KasEcPublicKey::from_base64(client_public_key_base64)
+            .map_err(|e| KasError::InvalidKeyFormat(format!("Invalid client public key: {e}")))?;
 
-        // For now, return the input as a placeholder
-        // The actual implementation would integrate with opentdf-rs RSA operations
-        Ok(wrapped_key_base64.to_string())
+        // Perform ECDH key agreement
+        let shared_secret = self.keypair.diffie_hellman(&client_public);
+
+        // Return shared secret as base64
+        // In a full implementation, this would be used with a KDF to derive the actual key
+        Ok(general_purpose::STANDARD.encode(shared_secret))
     }
 }
 
@@ -144,12 +153,12 @@ impl KasA2aHandler {
         }
     }
 
-    /// Create a handler with default configuration.
+    /// Create a handler with default configuration and a generated keypair.
     pub fn with_defaults() -> Self {
         Self {
             verifier: DelegationVerifier::empty(),
             abac: AbacEvaluator::new(),
-            keypair: None,
+            keypair: Some(KasKeypair::generate()),
             config: KasA2aConfig::default(),
         }
     }
@@ -231,7 +240,7 @@ impl KasA2aHandler {
         }
 
         Ok(KasPublicKeyResponse {
-            public_key: keypair.public_key_pem().to_string(),
+            public_key: keypair.public_key_base64(),
             key_id: self.config.key_id.clone(),
             algorithm: self.config.algorithm.clone(),
         })
@@ -366,7 +375,8 @@ mod tests {
 
     #[test]
     fn test_handler_without_keypair() {
-        let handler = KasA2aHandler::with_defaults();
+        // Use new() without a keypair to test the error case
+        let handler = KasA2aHandler::new(vec![], KasA2aConfig::default());
         let request = KasPublicKeyRequest::default();
 
         let result = tokio::runtime::Runtime::new()
@@ -377,11 +387,30 @@ mod tests {
     }
 
     #[test]
-    fn test_kas_keypair_public_key() {
-        let pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjAN...\n-----END PUBLIC KEY-----";
-        let keypair = KasKeypair::from_pem(pem, "-----BEGIN PRIVATE KEY-----").unwrap();
+    fn test_handler_with_defaults_has_keypair() {
+        // with_defaults() should generate a keypair
+        let handler = KasA2aHandler::with_defaults();
+        let request = KasPublicKeyRequest::default();
 
-        assert_eq!(keypair.public_key_pem(), pem);
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(handler.handle_public_key(request));
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.public_key.is_empty());
+        assert_eq!(response.algorithm, "ec:secp256r1");
+    }
+
+    #[test]
+    fn test_kas_keypair_public_key() {
+        let keypair = KasKeypair::generate();
+        let public_key = keypair.public_key_base64();
+
+        // EC P-256 SEC1 uncompressed public key is 65 bytes (1 + 32 + 32)
+        // Base64 encoded: 65 * 4/3 = ~88 characters
+        assert!(!public_key.is_empty());
+        assert!(public_key.len() > 80); // Base64 of 65 bytes
     }
 
     #[test]
