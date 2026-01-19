@@ -304,6 +304,7 @@ impl ArkavoKasClient {
                 },
                 encrypted_metadata: None,
                 schema_version: Some("1.0".to_string()),
+                ephemeral_public_key: None,
             })
             .collect();
 
@@ -386,6 +387,7 @@ impl ArkavoKasClient {
                         },
                         encrypted_metadata: None,
                         schema_version: Some("1.0".to_string()),
+                        ephemeral_public_key: None,
                     })
                     .collect(),
                 method: opentdf::EncryptionMethod {
