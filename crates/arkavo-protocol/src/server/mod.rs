@@ -222,6 +222,22 @@ pub trait A2aRpc {
         &self,
         request: AgentSpecializeRequest,
     ) -> RpcResult<AgentSpecializeResponse>;
+
+    /// KAS rewrap - unwrap TDF key and rewrap for client
+    #[cfg(feature = "kas")]
+    #[method(name = "kas.rewrap")]
+    async fn kas_rewrap(
+        &self,
+        request: arkavo_tdf::KasRewrapRequest,
+    ) -> RpcResult<arkavo_tdf::KasRewrapResponse>;
+
+    /// Get KAS public key for TDF encryption
+    #[cfg(feature = "kas")]
+    #[method(name = "kas.publicKey")]
+    async fn kas_public_key(
+        &self,
+        request: arkavo_tdf::KasPublicKeyRequest,
+    ) -> RpcResult<arkavo_tdf::KasPublicKeyResponse>;
 }
 
 pub struct A2aRpcImpl {
@@ -246,6 +262,9 @@ pub struct A2aRpcImpl {
     pub(crate) learning_bus: Option<Arc<LearningBus>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     pub(crate) public_key: Option<String>,
+    /// KAS A2A handler for TDF key operations
+    #[cfg(feature = "kas")]
+    pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
 }
 
 #[async_trait]
@@ -723,6 +742,39 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.mcp_registry,
             &self.agent_metadata,
+            request,
+        )
+        .await
+    }
+
+    #[cfg(feature = "kas")]
+    async fn kas_rewrap(
+        &self,
+        request: arkavo_tdf::KasRewrapRequest,
+    ) -> RpcResult<arkavo_tdf::KasRewrapResponse> {
+        // Extract caller DID from authenticated context
+        // For now, use a placeholder - real impl would get this from auth
+        let caller_did = "did:key:z6MkUnknown";
+
+        handlers::kas::handle_kas_rewrap(
+            &self.metrics,
+            &self.rate_limiter,
+            self.kas_handler.as_ref(),
+            request,
+            caller_did,
+        )
+        .await
+    }
+
+    #[cfg(feature = "kas")]
+    async fn kas_public_key(
+        &self,
+        request: arkavo_tdf::KasPublicKeyRequest,
+    ) -> RpcResult<arkavo_tdf::KasPublicKeyResponse> {
+        handlers::kas::handle_kas_public_key(
+            &self.metrics,
+            &self.rate_limiter,
+            self.kas_handler.as_ref(),
             request,
         )
         .await

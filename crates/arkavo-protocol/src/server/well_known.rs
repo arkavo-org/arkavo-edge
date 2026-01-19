@@ -15,6 +15,9 @@ pub struct WellKnownState {
     pub agent_metadata: Arc<RwLock<AgentMetadata>>,
     pub mcp_registry: Arc<McpRegistry>,
     pub rpc_port: u16,
+    /// Whether KAS capability is enabled
+    #[cfg(feature = "kas")]
+    pub kas_enabled: bool,
 }
 
 /// Build the Agent Card from current agent state
@@ -22,7 +25,7 @@ async fn build_agent_card(state: &WellKnownState) -> AgentCard {
     let metadata = state.agent_metadata.read().await;
 
     // Get MCP tools to build skills list
-    let skills = match state.mcp_registry.list_all_tools().await {
+    let mut skills: Vec<AgentSkill> = match state.mcp_registry.list_all_tools().await {
         Ok(tools) => tools
             .into_iter()
             .map(|t| AgentSkill {
@@ -37,6 +40,29 @@ async fn build_agent_card(state: &WellKnownState) -> AgentCard {
             .collect(),
         Err(_) => vec![],
     };
+
+    // Add KAS skills when capability is enabled
+    #[cfg(feature = "kas")]
+    if state.kas_enabled {
+        skills.push(AgentSkill {
+            id: "kas.rewrap".to_string(),
+            name: "TDF Key Rewrap".to_string(),
+            description: Some("Rewrap TDF encryption keys with ABAC policy enforcement".to_string()),
+            tags: vec!["kas".to_string(), "tdf".to_string(), "encryption".to_string()],
+            examples: vec![],
+            input_modes: vec!["application/json".to_string()],
+            output_modes: vec!["application/json".to_string()],
+        });
+        skills.push(AgentSkill {
+            id: "kas.publicKey".to_string(),
+            name: "KAS Public Key".to_string(),
+            description: Some("Get KAS public key for TDF encryption".to_string()),
+            tags: vec!["kas".to_string(), "crypto".to_string()],
+            examples: vec![],
+            input_modes: vec!["application/json".to_string()],
+            output_modes: vec!["application/json".to_string()],
+        });
+    }
 
     // Build capabilities from agent features
     let capabilities = AgentCapabilities {
@@ -130,10 +156,13 @@ mod tests {
         }));
         let mcp_registry = Arc::new(McpRegistry::new());
 
+        #[allow(clippy::needless_update)]
         let state = WellKnownState {
             agent_metadata,
             mcp_registry,
             rpc_port: 8080,
+            #[cfg(feature = "kas")]
+            kas_enabled: false,
         };
 
         let card = build_agent_card(&state).await;

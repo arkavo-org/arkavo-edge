@@ -809,6 +809,8 @@ impl A2aServer {
             router,
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
+            #[cfg(feature = "kas")]
+            kas_handler: None,
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -845,6 +847,8 @@ impl A2aServer {
             agent_metadata: self.agent_metadata.clone(),
             mcp_registry: self.mcp_registry.clone(),
             rpc_port,
+            #[cfg(feature = "kas")]
+            kas_enabled: false,
         };
 
         let (handle, actual_http_port) = start_well_known_server(bind_addr, state)

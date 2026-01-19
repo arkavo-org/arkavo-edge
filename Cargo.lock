@@ -1099,6 +1099,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-router",
+ "arkavo-tdf",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -1277,6 +1278,7 @@ dependencies = [
 name = "arkavo-tdf"
 version = "0.54.2"
 dependencies = [
+ "arkavo-crypto",
  "async-trait",
  "base64 0.22.1",
  "chrono",

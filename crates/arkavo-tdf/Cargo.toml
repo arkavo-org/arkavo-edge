@@ -28,6 +28,9 @@ opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features =
 # HTTP client for KAS (optional)
 reqwest = { workspace = true, optional = true }
 
+# A2A KAS capability dependencies (optional)
+arkavo-crypto = { path = "../arkavo-crypto", optional = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 
@@ -36,6 +39,7 @@ default = []
 testing = []  # Enables mock implementations
 opentdf = ["dep:opentdf"]  # Real TDF encryption via opentdf-rs
 kas = ["opentdf", "opentdf/kas", "dep:reqwest"]  # KAS client support
+a2a = ["dep:arkavo-crypto"]  # A2A KAS capability over JSON-RPC
 
 [lints]
 workspace = true
