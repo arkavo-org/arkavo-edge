@@ -6,7 +6,7 @@
 
 use arkavo_crypto::{KasEcKeypair, KasEcPublicKey};
 use base64::{Engine as _, engine::general_purpose};
-use opentdf_kas_server::{KasEcKeypair as KasServerKeypair, ec_unwrap};
+use opentdf_kas::{KasEcKeypair as KasServerKeypair, ec_unwrap};
 use thiserror::Error;
 
 use crate::a2a_types::{
@@ -72,7 +72,7 @@ impl Default for KasA2aConfig {
 
 /// Wrapper for EC P-256 keypair used in KAS operations.
 ///
-/// Wraps opentdf_kas_server::KasEcKeypair to provide full NanoTDF-compatible
+/// Wraps opentdf_kas::KasEcKeypair to provide full NanoTDF-compatible
 /// key rewrapping with HKDF key derivation and AES-GCM encryption.
 pub struct KasKeypair {
     keypair: KasEcKeypair,

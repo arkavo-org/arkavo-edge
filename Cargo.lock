@@ -1285,7 +1285,7 @@ dependencies = [
  "chrono",
  "futures",
  "opentdf 0.9.0",
- "opentdf-kas-server",
+ "opentdf-kas",
  "reqwest",
  "serde",
  "serde_json",
@@ -6836,9 +6836,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentdf-kas-server"
+name = "opentdf-kas"
 version = "0.10.0"
-source = "git+https://github.com/arkavo-org/opentdf-rs?branch=feature%2Fkas-server#f21626bbd25b93387d72cdaa8bd00a2b5776073b"
+source = "git+https://github.com/arkavo-org/opentdf-rs?branch=feature%2Fkas-server#3df539616e72423bf3c05c840a01ae076cc9dc22"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
