@@ -228,8 +228,8 @@ impl KasA2aHandler {
         caller_did: &str,
     ) -> Result<KasRewrapResponse, KasError> {
         // 1. Verify delegation token and extract entitlements
-        let token = DelegationToken::from_json(&request.delegation_token)
-            .map_err(KasError::Delegation)?;
+        let token =
+            DelegationToken::from_json(&request.delegation_token).map_err(KasError::Delegation)?;
 
         let entitlements = self.verifier.verify(&token, caller_did)?;
 
@@ -250,12 +250,13 @@ impl KasA2aHandler {
         self.verify_policy_binding(&request)?;
 
         // 5. Rewrap the key for the client
-        let keypair = self.keypair.as_ref().ok_or(KasError::KeypairNotConfigured)?;
+        let keypair = self
+            .keypair
+            .as_ref()
+            .ok_or(KasError::KeypairNotConfigured)?;
 
-        let entity_wrapped_key = keypair.rewrap(
-            &request.wrapped_key,
-            &request.client_public_key,
-        )?;
+        let entity_wrapped_key =
+            keypair.rewrap(&request.wrapped_key, &request.client_public_key)?;
 
         Ok(KasRewrapResponse { entity_wrapped_key })
     }
@@ -266,7 +267,10 @@ impl KasA2aHandler {
         &self,
         request: KasPublicKeyRequest,
     ) -> Result<KasPublicKeyResponse, KasError> {
-        let keypair = self.keypair.as_ref().ok_or(KasError::KeypairNotConfigured)?;
+        let keypair = self
+            .keypair
+            .as_ref()
+            .ok_or(KasError::KeypairNotConfigured)?;
 
         // Check if requested algorithm matches (if specified)
         if let Some(ref requested_alg) = request.algorithm
@@ -336,10 +340,7 @@ mod tests {
     fn make_test_policy() -> Policy {
         Policy {
             id: Some("test-policy".to_string()),
-            attributes: vec![Attribute::new(
-                "https://arkavo.net/attr/role",
-                &["admin"],
-            )],
+            attributes: vec![Attribute::new("https://arkavo.net/attr/role", &["admin"])],
             dissemination: vec![],
         }
     }

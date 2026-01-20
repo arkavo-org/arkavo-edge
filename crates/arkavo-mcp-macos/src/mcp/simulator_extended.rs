@@ -21,35 +21,35 @@ pub struct SimulatorInfo {
 fn parse_simctl_list(output: &str) -> Vec<SimulatorInfo> {
     let mut simulators = Vec::new();
 
-    if let Ok(json_value) = serde_json::from_str::<Value>(output) {
-        if let Some(devices) = json_value.get("devices").and_then(|d| d.as_object()) {
-            for (runtime, device_list) in devices {
-                if let Some(devices_array) = device_list.as_array() {
-                    for device in devices_array {
-                        if let (Some(udid), Some(name), Some(state)) = (
-                            device.get("udid").and_then(|v| v.as_str()),
-                            device.get("name").and_then(|v| v.as_str()),
-                            device.get("state").and_then(|v| v.as_str()),
-                        ) {
-                            let is_available = device
-                                .get("isAvailable")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                            let device_type = device
-                                .get("deviceTypeIdentifier")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Unknown")
-                                .to_string();
+    if let Ok(json_value) = serde_json::from_str::<Value>(output)
+        && let Some(devices) = json_value.get("devices").and_then(|d| d.as_object())
+    {
+        for (runtime, device_list) in devices {
+            if let Some(devices_array) = device_list.as_array() {
+                for device in devices_array {
+                    if let (Some(udid), Some(name), Some(state)) = (
+                        device.get("udid").and_then(|v| v.as_str()),
+                        device.get("name").and_then(|v| v.as_str()),
+                        device.get("state").and_then(|v| v.as_str()),
+                    ) {
+                        let is_available = device
+                            .get("isAvailable")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let device_type = device
+                            .get("deviceTypeIdentifier")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string();
 
-                            simulators.push(SimulatorInfo {
-                                udid: udid.to_string(),
-                                name: name.to_string(),
-                                state: state.to_string(),
-                                runtime: runtime.clone(),
-                                device_type,
-                                is_available,
-                            });
-                        }
+                        simulators.push(SimulatorInfo {
+                            udid: udid.to_string(),
+                            name: name.to_string(),
+                            state: state.to_string(),
+                            runtime: runtime.clone(),
+                            device_type,
+                            is_available,
+                        });
                     }
                 }
             }

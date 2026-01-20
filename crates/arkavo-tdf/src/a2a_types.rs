@@ -68,7 +68,8 @@ mod tests {
             policy_binding: PolicyBinding::new("test-hash"),
             policy: "eyJhdHRyaWJ1dGVzIjpbXX0=".to_string(),
             delegation_token: "ntdf-token-chain".to_string(),
-            client_public_key: "-----BEGIN PUBLIC KEY-----\nMIIB...\n-----END PUBLIC KEY-----".to_string(),
+            client_public_key: "-----BEGIN PUBLIC KEY-----\nMIIB...\n-----END PUBLIC KEY-----"
+                .to_string(),
         };
 
         let json = serde_json::to_string(&request).unwrap();

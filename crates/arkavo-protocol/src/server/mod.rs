@@ -230,7 +230,8 @@ pub trait A2aRpc {
 
     /// Get KAS public key for TDF encryption
     #[method(name = "kas.publicKey")]
-    async fn kas_public_key(&self, request: KasPublicKeyRequest) -> RpcResult<KasPublicKeyResponse>;
+    async fn kas_public_key(&self, request: KasPublicKeyRequest)
+    -> RpcResult<KasPublicKeyResponse>;
 }
 
 pub struct A2aRpcImpl {
@@ -768,7 +769,10 @@ impl A2aRpcServer for A2aRpcImpl {
         }
     }
 
-    async fn kas_public_key(&self, request: KasPublicKeyRequest) -> RpcResult<KasPublicKeyResponse> {
+    async fn kas_public_key(
+        &self,
+        request: KasPublicKeyRequest,
+    ) -> RpcResult<KasPublicKeyResponse> {
         #[cfg(feature = "kas")]
         {
             handlers::kas::handle_kas_public_key(

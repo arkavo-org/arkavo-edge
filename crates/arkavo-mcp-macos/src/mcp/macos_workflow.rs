@@ -284,12 +284,11 @@ impl Tool for MacosBuildRunTool {
             build_args.push(&project);
         }
 
-        let config;
-        let config_value = params
+        let config = params
             .get("configuration")
             .and_then(|v| v.as_str())
-            .unwrap_or("Debug");
-        config = config_value.to_string();
+            .unwrap_or("Debug")
+            .to_string();
         build_args.push("-configuration");
         build_args.push(&config);
 
@@ -879,12 +878,11 @@ impl Tool for MacosAppPathTool {
             args.push(&project);
         }
 
-        let config;
-        let config_value = params
+        let config = params
             .get("configuration")
             .and_then(|v| v.as_str())
-            .unwrap_or("Debug");
-        config = config_value.to_string();
+            .unwrap_or("Debug")
+            .to_string();
         args.push("-configuration");
         args.push(&config);
 

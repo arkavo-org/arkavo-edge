@@ -2,7 +2,9 @@
 
 use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::rate_limit::RateLimiter;
-use crate::types::{KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse};
+use crate::types::{
+    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
+};
 use arkavo_tdf::KasA2aHandler;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
@@ -63,14 +65,12 @@ pub async fn handle_kas_rewrap(
                 arkavo_tdf::KasError::AccessDenied => (-32001, "Access denied"),
                 arkavo_tdf::KasError::Delegation(_) => (-32002, "Delegation verification failed"),
                 arkavo_tdf::KasError::PolicyBindingInvalid(_) => (-32003, "Invalid policy binding"),
-                arkavo_tdf::KasError::KeypairNotConfigured => (-32603, "KAS keypair not configured"),
+                arkavo_tdf::KasError::KeypairNotConfigured => {
+                    (-32603, "KAS keypair not configured")
+                }
                 _ => (-32000, "KAS error"),
             };
-            Err(ErrorObjectOwned::owned(
-                code,
-                message,
-                Some(e.to_string()),
-            ))
+            Err(ErrorObjectOwned::owned(code, message, Some(e.to_string())))
         }
     }
 }
@@ -161,14 +161,8 @@ mod tests {
             client_public_key: "-----BEGIN PUBLIC KEY-----".to_string(),
         };
 
-        let result = handle_kas_rewrap(
-            &metrics,
-            &rate_limiter,
-            None,
-            request,
-            "did:key:z6MkTest",
-        )
-        .await;
+        let result =
+            handle_kas_rewrap(&metrics, &rate_limiter, None, request, "did:key:z6MkTest").await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();

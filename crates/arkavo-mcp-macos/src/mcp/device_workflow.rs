@@ -593,24 +593,24 @@ impl Tool for DeviceStopTool {
             .and_then(|p| p.as_array())
         {
             for process in processes {
-                if process.get("bundleID").and_then(|b| b.as_str()) == Some(bundle_id) {
-                    if let Some(pid) = process.get("processIdentifier").and_then(|p| p.as_i64()) {
-                        let pid_str = pid.to_string();
-                        let _ = run_devicectl(&[
-                            "device", "process", "signal", "--device", device_id, "--pid",
-                            &pid_str, "--signal", signal,
-                        ])
-                        .await;
+                if process.get("bundleID").and_then(|b| b.as_str()) == Some(bundle_id)
+                    && let Some(pid) = process.get("processIdentifier").and_then(|p| p.as_i64())
+                {
+                    let pid_str = pid.to_string();
+                    let _ = run_devicectl(&[
+                        "device", "process", "signal", "--device", device_id, "--pid", &pid_str,
+                        "--signal", signal,
+                    ])
+                    .await;
 
-                        return Ok(json!({
-                            "success": true,
-                            "message": "App stopped",
-                            "device_id": device_id,
-                            "bundle_id": bundle_id,
-                            "pid": pid,
-                            "signal": signal
-                        }));
-                    }
+                    return Ok(json!({
+                        "success": true,
+                        "message": "App stopped",
+                        "device_id": device_id,
+                        "bundle_id": bundle_id,
+                        "pid": pid,
+                        "signal": signal
+                    }));
                 }
             }
         }

@@ -203,11 +203,7 @@ impl DelegationVerifier {
     }
 
     /// Verify the signature on a token using the issuer's DID:key.
-    fn verify_signature(
-        &self,
-        token: &DelegationToken,
-        depth: u32,
-    ) -> Result<(), DelegationError> {
+    fn verify_signature(&self, token: &DelegationToken, depth: u32) -> Result<(), DelegationError> {
         // Extract public key from DID:key
         let public_key = arkavo_crypto::AgentPublicKey::from_did_key(&token.issuer_did)
             .map_err(|e| DelegationError::InvalidIssuerDid(e.to_string()))?;
@@ -230,10 +226,7 @@ impl DelegationVerifier {
 
 /// Compute the intersection of two entitlement sets.
 fn intersect_entitlements(a: &[String], b: &[String]) -> Vec<String> {
-    a.iter()
-        .filter(|ent| b.contains(ent))
-        .cloned()
-        .collect()
+    a.iter().filter(|ent| b.contains(ent)).cloned().collect()
 }
 
 #[cfg(test)]
@@ -285,7 +278,10 @@ mod tests {
         let verifier = DelegationVerifier::empty();
         let result = verifier.verify(&token, "did:key:z6MkWrongCaller");
 
-        assert!(matches!(result, Err(DelegationError::SubjectMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(DelegationError::SubjectMismatch { .. })
+        ));
     }
 
     #[test]

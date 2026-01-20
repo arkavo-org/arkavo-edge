@@ -48,8 +48,14 @@ async fn build_agent_card(state: &WellKnownState) -> AgentCard {
         skills.push(AgentSkill {
             id: "kas.rewrap".to_string(),
             name: "TDF Key Rewrap".to_string(),
-            description: Some("Rewrap TDF encryption keys with ABAC policy enforcement".to_string()),
-            tags: vec!["kas".to_string(), "tdf".to_string(), "encryption".to_string()],
+            description: Some(
+                "Rewrap TDF encryption keys with ABAC policy enforcement".to_string(),
+            ),
+            tags: vec![
+                "kas".to_string(),
+                "tdf".to_string(),
+                "encryption".to_string(),
+            ],
             examples: vec![],
             input_modes: vec!["application/json".to_string()],
             output_modes: vec!["application/json".to_string()],

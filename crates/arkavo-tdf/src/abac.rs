@@ -147,10 +147,7 @@ mod tests {
 
         let policy = Policy {
             id: None,
-            attributes: vec![Attribute::new(
-                "https://arkavo.net/attr/role",
-                &["admin"],
-            )],
+            attributes: vec![Attribute::new("https://arkavo.net/attr/role", &["admin"])],
             dissemination: vec![],
         };
 
@@ -168,9 +165,7 @@ mod tests {
 
         let policy = Policy::default();
 
-        let entitlements = vec![
-            "https://arkavo.net/attr/role/value/user".to_string(),
-        ];
+        let entitlements = vec!["https://arkavo.net/attr/role/value/user".to_string()];
 
         let result = evaluator.evaluate(&entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
@@ -182,10 +177,7 @@ mod tests {
 
         let policy = Policy {
             id: None,
-            attributes: vec![Attribute::new(
-                "https://arkavo.net/attr/role",
-                &["admin"],
-            )],
+            attributes: vec![Attribute::new("https://arkavo.net/attr/role", &["admin"])],
             dissemination: vec![],
         };
 
@@ -203,7 +195,10 @@ mod tests {
             id: None,
             attributes: vec![
                 Attribute::new("https://arkavo.net/attr/role", &["admin"]),
-                Attribute::new("https://arkavo.net/attr/clearance", &["secret", "top-secret"]),
+                Attribute::new(
+                    "https://arkavo.net/attr/clearance",
+                    &["secret", "top-secret"],
+                ),
             ],
             dissemination: vec![],
         };
@@ -258,9 +253,7 @@ mod tests {
         };
 
         // Has "security" which is one of the allowed values
-        let entitlements = vec![
-            "https://arkavo.net/attr/department/value/security".to_string(),
-        ];
+        let entitlements = vec!["https://arkavo.net/attr/department/value/security".to_string()];
 
         let result = evaluator.evaluate(&entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
