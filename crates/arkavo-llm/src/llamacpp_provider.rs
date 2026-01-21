@@ -385,21 +385,60 @@ impl Provider for LlamaCppProvider {
             }
         }
 
-        let content = self
+        let raw_content = self
             .complete_with_options(modified_messages, max_tokens)
             .await?;
 
+        // Check if this is a GLM model (may have thinking blocks)
+        let format = detect_model_format(&self.name);
+        let is_glm = matches!(format, ModelFormat::GLM4);
+
+        // Extract thinking blocks for GLM models
+        let (content, reasoning_content) = if is_glm {
+            let extraction = ToolParser::extract_thinking_blocks(&raw_content);
+            let reasoning = if extraction.thinking.is_empty() {
+                None
+            } else {
+                Some(extraction.thinking)
+            };
+            (extraction.content, reasoning)
+        } else {
+            (raw_content, None)
+        };
+
         let tool_calls = if tools.is_some() {
             // Try configured format first, then fallback chain
+            // For GLM models, also try Python-style parser
             match self.config.tool_format {
                 LocalToolFormat::Fence => ToolParser::parse_fence(&content)
                     .or_else(|_| ToolParser::parse_xml(&content))
+                    .or_else(|_| {
+                        if is_glm {
+                            ToolParser::parse_python_style(&content)
+                        } else {
+                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
+                        }
+                    })
                     .unwrap_or_default(),
                 LocalToolFormat::Xml => ToolParser::parse_xml(&content)
                     .or_else(|_| ToolParser::parse_fence(&content))
+                    .or_else(|_| {
+                        if is_glm {
+                            ToolParser::parse_python_style(&content)
+                        } else {
+                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
+                        }
+                    })
                     .unwrap_or_default(),
                 LocalToolFormat::Json => ToolParser::parse_json(&content)
                     .or_else(|_| ToolParser::parse_fence(&content))
+                    .or_else(|_| {
+                        if is_glm {
+                            ToolParser::parse_python_style(&content)
+                        } else {
+                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
+                        }
+                    })
                     .unwrap_or_default(),
             }
         } else {
@@ -408,7 +447,7 @@ impl Provider for LlamaCppProvider {
 
         Ok(ProviderResponse {
             content,
-            reasoning_content: None,
+            reasoning_content,
             tool_calls,
             finish_reason: None,
         })

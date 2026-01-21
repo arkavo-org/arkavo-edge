@@ -1251,4 +1251,59 @@ mod tests {
         assert!(QWEN3_TEMPLATE.contains("user"));
         assert!(QWEN3_TEMPLATE.contains("assistant"));
     }
+
+    #[test]
+    fn test_glm4_template_contains_markers() {
+        assert!(GLM4_TEMPLATE.contains("[gMASK]<sop>"));
+        assert!(GLM4_TEMPLATE.contains("<|system|>"));
+        assert!(GLM4_TEMPLATE.contains("<|user|>"));
+        assert!(GLM4_TEMPLATE.contains("<|assistant|>"));
+        assert!(GLM4_TEMPLATE.contains("<|observation|>"));
+    }
+
+    #[test]
+    fn test_glm4_observation_role_no_trailing_newline() {
+        // CRITICAL: GLM-4 expects content immediately after <|observation|>
+        // with NO newline between the token and the content.
+        // This is essential for proper tool result handling.
+        let observation_pattern = "<|observation|>{{ message['content'] }}";
+        assert!(
+            GLM4_TEMPLATE.contains(observation_pattern),
+            "Observation role must not have newline after token. Expected: {}",
+            observation_pattern
+        );
+        // Ensure there's no newline variant
+        assert!(
+            !GLM4_TEMPLATE.contains("<|observation|>\n{{ message['content'] }}"),
+            "Observation role must NOT have newline after <|observation|> token"
+        );
+    }
+
+    #[test]
+    fn test_glm4_template_python_tool_guidance() {
+        // GLM-4.7-Flash is trained as Code Interpreter, so we guide it
+        assert!(GLM4_TEMPLATE.contains("python tool"));
+        assert!(GLM4_TEMPLATE.contains("code"));
+    }
+
+    #[test]
+    fn test_detect_model_format_glm() {
+        assert_eq!(detect_model_format("GLM-4.7-Flash"), ModelFormat::GLM4);
+        assert_eq!(detect_model_format("glm-4-9b"), ModelFormat::GLM4);
+        assert_eq!(
+            detect_model_format("bartowski/GLM-4.7-Flash-GGUF"),
+            ModelFormat::GLM4
+        );
+    }
+
+    #[test]
+    fn test_dry_sampling_config_defaults() {
+        let config = DrySamplingConfig::default();
+        assert_eq!(config.multiplier, 0.0); // Disabled by default
+        assert!(!config.is_enabled());
+
+        let glm_config = DrySamplingConfig::for_glm();
+        assert_eq!(glm_config.multiplier, 1.1); // GLM requires 1.1
+        assert!(glm_config.is_enabled());
+    }
 }
