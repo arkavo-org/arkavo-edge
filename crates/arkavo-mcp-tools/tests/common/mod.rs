@@ -2,7 +2,7 @@
 // These may not all be used in every test file
 #![allow(dead_code)]
 
-use arkavo_mcp_tools::{time_sync::SyncAgentTimeTool, Tool};
+use arkavo_mcp_tools::{Tool, time_sync::SyncAgentTimeTool};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Semaphore;

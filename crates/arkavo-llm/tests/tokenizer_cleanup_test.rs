@@ -43,7 +43,10 @@ fn test_tokenizer_temp_file_cleanup() {
     }
 
     // Verify cleanup worked
-    assert!(!test_tokenizer_path.exists(), "Test file should be cleaned up");
+    assert!(
+        !test_tokenizer_path.exists(),
+        "Test file should be cleaned up"
+    );
 }
 
 #[test]

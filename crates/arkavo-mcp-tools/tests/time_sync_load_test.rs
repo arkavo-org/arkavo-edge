@@ -2,11 +2,11 @@
 mod common;
 
 #[cfg(feature = "ntp-server")]
-use common::{run_concurrent_operations, AgentSimulator, PerformanceMetrics};
-#[cfg(feature = "ntp-server")]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use common::{AgentSimulator, PerformanceMetrics, run_concurrent_operations};
 #[cfg(feature = "ntp-server")]
 use std::sync::Arc;
+#[cfg(feature = "ntp-server")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "ntp-server")]
 use std::time::Instant;
 
