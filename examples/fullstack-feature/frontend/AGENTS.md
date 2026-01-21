@@ -2,7 +2,8 @@
 
 ## frontend-agent
 purpose: Implement frontend features including React components, forms, and API integration
-listen:  0.0.0.0:8360
+model:   ministral-3b
+listen:  0.0.0.0:8370
 
 # The frontend agent handles:
 # - React/Vue component development

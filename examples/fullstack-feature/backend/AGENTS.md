@@ -2,7 +2,8 @@
 
 ## backend-agent
 purpose: Implement backend features including REST APIs, database schemas, and business logic
-listen:  0.0.0.0:8361
+model:   ministral-3b
+listen:  0.0.0.0:8380
 
 # The backend agent handles:
 # - REST API endpoint implementation

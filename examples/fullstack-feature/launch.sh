@@ -97,13 +97,15 @@ start_agent() {
 
     echo -e "${BLUE}Starting $name...${NC}"
 
-    # Build command with optional model override
-    local cmd=("$BINARY" agent --config "$config")
+    # If model override specified, create temp config with model replaced
+    local actual_config="$config"
     if [ -n "$MODEL" ]; then
-        cmd+=(--model "$MODEL")
+        local temp_config="$LOG_DIR/$name-config.md"
+        sed "s/^model:.*$/model:   $MODEL/" "$config" > "$temp_config"
+        actual_config="$temp_config"
     fi
 
-    nohup "${cmd[@]}" > "$log_file" 2>&1 &
+    nohup "$BINARY" agent --config "$actual_config" > "$log_file" 2>&1 &
     local pid=$!
 
     echo "$pid $name" >> "$PID_FILE"
@@ -137,14 +139,8 @@ run_tasks() {
         echo "  $task_desc"
         echo ""
 
-        # Build command with optional model
-        local cmd=("$BINARY" task --yes)
-        if [ -n "$MODEL" ]; then
-            cmd+=(--model "$MODEL")
-        fi
-        cmd+=("$task_desc")
-
-        "${cmd[@]}" 2>&1 || true
+        # Task uses mesh agents (which have model configured) or falls back to local
+        "$BINARY" task --yes "$task_desc" 2>&1 || true
 
         echo ""
         echo "---"

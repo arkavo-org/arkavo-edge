@@ -2,7 +2,8 @@
 
 ## orchestrator-agent
 purpose: Coordinate frontend and backend agents to implement fullstack features
-listen:  0.0.0.0:8362
+model:   ministral-3b
+listen:  0.0.0.0:8390
 
 # The orchestrator agent is responsible for:
 # - Breaking down feature requests into frontend/backend tasks
