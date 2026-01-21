@@ -1,0 +1,25 @@
+{
+  "scenario": "fullstack-feature",
+  "description": "Fullstack feature development with frontend/backend agents coordinated by orchestrator",
+  "type": "task",
+  "tasks": [
+    {
+      "id": "user-profile",
+      "description": "Implement a user profile feature: Backend needs a GET /api/users/:id endpoint returning {id, name, email, avatar}. Frontend needs a ProfileCard component that fetches and displays this data with loading and error states.",
+      "target": "orchestrator",
+      "expected_flow": ["orchestrator", "backend-agent", "frontend-agent"]
+    },
+    {
+      "id": "search-feature",
+      "description": "Add search functionality: Backend needs a GET /api/search?q=term endpoint with pagination. Frontend needs a SearchBar component with debounced input and a SearchResults component showing paginated results.",
+      "target": "orchestrator",
+      "expected_flow": ["orchestrator", "backend-agent", "frontend-agent"]
+    },
+    {
+      "id": "notification-system",
+      "description": "Build a notification system: Backend needs endpoints for creating, listing, and marking notifications as read. Frontend needs a NotificationBell component with a dropdown showing unread count and recent notifications.",
+      "target": "orchestrator",
+      "expected_flow": ["orchestrator", "backend-agent", "frontend-agent"]
+    }
+  ]
+}

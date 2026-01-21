@@ -408,37 +408,15 @@ impl Provider for LlamaCppProvider {
 
         let tool_calls = if tools.is_some() {
             // Try configured format first, then fallback chain
-            // For GLM models, also try Python-style parser
             match self.config.tool_format {
                 LocalToolFormat::Fence => ToolParser::parse_fence(&content)
                     .or_else(|_| ToolParser::parse_xml(&content))
-                    .or_else(|_| {
-                        if is_glm {
-                            ToolParser::parse_python_style(&content)
-                        } else {
-                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
-                        }
-                    })
                     .unwrap_or_default(),
                 LocalToolFormat::Xml => ToolParser::parse_xml(&content)
                     .or_else(|_| ToolParser::parse_fence(&content))
-                    .or_else(|_| {
-                        if is_glm {
-                            ToolParser::parse_python_style(&content)
-                        } else {
-                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
-                        }
-                    })
                     .unwrap_or_default(),
                 LocalToolFormat::Json => ToolParser::parse_json(&content)
                     .or_else(|_| ToolParser::parse_fence(&content))
-                    .or_else(|_| {
-                        if is_glm {
-                            ToolParser::parse_python_style(&content)
-                        } else {
-                            Err(crate::tool_parser::ToolParseError::NoToolCalls)
-                        }
-                    })
                     .unwrap_or_default(),
             }
         } else {

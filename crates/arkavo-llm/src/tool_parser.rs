@@ -257,81 +257,6 @@ impl ToolParser {
         })
     }
 
-    /// Parse Python-style function calls from GLM-4 and similar models
-    /// Handles: function_name(arg1="value", arg2="value")
-    /// If args don't parse as key=value pairs, treats content as 'code' parameter
-    pub fn parse_python_style(text: &str) -> Result<Vec<ParsedToolCall>, ToolParseError> {
-        let mut calls = Vec::new();
-
-        // Pattern for Python-style function calls: name(...)
-        // Only match identifiers that could be tool names (start with letter, contain only alphanumeric/underscore)
-        let func_pattern = Regex::new(r"\b([a-zA-Z][a-zA-Z0-9_]*)\s*\(([^)]*)\)")
-            .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
-
-        for cap in func_pattern.captures_iter(text) {
-            if let (Some(name), Some(args_str)) = (cap.get(1), cap.get(2)) {
-                let tool_name = name.as_str().to_string();
-                let args_content = args_str.as_str().trim();
-
-                let arguments = Self::parse_python_args(args_content)?;
-                calls.push(ParsedToolCall {
-                    tool_name,
-                    arguments,
-                    call_id: None,
-                });
-            }
-        }
-
-        if calls.is_empty() {
-            return Err(ToolParseError::NoToolCalls);
-        }
-
-        Ok(calls)
-    }
-
-    /// Parse Python-style arguments: key="value", key2="value2"
-    /// Falls back to treating content as 'code' parameter if no key=value pairs found
-    fn parse_python_args(args_str: &str) -> Result<Value, ToolParseError> {
-        let args_str = args_str.trim();
-
-        // Empty args
-        if args_str.is_empty() {
-            return Ok(Value::Object(Map::new()));
-        }
-
-        // Try to parse as JSON object first
-        if args_str.starts_with('{')
-            && args_str.ends_with('}')
-            && let Ok(json) = serde_json::from_str::<Value>(args_str)
-        {
-            return Ok(json);
-        }
-
-        // Parse key="value", key2="value2" format
-        let mut map = Map::new();
-        let kv_pattern = Regex::new(r#"(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))"#)
-            .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
-
-        for cap in kv_pattern.captures_iter(args_str) {
-            if let Some(key) = cap.get(1) {
-                let value = cap
-                    .get(2)
-                    .or_else(|| cap.get(3))
-                    .or_else(|| cap.get(4))
-                    .map(|m| m.as_str())
-                    .unwrap_or("");
-                map.insert(key.as_str().to_string(), Value::String(value.to_string()));
-            }
-        }
-
-        if map.is_empty() && !args_str.is_empty() {
-            // Fallback: treat entire content as a single 'code' parameter
-            map.insert("code".to_string(), Value::String(args_str.to_string()));
-        }
-
-        Ok(Value::Object(map))
-    }
-
     fn extract_xml_tag(xml: &str, tag: &str) -> Result<String, ToolParseError> {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
@@ -723,53 +648,6 @@ location: New York
         let calls = ToolParser::parse_fence(text).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "get_weather");
-    }
-
-    #[test]
-    fn test_parse_python_style_basic() {
-        // GLM-4 native function call format
-        let text = r#"get_current_weather(location="Boston", unit="fahrenheit")"#;
-
-        let calls = ToolParser::parse_python_style(text).unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].tool_name, "get_current_weather");
-        assert_eq!(calls[0].arguments["location"], "Boston");
-        assert_eq!(calls[0].arguments["unit"], "fahrenheit");
-    }
-
-    #[test]
-    fn test_parse_python_style_single_quotes() {
-        // Handle single quotes
-        let text = r#"search_files(pattern='*.rs', path='/src')"#;
-
-        let calls = ToolParser::parse_python_style(text).unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].tool_name, "search_files");
-        assert_eq!(calls[0].arguments["pattern"], "*.rs");
-        assert_eq!(calls[0].arguments["path"], "/src");
-    }
-
-    #[test]
-    fn test_parse_python_style_with_empty_args() {
-        let text = r#"get_time()"#;
-
-        let calls = ToolParser::parse_python_style(text).unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].tool_name, "get_time");
-        assert!(calls[0].arguments.as_object().unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_parse_python_style_code_fallback() {
-        // When args don't parse as key=value, treat as code
-        let text = r#"python(print("hello world"))"#;
-
-        let calls = ToolParser::parse_python_style(text).unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].tool_name, "python");
-        // Should fall back to treating content as code
-        let code = calls[0].arguments["code"].as_str().unwrap();
-        assert!(code.contains("print"));
     }
 
     #[test]
