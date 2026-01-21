@@ -41,6 +41,8 @@ use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::rate_limit::RateLimiter;
 use crate::task_executor::TaskExecutor;
 use crate::task_store::TaskStore;
+#[cfg(feature = "stub_handlers")]
+use crate::types::TaskStatus;
 use crate::types::{
     AgentBroadcast, AgentCapabilitiesGetResponse, AgentConfigGetRequest, AgentConfigGetResponse,
     AgentConfigRestoreRequest, AgentConfigRestoreResponse, AgentConfigUpdateRequest,
