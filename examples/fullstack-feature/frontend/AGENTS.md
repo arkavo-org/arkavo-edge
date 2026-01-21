@@ -12,6 +12,12 @@ listen:  0.0.0.0:8370
 # - CSS/styling implementation
 # - Unit tests for UI components
 
+# MCP servers for code tools
+mcp_servers:
+  - name: filesystem
+    command: npx
+    args: ["-y", "@anthropic-ai/mcp-server-filesystem", "."]
+
 # Enable mDNS for mesh discovery
 discovery:
   mdns: true

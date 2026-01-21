@@ -12,6 +12,12 @@ listen:  0.0.0.0:8380
 # - Authentication/authorization
 # - Integration tests for APIs
 
+# MCP servers for code tools
+mcp_servers:
+  - name: filesystem
+    command: npx
+    args: ["-y", "@anthropic-ai/mcp-server-filesystem", "."]
+
 # Enable mDNS for mesh discovery
 discovery:
   mdns: true
