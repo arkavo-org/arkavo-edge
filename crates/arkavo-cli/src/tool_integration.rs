@@ -662,6 +662,74 @@ fn format_tool_results(results: &[ToolExecutionResult]) -> String {
         } else {
             let error_msg = result.error.as_deref().unwrap_or("Unknown error");
             let _ = writeln!(formatted, "Error: {error_msg}");
+
+            // Include schema hint when available (helps LLM retry with correct params)
+            if let Some(schema) = &result.schema_hint {
+                let _ = writeln!(
+                    formatted,
+                    "\nTo fix this error, use the correct parameter format:"
+                );
+                if let Some(desc) = schema.get("description").and_then(|v| v.as_str()) {
+                    let _ = writeln!(formatted, "Description: {desc}");
+                }
+                if let Some(params) = schema.get("parameters") {
+                    // Format parameters in a clear, LLM-friendly way
+                    if let Some(props) = params.get("properties") {
+                        let _ = writeln!(formatted, "Required parameters:");
+                        if let Some(required) = params.get("required").and_then(|v| v.as_array()) {
+                            for req in required {
+                                if let Some(name) = req.as_str()
+                                    && let Some(prop_schema) = props.get(name)
+                                {
+                                    let prop_type = prop_schema
+                                        .get("type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("any");
+                                    let prop_desc = prop_schema
+                                        .get("description")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let _ = writeln!(
+                                        formatted,
+                                        "  - {name} ({prop_type}): {prop_desc}"
+                                    );
+                                }
+                            }
+                        }
+                        // Also show optional parameters if any
+                        let required_set: std::collections::HashSet<&str> = params
+                            .get("required")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                            .unwrap_or_default();
+
+                        let optional_params: Vec<_> = props
+                            .as_object()
+                            .map(|obj| {
+                                obj.iter()
+                                    .filter(|(k, _)| !required_set.contains(k.as_str()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        if !optional_params.is_empty() {
+                            let _ = writeln!(formatted, "Optional parameters:");
+                            for (name, prop_schema) in optional_params {
+                                let prop_type = prop_schema
+                                    .get("type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("any");
+                                let prop_desc = prop_schema
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let _ =
+                                    writeln!(formatted, "  - {name} ({prop_type}): {prop_desc}");
+                            }
+                        }
+                    }
+                }
+            }
         }
         formatted.push('\n');
     }
