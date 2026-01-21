@@ -1,4 +1,5 @@
-use arkavo_mcp_tools::Tool;
+#![allow(clippy::disallowed_methods)] // tokio::main uses block_on internally
+
 use arkavo_mcp_tools::registry::ToolRegistry;
 use arkavo_memory::MemoryStorage;
 use serde_json::json;
@@ -42,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             Err(e) => {
-                println!("❌ Error: {}", e);
+                println!("❌ Error: {e}");
                 println!("Note: This requires 'gh' CLI to be installed and authenticated");
             }
         }
@@ -60,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             Err(e) => {
-                println!("❌ Error: {}", e);
+                println!("❌ Error: {e}");
                 println!("Note: This requires 'gh' CLI to be installed and authenticated");
             }
         }

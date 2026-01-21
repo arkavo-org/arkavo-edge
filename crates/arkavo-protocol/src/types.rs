@@ -191,48 +191,196 @@ pub enum FeatureType {
     McpServer,
 }
 
-/// Agent Card - JSON metadata document describing an agent
+/// A2A Protocol Agent Card - JSON metadata document at /.well-known/agent.json
+/// Conforms to A2A Protocol Specification v0.3+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentCard {
-    /// Agent identity information
-    pub identity: AgentIdentity,
+    /// Human-readable name of the agent
+    pub name: String,
 
-    /// Agent capabilities
-    pub capabilities: Vec<AgentCapability>,
-
-    /// Authentication requirements
-    pub authentication: AuthenticationRequirements,
-
-    /// Supported interaction modes
-    pub interaction_modes: Vec<InteractionMode>,
-
-    /// Optional metadata
+    /// Description of the agent's purpose and capabilities
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
+    pub description: Option<String>,
+
+    /// The base URL for the agent's A2A endpoint
+    pub url: String,
+
+    /// Information about the agent provider/organization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<AgentProvider>,
+
+    /// Version of this agent implementation
+    pub version: String,
+
+    /// A2A protocol versions this agent supports
+    #[serde(default)]
+    pub protocol_versions: Vec<String>,
+
+    /// Default supported input content types
+    #[serde(default)]
+    pub default_input_modes: Vec<String>,
+
+    /// Default supported output content types
+    #[serde(default)]
+    pub default_output_modes: Vec<String>,
+
+    /// Agent capability flags
+    pub capabilities: AgentCapabilities,
+
+    /// Skills this agent can perform
+    #[serde(default)]
+    pub skills: Vec<AgentSkill>,
+
+    /// Authentication schemes available
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security_schemes: Vec<SecurityScheme>,
+
+    /// Required authentication configuration
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security: Vec<SecurityRequirement>,
+
+    /// Optional extensions
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<AgentExtension>,
+
+    /// Optional signature for card verification (A2A v0.3+)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<AgentCardSignature>,
 }
 
-/// Agent identity information
+/// Information about the agent provider/organization
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AgentIdentity {
-    /// Unique agent ID
+#[serde(rename_all = "camelCase")]
+pub struct AgentProvider {
+    /// Name of the organization providing this agent
+    pub organization: String,
+
+    /// URL of the organization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Agent capability flags per A2A spec
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapabilities {
+    /// Whether the agent supports streaming responses
+    #[serde(default)]
+    pub streaming: bool,
+
+    /// Whether the agent supports push notifications
+    #[serde(default)]
+    pub push_notifications: bool,
+
+    /// Whether the agent supports state/session persistence
+    #[serde(default)]
+    pub state_transition_history: bool,
+}
+
+/// A skill the agent can perform
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkill {
+    /// Unique identifier for this skill
     pub id: String,
 
     /// Human-readable name
     pub name: String,
 
-    /// Agent description
+    /// Description of what this skill does
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Agent version
-    pub version: String,
+    /// Tags for categorizing the skill
+    #[serde(default)]
+    pub tags: Vec<String>,
 
-    /// Organization or owner
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub organization: Option<String>,
+    /// Example prompts that trigger this skill
+    #[serde(default)]
+    pub examples: Vec<String>,
+
+    /// Input modes this skill accepts (overrides agent defaults)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_modes: Vec<String>,
+
+    /// Output modes this skill produces (overrides agent defaults)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_modes: Vec<String>,
 }
 
-/// Agent capability description
+/// Security scheme definition (OpenAPI-style)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityScheme {
+    /// Scheme identifier
+    pub name: String,
+
+    /// Type of security scheme
+    #[serde(rename = "type")]
+    pub scheme_type: SecuritySchemeType,
+
+    /// Description of the scheme
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// OAuth2 flows (if type is oauth2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flows: Option<serde_json::Value>,
+}
+
+/// Type of security scheme
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SecuritySchemeType {
+    /// OAuth2 authentication
+    Oauth2,
+    /// HTTP authentication (Bearer, Basic, etc.)
+    Http,
+    /// API key authentication
+    ApiKey,
+    /// OpenID Connect
+    OpenIdConnect,
+    /// Mutual TLS
+    MutualTls,
+}
+
+/// Security requirement (which schemes are required)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SecurityRequirement {
+    /// Scheme name to scopes mapping
+    #[serde(flatten)]
+    pub requirements: std::collections::HashMap<String, Vec<String>>,
+}
+
+/// Agent extension declaration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentExtension {
+    /// Extension identifier URI
+    pub uri: String,
+
+    /// Extension-specific data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+/// Signature for Agent Card verification (A2A v0.3+)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCardSignature {
+    /// Signature algorithm used
+    pub algorithm: String,
+
+    /// Base64-encoded signature
+    pub value: String,
+
+    /// Key ID for verification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+}
+
+/// Agent capability description (used in broadcasts)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentCapability {
     /// Skill or capability name
@@ -249,32 +397,6 @@ pub struct AgentCapability {
     /// Output schema for this capability
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
-}
-
-/// Authentication requirements
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AuthenticationRequirements {
-    /// Supported authentication methods
-    pub methods: Vec<AuthMethod>,
-
-    /// Whether authentication is required
-    pub required: bool,
-}
-
-/// Authentication method
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthMethod {
-    /// OAuth2 authentication
-    OAuth2,
-    /// JWT bearer token
-    JwtBearer,
-    /// API key
-    ApiKey,
-    /// mTLS client certificate
-    Mtls,
-    /// Basic authentication
-    Basic,
 }
 
 /// Request from one agent to query another agent
@@ -1241,4 +1363,54 @@ pub struct Citation {
     /// Additional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+}
+
+/// Policy binding for TDF key access
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasPolicyBinding {
+    /// HMAC algorithm (typically "HS256")
+    pub alg: String,
+    /// HMAC hash of policy bound to key
+    pub hash: String,
+}
+
+/// Request to rewrap a TDF encryption key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasRewrapRequest {
+    /// Base64-encoded wrapped key from the TDF manifest
+    pub wrapped_key: String,
+    /// Policy binding from the TDF manifest
+    pub policy_binding: KasPolicyBinding,
+    /// Base64-encoded policy JSON from the TDF manifest
+    pub policy: String,
+    /// NTDF delegation token chain (JSON)
+    pub delegation_token: String,
+    /// Client's public key in PEM format for rewrapping
+    pub client_public_key: String,
+}
+
+/// Response containing the rewrapped key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasRewrapResponse {
+    /// Key rewrapped for the client's public key
+    pub entity_wrapped_key: String,
+}
+
+/// Request to retrieve the KAS public key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct KasPublicKeyRequest {
+    /// Requested algorithm (e.g., "RSA-OAEP")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub algorithm: Option<String>,
+}
+
+/// Response containing the KAS public key
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KasPublicKeyResponse {
+    /// PEM-encoded public key
+    pub public_key: String,
+    /// Key identifier
+    pub key_id: String,
+    /// Algorithm this key supports
+    pub algorithm: String,
 }

@@ -14,6 +14,7 @@ mod synthesis;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
+mod well_known;
 
 pub use a2a_server::A2aServer;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
@@ -32,6 +33,7 @@ pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
 pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
+pub use well_known::{WellKnownState, start_well_known_server};
 
 use crate::auth::AuthBackend;
 use crate::mcp_registry::McpRegistry;
@@ -39,13 +41,16 @@ use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::rate_limit::RateLimiter;
 use crate::task_executor::TaskExecutor;
 use crate::task_store::TaskStore;
+#[cfg(feature = "stub_handlers")]
+use crate::types::TaskStatus;
 use crate::types::{
     AgentBroadcast, AgentCapabilitiesGetResponse, AgentConfigGetRequest, AgentConfigGetResponse,
     AgentConfigRestoreRequest, AgentConfigRestoreResponse, AgentConfigUpdateRequest,
     AgentConfigUpdateResponse, AgentConfigValidateRequest, AgentConfigValidateResponse,
     AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, AgentSpecializeRequest,
     AgentSpecializeResponse, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
-    DiscoverFeaturesQuery, DiscoveredAgent, MessageSendRequest, MessageSendResponse,
+    DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
+    KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
     TaskGetResponse, TaskResponse, UserMessage,
 };
@@ -220,6 +225,15 @@ pub trait A2aRpc {
         &self,
         request: AgentSpecializeRequest,
     ) -> RpcResult<AgentSpecializeResponse>;
+
+    /// KAS rewrap - unwrap TDF key and rewrap for client
+    #[method(name = "kas.rewrap")]
+    async fn kas_rewrap(&self, request: KasRewrapRequest) -> RpcResult<KasRewrapResponse>;
+
+    /// Get KAS public key for TDF encryption
+    #[method(name = "kas.publicKey")]
+    async fn kas_public_key(&self, request: KasPublicKeyRequest)
+    -> RpcResult<KasPublicKeyResponse>;
 }
 
 pub struct A2aRpcImpl {
@@ -244,6 +258,9 @@ pub struct A2aRpcImpl {
     pub(crate) learning_bus: Option<Arc<LearningBus>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     pub(crate) public_key: Option<String>,
+    /// KAS A2A handler for TDF key operations
+    #[cfg(feature = "kas")]
+    pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
 }
 
 #[async_trait]
@@ -724,5 +741,59 @@ impl A2aRpcServer for A2aRpcImpl {
             request,
         )
         .await
+    }
+
+    async fn kas_rewrap(&self, request: KasRewrapRequest) -> RpcResult<KasRewrapResponse> {
+        #[cfg(feature = "kas")]
+        {
+            // Extract caller DID from authenticated context
+            // For now, use a placeholder - real impl would get this from auth
+            let caller_did = "did:key:z6MkUnknown";
+
+            handlers::kas::handle_kas_rewrap(
+                &self.metrics,
+                &self.rate_limiter,
+                self.kas_handler.as_ref(),
+                request,
+                caller_did,
+            )
+            .await
+        }
+
+        #[cfg(not(feature = "kas"))]
+        {
+            let _ = request;
+            Err(ErrorObjectOwned::owned(
+                -32603,
+                "KAS capability not available",
+                Some("Build with --features kas to enable KAS capability".to_string()),
+            ))
+        }
+    }
+
+    async fn kas_public_key(
+        &self,
+        request: KasPublicKeyRequest,
+    ) -> RpcResult<KasPublicKeyResponse> {
+        #[cfg(feature = "kas")]
+        {
+            handlers::kas::handle_kas_public_key(
+                &self.metrics,
+                &self.rate_limiter,
+                self.kas_handler.as_ref(),
+                request,
+            )
+            .await
+        }
+
+        #[cfg(not(feature = "kas"))]
+        {
+            let _ = request;
+            Err(ErrorObjectOwned::owned(
+                -32603,
+                "KAS capability not available",
+                Some("Build with --features kas to enable KAS capability".to_string()),
+            ))
+        }
     }
 }

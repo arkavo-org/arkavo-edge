@@ -20,6 +20,12 @@ pub struct AgentDescriptor {
     pub endpoint: String,
     pub mdns_service: Option<String>,
     pub agent_id_short_sha: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entitlements: Vec<String>,
 }
 
 impl AgentDescriptor {
@@ -29,14 +35,55 @@ impl AgentDescriptor {
         mdns_service: Option<String>,
         agent_id_short_sha: String,
     ) -> Self {
+        let did_key = Some(public_key.to_did_key());
         Self {
             public_key: public_key.to_base64(),
             endpoint,
             mdns_service,
             agent_id_short_sha,
+            did_key,
+            name: None,
+            entitlements: Vec::new(),
         }
     }
 
+    /// Set the agent name for authorization.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Set the entitlements (capabilities) for authorization.
+    #[must_use]
+    pub fn with_entitlements(mut self, entitlements: Vec<String>) -> Self {
+        self.entitlements = entitlements;
+        self
+    }
+
+    /// Generate authorization URL for mobile app scanning.
+    ///
+    /// Format: `arkavo://agent/authorize?did=...&name=...&entitlements=...`
+    pub fn to_authorization_url(&self) -> String {
+        let did = self.did_key.as_deref().unwrap_or("");
+        let mut url = format!("arkavo://agent/authorize?did={}", urlencoding::encode(did));
+
+        if let Some(name) = &self.name {
+            url.push_str(&format!("&name={}", urlencoding::encode(name)));
+        }
+
+        if !self.entitlements.is_empty() {
+            let entitlements_str = self.entitlements.join(",");
+            url.push_str(&format!(
+                "&entitlements={}",
+                urlencoding::encode(&entitlements_str)
+            ));
+        }
+
+        url
+    }
+
+    /// Legacy URL format for backward compatibility.
     pub fn to_url(&self) -> String {
         let mut url = format!("arkavo://agent?public_key={}", self.public_key);
 

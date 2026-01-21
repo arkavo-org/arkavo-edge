@@ -1,6 +1,9 @@
+#[cfg(feature = "ntp-server")]
 mod common;
 
+#[cfg(feature = "ntp-server")]
 use common::{AgentSimulator, PerformanceMetrics, run_concurrent_operations};
+#[cfg(feature = "ntp-server")]
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "ntp-server")]

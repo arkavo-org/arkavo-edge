@@ -35,7 +35,7 @@ check_mesh() {
     echo -e "${YELLOW}[MESH CHECK]${NC} Verifying agents are running..."
 
     # Check if conductor is listening
-    if ! curl -s http://localhost:8401/health > /dev/null 2>&1; then
+    if ! curl -s http://localhost:8401/.well-known/agent.json > /dev/null 2>&1; then
         echo -e "${RED}Error: Conductor not running on port 8401${NC}"
         echo "Start the mesh first: ./launch_mesh.sh"
         exit 1
@@ -45,7 +45,7 @@ check_mesh() {
 
     # Check other agents
     for port in 8402 8410 8411 8412; do
-        if curl -s http://localhost:$port/health > /dev/null 2>&1; then
+        if curl -s http://localhost:$port/.well-known/agent.json > /dev/null 2>&1; then
             echo -e "  ${GREEN}✓${NC} Agent on port $port"
         else
             echo -e "  ${YELLOW}!${NC} Agent on port $port not responding"

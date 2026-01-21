@@ -43,7 +43,7 @@ async fn find_qwen3_model() -> Option<String> {
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test -- --ignored --nocapture
+#[ignore = "requires local model file"]
 async fn test_deliberation_with_ministral_3b() {
     // Find model dynamically from HuggingFace cache
     let model_path = match find_ministral_model().await {
@@ -110,7 +110,7 @@ async fn test_deliberation_with_ministral_3b() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "requires local model file"]
 async fn test_deliberation_tool_error_scenario() {
     let model_path = match find_ministral_model().await {
         Some(path) => path,
@@ -170,7 +170,7 @@ async fn test_deliberation_tool_error_scenario() {
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test test_qwen3 -- --ignored --nocapture
+#[ignore = "requires local model file"]
 async fn test_qwen3_math() {
     let model_path = match find_qwen3_model().await {
         Some(path) => path,
@@ -223,7 +223,7 @@ async fn test_qwen3_math() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "requires local model file"]
 async fn test_qwen3_coding() {
     let model_path = match find_qwen3_model().await {
         Some(path) => path,

@@ -20,7 +20,11 @@ use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
+use super::well_known::{WellKnownState, start_well_known_server};
 use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
+
+#[cfg(feature = "kas")]
+use arkavo_tdf::KasA2aHandler;
 
 pub struct A2aServer {
     config: ServerConfig,
@@ -45,6 +49,8 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
+    /// Handle for the well-known HTTP server
+    well_known_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl A2aServer {
@@ -74,6 +80,7 @@ impl A2aServer {
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
+            well_known_handle: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -805,6 +812,8 @@ impl A2aServer {
             router,
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
+            #[cfg(feature = "kas")]
+            kas_handler: Some(Arc::new(KasA2aHandler::with_defaults())),
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -816,6 +825,54 @@ impl A2aServer {
         info!("A2A server started successfully on {}", actual_addr);
         info!("OpenRPC schema available via JSON-RPC method: rpc.discover");
 
+        // Start the well-known HTTP server on port + 1 (or dynamic if port is 0)
+        let http_port = if self.config.port == 0 {
+            0
+        } else {
+            self.config.port + 1
+        };
+
+        if let Err(e) = self.start_well_known_server(http_port, actual_port).await {
+            warn!("Failed to start well-known HTTP server: {}", e);
+        }
+
         Ok((handle, actual_port))
+    }
+
+    /// Start the well-known HTTP server for agent discovery
+    /// Serves /.well-known/agent.json per A2A protocol spec
+    pub async fn start_well_known_server(&self, http_port: u16, rpc_port: u16) -> Result<u16> {
+        let bind_addr: SocketAddr = format!("{}:{}", self.config.bind_address, http_port)
+            .parse()
+            .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid HTTP bind address: {e}")))?;
+
+        let state = WellKnownState {
+            agent_metadata: self.agent_metadata.clone(),
+            mcp_registry: self.mcp_registry.clone(),
+            rpc_port,
+            #[cfg(feature = "kas")]
+            kas_enabled: true,
+        };
+
+        let (handle, actual_http_port) = start_well_known_server(bind_addr, state)
+            .await
+            .map_err(|e| A2aError::Transport(format!("Failed to start well-known server: {e}")))?;
+
+        *self.well_known_handle.write().await = Some(handle);
+
+        info!(
+            "Agent Card available at http://{}:{}/.well-known/agent.json",
+            self.config.bind_address, actual_http_port
+        );
+
+        Ok(actual_http_port)
+    }
+
+    /// Stop the well-known HTTP server
+    pub async fn stop_well_known_server(&self) {
+        if let Some(handle) = self.well_known_handle.write().await.take() {
+            handle.abort();
+            info!("Well-known HTTP server stopped");
+        }
     }
 }

@@ -150,7 +150,7 @@ lsof -i :8342 -i :8343 -i :8344
 sleep 15
 
 # Verify orchestrator is healthy
-if ! curl -sSf http://localhost:8342/health > /dev/null 2>&1; then
+if ! curl -sSf http://localhost:8342/.well-known/agent.json > /dev/null 2>&1; then
     echo "FAIL: Orchestrator not responding"
     ./launch_multi_agent_system.sh stop
     exit 1

@@ -164,7 +164,7 @@ async fn test_format_with_model(
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p arkavo-router --features llama-cpp --test format_learning_test -- --ignored --nocapture
+#[ignore = "requires llama-cpp feature and local model"]
 async fn test_format_learning_ministral() {
     let model_path = match find_ministral_model().await {
         Some(path) => path,
@@ -257,7 +257,7 @@ async fn test_format_learning_ministral() {
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p arkavo-router --features llama-cpp --test format_learning_test -- --ignored --nocapture
+#[ignore = "requires llama-cpp feature and local model"]
 async fn test_format_learning_qwen() {
     let model_path = match find_qwen3_model().await {
         Some(path) => path,
@@ -348,7 +348,7 @@ async fn test_format_learning_qwen() {
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p arkavo-router --features llama-cpp --test format_learning_test -- --ignored --nocapture
+#[ignore = "requires llama-cpp feature and local model"]
 async fn test_format_learning_comparison() {
     println!("\n=== Cross-Model Format Learning Comparison ===\n");
 

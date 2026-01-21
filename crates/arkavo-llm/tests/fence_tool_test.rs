@@ -2,10 +2,11 @@
 //!
 //! Run with: cargo test --features llama-cpp -p arkavo-llm --test fence_tool_test -- --ignored --nocapture
 
+#![allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
+
 #[cfg(all(test, feature = "llama-cpp"))]
 mod tests {
     use arkavo_llm::{LlamaCppProvider, LocalToolFormat, Message, Provider, Role, SamplingConfig};
-    use serde_json::json;
 
     const TEST_TOOLS: &str = r#"[{
         "name": "get_weather",
@@ -45,18 +46,18 @@ mod tests {
             let model_dir = format!("{cache_dir}/{pattern}");
             if let Ok(entries) = std::fs::read_dir(&model_dir) {
                 for entry in entries.flatten() {
-                    if entry.file_name().to_string_lossy().starts_with("snapshots") {
-                        if let Ok(snapshots) = std::fs::read_dir(entry.path()) {
-                            for snapshot in snapshots.flatten() {
-                                let gguf_path = snapshot.path().join("gemma-3-270m-it-Q4_0.gguf");
-                                if gguf_path.exists() {
-                                    return Some(gguf_path.to_string_lossy().to_string());
-                                }
-                                // Also try Q4_K_M variant
-                                let gguf_path = snapshot.path().join("gemma-3-270m-it-Q4_K_M.gguf");
-                                if gguf_path.exists() {
-                                    return Some(gguf_path.to_string_lossy().to_string());
-                                }
+                    if entry.file_name().to_string_lossy().starts_with("snapshots")
+                        && let Ok(snapshots) = std::fs::read_dir(entry.path())
+                    {
+                        for snapshot in snapshots.flatten() {
+                            let gguf_path = snapshot.path().join("gemma-3-270m-it-Q4_0.gguf");
+                            if gguf_path.exists() {
+                                return Some(gguf_path.to_string_lossy().to_string());
+                            }
+                            // Also try Q4_K_M variant
+                            let gguf_path = snapshot.path().join("gemma-3-270m-it-Q4_K_M.gguf");
+                            if gguf_path.exists() {
+                                return Some(gguf_path.to_string_lossy().to_string());
                             }
                         }
                     }

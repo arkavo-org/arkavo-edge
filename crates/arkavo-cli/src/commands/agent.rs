@@ -1298,7 +1298,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     if !quiet {
         use arkavo_crypto::AgentKeypair;
         use arkavo_device_identity::{get_or_create_device_id, keypair};
-        use arkavo_registration::{AgentDescriptor, qr::display_qr};
+        use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
         // Get or create device ID (needed for system initialization)
         let _device_id =
@@ -1327,7 +1327,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             .unwrap_or("unknown")
             .to_string();
 
-        // Create agent descriptor
+        // Create agent descriptor with DID:key and default entitlements
         let endpoint = format!("http://{}", config.listen);
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
@@ -1335,13 +1335,18 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             None
         };
 
-        let descriptor = AgentDescriptor::new(public_key, endpoint, mdns_service, folder_id);
+        let descriptor = AgentDescriptor::new(public_key, endpoint, mdns_service, folder_id)
+            .with_name(&config.name)
+            .with_entitlements(vec![
+                "agent.capability.chat".to_string(),
+                "agent.capability.tools".to_string(),
+            ]);
 
-        // Display QR code
+        // Display authorization QR code with DID:key
         println!("\n{}", "=".repeat(60));
-        println!("Agent Registration QR Code");
+        println!("Agent Authorization QR Code");
         println!("{}", "=".repeat(60));
-        if let Err(e) = display_qr(&descriptor) {
+        if let Err(e) = display_authorization_qr(&descriptor) {
             eprintln!("Warning: Failed to display QR code: {e}");
         }
         println!("{}", "=".repeat(60));

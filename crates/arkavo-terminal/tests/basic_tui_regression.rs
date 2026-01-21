@@ -1,7 +1,10 @@
-/// Basic TUI regression tests that can run without triggering runtime issues
-/// These tests verify the TUI testing infrastructure is working
-///
-/// Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
+//! Basic TUI regression tests that can run without triggering runtime issues
+//! These tests verify the TUI testing infrastructure is working
+//!
+//! Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
+
+#![allow(clippy::disallowed_methods)] // block_on is safe in sync test functions
+
 use arkavo_mcp_tools::server::Tool;
 use arkavo_mcp_tools::tui::{TuiInteractionKit, TuiKeyboardKit, TuiScreenshotKit};
 use serde_json::json;

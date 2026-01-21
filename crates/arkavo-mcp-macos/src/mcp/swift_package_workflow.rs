@@ -133,12 +133,14 @@ impl Tool for SwiftPackageBuildTool {
         let mut args = vec!["build", "--package-path", package_path];
 
         let config;
-        if let Some(c) = params.get("configuration").and_then(|v| v.as_str()) {
-            if c == "release" {
-                config = "release".to_string();
-                args.push("-c");
-                args.push(&config);
-            }
+        if params
+            .get("configuration")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c == "release")
+        {
+            config = "release".to_string();
+            args.push("-c");
+            args.push(&config);
         }
 
         let target;
@@ -283,11 +285,13 @@ impl Tool for SwiftPackageRunTool {
             package_path.to_string(),
         ];
 
-        if let Some(c) = params.get("configuration").and_then(|v| v.as_str()) {
-            if c == "release" {
-                args.push("-c".to_string());
-                args.push("release".to_string());
-            }
+        if params
+            .get("configuration")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c == "release")
+        {
+            args.push("-c".to_string());
+            args.push("release".to_string());
         }
 
         if params
@@ -457,12 +461,14 @@ impl Tool for SwiftPackageTestTool {
         let mut args = vec!["test", "--package-path", package_path];
 
         let config;
-        if let Some(c) = params.get("configuration").and_then(|v| v.as_str()) {
-            if c == "release" {
-                config = "release".to_string();
-                args.push("-c");
-                args.push(&config);
-            }
+        if params
+            .get("configuration")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c == "release")
+        {
+            config = "release".to_string();
+            args.push("-c");
+            args.push(&config);
         }
 
         let test_product;

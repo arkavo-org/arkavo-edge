@@ -1,3 +1,7 @@
+// Test utilities for time sync stress/load tests
+// These may not all be used in every test file
+#![allow(dead_code)]
+
 use arkavo_mcp_tools::{Tool, time_sync::SyncAgentTimeTool};
 use serde_json::json;
 use std::sync::Arc;
@@ -149,7 +153,7 @@ where
     for handle in handles {
         match handle.await {
             Ok(result) => results.push(result),
-            Err(e) => results.push(Err(format!("Task panicked: {}", e))),
+            Err(e) => results.push(Err(format!("Task panicked: {e}"))),
         }
     }
 
@@ -180,9 +184,9 @@ mod tests {
     #[test]
     fn test_percentile() {
         let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        assert_eq!(percentile(&values, 0.5), 3.0);
-        assert_eq!(percentile(&values, 0.0), 1.0);
-        assert_eq!(percentile(&values, 1.0), 5.0);
+        assert!((percentile(&values, 0.5) - 3.0).abs() < f64::EPSILON);
+        assert!((percentile(&values, 0.0) - 1.0).abs() < f64::EPSILON);
+        assert!((percentile(&values, 1.0) - 5.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -192,9 +196,9 @@ mod tests {
 
         assert_eq!(metrics.total_operations, 5);
         assert_eq!(metrics.successful_operations, 5);
-        assert_eq!(metrics.min_latency_ms, 10.0);
-        assert_eq!(metrics.max_latency_ms, 50.0);
-        assert_eq!(metrics.avg_latency_ms, 30.0);
+        assert!((metrics.min_latency_ms - 10.0).abs() < f64::EPSILON);
+        assert!((metrics.max_latency_ms - 50.0).abs() < f64::EPSILON);
+        assert!((metrics.avg_latency_ms - 30.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -202,8 +206,8 @@ mod tests {
         let offsets = vec![-10.0, -5.0, 0.0, 5.0, 10.0];
         let (mean, std_dev, max_drift) = calculate_drift_statistics(&offsets);
 
-        assert_eq!(mean, 0.0);
+        assert!(mean.abs() < f64::EPSILON);
         assert!(std_dev > 0.0);
-        assert_eq!(max_drift, 10.0);
+        assert!((max_drift - 10.0).abs() < f64::EPSILON);
     }
 }

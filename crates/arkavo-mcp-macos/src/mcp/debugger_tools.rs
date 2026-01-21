@@ -243,13 +243,12 @@ impl Tool for DebugBreakpointAddTool {
         let output = send_lldb_command(session_id, &command).await?;
 
         // Add condition if specified
-        if let Some(cond) = condition {
-            if output.contains("Breakpoint") {
-                if let Some(bp_num) = extract_breakpoint_number(&output) {
-                    let cond_cmd = format!("breakpoint modify {} --condition '{}'", bp_num, cond);
-                    send_lldb_command(session_id, &cond_cmd).await?;
-                }
-            }
+        if let Some(cond) = condition
+            && output.contains("Breakpoint")
+            && let Some(bp_num) = extract_breakpoint_number(&output)
+        {
+            let cond_cmd = format!("breakpoint modify {} --condition '{}'", bp_num, cond);
+            send_lldb_command(session_id, &cond_cmd).await?;
         }
 
         Ok(json!({
@@ -726,14 +725,11 @@ async fn send_lldb_command(session_id: &str, command: &str) -> Result<String> {
 // Helper to extract breakpoint number from LLDB output
 fn extract_breakpoint_number(output: &str) -> Option<u32> {
     for line in output.lines() {
-        if line.starts_with("Breakpoint ") {
-            if let Some(num_str) = line.strip_prefix("Breakpoint ") {
-                if let Some(num_end) = num_str.find(':') {
-                    if let Ok(num) = num_str[..num_end].parse() {
-                        return Some(num);
-                    }
-                }
-            }
+        if let Some(num_str) = line.strip_prefix("Breakpoint ")
+            && let Some(num_end) = num_str.find(':')
+            && let Ok(num) = num_str[..num_end].parse()
+        {
+            return Some(num);
         }
     }
     None

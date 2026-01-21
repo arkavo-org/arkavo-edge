@@ -137,7 +137,7 @@ show_status() {
     for agent in "${agents[@]}"; do
         local name="${agent%:*}"
         local port="${agent#*:}"
-        if curl -s "http://localhost:$port/health" > /dev/null 2>&1; then
+        if curl -s "http://localhost:$port/.well-known/agent.json" > /dev/null 2>&1; then
             print_status "SUCCESS" "$name (port $port)"
         else
             print_status "WARNING" "$name (port $port) - not responding"

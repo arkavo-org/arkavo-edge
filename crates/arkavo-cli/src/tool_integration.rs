@@ -341,11 +341,10 @@ pub async fn process_with_tools(
 
         // Check for format confusion (model generating conversation markers)
         if let Some(confusion_reason) = detect_format_confusion(&response.content) {
-            tracing::warn!("Format confusion detected: {}", confusion_reason);
+            tracing::warn!("Format confusion detected: {confusion_reason}");
             return Ok(ToolIntegrationResult {
                 final_response: format!(
-                    "Loop detected: {}. The model appears confused about the conversation format. Please try rephrasing your request.",
-                    confusion_reason
+                    "Loop detected: {confusion_reason}. The model appears confused about the conversation format. Please try rephrasing your request.",
                 ),
                 tool_executions: all_tool_executions,
                 total_iterations: iteration,

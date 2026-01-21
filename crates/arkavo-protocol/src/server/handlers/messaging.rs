@@ -164,7 +164,7 @@ pub async fn handle_agent_query(
 
     if let Some(ref target_id) = request.to_agent_id {
         let agents = mcp_registry.list_agents().await;
-        if !agents.iter().any(|a| &a.identity.id == target_id) {
+        if !agents.iter().any(|a| &a.name == target_id) {
             timer.error();
             return Err(jsonrpsee::types::error::ErrorObject::owned(
                 -32001,

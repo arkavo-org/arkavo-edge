@@ -5,6 +5,10 @@
 //!
 //! Enable with the `kas` feature flag.
 
+// Allow deprecated opentdf types until migration to TdfJson API.
+// The deprecated API (TdfJsonRpc, TdfManifestInline, InlinePayload) will be removed in opentdf 1.0.0.
+#![allow(deprecated)]
+
 use async_trait::async_trait;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
@@ -304,6 +308,7 @@ impl ArkavoKasClient {
                 },
                 encrypted_metadata: None,
                 schema_version: Some("1.0".to_string()),
+                ephemeral_public_key: None,
             })
             .collect();
 
@@ -386,6 +391,7 @@ impl ArkavoKasClient {
                         },
                         encrypted_metadata: None,
                         schema_version: Some("1.0".to_string()),
+                        ephemeral_public_key: None,
                     })
                     .collect(),
                 method: opentdf::EncryptionMethod {

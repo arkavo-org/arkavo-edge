@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 
 use super::super::config_helpers::AgentMetadata;
 
+#[allow(clippy::used_underscore_binding)]
 pub async fn handle_message_stream(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,

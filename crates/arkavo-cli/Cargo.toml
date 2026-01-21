@@ -31,6 +31,7 @@ snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["dep:arkavo-tdf-iroh"]
+kas = ["arkavo-protocol/kas"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
@@ -58,6 +59,7 @@ arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
+arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }

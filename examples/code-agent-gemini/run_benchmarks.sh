@@ -36,7 +36,7 @@ print_header() {
 }
 
 check_agent_running() {
-    if ! curl -s "http://localhost:$AGENT_PORT/health" > /dev/null 2>&1; then
+    if ! curl -s "http://localhost:$AGENT_PORT/.well-known/agent.json" > /dev/null 2>&1; then
         print_error "Agent not running on port $AGENT_PORT"
         echo "Start the agent first: ./launch_agent.sh"
         exit 1

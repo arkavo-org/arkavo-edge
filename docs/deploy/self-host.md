@@ -326,7 +326,7 @@ sqlite3 /var/lib/arkavo/sessions.db "ANALYZE;"
 
 ```bash
 # HTTP health endpoint
-curl https://your-server/health
+curl https://your-server/.well-known/agent.json
 
 # Response
 {

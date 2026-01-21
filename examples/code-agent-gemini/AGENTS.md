@@ -74,7 +74,7 @@ logging:
 health_check:
   enabled: true
   interval: 60
-  endpoint: /health
+  endpoint: /.well-known/agent.json
 
 ## Budget Tracking (Orchestrator Only)
 # NOTE: Budget tracking is implemented in arkavo-budget crate and used by the orchestrator.

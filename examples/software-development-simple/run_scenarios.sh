@@ -69,21 +69,21 @@ check_agents() {
     
     local all_healthy=true
     
-    if curl -s "$PM_URL/health" > /dev/null 2>&1; then
+    if curl -s "$PM_URL/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Project Manager is ready"
     else
         print_status "ERROR" "Project Manager is not responding"
         all_healthy=false
     fi
     
-    if curl -s "$CODING_URL/health" > /dev/null 2>&1; then
+    if curl -s "$CODING_URL/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Coding Agent is ready"
     else
         print_status "ERROR" "Coding Agent is not responding"
         all_healthy=false
     fi
     
-    if curl -s "$TESTING_URL/health" > /dev/null 2>&1; then
+    if curl -s "$TESTING_URL/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Testing Agent is ready"
     else
         print_status "ERROR" "Testing Agent is not responding"

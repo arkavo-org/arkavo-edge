@@ -181,9 +181,9 @@ Parallel task execution across multiple agents:
 
 ### Health Check
 ```bash
-curl http://localhost:8342/health
-curl http://localhost:8343/health
-curl http://localhost:8344/health
+curl http://localhost:8342/.well-known/agent.json
+curl http://localhost:8343/.well-known/agent.json
+curl http://localhost:8344/.well-known/agent.json
 ```
 
 ## Project Structure

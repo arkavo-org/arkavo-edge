@@ -357,7 +357,7 @@ impl TaskStore for SqliteTaskStore {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
-    use crate::types::{AgentIdentity, AuthenticationRequirements, InteractionMode, MessagePart};
+    use crate::types::{AgentCapabilities, MessagePart};
 
     #[tokio::test]
     async fn test_task_store_crud() -> Result<()> {
@@ -373,20 +373,20 @@ mod tests {
                 metadata: None,
             },
             agent_card: Some(AgentCard {
-                identity: AgentIdentity {
-                    id: "test-agent".to_string(),
-                    name: "Test Agent".to_string(),
-                    description: Some("A test agent".to_string()),
-                    version: "1.0.0".to_string(),
-                    organization: None,
-                },
-                capabilities: vec![],
-                authentication: AuthenticationRequirements {
-                    methods: vec![],
-                    required: false,
-                },
-                interaction_modes: vec![InteractionMode::Synchronous],
-                metadata: None,
+                name: "Test Agent".to_string(),
+                description: Some("A test agent".to_string()),
+                url: "http://localhost:8080".to_string(),
+                provider: None,
+                version: "1.0.0".to_string(),
+                protocol_versions: vec!["0.3".to_string()],
+                default_input_modes: vec!["text/plain".to_string()],
+                default_output_modes: vec!["text/plain".to_string()],
+                capabilities: AgentCapabilities::default(),
+                skills: vec![],
+                security_schemes: vec![],
+                security: vec![],
+                extensions: vec![],
+                signature: None,
             }),
             created_at: Utc::now(),
             updated_at: Utc::now(),

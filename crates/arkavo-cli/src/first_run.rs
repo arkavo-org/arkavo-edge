@@ -330,7 +330,7 @@ pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
 pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_crypto::AgentKeypair;
     use arkavo_device_identity::{get_or_create_device_id, keypair};
-    use arkavo_registration::{AgentDescriptor, qr::display_qr};
+    use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
     println!("Welcome Friend\n");
 
@@ -359,18 +359,22 @@ pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "localhost".to_string());
 
-    // Create agent descriptor with public key
-    // Endpoint uses mDNS name - actual port determined at runtime
+    // Create agent descriptor with DID:key and default entitlements
     let short_id = &public_key.to_base64()[..7.min(public_key.to_base64().len())];
     let descriptor = AgentDescriptor::new(
         public_key,
-        format!("{hostname}._a2a._tcp.local."), // mDNS name, port discovered via mDNS
+        format!("{hostname}._a2a._tcp.local."),
         Some(format!("{hostname}._a2a._tcp.local.")),
         short_id.to_string(),
-    );
+    )
+    .with_name(&hostname)
+    .with_entitlements(vec![
+        "agent.capability.chat".to_string(),
+        "agent.capability.tools".to_string(),
+    ]);
 
-    // Display QR code
-    display_qr(&descriptor)?;
+    // Display authorization QR code with DID:key
+    display_authorization_qr(&descriptor)?;
 
     println!();
 

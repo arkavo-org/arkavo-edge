@@ -384,7 +384,7 @@ impl McpRegistry {
 
     /// Register an agent with its card
     pub async fn register_agent(&self, agent_card: AgentCard) {
-        let agent_id = agent_card.identity.id.clone();
+        let agent_id = agent_card.name.clone();
         let mut agents = self.agents.write().await;
         agents.insert(agent_id.clone(), agent_card);
 

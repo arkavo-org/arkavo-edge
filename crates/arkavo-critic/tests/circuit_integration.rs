@@ -2,6 +2,8 @@
 //!
 //! Tests CircuitCheck integration per docs/llm-integration-testing-requirements.md Section 3.3.2
 
+#![allow(clippy::disallowed_methods)] // block_on is safe in sync test functions
+
 use arkavo_critic::{CircuitCheck, FeatureId, PolicyId, VerificationCheck, VerificationInput};
 use arkavo_llm::ProviderResponse;
 use arkavo_llm::tool_parser::ParsedToolCall;

@@ -115,7 +115,7 @@ start_agent() {
     local attempt=0
     
     while [ $attempt -lt $max_attempts ]; do
-        if curl -s "http://localhost:$port/health" > /dev/null 2>&1; then
+        if curl -s "http://localhost:$port/.well-known/agent.json" > /dev/null 2>&1; then
             print_status "SUCCESS" "$name started successfully (PID: $pid)"
             return 0
         fi
@@ -134,7 +134,7 @@ verify_agents() {
     local all_healthy=true
     
     # Check Project Manager
-    if curl -s "http://localhost:8342/health" > /dev/null 2>&1; then
+    if curl -s "http://localhost:8342/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Project Manager is healthy"
     else
         print_status "ERROR" "Project Manager is not responding"
@@ -142,7 +142,7 @@ verify_agents() {
     fi
     
     # Check Coding Agent
-    if curl -s "http://localhost:8343/health" > /dev/null 2>&1; then
+    if curl -s "http://localhost:8343/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Coding Agent is healthy"
     else
         print_status "ERROR" "Coding Agent is not responding"
@@ -150,7 +150,7 @@ verify_agents() {
     fi
     
     # Check Testing Agent
-    if curl -s "http://localhost:8344/health" > /dev/null 2>&1; then
+    if curl -s "http://localhost:8344/.well-known/agent.json" > /dev/null 2>&1; then
         print_status "SUCCESS" "Testing Agent is healthy"
     else
         print_status "ERROR" "Testing Agent is not responding"

@@ -46,6 +46,16 @@ pub mod opentdf_impl;
 #[cfg(feature = "kas")]
 pub mod kas_client;
 
+// A2A KAS capability modules (optional)
+#[cfg(feature = "a2a")]
+pub mod a2a_handler;
+#[cfg(feature = "a2a")]
+pub mod a2a_types;
+#[cfg(feature = "a2a")]
+pub mod abac;
+#[cfg(feature = "a2a")]
+pub mod delegation;
+
 pub use error::{TdfError, TransportError};
 pub use policy::{PolicyBuilder, arkavo_attrs};
 pub use traits::{BlobTransport, KasClient, TdfDecryptor, TdfEncryptor, TdfService};
@@ -63,3 +73,15 @@ pub use opentdf_impl::{OpenTdfConfig, OpenTdfService};
 pub use kas_client::{
     ARKAVO_KAS_URL, ARKAVO_OAUTH_URL, ArkavoKasClient, ArkavoKasConfig, KasPublicKey,
 };
+
+// Re-export A2A KAS types when feature is enabled
+#[cfg(feature = "a2a")]
+pub use a2a_handler::{KasA2aConfig, KasA2aHandler, KasError, KasKeypair};
+#[cfg(feature = "a2a")]
+pub use a2a_types::{
+    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
+};
+#[cfg(feature = "a2a")]
+pub use abac::{AbacError, AbacEvaluator, Decision};
+#[cfg(feature = "a2a")]
+pub use delegation::{DelegationError, DelegationToken, DelegationVerifier, TrustedRoot};

@@ -131,7 +131,7 @@ tail -f logs/runner.log
 ```bash
 for port in 8401 8402 8410 8411 8412; do
   echo -n "Port $port: "
-  curl -s http://localhost:$port/health && echo "OK" || echo "FAIL"
+  curl -s http://localhost:$port/.well-known/agent.json && echo "OK" || echo "FAIL"
 done
 ```
 
