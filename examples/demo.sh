@@ -6,6 +6,7 @@
 #   ./demo.sh all          # Run all scenarios
 #   ./demo.sh <scenario>   # Run specific scenario
 #   ./demo.sh --list       # List available scenarios
+#   ./demo.sh --model glm <scenario>  # Run with specific model (e.g., glm, qwen3)
 
 set -e
 
@@ -23,6 +24,9 @@ NC='\033[0m'
 # Default delay between scenarios
 DELAY=10
 
+# Model override (empty = use tasks.json model or default)
+MODEL=""
+
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
@@ -36,18 +40,20 @@ print_help() {
     echo "Usage: $0 [OPTIONS] [SCENARIO]"
     echo ""
     echo "Options:"
-    echo "  --list, -l     List available scenarios"
-    echo "  --help, -h     Show this help"
-    echo "  all            Run all scenarios"
-    echo "  <scenario>     Run specific scenario"
+    echo "  --list, -l         List available scenarios"
+    echo "  --model <name>     Force specific model (e.g., glm, qwen3, ministral)"
+    echo "  --help, -h         Show this help"
+    echo "  all                Run all scenarios"
+    echo "  <scenario>         Run specific scenario"
     echo ""
     echo "Without arguments, runs in interactive mode."
     echo ""
     echo "Examples:"
-    echo "  $0                      # Interactive mode"
-    echo "  $0 --list               # List scenarios"
-    echo "  $0 01-hello-world       # Run hello-world"
-    echo "  $0 all                  # Run all scenarios"
+    echo "  $0                            # Interactive mode"
+    echo "  $0 --list                     # List scenarios"
+    echo "  $0 01-hello-world             # Run hello-world"
+    echo "  $0 --model glm 01-hello-world # Run with GLM-4.7-Flash"
+    echo "  $0 all                        # Run all scenarios"
 }
 
 # Find all scenarios with tasks.json
@@ -161,6 +167,20 @@ run_scenario() {
     # Check scenario type (chat or task, default to task)
     local scenario_type=$(jq -r '.type // "task"' "$tasks_file")
 
+    # Determine model: CLI override > tasks.json model > default
+    local model_to_use="$MODEL"
+    if [ -z "$model_to_use" ]; then
+        model_to_use=$(jq -r '.model // ""' "$tasks_file")
+    fi
+
+    # Build model flag if specified
+    local model_flag=""
+    if [ -n "$model_to_use" ]; then
+        model_flag="--model $model_to_use"
+        echo -e "${CYAN}Model:${NC} $model_to_use"
+        echo ""
+    fi
+
     # Read and execute tasks
     local task_count=$(jq '.tasks | length' "$tasks_file")
     echo "Running $task_count tasks (type: $scenario_type)..."
@@ -176,9 +196,11 @@ run_scenario() {
 
         # Use chat or task based on scenario type
         if [ "$scenario_type" = "chat" ]; then
-            "$BINARY" chat --repo-context off --prompt "$task_desc" 2>&1 || true
+            # shellcheck disable=SC2086
+            "$BINARY" chat $model_flag --repo-context off --prompt "$task_desc" 2>&1 || true
         else
-            "$BINARY" task --yes "$task_desc" 2>&1 || true
+            # shellcheck disable=SC2086
+            "$BINARY" task $model_flag --yes "$task_desc" 2>&1 || true
         fi
 
         echo ""
@@ -269,17 +291,28 @@ cleanup() {
     echo -e "${GREEN}Done!${NC}"
 }
 
-# Main
-case "${1:-}" in
-    --help|-h)
-        print_help
-        exit 0
-        ;;
-    --list|-l)
-        list_scenarios
-        exit 0
-        ;;
-esac
+# Parse arguments
+SCENARIO_ARG=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h)
+            print_help
+            exit 0
+            ;;
+        --list|-l)
+            list_scenarios
+            exit 0
+            ;;
+        --model|-m)
+            MODEL="$2"
+            shift 2
+            ;;
+        *)
+            SCENARIO_ARG="$1"
+            shift
+            ;;
+    esac
+done
 
 print_banner
 
@@ -299,7 +332,7 @@ sleep 3
 echo ""
 
 # Run based on argument
-case "${1:-}" in
+case "${SCENARIO_ARG:-}" in
     "")
         interactive_mode
         ;;
@@ -307,10 +340,10 @@ case "${1:-}" in
         run_all_scenarios
         ;;
     *)
-        if [ -d "$SCRIPT_DIR/$1" ]; then
-            run_scenario "$1"
+        if [ -d "$SCRIPT_DIR/$SCENARIO_ARG" ]; then
+            run_scenario "$SCENARIO_ARG"
         else
-            echo -e "${RED}Unknown scenario: $1${NC}"
+            echo -e "${RED}Unknown scenario: $SCENARIO_ARG${NC}"
             echo ""
             list_scenarios
             exit 1
