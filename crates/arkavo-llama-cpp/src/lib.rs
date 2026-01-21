@@ -58,12 +58,16 @@ pub enum ModelFormat {
     /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
     #[default]
     Qwen3,
+    /// GLM-4 format (ChatML variant): [gMASK]<sop><|user|>\n...<|assistant|>\n
+    GLM4,
 }
 
 /// Detect model format from model name or path
 pub fn detect_model_format(model_name: &str) -> ModelFormat {
     let name_lower = model_name.to_lowercase();
-    if name_lower.contains("qwen") {
+    if name_lower.contains("glm-4") || name_lower.contains("glm4") {
+        ModelFormat::GLM4
+    } else if name_lower.contains("qwen") {
         ModelFormat::Qwen3
     } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
@@ -178,6 +182,17 @@ unsafe impl Sync for LlamaModel {}
 #[cfg(not(target_env = "musl"))]
 impl LlamaModel {
     pub fn from_file(path: &str) -> Result<Self, String> {
+        Self::from_file_with_options(path, true, false)
+    }
+
+    /// Load model with explicit options
+    /// - `use_direct_io`: Use direct I/O for faster loading (bypasses OS cache)
+    /// - `use_mmap`: Use memory-mapped I/O (default: true, ignored if use_direct_io is true)
+    pub fn from_file_with_options(
+        path: &str,
+        use_mmap: bool,
+        use_direct_io: bool,
+    ) -> Result<Self, String> {
         // Initialize backend if not already done
         unsafe {
             ffi::llama_backend_init();
@@ -192,11 +207,16 @@ impl LlamaModel {
         if try_gpu {
             // First attempt: GPU acceleration
             let mut params = unsafe { ffi::llama_model_default_params() };
-            params.n_gpu_layers = 999; // Offload all layers (999 = all)
+            params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
+            params.use_mmap = use_mmap;
+            params.use_direct_io = use_direct_io; // New in b7785: faster I/O, bypasses mmap
 
             if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-                eprintln!("Attempting GPU acceleration (offloading all layers)");
+                eprintln!(
+                    "Attempting GPU acceleration (all layers, mmap={}, direct_io={})",
+                    use_mmap, use_direct_io
+                );
             }
 
             let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
@@ -222,6 +242,8 @@ impl LlamaModel {
         // CPU fallback
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
+        cpu_params.use_mmap = use_mmap;
+        cpu_params.use_direct_io = use_direct_io;
 
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
         if cpu_model.is_null() {
@@ -264,6 +286,70 @@ impl LlamaModel {
 
     pub fn model_name(&self) -> &str {
         self.path.split('/').next_back().unwrap_or(&self.path)
+    }
+
+    /// Get the output embedding size (new in b7785)
+    pub fn n_embd_out(&self) -> i32 {
+        unsafe { ffi::llama_model_n_embd_out(self.ptr) }
+    }
+}
+
+/// Result of llama_params_fit operation
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamsFitStatus {
+    /// Found allocations that are projected to fit
+    Success,
+    /// Could not find allocations that are projected to fit
+    Failure,
+    /// A hard error occurred (e.g., model not found)
+    Error,
+}
+
+/// Auto-fit model and context parameters to available device memory.
+/// Returns optimal n_gpu_layers and n_ctx values that should fit in VRAM.
+///
+/// This is useful for automatically configuring models on systems with limited GPU memory.
+#[cfg(not(target_env = "musl"))]
+pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String> {
+    let c_path = CString::new(model_path).map_err(|e| e.to_string())?;
+
+    let mut mparams = unsafe { ffi::llama_model_default_params() };
+    let mut cparams = unsafe { ffi::llama_context_default_params() };
+
+    // Allocate space for tensor split (max devices)
+    let max_devices = unsafe { ffi::llama_max_devices() };
+    let mut tensor_split = vec![0.0f32; max_devices];
+
+    // Allocate space for tensor buffer type overrides
+    let max_overrides = unsafe { ffi::llama_max_tensor_buft_overrides() };
+    let mut overrides: Vec<ffi::llama_model_tensor_buft_override> =
+        vec![unsafe { std::mem::zeroed() }; max_overrides];
+
+    // Margins per device (leave some headroom)
+    let mut margins = vec![256 * 1024 * 1024usize; max_devices]; // 256MB margin per device
+
+    let status = unsafe {
+        ffi::llama_params_fit(
+            c_path.as_ptr(),
+            &mut mparams,
+            &mut cparams,
+            tensor_split.as_mut_ptr(),
+            overrides.as_mut_ptr(),
+            margins.as_mut_ptr(),
+            n_ctx_min,
+            ffi::ggml_log_level_GGML_LOG_LEVEL_WARN,
+        )
+    };
+
+    match status {
+        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_SUCCESS => {
+            Ok((mparams.n_gpu_layers, cparams.n_ctx))
+        }
+        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_FAILURE => {
+            Err("Could not find parameters that fit in device memory".to_string())
+        }
+        _ => Err("Error fitting parameters (model not found or other error)".to_string()),
     }
 }
 
@@ -479,6 +565,12 @@ const MISTRAL_V3_TEMPLATE: &str = "{{ bos_token }}{% for message in messages %}{
 // Uses <|im_start|>role\ncontent<|im_end|> format
 const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
 
+// GLM-4 chat template
+// Uses [gMASK]<sop> prefix and <|system|>, <|user|>, <|assistant|>, <|observation|> role tokens
+// GLM-4.7-Flash is trained as a Code Interpreter - it naturally wants to execute code.
+// We meet it halfway by providing a python tool and guiding the format.
+const GLM4_TEMPLATE: &str = "[gMASK]<sop><|system|>\nYou are a helpful assistant with access to a python tool. When using the python tool, pass your code as a string in the 'code' parameter like: python(code=\"your code here\").{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% elif message['role'] == 'observation' %}<|observation|>{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
+
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
@@ -498,6 +590,7 @@ pub fn apply_chat_template_with_format(
         ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
         ModelFormat::Qwen3 => QWEN3_TEMPLATE,
+        ModelFormat::GLM4 => GLM4_TEMPLATE,
     };
 
     if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
@@ -811,6 +904,76 @@ impl LlamaSampler {
         }
     }
 
+    /// Add adaptive-p sampler for dynamic probability adjustment (new in b7785)
+    ///
+    /// Adaptive-P dynamically adjusts sampling probability based on model confidence.
+    /// - `target`: Target cumulative probability (0.0-1.0), e.g., 0.9
+    /// - `decay`: How quickly to adapt (0.0-1.0), higher = faster adaptation
+    /// - `seed`: Random seed for reproducibility
+    ///
+    /// This produces more natural text by allowing the model to be more deterministic
+    /// when confident and more exploratory when uncertain.
+    pub fn add_adaptive_p(&self, target: f32, decay: f32, seed: u32) {
+        let adaptive_sampler = unsafe { ffi::llama_sampler_init_adaptive_p(target, decay, seed) };
+        if !adaptive_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, adaptive_sampler) };
+        }
+    }
+
+    /// Add distribution sampler for final token selection
+    ///
+    /// Unlike greedy sampling, this samples from the probability distribution,
+    /// providing stochastic output even after other samplers have filtered candidates.
+    pub fn add_dist(&self, seed: u32) {
+        let dist_sampler = unsafe { ffi::llama_sampler_init_dist(seed) };
+        if !dist_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, dist_sampler) };
+        }
+    }
+
+    /// Add DRY (Don't Repeat Yourself) sampler to prevent repetition loops.
+    ///
+    /// CRITICAL for GLM-4.7-Flash: Without dry_multiplier ~1.1, the model loops.
+    ///
+    /// - `vocab`: Model vocabulary for sequence detection
+    /// - `n_ctx_train`: Training context size
+    /// - `dry_multiplier`: Penalty multiplier (1.1 recommended for GLM-4.7)
+    /// - `dry_base`: Base for exponential penalty growth (default 1.75)
+    /// - `dry_allowed_length`: Min length before penalty applies (default 2)
+    /// - `dry_penalty_last_n`: How many tokens back to check (default 128)
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_dry(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        n_ctx_train: i32,
+        dry_multiplier: f32,
+        dry_base: f32,
+        dry_allowed_length: i32,
+        dry_penalty_last_n: i32,
+    ) {
+        // Default sequence breakers that reset the repetition detector
+        let mut seq_breakers: [*const std::os::raw::c_char; 4] =
+            [c"\n".as_ptr(), c":".as_ptr(), c"\"".as_ptr(), c"*".as_ptr()];
+
+        let dry_sampler = unsafe {
+            ffi::llama_sampler_init_dry(
+                vocab,
+                n_ctx_train,
+                dry_multiplier,
+                dry_base,
+                dry_allowed_length,
+                dry_penalty_last_n,
+                seq_breakers.as_mut_ptr(),
+                seq_breakers.len(),
+            )
+        };
+        if !dry_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, dry_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
         unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }
     }
@@ -871,6 +1034,107 @@ pub fn create_sampler_chain(
         sampler.add_temp(temp);
 
         // 4. Final token selection - greedy picks the most likely after transformations
+        sampler.add_greedy();
+
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: top_k={}, top_p={}, temp={}", top_k, top_p, temp);
+        }
+    }
+
+    Ok(sampler)
+}
+
+/// Dry sampling configuration for repetition prevention
+#[derive(Debug, Clone, Copy)]
+pub struct DrySamplingConfig {
+    /// Penalty multiplier (1.1 recommended for GLM-4.7 to prevent looping)
+    pub multiplier: f32,
+    /// Base for exponential penalty growth (default 1.75)
+    pub base: f32,
+    /// Min repetition length before penalty applies (default 2)
+    pub allowed_length: i32,
+    /// How many tokens back to check for repetitions (default 128)
+    pub penalty_last_n: i32,
+}
+
+impl Default for DrySamplingConfig {
+    fn default() -> Self {
+        Self {
+            multiplier: 0.0, // Disabled by default
+            base: 1.75,
+            allowed_length: 2,
+            penalty_last_n: 128,
+        }
+    }
+}
+
+impl DrySamplingConfig {
+    /// Create a config for GLM-4.7-Flash with recommended dry_multiplier 1.1
+    pub fn for_glm() -> Self {
+        Self {
+            multiplier: 1.1,
+            ..Default::default()
+        }
+    }
+
+    /// Check if dry sampling is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.multiplier > 0.0
+    }
+}
+
+/// Create a sampler chain with optional dry sampling for repetition prevention
+///
+/// Dry sampling is critical for GLM-4.7-Flash to prevent looping.
+/// Use `DrySamplingConfig::for_glm()` when working with GLM models.
+///
+/// # Safety
+/// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+#[cfg(not(target_env = "musl"))]
+pub unsafe fn create_sampler_chain_with_dry(
+    temp: f32,
+    top_p: f32,
+    top_k: i32,
+    _seed: u32,
+    dry_config: DrySamplingConfig,
+    vocab: *const ffi::llama_vocab,
+    n_ctx_train: i32,
+) -> Result<LlamaSampler, String> {
+    // Clamp params to reasonable ranges
+    let top_k = if top_k < 1 { 40 } else { top_k };
+    let top_p = top_p.clamp(0.1, 1.0);
+    let temp = temp.max(0.0);
+
+    let sampler = LlamaSampler::new_chain(false)?;
+
+    // Add dry sampling early if enabled (before other filters)
+    if dry_config.is_enabled() {
+        sampler.add_dry(
+            vocab,
+            n_ctx_train,
+            dry_config.multiplier,
+            dry_config.base,
+            dry_config.allowed_length,
+            dry_config.penalty_last_n,
+        );
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: dry_multiplier={}", dry_config.multiplier);
+        }
+    }
+
+    if temp <= 0.0 {
+        sampler.add_greedy();
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: greedy (deterministic)");
+        }
+    } else {
+        if top_k > 0 {
+            sampler.add_top_k(top_k);
+        }
+        if top_p < 1.0 {
+            sampler.add_top_p(top_p, 1);
+        }
+        sampler.add_temp(temp);
         sampler.add_greedy();
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
@@ -986,5 +1250,60 @@ mod tests {
         assert!(QWEN3_TEMPLATE.contains("system"));
         assert!(QWEN3_TEMPLATE.contains("user"));
         assert!(QWEN3_TEMPLATE.contains("assistant"));
+    }
+
+    #[test]
+    fn test_glm4_template_contains_markers() {
+        assert!(GLM4_TEMPLATE.contains("[gMASK]<sop>"));
+        assert!(GLM4_TEMPLATE.contains("<|system|>"));
+        assert!(GLM4_TEMPLATE.contains("<|user|>"));
+        assert!(GLM4_TEMPLATE.contains("<|assistant|>"));
+        assert!(GLM4_TEMPLATE.contains("<|observation|>"));
+    }
+
+    #[test]
+    fn test_glm4_observation_role_no_trailing_newline() {
+        // CRITICAL: GLM-4 expects content immediately after <|observation|>
+        // with NO newline between the token and the content.
+        // This is essential for proper tool result handling.
+        let observation_pattern = "<|observation|>{{ message['content'] }}";
+        assert!(
+            GLM4_TEMPLATE.contains(observation_pattern),
+            "Observation role must not have newline after token. Expected: {}",
+            observation_pattern
+        );
+        // Ensure there's no newline variant
+        assert!(
+            !GLM4_TEMPLATE.contains("<|observation|>\n{{ message['content'] }}"),
+            "Observation role must NOT have newline after <|observation|> token"
+        );
+    }
+
+    #[test]
+    fn test_glm4_template_python_tool_guidance() {
+        // GLM-4.7-Flash is trained as Code Interpreter, so we guide it
+        assert!(GLM4_TEMPLATE.contains("python tool"));
+        assert!(GLM4_TEMPLATE.contains("code"));
+    }
+
+    #[test]
+    fn test_detect_model_format_glm() {
+        assert_eq!(detect_model_format("GLM-4.7-Flash"), ModelFormat::GLM4);
+        assert_eq!(detect_model_format("glm-4-9b"), ModelFormat::GLM4);
+        assert_eq!(
+            detect_model_format("bartowski/GLM-4.7-Flash-GGUF"),
+            ModelFormat::GLM4
+        );
+    }
+
+    #[test]
+    fn test_dry_sampling_config_defaults() {
+        let config = DrySamplingConfig::default();
+        assert_eq!(config.multiplier, 0.0); // Disabled by default
+        assert!(!config.is_enabled());
+
+        let glm_config = DrySamplingConfig::for_glm();
+        assert_eq!(glm_config.multiplier, 1.1); // GLM requires 1.1
+        assert!(glm_config.is_enabled());
     }
 }

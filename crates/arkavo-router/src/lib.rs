@@ -1491,29 +1491,31 @@ impl Router {
                 _ => continue,
             };
 
-            // Skip common Python built-ins and markdown code fence language hints
-            if [
-                "print",
-                "len",
-                "str",
-                "int",
-                "float",
-                "list",
-                "dict",
-                "range",
-                "type",
-                "python",
-                "bash",
-                "shell",
-                "rust",
-                "javascript",
-                "js",
-                "typescript",
-                "ts",
-                "json",
-                "yaml",
-            ]
-            .contains(&tool_name.as_str())
+            // Skip common Python built-ins, markdown code fence hints, and math notation
+            // Also skip single/double letter identifiers (e.g., O, f, g, fn) as they're rarely tools
+            if tool_name.len() <= 2
+                || [
+                    "print",
+                    "len",
+                    "str",
+                    "int",
+                    "float",
+                    "list",
+                    "dict",
+                    "range",
+                    "type",
+                    "python",
+                    "bash",
+                    "shell",
+                    "rust",
+                    "javascript",
+                    "js",
+                    "typescript",
+                    "ts",
+                    "json",
+                    "yaml",
+                ]
+                .contains(&tool_name.as_str())
             {
                 continue;
             }

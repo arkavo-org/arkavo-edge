@@ -8,12 +8,14 @@ use std::path::PathBuf;
 /// Device profile based on system capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceProfile {
-    /// Raspberry Pi 5 or similar (≤4 cores)
+    /// Raspberry Pi 5 or similar (<16GB RAM)
     RaspberryPi5,
-    /// Desktop/laptop (5-8 cores)
+    /// Desktop/laptop (16-31GB RAM)
     Desktop,
-    /// Workstation (>8 cores)
+    /// Workstation (32-63GB RAM) - GLM-4.7-Flash capable with capped context
     Workstation,
+    /// High-memory workstation (64GB+ RAM) - GLM-4.7-Flash with full 131k context
+    HighMemoryWorkstation,
 }
 
 impl std::fmt::Display for DeviceProfile {
@@ -22,6 +24,7 @@ impl std::fmt::Display for DeviceProfile {
             DeviceProfile::RaspberryPi5 => write!(f, "Embedded (RPi5-class)"),
             DeviceProfile::Desktop => write!(f, "Desktop"),
             DeviceProfile::Workstation => write!(f, "Workstation"),
+            DeviceProfile::HighMemoryWorkstation => write!(f, "High-Memory Workstation"),
         }
     }
 }
@@ -33,8 +36,10 @@ pub enum RecommendedModel {
     Qwen3_0_6B,
     /// Ministral 3B - medium, for desktops (~2GB)
     Ministral3B,
-    /// Ministral 8B - larger, for workstations (~5GB)
+    /// Ministral 8B - larger, for desktops (~5GB)
     Ministral8B,
+    /// GLM-4.7-Flash - 30B MoE, requires 32GB+ RAM (~20GB)
+    Glm47Flash,
 }
 
 impl RecommendedModel {
@@ -44,6 +49,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen/Qwen3-0.6B-GGUF",
             RecommendedModel::Ministral3B => "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
             RecommendedModel::Ministral8B => "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+            RecommendedModel::Glm47Flash => "bartowski/GLM-4.7-Flash-GGUF",
         }
     }
 
@@ -53,6 +59,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen3-0.6B-Q8_0.gguf",
             RecommendedModel::Ministral3B => "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
             RecommendedModel::Ministral8B => "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
+            RecommendedModel::Glm47Flash => "GLM-4.7-Flash-Q4_K_M.gguf",
         }
     }
 
@@ -62,6 +69,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => 650_000_000,    // ~650MB
             RecommendedModel::Ministral3B => 2_500_000_000, // ~2.5GB
             RecommendedModel::Ministral8B => 5_500_000_000, // ~5.5GB
+            RecommendedModel::Glm47Flash => 20_000_000_000, // ~20GB Q4_K_M
         }
     }
 
@@ -71,6 +79,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen3 0.6B",
             RecommendedModel::Ministral3B => "Ministral 3B",
             RecommendedModel::Ministral8B => "Ministral 8B",
+            RecommendedModel::Glm47Flash => "GLM-4.7-Flash",
         }
     }
 }
@@ -79,6 +88,8 @@ impl RecommendedModel {
 #[derive(Debug, Clone)]
 pub struct SystemCapabilities {
     pub cpu_cores: usize,
+    pub total_ram_gb: u64,
+    pub has_unified_memory: bool,
     pub available_disk_gb: f64,
     pub device_profile: DeviceProfile,
     pub recommended_model: RecommendedModel,
@@ -96,6 +107,7 @@ pub fn is_first_run() -> bool {
         "models--Qwen--Qwen3-0.6B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+        "models--bartowski--GLM-4.7-Flash-GGUF",
     ];
 
     for repo_name in &preferred_repos {
@@ -147,20 +159,29 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
 }
 
+pub use crate::hardware::calculate_glm_max_context;
+use crate::hardware::{detect_unified_memory, get_total_ram_gb};
+
 /// Detect system capabilities
 pub fn detect_capabilities() -> SystemCapabilities {
     let cpu_cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
 
+    let total_ram_gb = get_total_ram_gb();
+    let has_unified_memory = detect_unified_memory();
+
     // Check for Raspberry Pi environment variable override
     let is_rpi = std::env::var("ARKAVO_RASPBERRY_PI")
         .map(|v| v == "1" || v.to_lowercase() == "true")
         .unwrap_or(false);
 
-    let device_profile = if is_rpi || cpu_cores <= 4 {
+    // Profile based on RAM (primary) and CPU cores (secondary)
+    let device_profile = if is_rpi || total_ram_gb < 16 {
         DeviceProfile::RaspberryPi5
-    } else if cpu_cores > 8 {
+    } else if total_ram_gb >= 64 && cpu_cores >= 8 {
+        DeviceProfile::HighMemoryWorkstation
+    } else if total_ram_gb >= 32 && cpu_cores >= 6 {
         DeviceProfile::Workstation
     } else {
         DeviceProfile::Desktop
@@ -168,14 +189,26 @@ pub fn detect_capabilities() -> SystemCapabilities {
 
     let recommended_model = match device_profile {
         DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen3_0_6B,
-        DeviceProfile::Desktop => RecommendedModel::Ministral3B,
-        DeviceProfile::Workstation => RecommendedModel::Ministral8B,
+        DeviceProfile::Desktop => RecommendedModel::Ministral8B,
+        DeviceProfile::Workstation => RecommendedModel::Glm47Flash,
+        DeviceProfile::HighMemoryWorkstation => RecommendedModel::Glm47Flash,
     };
+
+    // Warn about MoE performance on CPU-only systems
+    if matches!(
+        device_profile,
+        DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation
+    ) && !has_unified_memory
+    {
+        eprintln!("Note: GLM-4.7-Flash is a 30B MoE model. On CPU RAM, expect 1-3 tokens/sec.");
+    }
 
     let available_disk_gb = get_available_disk_space();
 
     SystemCapabilities {
         cpu_cores,
+        total_ram_gb,
+        has_unified_memory,
         available_disk_gb,
         device_profile,
         recommended_model,
@@ -326,60 +359,8 @@ pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
     input.is_empty() || input == "y" || input == "yes"
 }
 
-/// Display welcome message with QR code (verbose mode)
-pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_crypto::AgentKeypair;
-    use arkavo_device_identity::{get_or_create_device_id, keypair};
-    use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
-
-    println!("Welcome Friend\n");
-
-    // Get or create device ID
-    let _device_id = get_or_create_device_id()?;
-
-    // Get or create keypair
-    let keypair_bytes = match keypair::get_keypair()? {
-        Some(bytes) => bytes,
-        None => {
-            let new_keypair = AgentKeypair::generate();
-            let bytes = new_keypair.to_bytes();
-            keypair::store_keypair(&bytes)?;
-            bytes
-        }
-    };
-
-    let agent_keypair = AgentKeypair::from_bytes(&keypair_bytes)?;
-    let public_key = agent_keypair.public_key();
-
-    // Get hostname for endpoint
-    let hostname = std::process::Command::new("hostname")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "localhost".to_string());
-
-    // Create agent descriptor with DID:key and default entitlements
-    let short_id = &public_key.to_base64()[..7.min(public_key.to_base64().len())];
-    let descriptor = AgentDescriptor::new(
-        public_key,
-        format!("{hostname}._a2a._tcp.local."),
-        Some(format!("{hostname}._a2a._tcp.local.")),
-        short_id.to_string(),
-    )
-    .with_name(&hostname)
-    .with_entitlements(vec![
-        "agent.capability.chat".to_string(),
-        "agent.capability.tools".to_string(),
-    ]);
-
-    // Display authorization QR code with DID:key
-    display_authorization_qr(&descriptor)?;
-
-    println!();
-
-    Ok(())
-}
+// Re-export from welcome module for backwards compatibility
+pub use crate::welcome::display_welcome_verbose;
 
 #[cfg(test)]
 mod tests {
@@ -389,6 +370,7 @@ mod tests {
     fn test_detect_capabilities() {
         let caps = detect_capabilities();
         assert!(caps.cpu_cores > 0);
+        assert!(caps.total_ram_gb > 0);
         assert!(caps.available_disk_gb >= 0.0);
     }
 
@@ -398,5 +380,18 @@ mod tests {
         assert!(!model.repo_id().is_empty());
         assert!(!model.filename().is_empty());
         assert!(model.size_bytes() > 0);
+
+        let glm = RecommendedModel::Glm47Flash;
+        assert!(glm.repo_id().contains("bartowski"));
+        assert!(glm.size_bytes() > 10_000_000_000);
+    }
+
+    #[test]
+    fn test_device_profile_display() {
+        assert_eq!(
+            DeviceProfile::HighMemoryWorkstation.to_string(),
+            "High-Memory Workstation"
+        );
+        assert_eq!(DeviceProfile::Workstation.to_string(), "Workstation");
     }
 }

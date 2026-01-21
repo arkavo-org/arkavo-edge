@@ -25,6 +25,8 @@ pub struct ToolExecutionResult {
     pub result: Value,
     pub success: bool,
     pub error: Option<String>,
+    /// Tool schema - included when params are invalid to help LLM retry correctly
+    pub schema_hint: Option<Value>,
 }
 
 use std::sync::Arc;
@@ -62,18 +64,47 @@ impl ToolExecutor {
                 result,
                 success: true,
                 error: None,
+                schema_hint: None,
             }),
             Err(e) => {
                 let error_msg = e.to_string();
+
+                // Check if this is a parameter-related error - if so, include the schema
+                // to help the LLM retry with correct parameters
+                let schema_hint = if Self::is_param_error(&error_msg) {
+                    let schema = tool.schema();
+                    Some(serde_json::json!({
+                        "tool_name": schema.name,
+                        "description": schema.description,
+                        "parameters": schema.parameters,
+                    }))
+                } else {
+                    None
+                };
+
                 Ok(ToolExecutionResult {
                     tool_name: tool_call.tool_name.clone(),
                     call_id: tool_call.call_id.clone(),
                     result: serde_json::json!({"error": error_msg}),
                     success: false,
                     error: Some(error_msg),
+                    schema_hint,
                 })
             }
         }
+    }
+
+    /// Check if an error message indicates a parameter-related issue
+    fn is_param_error(error_msg: &str) -> bool {
+        let lower = error_msg.to_lowercase();
+        lower.contains("invalid param")
+            || lower.contains("missing")
+            || lower.contains("required")
+            || lower.contains("expected")
+            || lower.contains("invalid argument")
+            || lower.contains("invalid type")
+            || lower.contains("parse error")
+            || lower.contains("deserialize")
     }
 
     /// Execute multiple tool calls in sequence
@@ -89,6 +120,7 @@ impl ToolExecutor {
                         result: serde_json::json!({"error": e.to_string()}),
                         success: false,
                         error: Some(e.to_string()),
+                        schema_hint: None,
                     });
                 }
             }
@@ -201,5 +233,35 @@ mod tests {
         let registry = executor.registry();
         let tools = registry.list_tools();
         assert!(!tools.is_empty());
+    }
+
+    #[test]
+    fn test_is_param_error() {
+        // Should match param-related errors
+        assert!(ToolExecutor::is_param_error(
+            "Invalid parameters: missing required field"
+        ));
+        assert!(ToolExecutor::is_param_error(
+            "Missing required 'query' parameter"
+        ));
+        assert!(ToolExecutor::is_param_error(
+            "expected string but got number"
+        ));
+        assert!(ToolExecutor::is_param_error("Invalid argument: foo"));
+        assert!(ToolExecutor::is_param_error("Failed to deserialize input"));
+        assert!(ToolExecutor::is_param_error(
+            "parse error: unexpected token"
+        ));
+        assert!(ToolExecutor::is_param_error(
+            "invalid type: expected object"
+        ));
+
+        // Should NOT match non-param errors
+        assert!(!ToolExecutor::is_param_error("Connection refused"));
+        assert!(!ToolExecutor::is_param_error(
+            "Timeout waiting for response"
+        ));
+        assert!(!ToolExecutor::is_param_error("Permission denied"));
+        assert!(!ToolExecutor::is_param_error("File not found"));
     }
 }

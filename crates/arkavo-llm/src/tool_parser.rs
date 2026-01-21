@@ -24,7 +24,64 @@ pub struct ParsedToolCall {
 
 pub struct ToolParser;
 
+/// Result of extracting thinking blocks from GLM output
+#[derive(Debug, Clone, Default)]
+pub struct ThinkingExtraction {
+    /// The thinking/reasoning content (may be empty)
+    pub thinking: String,
+    /// The content with thinking blocks removed
+    pub content: String,
+}
+
 impl ToolParser {
+    /// Strip GLM-4 thinking blocks from model output
+    ///
+    /// GLM-4.7-Flash outputs `<|thought|>...<|/thought|>` blocks before tool calls.
+    /// This removes them, returning only the actionable content.
+    pub fn strip_thinking_blocks(text: &str) -> String {
+        Self::extract_thinking_blocks(text).content
+    }
+
+    /// Extract thinking blocks from GLM-4 output, preserving both parts
+    ///
+    /// Returns both the thinking content (for optional display) and the
+    /// cleaned content (for tool parsing).
+    pub fn extract_thinking_blocks(text: &str) -> ThinkingExtraction {
+        let mut thinking = String::new();
+        let mut content = text.to_string();
+
+        // Pattern 1: <|thought|>...<|/thought|>
+        if let Ok(re) = Regex::new(r"<\|thought\|>([\s\S]*?)<\|/thought\|>") {
+            for cap in re.captures_iter(text) {
+                if let Some(thought) = cap.get(1) {
+                    if !thinking.is_empty() {
+                        thinking.push('\n');
+                    }
+                    thinking.push_str(thought.as_str().trim());
+                }
+            }
+            content = re.replace_all(&content, "").to_string();
+        }
+
+        // Pattern 2: <think>...</think> (alternative format)
+        if let Ok(re) = Regex::new(r"<think>([\s\S]*?)</think>") {
+            for cap in re.captures_iter(&content) {
+                if let Some(thought) = cap.get(1) {
+                    if !thinking.is_empty() {
+                        thinking.push('\n');
+                    }
+                    thinking.push_str(thought.as_str().trim());
+                }
+            }
+            content = re.replace_all(&content, "").to_string();
+        }
+
+        // Clean up extra whitespace from removal
+        let content = content.trim().to_string();
+
+        ThinkingExtraction { thinking, content }
+    }
+
     /// Parse tool calls from Gemini API response
     pub fn parse_gemini(response: &Value) -> Result<Vec<ParsedToolCall>, ToolParseError> {
         let function_calls = response
@@ -591,5 +648,66 @@ location: New York
         let calls = ToolParser::parse_fence(text).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "get_weather");
+    }
+
+    #[test]
+    fn test_strip_thinking_blocks_glm_format() {
+        // GLM-4 thinking format: <|thought|>...<|/thought|>
+        let text = r#"<|thought|>
+Let me think about this...
+I should call the weather tool.
+<|/thought|>
+get_weather(location="Boston")"#;
+
+        let result = ToolParser::strip_thinking_blocks(text);
+        assert!(!result.contains("<|thought|>"));
+        assert!(!result.contains("Let me think"));
+        assert!(result.contains("get_weather"));
+    }
+
+    #[test]
+    fn test_strip_thinking_blocks_alternative_format() {
+        // Alternative thinking format: <think>...</think>
+        let text = r#"<think>
+I need to calculate fibonacci.
+</think>
+python(code="def fib(n): return n if n <= 1 else fib(n-1) + fib(n-2)")"#;
+
+        let result = ToolParser::strip_thinking_blocks(text);
+        assert!(!result.contains("<think>"));
+        assert!(!result.contains("I need to calculate"));
+        assert!(result.contains("python(code="));
+    }
+
+    #[test]
+    fn test_extract_thinking_blocks_preserves_both() {
+        let text = r#"<|thought|>First, I'll check the weather API.<|/thought|>
+get_weather(location="NYC")"#;
+
+        let extraction = ToolParser::extract_thinking_blocks(text);
+        assert!(extraction.thinking.contains("check the weather API"));
+        assert!(extraction.content.contains("get_weather"));
+        assert!(!extraction.content.contains("<|thought|>"));
+    }
+
+    #[test]
+    fn test_strip_thinking_no_thinking_blocks() {
+        // Content without thinking blocks should pass through unchanged
+        let text = "get_weather(location=\"Boston\")";
+        let result = ToolParser::strip_thinking_blocks(text);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_strip_multiple_thinking_blocks() {
+        let text = r#"<|thought|>First thought<|/thought|>
+Some content
+<|thought|>Second thought<|/thought|>
+get_weather(location="Boston")"#;
+
+        let extraction = ToolParser::extract_thinking_blocks(text);
+        assert!(extraction.thinking.contains("First thought"));
+        assert!(extraction.thinking.contains("Second thought"));
+        assert!(extraction.content.contains("get_weather"));
     }
 }

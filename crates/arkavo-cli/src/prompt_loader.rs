@@ -137,8 +137,8 @@ pub fn load_chat_system_prompt(mcp_available: bool, available_tools: Option<&str
         format!(
             "{tools_section}
 
-Tool Discovery: If you need a tool not listed above, request it with REQUEST_TOOL: <keyword>
-Examples: REQUEST_TOOL: time, REQUEST_TOOL: github, REQUEST_TOOL: security
+Tool Discovery: If you need a capability not listed above, annotate your response with [need: keyword].
+Examples: [need: time], [need: github], [need: filesystem]
 
 Context Archives: You may see [ARCHIVED: Summary - ID: uuid] pointers in context.
 These are compressed logs. To read them, use the context_restore tool with the ID.

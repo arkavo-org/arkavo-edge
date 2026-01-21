@@ -772,6 +772,7 @@ mod tests {
             result: json!({"error": "Agent not found"}),
             success: false,
             error: Some("Agent 'test-agent' not found".to_string()),
+            schema_hint: None,
         }];
 
         let result = judge
@@ -808,6 +809,7 @@ mod tests {
             result: json!({"error": "Agent not found"}),
             success: false,
             error: Some("Agent 'test-agent' not found".to_string()),
+            schema_hint: None,
         }];
 
         let result = judge
@@ -851,6 +853,7 @@ mod tests {
             result: json!({"error": "Agent not found"}),
             success: false,
             error: Some("Agent 'test-agent' not found".to_string()),
+            schema_hint: None,
         }];
 
         let result = judge

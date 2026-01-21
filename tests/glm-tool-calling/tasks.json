@@ -1,0 +1,24 @@
+{
+  "scenario": "glm-tool-calling",
+  "description": "GLM-4.7-Flash tool calling validation - tests Python-style and XML tool parsing",
+  "type": "chat",
+  "model": "glm",
+  "tasks": [
+    {
+      "id": "time-query",
+      "description": "What time is it right now?"
+    },
+    {
+      "id": "list-models",
+      "description": "What LLM models are available?"
+    },
+    {
+      "id": "filesystem-list",
+      "description": "List the files in the current directory."
+    },
+    {
+      "id": "multi-tool",
+      "description": "First tell me the current time, then list the available models."
+    }
+  ]
+}

@@ -2,6 +2,7 @@ pub mod builtin_mcp;
 pub mod commands;
 pub mod conversation_manager;
 pub mod first_run;
+pub mod hardware;
 pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
@@ -11,6 +12,7 @@ pub mod memory_integration;
 pub mod peer_manager;
 pub mod prompt_loader;
 pub mod tool_integration;
+pub mod welcome;
 
 #[allow(clippy::disallowed_methods)]
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -248,7 +250,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     let caps = first_run::detect_capabilities();
 
     // Display verbose welcome with QR code if requested
-    if !verbose || first_run::display_welcome_verbose().is_err() {
+    if !verbose || welcome::display_welcome_verbose().is_err() {
         println!("Welcome Friend\n");
     }
 
