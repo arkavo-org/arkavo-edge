@@ -180,8 +180,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Checkout version with Ministral 3 + warmup field (Dec 2025)
-          git checkout ecf74a841
+          # Checkout b7785 with GLM-4.7-Flash support, adaptive-p sampler, params_fit (Jan 2026)
+          git checkout b7785
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -367,8 +367,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Checkout version with Ministral 3 + warmup field (Dec 2025)
-          git checkout ecf74a841
+          # Checkout b7785 with GLM-4.7-Flash support, adaptive-p sampler, params_fit (Jan 2026)
+          git checkout b7785
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -501,8 +501,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Checkout version with Ministral 3 + warmup field (Dec 2025)
-          git checkout ecf74a841
+          # Checkout b7785 with GLM-4.7-Flash support, adaptive-p sampler, params_fit (Jan 2026)
+          git checkout b7785
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -611,8 +611,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Checkout version with Ministral 3 + warmup field (Dec 2025)
-          git checkout ecf74a841
+          # Checkout b7785 with GLM-4.7-Flash support, adaptive-p sampler, params_fit (Jan 2026)
+          git checkout b7785
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -1122,8 +1122,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Checkout version with Ministral 3 + warmup field (Dec 2025)
-          git checkout ecf74a841
+          # Checkout b7785 with GLM-4.7-Flash support, adaptive-p sampler, params_fit (Jan 2026)
+          git checkout b7785
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |

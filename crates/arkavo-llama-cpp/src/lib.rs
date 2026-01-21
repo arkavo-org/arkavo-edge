@@ -58,12 +58,16 @@ pub enum ModelFormat {
     /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
     #[default]
     Qwen3,
+    /// GLM-4 format (ChatML variant): [gMASK]<sop><|user|>\n...<|assistant|>\n
+    GLM4,
 }
 
 /// Detect model format from model name or path
 pub fn detect_model_format(model_name: &str) -> ModelFormat {
     let name_lower = model_name.to_lowercase();
-    if name_lower.contains("qwen") {
+    if name_lower.contains("glm-4") || name_lower.contains("glm4") {
+        ModelFormat::GLM4
+    } else if name_lower.contains("qwen") {
         ModelFormat::Qwen3
     } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
@@ -178,6 +182,17 @@ unsafe impl Sync for LlamaModel {}
 #[cfg(not(target_env = "musl"))]
 impl LlamaModel {
     pub fn from_file(path: &str) -> Result<Self, String> {
+        Self::from_file_with_options(path, true, false)
+    }
+
+    /// Load model with explicit options
+    /// - `use_direct_io`: Use direct I/O for faster loading (bypasses OS cache)
+    /// - `use_mmap`: Use memory-mapped I/O (default: true, ignored if use_direct_io is true)
+    pub fn from_file_with_options(
+        path: &str,
+        use_mmap: bool,
+        use_direct_io: bool,
+    ) -> Result<Self, String> {
         // Initialize backend if not already done
         unsafe {
             ffi::llama_backend_init();
@@ -192,11 +207,16 @@ impl LlamaModel {
         if try_gpu {
             // First attempt: GPU acceleration
             let mut params = unsafe { ffi::llama_model_default_params() };
-            params.n_gpu_layers = 999; // Offload all layers (999 = all)
+            params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
+            params.use_mmap = use_mmap;
+            params.use_direct_io = use_direct_io; // New in b7785: faster I/O, bypasses mmap
 
             if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-                eprintln!("Attempting GPU acceleration (offloading all layers)");
+                eprintln!(
+                    "Attempting GPU acceleration (all layers, mmap={}, direct_io={})",
+                    use_mmap, use_direct_io
+                );
             }
 
             let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
@@ -222,6 +242,8 @@ impl LlamaModel {
         // CPU fallback
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
+        cpu_params.use_mmap = use_mmap;
+        cpu_params.use_direct_io = use_direct_io;
 
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
         if cpu_model.is_null() {
@@ -264,6 +286,70 @@ impl LlamaModel {
 
     pub fn model_name(&self) -> &str {
         self.path.split('/').next_back().unwrap_or(&self.path)
+    }
+
+    /// Get the output embedding size (new in b7785)
+    pub fn n_embd_out(&self) -> i32 {
+        unsafe { ffi::llama_model_n_embd_out(self.ptr) }
+    }
+}
+
+/// Result of llama_params_fit operation
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamsFitStatus {
+    /// Found allocations that are projected to fit
+    Success,
+    /// Could not find allocations that are projected to fit
+    Failure,
+    /// A hard error occurred (e.g., model not found)
+    Error,
+}
+
+/// Auto-fit model and context parameters to available device memory.
+/// Returns optimal n_gpu_layers and n_ctx values that should fit in VRAM.
+///
+/// This is useful for automatically configuring models on systems with limited GPU memory.
+#[cfg(not(target_env = "musl"))]
+pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String> {
+    let c_path = CString::new(model_path).map_err(|e| e.to_string())?;
+
+    let mut mparams = unsafe { ffi::llama_model_default_params() };
+    let mut cparams = unsafe { ffi::llama_context_default_params() };
+
+    // Allocate space for tensor split (max devices)
+    let max_devices = unsafe { ffi::llama_max_devices() };
+    let mut tensor_split = vec![0.0f32; max_devices];
+
+    // Allocate space for tensor buffer type overrides
+    let max_overrides = unsafe { ffi::llama_max_tensor_buft_overrides() };
+    let mut overrides: Vec<ffi::llama_model_tensor_buft_override> =
+        vec![unsafe { std::mem::zeroed() }; max_overrides];
+
+    // Margins per device (leave some headroom)
+    let mut margins = vec![256 * 1024 * 1024usize; max_devices]; // 256MB margin per device
+
+    let status = unsafe {
+        ffi::llama_params_fit(
+            c_path.as_ptr(),
+            &mut mparams,
+            &mut cparams,
+            tensor_split.as_mut_ptr(),
+            overrides.as_mut_ptr(),
+            margins.as_mut_ptr(),
+            n_ctx_min,
+            ffi::ggml_log_level_GGML_LOG_LEVEL_WARN,
+        )
+    };
+
+    match status {
+        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_SUCCESS => {
+            Ok((mparams.n_gpu_layers, cparams.n_ctx))
+        }
+        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_FAILURE => {
+            Err("Could not find parameters that fit in device memory".to_string())
+        }
+        _ => Err("Error fitting parameters (model not found or other error)".to_string()),
     }
 }
 
@@ -479,6 +565,10 @@ const MISTRAL_V3_TEMPLATE: &str = "{{ bos_token }}{% for message in messages %}{
 // Uses <|im_start|>role\ncontent<|im_end|> format
 const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
 
+// GLM-4 chat template
+// Uses [gMASK]<sop> prefix and <|system|>, <|user|>, <|assistant|> role tokens
+const GLM4_TEMPLATE: &str = "[gMASK]<sop>{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
+
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
@@ -498,6 +588,7 @@ pub fn apply_chat_template_with_format(
         ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
         ModelFormat::Qwen3 => QWEN3_TEMPLATE,
+        ModelFormat::GLM4 => GLM4_TEMPLATE,
     };
 
     if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
@@ -808,6 +899,33 @@ impl LlamaSampler {
         };
         if !bias_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, bias_sampler) };
+        }
+    }
+
+    /// Add adaptive-p sampler for dynamic probability adjustment (new in b7785)
+    ///
+    /// Adaptive-P dynamically adjusts sampling probability based on model confidence.
+    /// - `target`: Target cumulative probability (0.0-1.0), e.g., 0.9
+    /// - `decay`: How quickly to adapt (0.0-1.0), higher = faster adaptation
+    /// - `seed`: Random seed for reproducibility
+    ///
+    /// This produces more natural text by allowing the model to be more deterministic
+    /// when confident and more exploratory when uncertain.
+    pub fn add_adaptive_p(&self, target: f32, decay: f32, seed: u32) {
+        let adaptive_sampler = unsafe { ffi::llama_sampler_init_adaptive_p(target, decay, seed) };
+        if !adaptive_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, adaptive_sampler) };
+        }
+    }
+
+    /// Add distribution sampler for final token selection
+    ///
+    /// Unlike greedy sampling, this samples from the probability distribution,
+    /// providing stochastic output even after other samplers have filtered candidates.
+    pub fn add_dist(&self, seed: u32) {
+        let dist_sampler = unsafe { ffi::llama_sampler_init_dist(seed) };
+        if !dist_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, dist_sampler) };
         }
     }
 
