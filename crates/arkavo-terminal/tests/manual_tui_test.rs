@@ -1,5 +1,8 @@
-/// Manual TUI tests that verify tool functionality
-/// Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
+//! Manual TUI tests that verify tool functionality
+//! Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
+
+#![allow(clippy::disallowed_methods)] // block_on is safe in sync test functions
+
 #[cfg(test)]
 mod manual_tests {
     use arkavo_mcp_tools::server::Tool;

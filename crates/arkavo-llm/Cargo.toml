@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = ["llm-remote"]
+local = ["llama-cpp"]  # Alias for local model support
 llm-remote = ["dep:reqwest", "dep:url", "dep:bytes", "dep:log"]
 kimi = ["dep:arkavo-kimi", "dep:reqwest", "dep:log"]
 deepseek = ["dep:arkavo-deepseek", "dep:reqwest", "dep:log"]
