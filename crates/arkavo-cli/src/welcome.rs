@@ -4,7 +4,7 @@
 
 use arkavo_crypto::AgentKeypair;
 use arkavo_device_identity::{get_or_create_device_id, keypair};
-use arkavo_registration::{qr::display_authorization_qr, AgentDescriptor};
+use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
 /// Display welcome message with QR code (verbose mode)
 pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {

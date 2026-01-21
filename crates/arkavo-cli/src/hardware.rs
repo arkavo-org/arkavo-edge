@@ -21,13 +21,16 @@ pub fn get_total_ram_gb() -> u64 {
     std::fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|content| {
-            content.lines().find(|l| l.starts_with("MemTotal:")).map(|l| {
-                l.split_whitespace()
-                    .nth(1)
-                    .and_then(|kb| kb.parse::<u64>().ok())
-                    .map(|kb| kb / 1_048_576) // kB to GB
-                    .unwrap_or(8)
-            })
+            content
+                .lines()
+                .find(|l| l.starts_with("MemTotal:"))
+                .map(|l| {
+                    l.split_whitespace()
+                        .nth(1)
+                        .and_then(|kb| kb.parse::<u64>().ok())
+                        .map(|kb| kb / 1_048_576) // kB to GB
+                        .unwrap_or(8)
+                })
         })
         .unwrap_or(8)
 }
@@ -71,15 +74,19 @@ pub fn calculate_glm_max_context(total_ram_gb: u64, use_kv_quant: bool) -> Optio
     const OVERHEAD_GB: u64 = 4;
 
     let remaining = total_ram_gb.saturating_sub(MODEL_SIZE_GB + OVERHEAD_GB);
-    let effective = if use_kv_quant { remaining * 2 } else { remaining };
+    let effective = if use_kv_quant {
+        remaining * 2
+    } else {
+        remaining
+    };
 
     match effective {
-        0..=3 => None,         // Cannot run GLM
-        4..=7 => Some(8_192),  // Minimal (24GB RAM with KV quant)
+        0..=3 => None,        // Cannot run GLM
+        4..=7 => Some(8_192), // Minimal (24GB RAM with KV quant)
         8..=15 => Some(16_384),
-        16..=30 => Some(32_768),  // 32GB RAM default
-        31..=50 => Some(65_536),  // 48GB RAM
-        _ => Some(131_072),       // 64GB+ RAM - full context
+        16..=30 => Some(32_768), // 32GB RAM default
+        31..=50 => Some(65_536), // 48GB RAM
+        _ => Some(131_072),      // 64GB+ RAM - full context
     }
 }
 

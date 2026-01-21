@@ -954,12 +954,8 @@ impl LlamaSampler {
         dry_penalty_last_n: i32,
     ) {
         // Default sequence breakers that reset the repetition detector
-        let mut seq_breakers: [*const std::os::raw::c_char; 4] = [
-            c"\n".as_ptr(),
-            c":".as_ptr(),
-            c"\"".as_ptr(),
-            c"*".as_ptr(),
-        ];
+        let mut seq_breakers: [*const std::os::raw::c_char; 4] =
+            [c"\n".as_ptr(), c":".as_ptr(), c"\"".as_ptr(), c"*".as_ptr()];
 
         let dry_sampler = unsafe {
             ffi::llama_sampler_init_dry(

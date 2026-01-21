@@ -243,8 +243,10 @@ impl ToolParser {
         }
 
         // Try to parse as JSON object first
-        if args_str.starts_with('{') && args_str.ends_with('}')
-            && let Ok(json) = serde_json::from_str::<Value>(args_str) {
+        if args_str.starts_with('{')
+            && args_str.ends_with('}')
+            && let Ok(json) = serde_json::from_str::<Value>(args_str)
+        {
             return Ok(json);
         }
 
@@ -255,7 +257,10 @@ impl ToolParser {
 
         for cap in kv_pattern.captures_iter(args_str) {
             if let Some(key) = cap.get(1) {
-                let value = cap.get(2).or_else(|| cap.get(3)).or_else(|| cap.get(4))
+                let value = cap
+                    .get(2)
+                    .or_else(|| cap.get(3))
+                    .or_else(|| cap.get(4))
                     .map(|m| m.as_str())
                     .unwrap_or("");
                 map.insert(key.as_str().to_string(), Value::String(value.to_string()));
@@ -709,5 +714,4 @@ location: New York
         let code = calls[0].arguments["code"].as_str().unwrap();
         assert!(code.contains("print"));
     }
-
 }

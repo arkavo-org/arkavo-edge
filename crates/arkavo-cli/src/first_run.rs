@@ -66,10 +66,10 @@ impl RecommendedModel {
     /// Approximate size in bytes
     pub fn size_bytes(&self) -> u64 {
         match self {
-            RecommendedModel::Qwen3_0_6B => 650_000_000,     // ~650MB
-            RecommendedModel::Ministral3B => 2_500_000_000,  // ~2.5GB
-            RecommendedModel::Ministral8B => 5_500_000_000,  // ~5.5GB
-            RecommendedModel::Glm47Flash => 20_000_000_000,  // ~20GB Q4_K_M
+            RecommendedModel::Qwen3_0_6B => 650_000_000,    // ~650MB
+            RecommendedModel::Ministral3B => 2_500_000_000, // ~2.5GB
+            RecommendedModel::Ministral8B => 5_500_000_000, // ~5.5GB
+            RecommendedModel::Glm47Flash => 20_000_000_000, // ~20GB Q4_K_M
         }
     }
 
@@ -159,8 +159,8 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
 }
 
-use crate::hardware::{detect_unified_memory, get_total_ram_gb};
 pub use crate::hardware::calculate_glm_max_context;
+use crate::hardware::{detect_unified_memory, get_total_ram_gb};
 
 /// Detect system capabilities
 pub fn detect_capabilities() -> SystemCapabilities {
@@ -195,12 +195,12 @@ pub fn detect_capabilities() -> SystemCapabilities {
     };
 
     // Warn about MoE performance on CPU-only systems
-    if matches!(device_profile, DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation)
-        && !has_unified_memory
+    if matches!(
+        device_profile,
+        DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation
+    ) && !has_unified_memory
     {
-        eprintln!(
-            "Note: GLM-4.7-Flash is a 30B MoE model. On CPU RAM, expect 1-3 tokens/sec."
-        );
+        eprintln!("Note: GLM-4.7-Flash is a 30B MoE model. On CPU RAM, expect 1-3 tokens/sec.");
     }
 
     let available_disk_gb = get_available_disk_space();
