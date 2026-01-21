@@ -566,8 +566,10 @@ const MISTRAL_V3_TEMPLATE: &str = "{{ bos_token }}{% for message in messages %}{
 const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
 
 // GLM-4 chat template
-// Uses [gMASK]<sop> prefix and <|system|>, <|user|>, <|assistant|> role tokens
-const GLM4_TEMPLATE: &str = "[gMASK]<sop>{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
+// Uses [gMASK]<sop> prefix and <|system|>, <|user|>, <|assistant|>, <|observation|> role tokens
+// GLM-4.7-Flash is trained as a Code Interpreter - it naturally wants to execute code.
+// We meet it halfway by providing a python tool and guiding the format.
+const GLM4_TEMPLATE: &str = "[gMASK]<sop><|system|>\nYou are a helpful assistant with access to a python tool. When using the python tool, pass your code as a string in the 'code' parameter like: python(code=\"your code here\").{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% elif message['role'] == 'observation' %}<|observation|>{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
 
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
@@ -929,6 +931,53 @@ impl LlamaSampler {
         }
     }
 
+    /// Add DRY (Don't Repeat Yourself) sampler to prevent repetition loops.
+    ///
+    /// CRITICAL for GLM-4.7-Flash: Without dry_multiplier ~1.1, the model loops.
+    ///
+    /// - `vocab`: Model vocabulary for sequence detection
+    /// - `n_ctx_train`: Training context size
+    /// - `dry_multiplier`: Penalty multiplier (1.1 recommended for GLM-4.7)
+    /// - `dry_base`: Base for exponential penalty growth (default 1.75)
+    /// - `dry_allowed_length`: Min length before penalty applies (default 2)
+    /// - `dry_penalty_last_n`: How many tokens back to check (default 128)
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_dry(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        n_ctx_train: i32,
+        dry_multiplier: f32,
+        dry_base: f32,
+        dry_allowed_length: i32,
+        dry_penalty_last_n: i32,
+    ) {
+        // Default sequence breakers that reset the repetition detector
+        let mut seq_breakers: [*const std::os::raw::c_char; 4] = [
+            c"\n".as_ptr(),
+            c":".as_ptr(),
+            c"\"".as_ptr(),
+            c"*".as_ptr(),
+        ];
+
+        let dry_sampler = unsafe {
+            ffi::llama_sampler_init_dry(
+                vocab,
+                n_ctx_train,
+                dry_multiplier,
+                dry_base,
+                dry_allowed_length,
+                dry_penalty_last_n,
+                seq_breakers.as_mut_ptr(),
+                seq_breakers.len(),
+            )
+        };
+        if !dry_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, dry_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
         unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }
     }
@@ -989,6 +1038,107 @@ pub fn create_sampler_chain(
         sampler.add_temp(temp);
 
         // 4. Final token selection - greedy picks the most likely after transformations
+        sampler.add_greedy();
+
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: top_k={}, top_p={}, temp={}", top_k, top_p, temp);
+        }
+    }
+
+    Ok(sampler)
+}
+
+/// Dry sampling configuration for repetition prevention
+#[derive(Debug, Clone, Copy)]
+pub struct DrySamplingConfig {
+    /// Penalty multiplier (1.1 recommended for GLM-4.7 to prevent looping)
+    pub multiplier: f32,
+    /// Base for exponential penalty growth (default 1.75)
+    pub base: f32,
+    /// Min repetition length before penalty applies (default 2)
+    pub allowed_length: i32,
+    /// How many tokens back to check for repetitions (default 128)
+    pub penalty_last_n: i32,
+}
+
+impl Default for DrySamplingConfig {
+    fn default() -> Self {
+        Self {
+            multiplier: 0.0, // Disabled by default
+            base: 1.75,
+            allowed_length: 2,
+            penalty_last_n: 128,
+        }
+    }
+}
+
+impl DrySamplingConfig {
+    /// Create a config for GLM-4.7-Flash with recommended dry_multiplier 1.1
+    pub fn for_glm() -> Self {
+        Self {
+            multiplier: 1.1,
+            ..Default::default()
+        }
+    }
+
+    /// Check if dry sampling is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.multiplier > 0.0
+    }
+}
+
+/// Create a sampler chain with optional dry sampling for repetition prevention
+///
+/// Dry sampling is critical for GLM-4.7-Flash to prevent looping.
+/// Use `DrySamplingConfig::for_glm()` when working with GLM models.
+///
+/// # Safety
+/// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+#[cfg(not(target_env = "musl"))]
+pub unsafe fn create_sampler_chain_with_dry(
+    temp: f32,
+    top_p: f32,
+    top_k: i32,
+    _seed: u32,
+    dry_config: DrySamplingConfig,
+    vocab: *const ffi::llama_vocab,
+    n_ctx_train: i32,
+) -> Result<LlamaSampler, String> {
+    // Clamp params to reasonable ranges
+    let top_k = if top_k < 1 { 40 } else { top_k };
+    let top_p = top_p.clamp(0.1, 1.0);
+    let temp = temp.max(0.0);
+
+    let sampler = LlamaSampler::new_chain(false)?;
+
+    // Add dry sampling early if enabled (before other filters)
+    if dry_config.is_enabled() {
+        sampler.add_dry(
+            vocab,
+            n_ctx_train,
+            dry_config.multiplier,
+            dry_config.base,
+            dry_config.allowed_length,
+            dry_config.penalty_last_n,
+        );
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: dry_multiplier={}", dry_config.multiplier);
+        }
+    }
+
+    if temp <= 0.0 {
+        sampler.add_greedy();
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Sampler: greedy (deterministic)");
+        }
+    } else {
+        if top_k > 0 {
+            sampler.add_top_k(top_k);
+        }
+        if top_p < 1.0 {
+            sampler.add_top_p(top_p, 1);
+        }
+        sampler.add_temp(temp);
         sampler.add_greedy();
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {

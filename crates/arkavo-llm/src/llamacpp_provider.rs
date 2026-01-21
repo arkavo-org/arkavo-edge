@@ -189,6 +189,11 @@ impl LlamaCppProvider {
                         eprintln!("✓ Template is using correct Qwen3 ChatML format");
                     }
                 }
+                ModelFormat::GLM4 => {
+                    if prompt_str.contains("<|user|>") || prompt_str.contains("[gMASK]") {
+                        eprintln!("✓ Template is using correct GLM-4 format");
+                    }
+                }
             }
         }
 
