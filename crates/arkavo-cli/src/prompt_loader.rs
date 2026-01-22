@@ -194,6 +194,172 @@ pub fn load_agent_system_prompt(
     render_prompt(&template, &variables)
 }
 
+/// Model family for prompt selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFamily {
+    Gemma,
+    Glm,
+    Qwen,
+    Mistral,
+    DeepSeek,
+    Claude,
+    Gemini,
+    Unknown,
+}
+
+/// Model size category for prompt complexity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSize {
+    Tiny,   // <1B params (270M, 500M)
+    Small,  // 1-4B params
+    Medium, // 4-12B params
+    Large,  // 12-30B params
+    XLarge, // 30B+ params
+}
+
+impl ModelFamily {
+    /// Detect model family from model name
+    pub fn from_name(name: &str) -> Self {
+        let lower = name.to_lowercase();
+        if lower.contains("glm") {
+            ModelFamily::Glm
+        } else if lower.contains("gemma") {
+            ModelFamily::Gemma
+        } else if lower.contains("qwen") {
+            ModelFamily::Qwen
+        } else if lower.contains("mistral") || lower.contains("ministral") {
+            ModelFamily::Mistral
+        } else if lower.contains("deepseek") {
+            ModelFamily::DeepSeek
+        } else if lower.contains("claude") {
+            ModelFamily::Claude
+        } else if lower.contains("gemini") {
+            ModelFamily::Gemini
+        } else {
+            ModelFamily::Unknown
+        }
+    }
+}
+
+impl ModelSize {
+    /// Detect model size from size hint string
+    pub fn from_hint(hint: Option<&str>) -> Self {
+        match hint {
+            Some("270M" | "500M") => ModelSize::Tiny,
+            Some("1B" | "2B" | "3B" | "4B") => ModelSize::Small,
+            Some("7B" | "8B" | "9B" | "12B") => ModelSize::Medium,
+            Some("14B" | "27B" | "30B") => ModelSize::Large,
+            Some("70B" | "72B") => ModelSize::XLarge,
+            _ => ModelSize::Medium, // Default assumption
+        }
+    }
+}
+
+/// Load model-specific system prompt for chat
+///
+/// Different models have different prompting requirements:
+/// - GLM: Prefers direct instructions, tends to over-use tools
+/// - Gemma: Works well with examples, balanced tool usage
+/// - Tiny models: Minimal or no system prompt works best
+pub fn load_model_chat_prompt(
+    model_name: &str,
+    size_hint: Option<&str>,
+    tools: Option<&[&str]>,
+) -> String {
+    let family = ModelFamily::from_name(model_name);
+    let size = ModelSize::from_hint(size_hint);
+
+    // Tiny models work best with minimal prompts
+    if matches!(size, ModelSize::Tiny) {
+        return String::new();
+    }
+
+    match family {
+        ModelFamily::Glm => load_glm_chat_prompt(size, tools),
+        ModelFamily::Gemma => load_gemma_chat_prompt(size, tools),
+        ModelFamily::Qwen => load_qwen_chat_prompt(size, tools),
+        _ => load_default_chat_prompt(tools),
+    }
+}
+
+/// GLM-specific chat prompt
+/// GLM-4.7-Flash is a MoE (Mixture of Experts) trained as Code Interpreter
+/// The coding expert gets triggered by technical/tool prompts and causes fence-wrapping and loops
+/// Key: Explicitly route to the CONVERSATION expert, avoid triggering code expert
+fn load_glm_chat_prompt(size: ModelSize, _tools: Option<&[&str]>) -> String {
+    // GLM MoE routing: Avoid triggering the coding expert
+    // Don't mention: code, tools, execute, compute, programming
+    // DO mention: conversation, chat, discuss, explain
+    match size {
+        ModelSize::Tiny => String::new(),
+        ModelSize::Small | ModelSize::Medium | ModelSize::Large | ModelSize::XLarge => {
+            // Explicitly frame as conversation to route to conversational expert
+            "You are having a friendly conversation. Respond naturally in plain text.\n\
+             For math: just state the answer.\n\
+             For facts: just explain.\n\
+             Never use code blocks or special formatting."
+                .to_string()
+        }
+    }
+}
+
+/// Gemma-specific chat prompt
+/// Gemma models work well with examples and balanced instructions
+fn load_gemma_chat_prompt(size: ModelSize, tools: Option<&[&str]>) -> String {
+    let tool_section = if let Some(tool_list) = tools {
+        if tool_list.is_empty() {
+            String::new()
+        } else {
+            let tools_str = tool_list
+                .iter()
+                .map(|t| format!("- @{t}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("\n\nAvailable tools:\n{tools_str}")
+        }
+    } else {
+        String::new()
+    };
+
+    match size {
+        ModelSize::Tiny => String::new(),
+        ModelSize::Small => {
+            format!("Be helpful and concise.{tool_section}")
+        }
+        _ => {
+            format!(
+                "You are a helpful AI assistant.{tool_section}\n\n\
+                 Use tools when needed for: file operations, git status, external APIs.\n\
+                 Answer directly for: math, general knowledge, conversation."
+            )
+        }
+    }
+}
+
+/// Qwen-specific chat prompt
+fn load_qwen_chat_prompt(_size: ModelSize, tools: Option<&[&str]>) -> String {
+    // Qwen uses ChatML format and handles tools well
+    load_default_chat_prompt(tools)
+}
+
+/// Default chat prompt for unknown models
+fn load_default_chat_prompt(tools: Option<&[&str]>) -> String {
+    if let Some(tool_list) = tools {
+        if !tool_list.is_empty() {
+            let tools_str = tool_list
+                .iter()
+                .map(|t| format!("- {t}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return format!(
+                "Available tools:\n{tools_str}\n\n\
+                 Use @tool_name {{\"param\": \"value\"}} to call a tool."
+            );
+        }
+    }
+    String::new()
+}
+
 /// Initialize the .arkavo/prompts directory if it doesn't exist
 pub fn init_prompt_override_dir() -> std::io::Result<()> {
     let mut path = PathBuf::from(".arkavo");

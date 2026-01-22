@@ -200,8 +200,9 @@ impl LlamaCppProvider {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
 
-        // Enable dry sampling for GLM models to prevent repetition loops
-        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+        // Dry sampling for GLM - disabled due to crash issues
+        // TODO: Investigate dry sampling crash with GLM model
+        let use_dry_sampling = false;
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -408,7 +409,7 @@ impl Provider for LlamaCppProvider {
         // For GLM with tools, use lower temperature (0.15) for more reliable tool calling
         let raw_content = if is_glm && tools.is_some() {
             let mut config = self.config.clone();
-            config.temperature = 0.15; // Recommended for GLM tool calling
+            config.temperature = 0.15;
             let custom_provider = Self {
                 model: self.model.clone(),
                 name: self.name.clone(),

@@ -453,29 +453,21 @@ impl McpConverter {
     /// - Strong beginning bias: Place mandatory instructions at the ABSOLUTE START
     /// - Direct, firm language: GLM responds better to imperative commands
     /// - Explicit negative examples: Tell it what NOT to do
+    ///
+    /// NOTE: This returns ONLY behavioral instructions, not tool definitions.
+    /// Tool definitions are already provided in the system prompt from the CLI.
+    /// Adding them twice confuses the model.
     pub fn to_glm_prompt(tools: &[ToolInfo]) -> String {
         if tools.is_empty() {
             return String::new();
         }
 
-        let mut prompt = String::new();
-
-        // CRITICAL: Strong beginning bias - mandatory instructions FIRST
+        // CRITICAL: Strong beginning bias - behavioral instructions ONLY
         // GLM-4.7 pays most attention to the start of the system prompt
-        prompt.push_str("RESPOND DIRECTLY. Do NOT use tools unless explicitly required.\n\n");
-        prompt.push_str("NEVER call tools for: greetings, math, general knowledge, conversation.\n");
-        prompt.push_str("ONLY call tools when you cannot answer without external data.\n\n");
-
-        // Tool definitions come AFTER the mandatory behavioral instructions
-        prompt.push_str("Available tools (use sparingly):\n");
-        for tool in tools {
-            let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
-        }
-
-        prompt.push_str("\nTool format (only when needed):\n");
-        prompt.push_str("```tool_name\nparameter: value\n```\n");
-
-        prompt
+        // Tool definitions are already in the system prompt, don't duplicate them
+        "RESPOND DIRECTLY to questions. Do NOT call tools unless you need external data.\n\
+         NEVER use tools for: math, general knowledge, greetings, conversation.\n"
+            .to_string()
     }
 }
 
@@ -876,19 +868,14 @@ mod tests {
             "GLM prompt must start with mandatory instructions (strong beginning bias)"
         );
 
-        // Verify tool definitions come AFTER behavioral instructions
-        let respond_pos = prompt.find("RESPOND DIRECTLY").unwrap();
-        let tools_pos = prompt.find("Available tools").unwrap();
-        assert!(
-            respond_pos < tools_pos,
-            "Behavioral instructions must come before tool definitions"
-        );
-
         // Verify negative examples are included
-        assert!(prompt.contains("NEVER call tools for"));
+        assert!(prompt.contains("NEVER use tools for"));
 
-        // Verify tool is listed
-        assert!(prompt.contains("test_tool"));
+        // Verify tool definitions are NOT included (they're in the system prompt already)
+        assert!(
+            !prompt.contains("Available tools"),
+            "GLM prompt should not duplicate tool definitions"
+        );
     }
 
     #[test]
