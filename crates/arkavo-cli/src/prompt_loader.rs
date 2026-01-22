@@ -344,18 +344,18 @@ fn load_qwen_chat_prompt(_size: ModelSize, tools: Option<&[&str]>) -> String {
 
 /// Default chat prompt for unknown models
 fn load_default_chat_prompt(tools: Option<&[&str]>) -> String {
-    if let Some(tool_list) = tools {
-        if !tool_list.is_empty() {
-            let tools_str = tool_list
-                .iter()
-                .map(|t| format!("- {t}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            return format!(
-                "Available tools:\n{tools_str}\n\n\
-                 Use @tool_name {{\"param\": \"value\"}} to call a tool."
-            );
-        }
+    if let Some(tool_list) = tools
+        && !tool_list.is_empty()
+    {
+        let tools_str = tool_list
+            .iter()
+            .map(|t| format!("- {t}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return format!(
+            "Available tools:\n{tools_str}\n\n\
+             Use @tool_name {{\"param\": \"value\"}} to call a tool."
+        );
     }
     String::new()
 }

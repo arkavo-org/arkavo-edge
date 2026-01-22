@@ -3,6 +3,9 @@
 //! The TaskStore trait defines the persistence interface that the Conductor
 //! uses to persist state before dispatching bursts. This ensures tasks
 //! survive process restarts.
+//!
+//! Note: Model feedback is now handled by arkavo-router's LearningStore,
+//! which provides SQLite-backed persistence for Episodes and learned patterns.
 
 #[cfg(feature = "file-store")]
 use crate::error::Error;
@@ -206,6 +209,7 @@ impl TaskStore for FileTaskStore {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,4 +261,5 @@ mod tests {
         // Still only one task
         assert_eq!(store.len().await, 1);
     }
+
 }
