@@ -25,6 +25,8 @@ pub enum ModelChoice {
     LocalMinistral3B,
     /// Ministral-8B - TØRG-compatible, high quality
     LocalMinistral8B,
+    /// GLM-4.7-Flash - 30B MoE reasoning model, requires 32GB+ RAM
+    LocalGlm47Flash,
     /// Legacy: Gemma-3-270M (if cached)
     LocalGemma270M,
     /// Legacy: Gemma-3-4B (if cached)
@@ -48,6 +50,7 @@ impl ModelChoice {
             Self::LocalQwen3 => "qwen3-0.6b",
             Self::LocalMinistral3B => "ministral-3b",
             Self::LocalMinistral8B => "ministral-8b",
+            Self::LocalGlm47Flash => "glm-4.7-flash",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
@@ -62,6 +65,7 @@ impl ModelChoice {
             Self::LocalQwen3
                 | Self::LocalMinistral3B
                 | Self::LocalMinistral8B
+                | Self::LocalGlm47Flash
                 | Self::LocalGemma270M
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
@@ -94,6 +98,7 @@ impl ModelChoice {
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::LocalQwen3 => "local-qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
+            Self::LocalGlm47Flash => "local-glm",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
@@ -109,6 +114,7 @@ impl ModelChoice {
             Self::LocalMinistral3B | Self::LocalGemma4B => PlannerTier::Medium,
             // Large: > 7B parameters or cloud models
             Self::LocalMinistral8B
+            | Self::LocalGlm47Flash
             | Self::LocalGemma12B
             | Self::LocalDeepSeekCoder
             | Self::GeminiFlash
@@ -203,12 +209,15 @@ impl RoutingDecision {
                     ModelChoice::LocalMinistral8B,
                 ]
             }
-            // Qwen3 -> Ministral-3B -> Ministral-8B
+            // Qwen3 -> Ministral-3B -> Ministral-8B -> GLM-4.7-Flash
             (ModelChoice::LocalQwen3, _) => {
                 vec![ModelChoice::LocalMinistral3B, ModelChoice::GeminiFlash]
             }
             (ModelChoice::LocalMinistral3B, _) => vec![ModelChoice::LocalMinistral8B],
-            (ModelChoice::LocalMinistral8B, _) => vec![ModelChoice::GeminiFlash],
+            (ModelChoice::LocalMinistral8B, _) => {
+                vec![ModelChoice::LocalGlm47Flash, ModelChoice::GeminiFlash]
+            }
+            (ModelChoice::LocalGlm47Flash, _) => vec![ModelChoice::GeminiFlash],
             // Legacy Gemma fallbacks
             (ModelChoice::LocalGemma4B, _) => vec![ModelChoice::LocalGemma12B],
             (ModelChoice::LocalGemma270M, _) => {
@@ -268,6 +277,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalGlm47Flash
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
@@ -284,6 +294,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3 => Duration::from_millis(500),
             ModelChoice::LocalMinistral3B => Duration::from_secs(2),
             ModelChoice::LocalMinistral8B => Duration::from_secs(4),
+            ModelChoice::LocalGlm47Flash => Duration::from_secs(8),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
