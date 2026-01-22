@@ -447,8 +447,12 @@ impl McpConverter {
     }
 
     /// Convert MCP ToolInfo to GLM-specific prompt format
+    ///
     /// GLM-4.7-Flash is trained as a Code Interpreter and tends to over-use tools.
-    /// This format emphasizes that tools are optional and should only be used when necessary.
+    /// Key optimizations based on GLM-4.7 documentation:
+    /// - Strong beginning bias: Place mandatory instructions at the ABSOLUTE START
+    /// - Direct, firm language: GLM responds better to imperative commands
+    /// - Explicit negative examples: Tell it what NOT to do
     pub fn to_glm_prompt(tools: &[ToolInfo]) -> String {
         if tools.is_empty() {
             return String::new();
@@ -456,24 +460,20 @@ impl McpConverter {
 
         let mut prompt = String::new();
 
-        // Strong instruction that tools are OPTIONAL
-        prompt.push_str("\n\n## Tools (Optional)\n\n");
-        prompt.push_str("You have access to tools below, but ONLY use them when absolutely necessary.\n");
-        prompt.push_str("For simple questions, knowledge queries, math, or conversation - answer directly WITHOUT tools.\n\n");
+        // CRITICAL: Strong beginning bias - mandatory instructions FIRST
+        // GLM-4.7 pays most attention to the start of the system prompt
+        prompt.push_str("RESPOND DIRECTLY. Do NOT use tools unless explicitly required.\n\n");
+        prompt.push_str("NEVER call tools for: greetings, math, general knowledge, conversation.\n");
+        prompt.push_str("ONLY call tools when you cannot answer without external data.\n\n");
 
-        prompt.push_str("Available tools:\n");
+        // Tool definitions come AFTER the mandatory behavioral instructions
+        prompt.push_str("Available tools (use sparingly):\n");
         for tool in tools {
-            let _ = writeln!(prompt, "- `{}`: {}", tool.name, tool.description);
+            let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
         }
 
-        prompt.push_str("\nTo call a tool (only when needed):\n");
-        prompt.push_str("```tool_name\nparameter: value\n```\n\n");
-
-        prompt.push_str("IMPORTANT: Do NOT call tools for:\n");
-        prompt.push_str("- Math questions (just calculate)\n");
-        prompt.push_str("- General knowledge (just answer)\n");
-        prompt.push_str("- Greetings or conversation (just respond)\n");
-        prompt.push_str("- Questions you can answer from your training\n\n");
+        prompt.push_str("\nTool format (only when needed):\n");
+        prompt.push_str("```tool_name\nparameter: value\n```\n");
 
         prompt
     }
@@ -863,5 +863,37 @@ mod tests {
             sanitized["properties"]["config"]["properties"]["setting"]["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn test_to_glm_prompt_strong_beginning_bias() {
+        let tools = vec![create_test_tool()];
+        let prompt = McpConverter::to_glm_prompt(&tools);
+
+        // Verify strong beginning bias: mandatory instructions at the ABSOLUTE START
+        assert!(
+            prompt.starts_with("RESPOND DIRECTLY"),
+            "GLM prompt must start with mandatory instructions (strong beginning bias)"
+        );
+
+        // Verify tool definitions come AFTER behavioral instructions
+        let respond_pos = prompt.find("RESPOND DIRECTLY").unwrap();
+        let tools_pos = prompt.find("Available tools").unwrap();
+        assert!(
+            respond_pos < tools_pos,
+            "Behavioral instructions must come before tool definitions"
+        );
+
+        // Verify negative examples are included
+        assert!(prompt.contains("NEVER call tools for"));
+
+        // Verify tool is listed
+        assert!(prompt.contains("test_tool"));
+    }
+
+    #[test]
+    fn test_to_glm_prompt_empty() {
+        let tools: Vec<ToolInfo> = vec![];
+        assert!(McpConverter::to_glm_prompt(&tools).is_empty());
     }
 }

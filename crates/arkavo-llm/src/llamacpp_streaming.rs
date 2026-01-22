@@ -8,9 +8,9 @@ use arkavo_llama_cpp::multimodal::{
 };
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
-    LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits, batch_get_one_with_offset,
-    batch_init_with_tokens, create_sampler_chain, decode_batch, token_to_bytes,
-    tokenize_with_model,
+    DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
+    batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain,
+    create_sampler_chain_with_dry, decode_batch, token_to_bytes, tokenize_with_model,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -98,6 +98,8 @@ pub(crate) struct StreamingConfig {
     pub top_k: i32,
     pub max_tokens: u32,
     pub seed: u32,
+    /// Enable dry sampling for repetition prevention (critical for GLM-4.7-Flash)
+    pub use_dry_sampling: bool,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -128,9 +130,27 @@ pub(crate) async fn generate_tokens(
             );
         }
 
-        let sampler =
+        // Use dry sampling for GLM models to prevent repetition loops
+        let sampler = if config.use_dry_sampling {
+            let dry_config = DrySamplingConfig::for_glm();
+            let vocab = model.get_vocab();
+            let n_ctx_train = 32768; // GLM-4.7 context size
+            unsafe {
+                create_sampler_chain_with_dry(
+                    config.temperature,
+                    config.top_p,
+                    config.top_k,
+                    config.seed,
+                    dry_config,
+                    vocab,
+                    n_ctx_train,
+                )
+            }
+            .map_err(|e| Error::Config(format!("Failed to create sampler with dry: {e}")))?
+        } else {
             create_sampler_chain(config.temperature, config.top_p, config.top_k, config.seed)
-                .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?;
+                .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
+        };
 
         let eos_token = model.get_eos_token();
         if is_debug() {

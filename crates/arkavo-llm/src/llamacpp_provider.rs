@@ -199,12 +199,17 @@ impl LlamaCppProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
+
+        // Enable dry sampling for GLM models to prevent repetition loops
+        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,
             top_k: self.config.top_k,
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
+            use_dry_sampling,
         };
 
         tokio::spawn(async move {
@@ -226,12 +231,18 @@ impl LlamaCppProvider {
             .mtmd_ctx
             .clone()
             .ok_or_else(|| Error::Config("Vision context not initialized".to_string()))?;
+
+        // Detect if GLM for dry sampling
+        let format = detect_model_format(&self.name);
+        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,
             top_k: self.config.top_k,
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
+            use_dry_sampling,
         };
 
         tokio::spawn(async move {
@@ -394,13 +405,23 @@ impl Provider for LlamaCppProvider {
             }
         }
 
-        let raw_content = self
-            .complete_with_options(modified_messages, max_tokens)
-            .await?;
-
-        // Check if this is a GLM model (may have thinking blocks)
-        let format = detect_model_format(&self.name);
-        let is_glm = matches!(format, ModelFormat::GLM4);
+        // For GLM with tools, use lower temperature (0.15) for more reliable tool calling
+        let raw_content = if is_glm && tools.is_some() {
+            let mut config = self.config.clone();
+            config.temperature = 0.15; // Recommended for GLM tool calling
+            let custom_provider = Self {
+                model: self.model.clone(),
+                name: self.name.clone(),
+                config,
+                mtmd_ctx: self.mtmd_ctx.clone(),
+            };
+            custom_provider
+                .complete_with_options(modified_messages, max_tokens)
+                .await?
+        } else {
+            self.complete_with_options(modified_messages, max_tokens)
+                .await?
+        };
 
         // Extract thinking blocks for GLM models
         let (content, reasoning_content) = if is_glm {
