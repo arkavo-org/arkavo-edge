@@ -321,6 +321,196 @@ impl VerificationStatus {
     }
 }
 
+/// Type of feedback issue detected in model output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum FeedbackIssue {
+    /// Model wrapped output in code fences when not needed
+    UnwantedCodeFence,
+    /// Model called a tool that doesn't exist
+    HallucinatedTool,
+    /// Model used wrong tool call format
+    InvalidToolFormat,
+    /// Model refused to answer when it should have
+    UnexpectedRefusal,
+    /// Model looped or repeated output
+    OutputLoop,
+    /// Model triggered wrong MoE expert (e.g., coding for chat)
+    WrongExpertRouting,
+    /// Model output was empty or timed out
+    EmptyOrTimeout,
+    /// Response was correct
+    #[default]
+    Correct,
+}
+
+/// Feedback record for model learning
+/// Captures what went wrong and how to improve
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BurstFeedback {
+    /// Unique feedback ID
+    pub id: Uuid,
+    /// When this feedback was recorded
+    pub timestamp: DateTime<Utc>,
+    /// Model that generated the response
+    pub model_name: String,
+    /// Model family (glm, gemma, qwen, etc.)
+    pub model_family: String,
+    /// Original user prompt
+    pub prompt: String,
+    /// Keywords extracted from prompt
+    pub prompt_keywords: Vec<String>,
+    /// Model's raw response
+    pub response: String,
+    /// Type of issue detected
+    pub issue: FeedbackIssue,
+    /// Human-readable description of the issue
+    pub issue_description: String,
+    /// What the correct behavior should have been
+    pub expected_behavior: Option<String>,
+    /// Confidence in this feedback (0.0-1.0)
+    pub confidence: f64,
+    /// Associated task/subtask IDs
+    pub task_id: Option<Uuid>,
+    pub subtask_id: Option<Uuid>,
+}
+
+impl BurstFeedback {
+    /// Create new feedback record
+    pub fn new(model_name: String, model_family: String, prompt: String, response: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+            model_name,
+            model_family,
+            prompt,
+            prompt_keywords: Vec::new(),
+            response,
+            issue: FeedbackIssue::Correct,
+            issue_description: String::new(),
+            expected_behavior: None,
+            confidence: 1.0,
+            task_id: None,
+            subtask_id: None,
+        }
+    }
+
+    /// Record a code fence issue
+    pub fn with_code_fence_issue(mut self) -> Self {
+        self.issue = FeedbackIssue::UnwantedCodeFence;
+        self.issue_description = "Model wrapped response in code fences".to_string();
+        self.expected_behavior = Some("Plain text response without formatting".to_string());
+        self
+    }
+
+    /// Record an output loop/timeout issue
+    pub fn with_loop_issue(mut self) -> Self {
+        self.issue = FeedbackIssue::OutputLoop;
+        self.issue_description = "Model output looped or timed out".to_string();
+        self
+    }
+
+    /// Record wrong expert routing (MoE models)
+    pub fn with_wrong_expert(mut self, expected_expert: &str) -> Self {
+        self.issue = FeedbackIssue::WrongExpertRouting;
+        self.issue_description = format!(
+            "Expected {} expert, got coding/tool expert",
+            expected_expert
+        );
+        self
+    }
+
+    /// Extract keywords from the prompt for pattern matching
+    pub fn extract_keywords(&mut self) {
+        let lower = self.prompt.to_lowercase();
+        let mut keywords = Vec::new();
+
+        // Math indicators
+        if lower.contains('+') || lower.contains('-') || lower.contains('*') || lower.contains('/')
+        {
+            keywords.push("math_operator".to_string());
+        }
+        if lower.contains("calculate") || lower.contains("compute") || lower.contains("sum") {
+            keywords.push("math_verb".to_string());
+        }
+
+        // Question indicators
+        if lower.contains("what is") || lower.contains("what's") {
+            keywords.push("what_question".to_string());
+        }
+        if lower.contains("how") {
+            keywords.push("how_question".to_string());
+        }
+
+        // Code indicators
+        if lower.contains("code") || lower.contains("function") || lower.contains("program") {
+            keywords.push("code_request".to_string());
+        }
+
+        // Greeting indicators
+        if lower.starts_with("hi") || lower.starts_with("hello") || lower.starts_with("hey") {
+            keywords.push("greeting".to_string());
+        }
+
+        self.prompt_keywords = keywords;
+    }
+}
+
+/// Learned pattern from feedback
+/// Used to adjust prompts for specific models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelPattern {
+    /// Pattern ID
+    pub id: Uuid,
+    /// Model family this pattern applies to
+    pub model_family: String,
+    /// Keywords that trigger this pattern
+    pub trigger_keywords: Vec<String>,
+    /// The issue this pattern addresses
+    pub issue_type: FeedbackIssue,
+    /// Recommended prompt adjustment
+    pub prompt_adjustment: String,
+    /// How many times this pattern was observed
+    pub observation_count: u32,
+    /// Success rate after applying adjustment (0.0-1.0)
+    pub success_rate: f64,
+    /// When pattern was first observed
+    pub first_seen: DateTime<Utc>,
+    /// When pattern was last observed
+    pub last_seen: DateTime<Utc>,
+}
+
+impl ModelPattern {
+    /// Create a new pattern from feedback
+    pub fn from_feedback(feedback: &BurstFeedback) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            model_family: feedback.model_family.clone(),
+            trigger_keywords: feedback.prompt_keywords.clone(),
+            issue_type: feedback.issue,
+            prompt_adjustment: String::new(),
+            observation_count: 1,
+            success_rate: 0.0,
+            first_seen: now,
+            last_seen: now,
+        }
+    }
+
+    /// Update pattern with new observation
+    pub fn observe(&mut self) {
+        self.observation_count += 1;
+        self.last_seen = Utc::now();
+    }
+
+    /// Record a success/failure after applying adjustment
+    pub fn record_outcome(&mut self, success: bool) {
+        // Exponential moving average for success rate
+        let alpha = 0.2;
+        let outcome = if success { 1.0 } else { 0.0 };
+        self.success_rate = alpha * outcome + (1.0 - alpha) * self.success_rate;
+    }
+}
+
 /// Serde support for Duration
 mod duration_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

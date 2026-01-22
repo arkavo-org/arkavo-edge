@@ -583,6 +583,10 @@ impl Router {
                 "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
             ),
+            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
+                "unsloth/GLM-4.7-Flash-GGUF",
+                "GLM-4.7-Flash-Q4_K_M.gguf",
+            ),
             // Cloud models aren't cached locally
             _ => false,
         }
@@ -651,10 +655,34 @@ impl Router {
                 }
             }
 
-            // Debug: log tool calls
+            // Deduplicate tool calls (prevents GLM-style repeated calls)
+            if response.tool_calls.len() > 1 {
+                let original_count = response.tool_calls.len();
+                let mut seen = std::collections::HashSet::new();
+                response.tool_calls.retain(|tc| {
+                    let key = format!("{}:{}", tc.tool_name, tc.arguments);
+                    seen.insert(key)
+                });
+                if response.tool_calls.len() < original_count {
+                    tracing::debug!(
+                        "Deduplicated tool calls: {} -> {}",
+                        original_count,
+                        response.tool_calls.len()
+                    );
+                }
+            }
+
+            // Debug: log tool calls (limit to first 5 to avoid spam)
             if !response.tool_calls.is_empty() {
-                for tc in &response.tool_calls {
+                let display_count = response.tool_calls.len().min(5);
+                for tc in response.tool_calls.iter().take(display_count) {
                     eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
+                if response.tool_calls.len() > 5 {
+                    eprintln!(
+                        "[LLM] ... and {} more tool calls",
+                        response.tool_calls.len() - 5
+                    );
                 }
             }
 
@@ -951,7 +979,8 @@ impl Router {
             // Qwen3/Ministral upgrade path - stay local, don't escalate to cloud
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalMinistral8B, // Cap at local
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalGlm47Flash,
+            ModelChoice::LocalGlm47Flash => ModelChoice::LocalGlm47Flash, // Cap at local
             // Legacy Gemma upgrade path - stay local
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
@@ -1015,6 +1044,10 @@ impl Router {
             ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
                 "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
+                "unsloth/GLM-4.7-Flash-GGUF",
+                "GLM-4.7-Flash-Q4_K_M.gguf",
             ),
         }
     }
@@ -1212,6 +1245,28 @@ impl Router {
                 })?;
                 Ok(Box::new(provider))
             }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalGlm47Flash => {
+                let model_path = model_discovery::find_gguf_model(
+                    "unsloth/GLM-4.7-Flash-GGUF",
+                    "GLM-4.7-Flash-Q4_K_M.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                tracing::info!(path = %model_path.display(), "Loading GLM-4.7-Flash model");
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "glm-4.7-flash".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
+                })?;
+
+                tracing::info!("GLM-4.7-Flash provider ready");
+                Ok(Box::new(provider))
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::ModelExecution(format!(
                 "Model {model:?} not available (feature not enabled)"
@@ -1254,6 +1309,7 @@ impl Router {
             | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
             // Large models and cloud - full schema
             ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalGlm47Flash
             | ModelChoice::GeminiFlash
             | ModelChoice::GeminiPro
             | ModelChoice::ClaudeSonnet

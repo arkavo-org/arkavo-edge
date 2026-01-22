@@ -90,8 +90,9 @@ impl ModelSelector {
 
     /// Get the best available local model, checking cache availability and GPU status
     ///
-    /// When GPU is unavailable, skips large models (8B) to avoid slow CPU-only inference.
+    /// When GPU is unavailable, skips large models (8B+) to avoid slow CPU-only inference.
     /// This prevents 20+ second waits on CPU-only devices.
+    /// GLM-4.7-Flash requires 32GB+ RAM (unified memory on Apple Silicon).
     fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
         // If no GPU, skip large models to avoid slow CPU-only inference
         if !self.gpu_available {
@@ -104,8 +105,12 @@ impl ModelSelector {
 
         // GPU available - use existing logic (prefer larger when requested)
         if prefer_larger {
-            // Try larger models first, fall back to smaller if not cached
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+            // Try GLM first (30B MoE, requires 32GB+ RAM), then fall back
+            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+                && Self::has_sufficient_ram_for_glm()
+            {
+                ModelChoice::LocalGlm47Flash
+            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 ModelChoice::LocalMinistral8B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 ModelChoice::LocalMinistral3B
@@ -114,6 +119,26 @@ impl ModelSelector {
             }
         } else {
             ModelChoice::LocalQwen3
+        }
+    }
+
+    /// Check if system has sufficient RAM for GLM-4.7-Flash (32GB+)
+    fn has_sufficient_ram_for_glm() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output()
+                && let Ok(mem_str) = String::from_utf8(output.stdout)
+                && let Ok(bytes) = mem_str.trim().parse::<u64>()
+            {
+                return bytes >= 32 * 1024 * 1024 * 1024; // 32GB
+            }
+            false
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // On other platforms, check /proc/meminfo or assume true for now
+            true
         }
     }
 
@@ -130,6 +155,10 @@ impl ModelSelector {
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                 "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
+            ),
+            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
+                "unsloth/GLM-4.7-Flash-GGUF",
+                "GLM-4.7-Flash-Q4_K_M.gguf",
             ),
             _ => false,
         }
@@ -257,6 +286,7 @@ impl ModelSelector {
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
+            ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",

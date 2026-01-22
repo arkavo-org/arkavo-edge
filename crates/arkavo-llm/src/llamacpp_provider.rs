@@ -199,12 +199,18 @@ impl LlamaCppProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
+
+        // Dry sampling for GLM - disabled due to crash issues
+        // TODO: Investigate dry sampling crash with GLM model
+        let use_dry_sampling = false;
+
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,
             top_k: self.config.top_k,
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
+            use_dry_sampling,
         };
 
         tokio::spawn(async move {
@@ -226,12 +232,18 @@ impl LlamaCppProvider {
             .mtmd_ctx
             .clone()
             .ok_or_else(|| Error::Config("Vision context not initialized".to_string()))?;
+
+        // Detect if GLM for dry sampling
+        let format = detect_model_format(&self.name);
+        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,
             top_k: self.config.top_k,
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
+            use_dry_sampling,
         };
 
         tokio::spawn(async move {
@@ -339,6 +351,10 @@ impl Provider for LlamaCppProvider {
         tools: Option<Value>,
         max_tokens: Option<usize>,
     ) -> Result<ProviderResponse> {
+        // Detect GLM model for special handling
+        let format = detect_model_format(&self.name);
+        let is_glm = matches!(format, ModelFormat::GLM4);
+
         let system_prompt = if let Some(tools_value) = tools.as_ref() {
             let tools_array = tools_value
                 .as_array()
@@ -356,7 +372,12 @@ impl Provider for LlamaCppProvider {
                 })
                 .collect();
 
-            McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+            // Use GLM-specific prompt that emphasizes tools are optional
+            if is_glm {
+                McpConverter::to_glm_prompt(&tool_infos)
+            } else {
+                McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+            }
         } else {
             String::new()
         };
@@ -385,13 +406,23 @@ impl Provider for LlamaCppProvider {
             }
         }
 
-        let raw_content = self
-            .complete_with_options(modified_messages, max_tokens)
-            .await?;
-
-        // Check if this is a GLM model (may have thinking blocks)
-        let format = detect_model_format(&self.name);
-        let is_glm = matches!(format, ModelFormat::GLM4);
+        // For GLM with tools, use lower temperature (0.15) for more reliable tool calling
+        let raw_content = if is_glm && tools.is_some() {
+            let mut config = self.config.clone();
+            config.temperature = 0.15;
+            let custom_provider = Self {
+                model: self.model.clone(),
+                name: self.name.clone(),
+                config,
+                mtmd_ctx: self.mtmd_ctx.clone(),
+            };
+            custom_provider
+                .complete_with_options(modified_messages, max_tokens)
+                .await?
+        } else {
+            self.complete_with_options(modified_messages, max_tokens)
+                .await?
+        };
 
         // Extract thinking blocks for GLM models
         let (content, reasoning_content) = if is_glm {

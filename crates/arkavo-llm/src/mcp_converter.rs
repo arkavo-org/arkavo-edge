@@ -445,6 +445,30 @@ impl McpConverter {
             LocalToolFormat::Fence => Self::to_fence_prompt(tools),
         }
     }
+
+    /// Convert MCP ToolInfo to GLM-specific prompt format
+    ///
+    /// GLM-4.7-Flash is trained as a Code Interpreter and tends to over-use tools.
+    /// Key optimizations based on GLM-4.7 documentation:
+    /// - Strong beginning bias: Place mandatory instructions at the ABSOLUTE START
+    /// - Direct, firm language: GLM responds better to imperative commands
+    /// - Explicit negative examples: Tell it what NOT to do
+    ///
+    /// NOTE: This returns ONLY behavioral instructions, not tool definitions.
+    /// Tool definitions are already provided in the system prompt from the CLI.
+    /// Adding them twice confuses the model.
+    pub fn to_glm_prompt(tools: &[ToolInfo]) -> String {
+        if tools.is_empty() {
+            return String::new();
+        }
+
+        // CRITICAL: Strong beginning bias - behavioral instructions ONLY
+        // GLM-4.7 pays most attention to the start of the system prompt
+        // Tool definitions are already in the system prompt, don't duplicate them
+        "RESPOND DIRECTLY to questions. Do NOT call tools unless you need external data.\n\
+         NEVER use tools for: math, general knowledge, greetings, conversation.\n"
+            .to_string()
+    }
 }
 
 #[cfg(test)]
@@ -831,5 +855,32 @@ mod tests {
             sanitized["properties"]["config"]["properties"]["setting"]["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn test_to_glm_prompt_strong_beginning_bias() {
+        let tools = vec![create_test_tool()];
+        let prompt = McpConverter::to_glm_prompt(&tools);
+
+        // Verify strong beginning bias: mandatory instructions at the ABSOLUTE START
+        assert!(
+            prompt.starts_with("RESPOND DIRECTLY"),
+            "GLM prompt must start with mandatory instructions (strong beginning bias)"
+        );
+
+        // Verify negative examples are included
+        assert!(prompt.contains("NEVER use tools for"));
+
+        // Verify tool definitions are NOT included (they're in the system prompt already)
+        assert!(
+            !prompt.contains("Available tools"),
+            "GLM prompt should not duplicate tool definitions"
+        );
+    }
+
+    #[test]
+    fn test_to_glm_prompt_empty() {
+        let tools: Vec<ToolInfo> = vec![];
+        assert!(McpConverter::to_glm_prompt(&tools).is_empty());
     }
 }

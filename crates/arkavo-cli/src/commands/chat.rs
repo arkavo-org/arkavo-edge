@@ -685,7 +685,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let has_agent_persona = agent_purpose.as_ref().is_some_and(|p| !p.is_empty());
 
     // Build base system prompt (without repo context initially)
-    // When agent has persona, use progressive tools (don't inject tool examples)
+    // Use model-specific prompts based on model family and size
     let base_system_prompt = if has_agent_persona {
         // Agent mode: persona-focused, tools loaded progressively on demand
         let persona = agent_purpose.as_ref().unwrap();
@@ -693,17 +693,45 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "You are an AI agent with the following purpose:\n{persona}\n\nStay in character and focus on this purpose. Answer questions directly without using tools unless explicitly needed."
         )
     } else if mcp_client.is_some() && model_size_hint != Some("270M") {
-        // General chat mode: include MCP tools info
-        let tools_info = format!(
-            "EXAMPLES:
-Q: \"What git branch am I on?\" → A: @git_status
-Q: \"List files here\" → A: @filesystem {{\"action\": \"list_directory\", \"dir_path\": \".\"}}
-Q: \"What's in the README?\" → A: @filesystem {{\"action\": \"read_file\", \"file_path\": \"README.md\"}}
-Q: \"Recent commits?\" → A: @git_status
+        // Extract tool names for model-specific prompt
+        let tool_names: Vec<String> = if let Some(ref client) = mcp_client {
+            client
+                .list_tools()
+                .map(|tools| tools.iter().map(|t| t.name.clone()).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let tool_refs: Vec<&str> = tool_names.iter().map(|s| s.as_str()).collect();
 
-{mcp_info}"
+        // Use model-specific prompt based on provider name
+        let model_family = crate::prompt_loader::ModelFamily::from_name(&provider_name);
+        if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() {
+            eprintln!("[DEBUG] Provider: {provider_name}, Family: {model_family:?}");
+        }
+        let model_prompt = crate::prompt_loader::load_model_chat_prompt(
+            &provider_name,
+            model_size_hint,
+            if tool_refs.is_empty() {
+                None
+            } else {
+                Some(&tool_refs)
+            },
         );
-        crate::prompt_loader::load_chat_system_prompt(true, Some(&tools_info))
+
+        // For GLM models: use ONLY the model-specific prompt (no tool info)
+        // GLM's MoE coding expert is triggered by tool mentions and causes crashes/loops
+        if matches!(model_family, crate::prompt_loader::ModelFamily::Glm) {
+            model_prompt
+        } else if model_prompt.is_empty() {
+            mcp_info
+        } else {
+            format!(
+                "{model_prompt}\n\n\
+                 Tool Discovery: If you need a capability not listed, annotate with [need: keyword].\n\
+                 {mcp_info}"
+            )
+        }
     } else {
         // For 270M models or when MCP not available, use no system prompt
         String::new()
@@ -817,19 +845,50 @@ Q: \"Recent commits?\" → A: @git_status
 
     // If prompt provided via command line, process it and exit
     if let Some(prompt_text) = prompt {
+        // Check for pattern-based prompt adjustment
+        let pattern_adjustment = crate::feedback_analyzer::check_pattern_adjustment_sync(
+            client.provider_name(),
+            &prompt_text,
+        );
+
+        let adjusted_prompt = if let Some(ref adj) = pattern_adjustment {
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DEBUG] Applying pattern adjustment: prefix={:?}, max_tokens={:?}",
+                    adj.prompt_prefix, adj.max_tokens
+                );
+            }
+            if adj.prompt_prefix.is_empty() {
+                prompt_text
+            } else {
+                format!("{}\n\n{prompt_text}", adj.prompt_prefix)
+            }
+        } else {
+            prompt_text
+        };
+
+        // Apply max_tokens override if pattern adjustment suggests it (future use)
+        let _effective_max_tokens = pattern_adjustment
+            .as_ref()
+            .and_then(|adj| adj.max_tokens)
+            .map(|t| t as usize);
+
         // Check if image is also provided
         if let Some(img_path) = image_path {
             match encode_image_file(&img_path) {
                 Ok(encoded_image) => {
-                    messages.push(Message::user_with_images(&prompt_text, vec![encoded_image]));
+                    messages.push(Message::user_with_images(
+                        &adjusted_prompt,
+                        vec![encoded_image],
+                    ));
                 }
                 Err(e) => {
                     eprintln!("Error loading image: {e}");
-                    messages.push(Message::user(&prompt_text));
+                    messages.push(Message::user(&adjusted_prompt));
                 }
             }
         } else {
-            messages.push(Message::user(&prompt_text));
+            messages.push(Message::user(&adjusted_prompt));
         }
 
         // Disable MCP tools for persona-focused agents (progressive tool loading)
@@ -1146,8 +1205,27 @@ Q: \"Recent commits?\" → A: @git_status
             runtime.block_on(conversation_manager.add_message(&msg))?;
             messages.push(msg);
         } else {
-            // Add regular user message
-            let msg = Message::user(input);
+            // Add regular user message with pattern-based adjustment if available
+            let adjusted_input = if let Some(adj) =
+                crate::feedback_analyzer::check_pattern_adjustment_sync(
+                    client.provider_name(),
+                    input,
+                ) {
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[DEBUG] Applying pattern adjustment: prefix={:?}, max_tokens={:?}",
+                        adj.prompt_prefix, adj.max_tokens
+                    );
+                }
+                if adj.prompt_prefix.is_empty() {
+                    input.to_string()
+                } else {
+                    format!("{}\n\n{input}", adj.prompt_prefix)
+                }
+            } else {
+                input.to_string()
+            };
+            let msg = Message::user(&adjusted_input);
             runtime.block_on(conversation_manager.add_message(&msg))?;
             messages.push(msg);
         }
@@ -1448,20 +1526,29 @@ async fn process_message_print_with_router(
 
     // Strip <think> blocks and print response cleanly
     let response = strip_think_blocks(&result.final_response);
-    let trimmed = response.trim();
+
+    // Check if this was a math query - if so, extract just the answer to prevent loops
+    let user_prompt_text = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+    let is_math = crate::feedback_analyzer::is_simple_math_query(user_prompt_text);
+
+    // For math queries or if response is very long (likely looping), extract first answer
+    let trimmed = if is_math || response.len() > 500 {
+        crate::feedback_analyzer::extract_first_answer(&response, is_math)
+    } else {
+        response.trim().to_string()
+    };
 
     // Debug: show what we're working with
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-        eprintln!(
-            "[DEBUG] final_response length: {}",
-            result.final_response.len()
-        );
-        eprintln!("[DEBUG] stripped length: {}", response.len());
-        eprintln!("[DEBUG] trimmed length: {}", trimmed.len());
-        eprintln!(
-            "[DEBUG] tool_executions count: {}",
-            result.tool_executions.len()
-        );
+        let resp_len = result.final_response.len();
+        let strip_len = response.len();
+        let trim_len = trimmed.len();
+        let tool_count = result.tool_executions.len();
+        eprintln!("[DEBUG] final_response length: {resp_len}");
+        eprintln!("[DEBUG] stripped length: {strip_len}");
+        eprintln!("[DEBUG] trimmed length: {trim_len}");
+        eprintln!("[DEBUG] is_math: {is_math}");
+        eprintln!("[DEBUG] tool_executions count: {tool_count}");
     }
 
     // If response is empty but we executed tools, show tool results directly
@@ -1489,6 +1576,27 @@ async fn process_message_print_with_router(
         );
     }
 
+    // Record feedback for learning (analyze response for issues)
+    let user_prompt = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, arkavo_llm::Role::User))
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    // Get model name from router - use a generic name since router handles model selection
+    let model_name = "router-glm"; // Router typically uses GLM for local inference
+    if let Err(e) = crate::feedback_analyzer::record_model_feedback(
+        model_name,
+        &user_prompt,
+        &result.final_response,
+    )
+    .await
+        && SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!("[DEBUG] Failed to record feedback: {e}");
+    }
+
     Ok(result.final_response)
 }
 
@@ -1501,6 +1609,14 @@ async fn process_message_print(
     use std::time::Instant;
 
     let start_time = Instant::now();
+
+    // Extract the last user prompt for feedback recording
+    let user_prompt = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, arkavo_llm::Role::User))
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
         eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
         eprintln!("[DEBUG] Messages count: {}", messages.len());
@@ -1648,6 +1764,18 @@ async fn process_message_print(
                             );
                         }
 
+                        // Record timeout feedback for learning
+                        if let Err(e) = crate::feedback_analyzer::record_timeout_feedback(
+                            client.provider_name(),
+                            &user_prompt,
+                        )
+                        .await
+                        {
+                            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                eprintln!("[DEBUG] Failed to record timeout feedback: {e}");
+                            }
+                        }
+
                         return Err("Stream timeout: No response received within 30 seconds".into());
                     }
                 }
@@ -1702,6 +1830,20 @@ async fn process_message_print(
                     start_time.elapsed()
                 );
             }
+
+            // Record feedback for learning (analyze response for issues)
+            if let Err(e) = crate::feedback_analyzer::record_model_feedback(
+                client.provider_name(),
+                &user_prompt,
+                &full_response,
+            )
+            .await
+            {
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("[DEBUG] Failed to record feedback: {e}");
+                }
+            }
+
             Ok(full_response)
         }
         Err(e) => {
@@ -2283,6 +2425,12 @@ async fn initialize_llm_client(
                         "Qwen/Qwen3-0.6B-GGUF" | "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
                             ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
                         }
+                        // GLM-4.7-Flash (30B MoE reasoning model)
+                        "unsloth/GLM-4.7-Flash-GGUF" | "glm-4.7" | "glm" => (
+                            "unsloth/GLM-4.7-Flash-GGUF",
+                            "GLM-4.7-Flash-Q4_K_M.gguf",
+                            "glm-4.7-flash",
+                        ),
                         _ => {
                             // Check cache for compatible models or prompt to download
                             return initialize_with_compatible_model_or_download(
@@ -2341,6 +2489,12 @@ async fn initialize_llm_client(
                     "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
                         ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
                     }
+                    // GLM-4.7-Flash (30B MoE reasoning model)
+                    "glm-4.7" | "glm" => (
+                        "unsloth/GLM-4.7-Flash-GGUF",
+                        "GLM-4.7-Flash-Q4_K_M.gguf",
+                        "glm-4.7-flash",
+                    ),
                     _ => {
                         // Check cache for compatible models or prompt to download
                         return initialize_with_compatible_model_or_download(

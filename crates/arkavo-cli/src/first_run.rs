@@ -49,7 +49,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen/Qwen3-0.6B-GGUF",
             RecommendedModel::Ministral3B => "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
             RecommendedModel::Ministral8B => "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-            RecommendedModel::Glm47Flash => "bartowski/GLM-4.7-Flash-GGUF",
+            RecommendedModel::Glm47Flash => "unsloth/GLM-4.7-Flash-GGUF",
         }
     }
 
@@ -107,7 +107,7 @@ pub fn is_first_run() -> bool {
         "models--Qwen--Qwen3-0.6B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
-        "models--bartowski--GLM-4.7-Flash-GGUF",
+        "models--unsloth--GLM-4.7-Flash-GGUF",
     ];
 
     for repo_name in &preferred_repos {
@@ -382,7 +382,7 @@ mod tests {
         assert!(model.size_bytes() > 0);
 
         let glm = RecommendedModel::Glm47Flash;
-        assert!(glm.repo_id().contains("bartowski"));
+        assert!(glm.repo_id().contains("unsloth"));
         assert!(glm.size_bytes() > 10_000_000_000);
     }
 

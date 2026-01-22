@@ -41,7 +41,7 @@ pub use burst::{BurstContract, BurstResult, BurstState, ContextStrategy, Continu
 pub use conductor::Conductor;
 pub use error::{Error, Result};
 pub use schemas::{
-    GlobalTaskState, Priority, SubTask, SubTaskBudget, SubTaskResult, TaskBudget, TaskStatus,
-    VerificationStatus,
+    BurstFeedback, FeedbackIssue, GlobalTaskState, ModelPattern, Priority, SubTask, SubTaskBudget,
+    SubTaskResult, TaskBudget, TaskStatus, VerificationStatus,
 };
 pub use store::{InMemoryTaskStore, TaskStore};

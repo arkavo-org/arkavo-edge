@@ -1,0 +1,42 @@
+{
+  "name": "arkavo-self-improvement",
+  "description": "Agent-driven codebase improvement tasks",
+  "tasks": [
+    {
+      "id": "analyze-codebase",
+      "description": "Analyze entire codebase for improvement opportunities",
+      "agent": "code-analyzer",
+      "priority": "high"
+    },
+    {
+      "id": "fix-clippy-warnings",
+      "description": "Fix all clippy warnings with cargo clippy -- -D warnings",
+      "agent": "clippy-fixer",
+      "priority": "high"
+    },
+    {
+      "id": "improve-test-coverage",
+      "description": "Generate tests to achieve 85% coverage target",
+      "agent": "test-generator",
+      "priority": "medium"
+    },
+    {
+      "id": "optimize-performance",
+      "description": "Profile and optimize hot paths for router <= 50ms",
+      "agent": "performance-optimizer",
+      "priority": "medium"
+    },
+    {
+      "id": "refactor-large-files",
+      "description": "Split files exceeding 400 lines per CLAUDE.md",
+      "agent": "refactorer",
+      "priority": "medium"
+    },
+    {
+      "id": "remove-dead-code",
+      "description": "Identify and remove unused functions, types, imports",
+      "agent": "code-analyzer",
+      "priority": "low"
+    }
+  ]
+}

@@ -14,6 +14,8 @@ fn get_model_compatibility(model_name: &str) -> (&'static str, &'static str) {
         ("compatible", "MistralV3")
     } else if name_lower.contains("gemma") {
         ("compatible", "Gemma3")
+    } else if name_lower.contains("glm-4") || name_lower.contains("glm4") {
+        ("compatible", "GLM4")
     } else {
         ("incompatible", "unknown format")
     }
@@ -258,10 +260,13 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
         ModelSubcommand::Download { name } => {
             use crate::first_run::{RecommendedModel, detect_capabilities, download_model};
 
+            let caps = detect_capabilities();
+
             let model = match name.as_deref() {
                 Some("qwen3-0.6b" | "qwen" | "qwen3") => RecommendedModel::Qwen3_0_6B,
                 Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
                 Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
+                Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
                 Some(other) => {
                     println!("Unknown model: {other}");
                     println!();
@@ -269,10 +274,12 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     println!("  qwen3-0.6b    - Qwen3 0.6B (~650 MB) - Best for embedded");
                     println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
                     println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
+                    println!(
+                        "  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM"
+                    );
                     return Ok(());
                 }
                 None => {
-                    let caps = detect_capabilities();
                     println!(
                         "No model specified, using recommended: {}",
                         caps.recommended_model.display_name()
@@ -280,6 +287,51 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     caps.recommended_model
                 }
             };
+
+            // Check system capabilities for GLM-4.7-Flash
+            if matches!(model, RecommendedModel::Glm47Flash) {
+                use crate::first_run::DeviceProfile;
+                println!(
+                    "System: {} ({} GB RAM)",
+                    caps.device_profile, caps.total_ram_gb
+                );
+                match caps.device_profile {
+                    DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation => {
+                        println!("System meets GLM-4.7-Flash requirements.");
+                    }
+                    _ => {
+                        println!();
+                        println!(
+                            "Warning: GLM-4.7-Flash requires 32GB+ RAM for reasonable performance."
+                        );
+                        println!(
+                            "Your system has {} GB RAM ({}).",
+                            caps.total_ram_gb, caps.device_profile
+                        );
+                        println!();
+                        println!("Recommended alternatives:");
+                        println!(
+                            "  arkavo model download ministral-8b  (5.5 GB, works on 16GB+ RAM)"
+                        );
+                        println!(
+                            "  arkavo model download ministral-3b  (2.5 GB, works on 8GB+ RAM)"
+                        );
+                        println!();
+                        print!("Continue anyway? (y/N) ");
+                        use std::io::{self, Write};
+                        let _ = io::stdout().flush();
+                        let mut input = String::new();
+                        if io::stdin().read_line(&mut input).is_err() {
+                            return Ok(());
+                        }
+                        let input = input.trim().to_lowercase();
+                        if input != "y" && input != "yes" {
+                            println!("Download cancelled.");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
 
             println!(
                 "Downloading {} ({:.1} GB)...",

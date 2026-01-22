@@ -1,6 +1,7 @@
 pub mod builtin_mcp;
 pub mod commands;
 pub mod conversation_manager;
+pub mod feedback_analyzer;
 pub mod first_run;
 pub mod hardware;
 pub mod log;
