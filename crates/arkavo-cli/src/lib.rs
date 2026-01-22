@@ -1,6 +1,7 @@
 pub mod builtin_mcp;
 pub mod commands;
 pub mod conversation_manager;
+pub mod feedback_analyzer;
 pub mod first_run;
 pub mod hardware;
 pub mod log;
@@ -10,7 +11,6 @@ pub mod mcp_spawner;
 #[cfg(all(unix, feature = "mcp-tools"))]
 pub mod memory_integration;
 pub mod peer_manager;
-pub mod feedback_analyzer;
 pub mod prompt_loader;
 pub mod tool_integration;
 pub mod welcome;

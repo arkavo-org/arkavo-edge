@@ -209,7 +209,6 @@ impl TaskStore for FileTaskStore {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +260,4 @@ mod tests {
         // Still only one task
         assert_eq!(store.len().await, 1);
     }
-
 }

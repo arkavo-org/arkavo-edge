@@ -274,7 +274,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     println!("  qwen3-0.6b    - Qwen3 0.6B (~650 MB) - Best for embedded");
                     println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
                     println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
-                    println!("  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM");
+                    println!(
+                        "  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM"
+                    );
                     return Ok(());
                 }
                 None => {
@@ -289,19 +291,31 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             // Check system capabilities for GLM-4.7-Flash
             if matches!(model, RecommendedModel::Glm47Flash) {
                 use crate::first_run::DeviceProfile;
-                println!("System: {} ({} GB RAM)", caps.device_profile, caps.total_ram_gb);
+                println!(
+                    "System: {} ({} GB RAM)",
+                    caps.device_profile, caps.total_ram_gb
+                );
                 match caps.device_profile {
                     DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation => {
                         println!("System meets GLM-4.7-Flash requirements.");
                     }
                     _ => {
                         println!();
-                        println!("Warning: GLM-4.7-Flash requires 32GB+ RAM for reasonable performance.");
-                        println!("Your system has {} GB RAM ({}).", caps.total_ram_gb, caps.device_profile);
+                        println!(
+                            "Warning: GLM-4.7-Flash requires 32GB+ RAM for reasonable performance."
+                        );
+                        println!(
+                            "Your system has {} GB RAM ({}).",
+                            caps.total_ram_gb, caps.device_profile
+                        );
                         println!();
                         println!("Recommended alternatives:");
-                        println!("  arkavo model download ministral-8b  (5.5 GB, works on 16GB+ RAM)");
-                        println!("  arkavo model download ministral-3b  (2.5 GB, works on 8GB+ RAM)");
+                        println!(
+                            "  arkavo model download ministral-8b  (5.5 GB, works on 16GB+ RAM)"
+                        );
+                        println!(
+                            "  arkavo model download ministral-3b  (2.5 GB, works on 8GB+ RAM)"
+                        );
                         println!();
                         print!("Continue anyway? (y/N) ");
                         use std::io::{self, Write};

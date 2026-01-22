@@ -877,7 +877,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(img_path) = image_path {
             match encode_image_file(&img_path) {
                 Ok(encoded_image) => {
-                    messages.push(Message::user_with_images(&adjusted_prompt, vec![encoded_image]));
+                    messages.push(Message::user_with_images(
+                        &adjusted_prompt,
+                        vec![encoded_image],
+                    ));
                 }
                 Err(e) => {
                     eprintln!("Error loading image: {e}");
@@ -1203,25 +1206,25 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             messages.push(msg);
         } else {
             // Add regular user message with pattern-based adjustment if available
-            let adjusted_input =
-                if let Some(adj) = crate::feedback_analyzer::check_pattern_adjustment_sync(
+            let adjusted_input = if let Some(adj) =
+                crate::feedback_analyzer::check_pattern_adjustment_sync(
                     client.provider_name(),
                     input,
                 ) {
-                    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DEBUG] Applying pattern adjustment: prefix={:?}, max_tokens={:?}",
-                            adj.prompt_prefix, adj.max_tokens
-                        );
-                    }
-                    if adj.prompt_prefix.is_empty() {
-                        input.to_string()
-                    } else {
-                        format!("{}\n\n{input}", adj.prompt_prefix)
-                    }
-                } else {
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[DEBUG] Applying pattern adjustment: prefix={:?}, max_tokens={:?}",
+                        adj.prompt_prefix, adj.max_tokens
+                    );
+                }
+                if adj.prompt_prefix.is_empty() {
                     input.to_string()
-                };
+                } else {
+                    format!("{}\n\n{input}", adj.prompt_prefix)
+                }
+            } else {
+                input.to_string()
+            };
             let msg = Message::user(&adjusted_input);
             runtime.block_on(conversation_manager.add_message(&msg))?;
             messages.push(msg);
@@ -1525,10 +1528,7 @@ async fn process_message_print_with_router(
     let response = strip_think_blocks(&result.final_response);
 
     // Check if this was a math query - if so, extract just the answer to prevent loops
-    let user_prompt_text = messages
-        .last()
-        .map(|m| m.content.as_str())
-        .unwrap_or("");
+    let user_prompt_text = messages.last().map(|m| m.content.as_str()).unwrap_or("");
     let is_math = crate::feedback_analyzer::is_simple_math_query(user_prompt_text);
 
     // For math queries or if response is very long (likely looping), extract first answer

@@ -412,7 +412,10 @@ impl BurstFeedback {
     /// Record wrong expert routing (MoE models)
     pub fn with_wrong_expert(mut self, expected_expert: &str) -> Self {
         self.issue = FeedbackIssue::WrongExpertRouting;
-        self.issue_description = format!("Expected {} expert, got coding/tool expert", expected_expert);
+        self.issue_description = format!(
+            "Expected {} expert, got coding/tool expert",
+            expected_expert
+        );
         self
     }
 
@@ -422,7 +425,8 @@ impl BurstFeedback {
         let mut keywords = Vec::new();
 
         // Math indicators
-        if lower.contains('+') || lower.contains('-') || lower.contains('*') || lower.contains('/') {
+        if lower.contains('+') || lower.contains('-') || lower.contains('*') || lower.contains('/')
+        {
             keywords.push("math_operator".to_string());
         }
         if lower.contains("calculate") || lower.contains("compute") || lower.contains("sum") {

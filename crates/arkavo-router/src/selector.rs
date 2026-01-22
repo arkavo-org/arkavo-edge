@@ -106,7 +106,9 @@ impl ModelSelector {
         // GPU available - use existing logic (prefer larger when requested)
         if prefer_larger {
             // Try GLM first (30B MoE, requires 32GB+ RAM), then fall back
-            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash) && Self::has_sufficient_ram_for_glm() {
+            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+                && Self::has_sufficient_ram_for_glm()
+            {
                 ModelChoice::LocalGlm47Flash
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 ModelChoice::LocalMinistral8B

@@ -679,7 +679,10 @@ impl Router {
                     eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
                 }
                 if response.tool_calls.len() > 5 {
-                    eprintln!("[LLM] ... and {} more tool calls", response.tool_calls.len() - 5);
+                    eprintln!(
+                        "[LLM] ... and {} more tool calls",
+                        response.tool_calls.len() - 5
+                    );
                 }
             }
 

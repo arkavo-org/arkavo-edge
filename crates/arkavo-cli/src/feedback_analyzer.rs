@@ -24,8 +24,8 @@ fn get_db_path() -> PathBuf {
 }
 
 /// Initialize the global learning store
-async fn init_learning_store() -> Result<Arc<LearningStore>, Box<dyn std::error::Error + Send + Sync>>
-{
+async fn init_learning_store()
+-> Result<Arc<LearningStore>, Box<dyn std::error::Error + Send + Sync>> {
     let db_path = get_db_path();
 
     // Ensure directory exists
@@ -41,8 +41,8 @@ async fn init_learning_store() -> Result<Arc<LearningStore>, Box<dyn std::error:
 }
 
 /// Get or initialize the learning store
-pub async fn get_learning_store(
-) -> Result<Arc<LearningStore>, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_learning_store()
+-> Result<Arc<LearningStore>, Box<dyn std::error::Error + Send + Sync>> {
     LEARNING_STORE
         .get_or_try_init(init_learning_store)
         .await
@@ -277,7 +277,10 @@ pub fn extract_first_answer(response: &str, is_math_query: bool) -> String {
         // Try to parse as number or return the first line
         let clean = first_line.trim();
         // If it looks like a number (possibly negative, with decimals), return it
-        if clean.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == ' ') {
+        if clean
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == ' ')
+        {
             return clean.to_string();
         }
         // Otherwise return first line
@@ -350,8 +353,7 @@ pub async fn record_model_feedback(
 
     if let Some(feedback) = analyzer.analyze(prompt, response) {
         let issue = feedback.issue;
-        let category =
-            ResponseAnalyzer::issue_to_category(feedback.issue, &analyzer.model_family);
+        let category = ResponseAnalyzer::issue_to_category(feedback.issue, &analyzer.model_family);
 
         // Create Episode from feedback
         let observation = Observation::new(
@@ -525,7 +527,7 @@ pub async fn check_for_pattern_adjustment(
                 // We've seen loops with math questions, apply aggressive mitigation
                 return Ok(Some(PatternAdjustment {
                     prompt_prefix: String::new(), // Don't add prefix, it gets echoed
-                    max_tokens: Some(20), // Very short - just enough for the number
+                    max_tokens: Some(20),         // Very short - just enough for the number
                 }));
             }
         }
@@ -543,14 +545,24 @@ pub fn check_pattern_adjustment_sync(model_name: &str, prompt: &str) -> Option<P
     tracing::debug!(model = %model_name, prompt = %prompt, "check_pattern_adjustment_sync called");
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         tokio::task::block_in_place(|| {
-            handle.block_on(async { check_for_pattern_adjustment(model_name, prompt).await.ok().flatten() })
+            handle.block_on(async {
+                check_for_pattern_adjustment(model_name, prompt)
+                    .await
+                    .ok()
+                    .flatten()
+            })
         })
     } else {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .ok()?;
-        rt.block_on(async { check_for_pattern_adjustment(model_name, prompt).await.ok().flatten() })
+        rt.block_on(async {
+            check_for_pattern_adjustment(model_name, prompt)
+                .await
+                .ok()
+                .flatten()
+        })
     }
 }
 
