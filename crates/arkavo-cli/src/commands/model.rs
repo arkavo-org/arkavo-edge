@@ -262,6 +262,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 Some("qwen3-0.6b" | "qwen" | "qwen3") => RecommendedModel::Qwen3_0_6B,
                 Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
                 Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
+                Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
                 Some(other) => {
                     println!("Unknown model: {other}");
                     println!();
@@ -269,6 +270,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     println!("  qwen3-0.6b    - Qwen3 0.6B (~650 MB) - Best for embedded");
                     println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
                     println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
+                    println!("  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE reasoning");
                     return Ok(());
                 }
                 None => {
