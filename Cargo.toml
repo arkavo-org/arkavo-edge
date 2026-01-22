@@ -114,7 +114,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.55.0"
+version = "0.55.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
