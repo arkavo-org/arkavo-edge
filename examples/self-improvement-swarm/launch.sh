@@ -43,11 +43,10 @@ check_prerequisites() {
 
     # Check for GLM-4.7-Flash model
     local hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-    if [ -d "$hf_cache/models--bartowski--GLM-4.7-Flash-GGUF" ]; then
-        print_status "SUCCESS" "GLM-4.7-Flash model available"
+    if [ -d "$hf_cache/models--unsloth--GLM-4.7-Flash-GGUF" ]; then
+        print_status "SUCCESS" "GLM-4.7-Flash model available (unsloth)"
     else
-        print_status "WARNING" "GLM-4.7-Flash not found. Will download on first use."
-        print_status "INFO" "Download manually: arkavo chat --model glm-4.7-flash"
+        print_status "WARNING" "GLM-4.7-Flash not found. Run: arkavo model download glm"
     fi
 }
 
