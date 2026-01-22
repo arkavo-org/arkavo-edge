@@ -14,6 +14,8 @@ fn get_model_compatibility(model_name: &str) -> (&'static str, &'static str) {
         ("compatible", "MistralV3")
     } else if name_lower.contains("gemma") {
         ("compatible", "Gemma3")
+    } else if name_lower.contains("glm-4") || name_lower.contains("glm4") {
+        ("compatible", "GLM4")
     } else {
         ("incompatible", "unknown format")
     }
