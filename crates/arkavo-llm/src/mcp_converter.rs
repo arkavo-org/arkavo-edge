@@ -445,6 +445,38 @@ impl McpConverter {
             LocalToolFormat::Fence => Self::to_fence_prompt(tools),
         }
     }
+
+    /// Convert MCP ToolInfo to GLM-specific prompt format
+    /// GLM-4.7-Flash is trained as a Code Interpreter and tends to over-use tools.
+    /// This format emphasizes that tools are optional and should only be used when necessary.
+    pub fn to_glm_prompt(tools: &[ToolInfo]) -> String {
+        if tools.is_empty() {
+            return String::new();
+        }
+
+        let mut prompt = String::new();
+
+        // Strong instruction that tools are OPTIONAL
+        prompt.push_str("\n\n## Tools (Optional)\n\n");
+        prompt.push_str("You have access to tools below, but ONLY use them when absolutely necessary.\n");
+        prompt.push_str("For simple questions, knowledge queries, math, or conversation - answer directly WITHOUT tools.\n\n");
+
+        prompt.push_str("Available tools:\n");
+        for tool in tools {
+            let _ = writeln!(prompt, "- `{}`: {}", tool.name, tool.description);
+        }
+
+        prompt.push_str("\nTo call a tool (only when needed):\n");
+        prompt.push_str("```tool_name\nparameter: value\n```\n\n");
+
+        prompt.push_str("IMPORTANT: Do NOT call tools for:\n");
+        prompt.push_str("- Math questions (just calculate)\n");
+        prompt.push_str("- General knowledge (just answer)\n");
+        prompt.push_str("- Greetings or conversation (just respond)\n");
+        prompt.push_str("- Questions you can answer from your training\n\n");
+
+        prompt
+    }
 }
 
 #[cfg(test)]

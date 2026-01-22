@@ -567,9 +567,9 @@ const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role']
 
 // GLM-4 chat template
 // Uses [gMASK]<sop> prefix and <|system|>, <|user|>, <|assistant|>, <|observation|> role tokens
-// GLM-4.7-Flash is trained as a Code Interpreter - it naturally wants to execute code.
-// We meet it halfway by providing a python tool and guiding the format.
-const GLM4_TEMPLATE: &str = "[gMASK]<sop><|system|>\nYou are a helpful assistant with access to a python tool. When using the python tool, pass your code as a string in the 'code' parameter like: python(code=\"your code here\").{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% elif message['role'] == 'observation' %}<|observation|>{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
+// Note: GLM-4.7-Flash is trained as a Code Interpreter but we use it for general chat.
+// Only call tools when explicitly needed - prefer direct answers for simple questions.
+const GLM4_TEMPLATE: &str = "[gMASK]<sop>{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% elif message['role'] == 'observation' %}<|observation|>{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
 
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(

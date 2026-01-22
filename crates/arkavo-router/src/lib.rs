@@ -655,10 +655,31 @@ impl Router {
                 }
             }
 
-            // Debug: log tool calls
+            // Deduplicate tool calls (prevents GLM-style repeated calls)
+            if response.tool_calls.len() > 1 {
+                let original_count = response.tool_calls.len();
+                let mut seen = std::collections::HashSet::new();
+                response.tool_calls.retain(|tc| {
+                    let key = format!("{}:{}", tc.tool_name, tc.arguments);
+                    seen.insert(key)
+                });
+                if response.tool_calls.len() < original_count {
+                    tracing::debug!(
+                        "Deduplicated tool calls: {} -> {}",
+                        original_count,
+                        response.tool_calls.len()
+                    );
+                }
+            }
+
+            // Debug: log tool calls (limit to first 5 to avoid spam)
             if !response.tool_calls.is_empty() {
-                for tc in &response.tool_calls {
+                let display_count = response.tool_calls.len().min(5);
+                for tc in response.tool_calls.iter().take(display_count) {
                     eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                }
+                if response.tool_calls.len() > 5 {
+                    eprintln!("[LLM] ... and {} more tool calls", response.tool_calls.len() - 5);
                 }
             }
 

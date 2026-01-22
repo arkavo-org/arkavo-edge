@@ -339,6 +339,10 @@ impl Provider for LlamaCppProvider {
         tools: Option<Value>,
         max_tokens: Option<usize>,
     ) -> Result<ProviderResponse> {
+        // Detect GLM model for special handling
+        let format = detect_model_format(&self.name);
+        let is_glm = matches!(format, ModelFormat::GLM4);
+
         let system_prompt = if let Some(tools_value) = tools.as_ref() {
             let tools_array = tools_value
                 .as_array()
@@ -356,7 +360,12 @@ impl Provider for LlamaCppProvider {
                 })
                 .collect();
 
-            McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+            // Use GLM-specific prompt that emphasizes tools are optional
+            if is_glm {
+                McpConverter::to_glm_prompt(&tool_infos)
+            } else {
+                McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+            }
         } else {
             String::new()
         };

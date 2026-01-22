@@ -113,8 +113,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7-Flash + dry sampler + looping fix (5bd341c9a Jan 2026)
-          git checkout 5bd341c9a
+          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
+          git checkout 94242a62c
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -227,8 +227,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7-Flash + dry sampler + looping fix (5bd341c9a Jan 2026)
-          git checkout 5bd341c9a
+          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
+          git checkout 94242a62c
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -295,8 +295,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7-Flash + dry sampler + looping fix (5bd341c9a Jan 2026)
-          git checkout 5bd341c9a
+          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
+          git checkout 94242a62c
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
@@ -415,8 +415,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7-Flash + dry sampler + looping fix (5bd341c9a Jan 2026)
-          git checkout 5bd341c9a
+          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
+          git checkout 94242a62c
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -769,8 +769,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7-Flash + dry sampler + looping fix (5bd341c9a Jan 2026)
-          git checkout 5bd341c9a
+          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
+          git checkout 94242a62c
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
