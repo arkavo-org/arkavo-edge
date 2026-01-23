@@ -12,13 +12,17 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["process", "io-util", "fs"] }
+tokio = { workspace = true, features = ["process", "io-util", "fs", "sync"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 glob = { workspace = true }
 once_cell = "1.19"
+futures = "0.3"
+
+# Claude Agent SDK (native Rust - supports OAuth for Claude Max/Pro subscribers)
+anthropic-agent-sdk = "0.2"
 
 # Internal dependencies
 arkavo-mcp = { path = "../arkavo-mcp" }

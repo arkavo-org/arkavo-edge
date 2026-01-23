@@ -248,4 +248,140 @@ impl EventMapper {
             tracing::error!("Failed to write token usage event: {}", e);
         }
     }
+
+    /// Emit a run started event
+    pub async fn emit_run_started(&self, run_id: &str, prompt: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::PromptSent {
+                prompt: prompt.to_string(),
+                model: "claude-code".to_string(),
+                parameters: None,
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write run started event: {}", e);
+        }
+    }
+
+    /// Emit a run completed event
+    pub async fn emit_run_completed(&self, run_id: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::SessionEnded {
+                reason: "completed".to_string(),
+                duration_ms: 0,
+                summary: None,
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write run completed event: {}", e);
+        }
+    }
+
+    /// Emit an assistant message event
+    pub async fn emit_assistant_message(&self, run_id: &str, content: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::StreamDelta {
+                stream_id: run_id.to_string(),
+                sequence,
+                delta_type: "assistant".to_string(),
+                content: content.to_string(),
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write assistant message event: {}", e);
+        }
+    }
+
+    /// Emit a system message event
+    pub async fn emit_system_message(&self, run_id: &str, content: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::StreamDelta {
+                stream_id: run_id.to_string(),
+                sequence,
+                delta_type: "system".to_string(),
+                content: content.to_string(),
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write system message event: {}", e);
+        }
+    }
+
+    /// Emit an error event
+    pub async fn emit_error(&self, run_id: &str, error: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::Error {
+                error_type: "sdk_error".to_string(),
+                message: error.to_string(),
+                stack_trace: None,
+                recoverable: Some(true),
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write error event: {}", e);
+        }
+    }
+
+    /// Emit a result event
+    pub async fn emit_result(&self, run_id: &str, result: &str) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::ModelResponse {
+                model: "claude-code".to_string(),
+                response: result.to_string(),
+                usage: None,
+                duration_ms: 0,
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write result event: {}", e);
+        }
+    }
 }

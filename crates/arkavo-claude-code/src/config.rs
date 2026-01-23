@@ -54,9 +54,10 @@ pub struct ClaudeCodeConfig {
     #[serde(default = "default_session_ttl")]
     pub session_ttl_secs: u64,
 
-    /// Node.js runtime path (if custom)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_path: Option<PathBuf>,
+    /// Use OAuth authentication (for Claude Max/Pro subscribers)
+    /// If false, uses ANTHROPIC_API_KEY environment variable
+    #[serde(default = "default_use_oauth")]
+    pub use_oauth: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +110,7 @@ impl Default for ClaudeCodeConfig {
             ],
             retry: RetryConfig::default(),
             session_ttl_secs: default_session_ttl(),
-            node_path: None,
+            use_oauth: default_use_oauth(),
         }
     }
 }
@@ -221,4 +222,9 @@ fn default_backoff_ms() -> u64 {
 
 fn default_session_ttl() -> u64 {
     3600
+}
+
+fn default_use_oauth() -> bool {
+    // Default to OAuth if no API key is set
+    std::env::var("ANTHROPIC_API_KEY").is_err()
 }
