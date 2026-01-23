@@ -75,20 +75,40 @@ impl SdkBridge {
                     ClaudeCodeError::Auth(format!("Failed to create OAuth client: {}", e))
                 })?;
 
-                // Try to authenticate - this will use cached credentials if available
-                // or prompt for browser authentication
+                // Check if we already have a valid cached token
+                if oauth.is_authenticated() {
+                    info!("OAuth: Using cached authentication token");
+                    return Ok(());
+                }
+
+                // No cached token - need to authenticate
+                // In non-interactive contexts, provide instructions
+                info!("OAuth: No cached token found, authentication required");
+
+                // Try to authenticate - this will open browser and prompt for code
+                // In agent contexts, this may fail if stdin is not available
                 match oauth.authenticate().await {
                     Ok(token_info) => {
                         info!("OAuth: Authenticated successfully");
                         debug!("Token expires at: {:?}", token_info.expires_at);
                     }
                     Err(e) => {
+                        // Provide helpful error message for non-interactive contexts
                         return Err(ClaudeCodeError::Auth(format!(
-                            "OAuth authentication failed: {}\n\
+                            "OAuth authentication required.\n\
                              \n\
-                             To authenticate:\n\
-                             1. Ensure you have a Claude Max/Pro subscription\n\
-                             2. Or set ANTHROPIC_API_KEY environment variable",
+                             To authenticate, run one of these commands in a terminal:\n\
+                             \n\
+                             Option 1 - Claude CLI (if installed):\n\
+                             $ claude login\n\
+                             \n\
+                             Option 2 - Direct OAuth (opens browser):\n\
+                             The OAuth flow opened a browser. Paste the authorization code when prompted.\n\
+                             \n\
+                             Option 3 - Use API key instead:\n\
+                             $ export ANTHROPIC_API_KEY=\"sk-ant-...\"\n\
+                             \n\
+                             Original error: {}",
                             e
                         )));
                     }
@@ -105,6 +125,17 @@ impl SdkBridge {
 
         info!("Claude SDK initialized successfully");
         Ok(())
+    }
+
+    /// Check if OAuth is already authenticated (has cached token)
+    pub fn is_authenticated(&self) -> bool {
+        if let AuthMethod::OAuth = &self.auth_method {
+            if let Ok(oauth) = OAuthClient::new() {
+                return oauth.is_authenticated();
+            }
+        }
+        // API key auth is always "authenticated" if key is set
+        matches!(&self.auth_method, AuthMethod::ApiKey(_))
     }
 
     /// Run a simple query and stream results
