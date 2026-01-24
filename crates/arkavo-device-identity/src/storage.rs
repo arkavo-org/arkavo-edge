@@ -1,10 +1,10 @@
 use crate::{DeviceId, DeviceIdentityError, Result};
 
-const DEVICE_ID_KEY: &str = "com.arkavo.edge.device_id";
-
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
+
+    const DEVICE_ID_KEY: &str = "com.arkavo.edge.device_id";
     use std::fs;
     use std::path::PathBuf;
 
@@ -140,6 +140,8 @@ mod platform {
 mod platform {
     use super::*;
     use keyring::Entry;
+
+    const DEVICE_ID_KEY: &str = "com.arkavo.edge.device_id";
 
     fn get_entry() -> Result<Entry> {
         Entry::new("arkavo-edge", DEVICE_ID_KEY)
