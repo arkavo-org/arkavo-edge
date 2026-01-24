@@ -1,11 +1,16 @@
 [package]
-name = "arkavo-claude-code"
+name = "arkavo-claude-agent"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Claude Agent SDK integration for Arkavo Edge"
 repository.workspace = true
+
+[features]
+default = ["oauth"]
+# OAuth support (requires native-tls compatible platform - not musl)
+oauth = []
 
 [dependencies]
 anyhow = { workspace = true }
@@ -26,9 +31,13 @@ anthropic-agent-sdk = "0.2"
 
 # Internal dependencies
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-authorization = { path = "../arkavo-authorization" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 
 [build-dependencies]
 anyhow = { workspace = true }
+
+[lints]
+workspace = true

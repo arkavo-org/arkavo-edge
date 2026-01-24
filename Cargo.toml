@@ -18,7 +18,7 @@ members = [
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-mcp-tools",
     "crates/arkavo-dataflow",
-    # "crates/arkavo-claude-code",  # Excluded: uses native-tls via anthropic-agent-sdk
+    "crates/arkavo-claude-agent",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
     "crates/arkavo-observability",
     "crates/arkavo-budget",
@@ -81,7 +81,7 @@ default-members = [
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-mcp-tools",
     "crates/arkavo-dataflow",
-    # "crates/arkavo-claude-code",  # Excluded: uses native-tls via anthropic-agent-sdk
+    "crates/arkavo-claude-agent",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
     "crates/arkavo-observability",
     "crates/arkavo-budget",

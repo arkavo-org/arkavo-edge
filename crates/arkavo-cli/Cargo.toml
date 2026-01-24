@@ -19,6 +19,8 @@ minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
 mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
+# Claude Agent SDK integration (requires non-musl target for OAuth)
+claude-agent = ["dep:arkavo-claude-agent"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
@@ -95,6 +97,9 @@ libc = { workspace = true }
 # Cross-platform MCP tools (optional, enabled via mcp-tools feature)
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
+
+# Claude Agent SDK integration (optional, requires non-musl target for OAuth)
+arkavo-claude-agent = { path = "../arkavo-claude-agent", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

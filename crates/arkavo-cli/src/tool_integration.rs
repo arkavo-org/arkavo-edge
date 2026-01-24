@@ -84,6 +84,44 @@ pub async fn process_with_tools(
     ));
     arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
 
+    // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
+    #[cfg(feature = "claude-agent")]
+    {
+        use arkavo_claude_agent::{ClaudeCodeCapability, ClaudeCodeConfig};
+
+        // Try to initialize Claude Code capability using default config
+        // The default config checks ANTHROPIC_API_KEY env var to determine auth method
+        let claude_config = ClaudeCodeConfig::default();
+        if claude_config.enabled {
+            let event_writer = std::sync::Arc::new(
+                arkavo_events::EventWriter::new(arkavo_events::EventWriterConfig::default()),
+            );
+            match ClaudeCodeCapability::new(
+                claude_config,
+                "arkavo-cli".to_string(),
+                event_writer,
+                None, // budget_tracker
+                None, // auth_client
+            )
+            .await
+            {
+                Ok(capability) => {
+                    let capability = std::sync::Arc::new(capability);
+                    // Prepare authentication (may fail if OAuth not configured)
+                    if let Err(e) = capability.prepare().await {
+                        tracing::warn!("Claude Code capability not ready: {e}");
+                    } else {
+                        arkavo_claude_agent::register_tools(&mut tool_registry, capability);
+                        tracing::info!("Claude Agent tools registered successfully");
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Claude Code tools disabled: {e}");
+                }
+            }
+        }
+    }
+
     // Wrap registry in Arc for shared access
     let registry_arc = Arc::new(tool_registry);
 

@@ -7,6 +7,7 @@ pub mod tools;
 
 pub use capability::ClaudeCodeCapability;
 pub use config::{ClaudeCodeConfig, ToolPermissions};
+pub use tools::register_tools;
 
 use thiserror::Error;
 
