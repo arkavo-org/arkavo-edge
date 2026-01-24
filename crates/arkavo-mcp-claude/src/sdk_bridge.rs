@@ -1,6 +1,5 @@
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
 use anthropic_agent_sdk::{ClaudeAgentOptions, Message, auth::OAuthClient, query};
@@ -34,7 +33,6 @@ pub struct SdkBridge {
     event_mapper: Arc<EventMapper>,
     auth_method: AuthMethod,
     options: ClaudeAgentOptions,
-    _authenticated: Arc<RwLock<bool>>,
 }
 
 impl SdkBridge {
@@ -51,6 +49,15 @@ impl SdkBridge {
             AuthMethod::default()
         };
 
+        // Set API key in environment early, before any SDK operations
+        // SAFETY: This is done during single-threaded initialization of the capability.
+        // The env var is set before the SDK is used, ensuring thread-safe access.
+        if let AuthMethod::ApiKey(key) = &auth_method {
+            unsafe {
+                std::env::set_var("ANTHROPIC_API_KEY", key);
+            }
+        }
+
         // Build options for the Claude agent
         let options = ClaudeAgentOptions::builder()
             .cwd(config.workspace_root.clone())
@@ -60,7 +67,6 @@ impl SdkBridge {
             event_mapper,
             auth_method,
             options,
-            _authenticated: Arc::new(RwLock::new(false)),
         })
     }
 
@@ -114,12 +120,9 @@ impl SdkBridge {
                     }
                 }
             }
-            AuthMethod::ApiKey(key) => {
+            AuthMethod::ApiKey(_) => {
+                // API key was already set in environment during construction
                 info!("Initializing Claude SDK with API key authentication");
-                // SAFETY: We're setting a single env var before any threads use it
-                unsafe {
-                    std::env::set_var("ANTHROPIC_API_KEY", key);
-                }
             }
         }
 
@@ -188,24 +191,53 @@ impl SdkBridge {
         match message {
             Message::Assistant { message, .. } => {
                 debug!("Assistant message received");
-                let content = format!("{:?}", message);
+                // Extract text content from assistant message
+                let content = Self::extract_assistant_content(&message);
                 event_mapper.emit_assistant_message(run_id, &content).await;
             }
             Message::User { message, .. } => {
                 debug!("User message echoed: {:?}", message);
             }
-            Message::Result { result, .. } => {
-                debug!("Result: {:?}", result);
-                if let Some(res) = result {
-                    event_mapper
-                        .emit_result(run_id, &format!("{:?}", res))
-                        .await;
-                }
+            Message::Result {
+                subtype,
+                duration_ms,
+                is_error,
+                ..
+            } => {
+                debug!(
+                    "Result received: subtype={}, duration={}ms",
+                    subtype, duration_ms
+                );
+                let content = if is_error {
+                    format!("Error: {}", subtype)
+                } else {
+                    format!("Completed: {} ({}ms)", subtype, duration_ms)
+                };
+                event_mapper.emit_result(run_id, &content).await;
             }
             _ => {
                 debug!("Other message type received");
             }
         }
+    }
+
+    /// Extract text content from an assistant message
+    fn extract_assistant_content(
+        message: &anthropic_agent_sdk::types::AssistantMessageContent,
+    ) -> String {
+        use anthropic_agent_sdk::types::ContentBlock;
+
+        let mut parts = Vec::new();
+        for block in &message.content {
+            match block {
+                ContentBlock::Text { text } => parts.push(text.clone()),
+                ContentBlock::ToolUse { name, input, .. } => {
+                    parts.push(format!("[Tool: {} with input: {}]", name, input));
+                }
+                _ => {}
+            }
+        }
+        parts.join("\n")
     }
 
     /// Get the current authentication method

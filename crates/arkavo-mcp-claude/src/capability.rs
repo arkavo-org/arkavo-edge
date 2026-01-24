@@ -153,7 +153,9 @@ impl ClaudeCodeCapability {
     pub async fn shutdown(&self) -> Result<()> {
         let mut bridge_guard = self.sdk_bridge.write().await;
         if let Some(bridge) = bridge_guard.take() {
-            bridge.close_session().await.ok(); // Ignore errors on shutdown
+            if let Err(e) = bridge.close_session().await {
+                tracing::warn!("Error closing Claude session: {e}");
+            }
         }
 
         info!("Claude Code capability shut down");
