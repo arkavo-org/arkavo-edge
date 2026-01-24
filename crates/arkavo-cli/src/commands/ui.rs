@@ -71,6 +71,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(feature = "cef-ui")]
+#[allow(clippy::future_not_send)]
 async fn use_cef_renderer(
     _port: u16,
     initial_prompt: Option<String>,
@@ -140,9 +141,10 @@ async fn use_cef_renderer(
         }
 
         // Check for resumable plans
-        if let Ok(resumable) = store.get_resumable_plans().await {
-            if !resumable.is_empty() {
-                let plan = &resumable[0];
+        if let Ok(resumable) = store.get_resumable_plans().await
+            && !resumable.is_empty()
+        {
+            let plan = &resumable[0];
                 eprintln!(
                     "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
                     plan.original_prompt, plan.current_subtask, plan.total_subtasks
@@ -170,7 +172,6 @@ async fn use_cef_renderer(
                     plan.total_subtasks
                 );
                 cef_renderer.render(&resume_html, "", "").await?;
-            }
         }
     }
 
@@ -203,8 +204,8 @@ async fn use_cef_renderer(
             for report in &reports {
                 if report.component == "cef" {
                     eprintln!(
-                        "[HEARTBEAT]   CEF: {} - {}",
-                        format!("{:?}", report.status),
+                        "[HEARTBEAT]   CEF: {:?} - {}",
+                        report.status,
                         report.message
                     );
 
@@ -318,7 +319,7 @@ async fn use_cef_renderer(
                 "submit" if !event.value.trim().is_empty() => {
                     eprintln!("[DEBUG] Processing submit event (async)");
                     if let Err(e) = handle_prompt_async(&mut cef_renderer, &event.value).await {
-                        eprintln!("[ERROR] Prompt processing failed: {}", e);
+                        eprintln!("[ERROR] Prompt processing failed: {e}");
                         return Err(e);
                     }
                     eprintln!("[DEBUG] Prompt processing completed");
@@ -354,6 +355,7 @@ async fn use_cef_renderer(
 }
 
 #[cfg(feature = "cef-ui")]
+#[allow(clippy::future_not_send, clippy::format_collect)]
 async fn handle_prompt_async(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
@@ -424,8 +426,7 @@ async fn handle_prompt_async(
                                         .replace('<', "&lt;")
                                         .replace('>', "&gt;")
                                 ))
-                                .collect::<Vec<_>>()
-                                .join("")
+                                .collect::<String>()
                         );
                         renderer.render(&tools_html, "", "").await?;
                         return Ok(());

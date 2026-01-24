@@ -1,6 +1,5 @@
 use arkavo_mcp::{McpClient, McpTool, Tool};
 use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
-use log::{error, info};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
