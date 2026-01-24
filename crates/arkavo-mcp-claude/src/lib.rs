@@ -9,6 +9,21 @@ pub use capability::ClaudeCodeCapability;
 pub use config::{ClaudeCodeConfig, ToolPermissions};
 pub use tools::register_tools;
 
+/// Check if Claude authentication is available (API key or cached OAuth token)
+///
+/// Use this to avoid blocking on interactive OAuth flow in non-interactive contexts.
+pub fn is_auth_available() -> bool {
+    // Check for API key first
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        return true;
+    }
+
+    // Check for cached OAuth token
+    anthropic_agent_sdk::auth::OAuthClient::new()
+        .map(|c| c.is_authenticated())
+        .unwrap_or(false)
+}
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
