@@ -171,7 +171,8 @@ impl Tool for ClaudeCodePlanTool {
         // Add planning instruction to prevent execution
         let plan_prompt = format!(
             "Please create a detailed plan for the following task. \
-             Do not execute any code, just outline the steps:\n\n{}", args.prompt
+             Do not execute any code, just outline the steps:\n\n{}",
+            args.prompt
         );
 
         let run_id = self

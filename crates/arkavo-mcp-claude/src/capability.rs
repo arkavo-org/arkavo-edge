@@ -68,7 +68,10 @@ impl ClaudeCodeCapability {
             (bridge, workspace)
         };
 
-        info!("Preparing Claude Code capability with workspace: {}", workspace_root.display());
+        info!(
+            "Preparing Claude Code capability with workspace: {}",
+            workspace_root.display()
+        );
 
         // Initialize authentication (OAuth or API key)
         bridge.initialize().await?;

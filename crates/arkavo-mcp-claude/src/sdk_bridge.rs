@@ -2,7 +2,7 @@ use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use anthropic_agent_sdk::{auth::OAuthClient, query, ClaudeAgentOptions, Message};
+use anthropic_agent_sdk::{ClaudeAgentOptions, Message, auth::OAuthClient, query};
 
 use crate::event_mapper::EventMapper;
 use crate::{ClaudeCodeError, Result};

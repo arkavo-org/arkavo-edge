@@ -110,11 +110,10 @@ pub async fn process_with_tools(
                 event_writer,
                 None, // budget_tracker
                 None, // auth_client
-            )
-            .await
-            {
+            ) {
                 Ok(capability) => {
-                    let capability = std::sync::Arc::new(capability);
+                    let capability: std::sync::Arc<ClaudeCodeCapability> =
+                        std::sync::Arc::new(capability);
                     // Prepare authentication (should succeed since we checked above)
                     if let Err(e) = capability.prepare().await {
                         tracing::warn!("Claude MCP tools not ready: {e}");
