@@ -1,10 +1,10 @@
 [package]
-name = "arkavo-claude-agent"
+name = "arkavo-mcp-claude"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Claude Agent SDK integration for Arkavo Edge"
+description = "Claude Agent SDK as MCP tools for Arkavo Edge"
 repository.workspace = true
 
 [features]

@@ -87,7 +87,7 @@ pub async fn process_with_tools(
     // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
     #[cfg(feature = "claude-agent")]
     {
-        use arkavo_claude_agent::{ClaudeCodeCapability, ClaudeCodeConfig};
+        use arkavo_mcp_claude::{ClaudeCodeCapability, ClaudeCodeConfig};
 
         // Try to initialize Claude Code capability using default config
         // The default config checks ANTHROPIC_API_KEY env var to determine auth method
@@ -111,7 +111,7 @@ pub async fn process_with_tools(
                     if let Err(e) = capability.prepare().await {
                         tracing::warn!("Claude Code capability not ready: {e}");
                     } else {
-                        arkavo_claude_agent::register_tools(&mut tool_registry, capability);
+                        arkavo_mcp_claude::register_tools(&mut tool_registry, capability);
                         tracing::info!("Claude Agent tools registered successfully");
                     }
                 }

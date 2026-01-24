@@ -13,14 +13,14 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Full defaults with all providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
 mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 # Claude Agent SDK integration (requires non-musl target for OAuth)
-claude-agent = ["dep:arkavo-claude-agent"]
+claude-agent = ["dep:arkavo-mcp-claude"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
@@ -99,7 +99,7 @@ arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
-arkavo-claude-agent = { path = "../arkavo-claude-agent", optional = true }
+arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

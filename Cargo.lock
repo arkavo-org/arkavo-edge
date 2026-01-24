@@ -440,30 +440,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arkavo-claude-agent"
-version = "0.56.0"
-dependencies = [
- "anthropic-agent-sdk",
- "anyhow",
- "arkavo-authorization",
- "arkavo-budget",
- "arkavo-events",
- "arkavo-mcp",
- "arkavo-mcp-tools",
- "async-trait",
- "chrono",
- "futures",
- "glob",
- "once_cell",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "arkavo-cli"
 version = "0.56.0"
 dependencies = [
@@ -472,7 +448,6 @@ dependencies = [
  "arkavo-agui",
  "arkavo-budget",
  "arkavo-cef",
- "arkavo-claude-agent",
  "arkavo-config-bundle",
  "arkavo-config-encryption",
  "arkavo-context",
@@ -488,6 +463,7 @@ dependencies = [
  "arkavo-kimi",
  "arkavo-llm",
  "arkavo-mcp",
+ "arkavo-mcp-claude",
  "arkavo-mcp-macos",
  "arkavo-mcp-mesh",
  "arkavo-mcp-runtime",
@@ -930,6 +906,30 @@ dependencies = [
  "async-trait",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "arkavo-mcp-claude"
+version = "0.56.0"
+dependencies = [
+ "anthropic-agent-sdk",
+ "anyhow",
+ "arkavo-authorization",
+ "arkavo-budget",
+ "arkavo-events",
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
+ "async-trait",
+ "chrono",
+ "futures",
+ "glob",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
