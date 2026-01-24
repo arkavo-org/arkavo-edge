@@ -78,6 +78,8 @@ impl AsyncDOMCommandBuilder {
         Ok(())
     }
 
+    /// # Panics
+    /// Panics if the internal rate limiter semaphore is closed (should never happen).
     pub async fn replace_inner_html(&mut self, selector: &str, html: &str) -> Result<()> {
         println!(
             "[DEBUG] replace_inner_html called: selector='{}', html_len={}",
@@ -111,7 +113,7 @@ impl AsyncDOMCommandBuilder {
         let feedback = tokio::time::timeout(tokio::time::Duration::from_secs(10), feedback_rx)
             .await
             .map_err(|_| {
-                eprintln!("[ERROR] Timeout waiting for feedback on command {}", id);
+                eprintln!("[ERROR] Timeout waiting for feedback on command {id}");
                 CefError::Timeout
             })?
             .map_err(|_| CefError::DomCommandFailed("Feedback channel closed".to_string()))?;
@@ -134,6 +136,8 @@ impl AsyncDOMCommandBuilder {
         Ok(())
     }
 
+    /// # Panics
+    /// Panics if the internal rate limiter semaphore is closed (should never happen).
     pub async fn set_attribute(
         &mut self,
         selector: &str,
@@ -178,6 +182,8 @@ impl AsyncDOMCommandBuilder {
         Ok(())
     }
 
+    /// # Panics
+    /// Panics if the internal rate limiter semaphore is closed (should never happen).
     pub async fn set_style(&mut self, selector: &str, property: &str, value: &str) -> Result<()> {
         self.validate_css_size(value)?;
 
@@ -211,6 +217,8 @@ impl AsyncDOMCommandBuilder {
         Ok(())
     }
 
+    /// # Panics
+    /// Panics if the internal rate limiter semaphore is closed (should never happen).
     pub async fn add_event_listener(&mut self, selector: &str, event_type: &str) -> Result<()> {
         let _permit = self
             .rate_limiter

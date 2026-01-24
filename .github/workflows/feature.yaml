@@ -229,6 +229,8 @@ jobs:
             cargo test --locked -p arkavo-terminal
             cargo test --locked -p arkavo-ui-generator
             cargo test --locked -p arkavo-agui --no-default-features --features mdns
+            # Check arkavo-cli with cef-ui feature to catch exhaustive match errors
+            cargo check --locked -p arkavo-cli --features cef-ui
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -254,6 +256,8 @@ jobs:
             cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
+            # Lint arkavo-cli with cef-ui feature (catches exhaustive match errors before release)
+            cargo clippy --locked -p arkavo-cli --lib --bins --features cef-ui -- -D warnings
           fi
 
   test-kimi-feature:

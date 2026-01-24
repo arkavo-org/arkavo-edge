@@ -56,8 +56,10 @@ impl CommandTracker {
     }
 
     pub async fn get_health_snapshot(&self) -> CommandHealthSnapshot {
-        let commands = self.active_commands.read().await;
-        let reports: Vec<CommandHealthReport> = commands
+        let reports: Vec<CommandHealthReport> = self
+            .active_commands
+            .read()
+            .await
             .values()
             .map(|record| CommandHealthReport {
                 id: record.id,

@@ -71,6 +71,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(feature = "cef-ui")]
+#[allow(clippy::future_not_send)]
 async fn use_cef_renderer(
     _port: u16,
     initial_prompt: Option<String>,
@@ -140,17 +141,18 @@ async fn use_cef_renderer(
         }
 
         // Check for resumable plans
-        if let Ok(resumable) = store.get_resumable_plans().await {
-            if !resumable.is_empty() {
-                let plan = &resumable[0];
-                eprintln!(
-                    "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
-                    plan.original_prompt, plan.current_subtask, plan.total_subtasks
-                );
+        if let Ok(resumable) = store.get_resumable_plans().await
+            && !resumable.is_empty()
+        {
+            let plan = &resumable[0];
+            eprintln!(
+                "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
+                plan.original_prompt, plan.current_subtask, plan.total_subtasks
+            );
 
-                // Show resume prompt in UI
-                let resume_html = format!(
-                    r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+            // Show resume prompt in UI
+            let resume_html = format!(
+                r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
                         <div style="background:#fff3cd;padding:20px;border-radius:8px;border-left:4px solid #ffc107;margin-bottom:20px;">
                             <strong style="color:#856404;">Interrupted Plan Found</strong>
                             <div style="margin-top:8px;color:#333;">"{}"</div>
@@ -162,15 +164,14 @@ async fn use_cef_renderer(
                             </div>
                         </div>
                     </div>"#,
-                    plan.original_prompt
-                        .replace('&', "&amp;")
-                        .replace('<', "&lt;")
-                        .replace('>', "&gt;"),
-                    plan.current_subtask,
-                    plan.total_subtasks
-                );
-                cef_renderer.render(&resume_html, "", "").await?;
-            }
+                plan.original_prompt
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                plan.current_subtask,
+                plan.total_subtasks
+            );
+            cef_renderer.render(&resume_html, "", "").await?;
         }
     }
 
@@ -203,9 +204,8 @@ async fn use_cef_renderer(
             for report in &reports {
                 if report.component == "cef" {
                     eprintln!(
-                        "[HEARTBEAT]   CEF: {} - {}",
-                        format!("{:?}", report.status),
-                        report.message
+                        "[HEARTBEAT]   CEF: {:?} - {}",
+                        report.status, report.message
                     );
 
                     // Check if degraded (stuck commands)
@@ -318,7 +318,7 @@ async fn use_cef_renderer(
                 "submit" if !event.value.trim().is_empty() => {
                     eprintln!("[DEBUG] Processing submit event (async)");
                     if let Err(e) = handle_prompt_async(&mut cef_renderer, &event.value).await {
-                        eprintln!("[ERROR] Prompt processing failed: {}", e);
+                        eprintln!("[ERROR] Prompt processing failed: {e}");
                         return Err(e);
                     }
                     eprintln!("[DEBUG] Prompt processing completed");
@@ -354,6 +354,7 @@ async fn use_cef_renderer(
 }
 
 #[cfg(feature = "cef-ui")]
+#[allow(clippy::future_not_send)]
 async fn handle_prompt_async(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
@@ -395,37 +396,38 @@ async fn handle_prompt_async(
             if let Ok(mcp) = mcp_result {
                 match mcp.list_tools() {
                     Ok(tools) if !tools.is_empty() => {
+                        use std::fmt::Write as _;
+                        let tools_list = tools.iter().fold(String::new(), |mut acc, t| {
+                            let _ = write!(
+                                acc,
+                                r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
+                                        <strong style="color:#333;">{}</strong><br>
+                                        <span style="color:#666;font-size:14px;">{}</span>
+                                    </div>"#,
+                                t.name
+                                    .replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;"),
+                                t.description
+                                    .replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;")
+                            );
+                            acc
+                        });
                         let tools_html = format!(
                             r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
                                 <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
                                     <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
                                 </div>
                                 <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({} total)</h3>
+                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({}) total</h3>
                                     <div style="display:grid;gap:12px;">
-                                        {}
+                                        {tools_list}
                                     </div>
                                 </div>
                             </div>"#,
                             tools.len(),
-                            tools
-                                .iter()
-                                .map(|t| format!(
-                                    r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
-                                        <strong style="color:#333;">{}</strong><br>
-                                        <span style="color:#666;font-size:14px;">{}</span>
-                                    </div>"#,
-                                    t.name
-                                        .replace('&', "&amp;")
-                                        .replace('<', "&lt;")
-                                        .replace('>', "&gt;"),
-                                    t.description
-                                        .replace('&', "&amp;")
-                                        .replace('<', "&lt;")
-                                        .replace('>', "&gt;")
-                                ))
-                                .collect::<Vec<_>>()
-                                .join("")
                         );
                         renderer.render(&tools_html, "", "").await?;
                         return Ok(());
@@ -777,23 +779,25 @@ async fn handle_architect_prompt(
     }
 
     // Build subtask list HTML
-    let subtask_items: String = plan
-        .subtasks
-        .iter()
-        .map(|st| {
-            format!(
-                r#"<div id="subtask-{}" style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #ccc;">
+    use std::fmt::Write;
+    let subtask_items = plan.subtasks.iter().fold(String::new(), |mut acc, st| {
+        let _ = write!(
+            acc,
+            r#"<div id="subtask-{}" style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #ccc;">
                     <div style="font-size:13px;font-weight:500;color:#333;">{}. {}</div>
                     <div style="font-size:11px;color:#888;margin-top:4px;">{:?} • {}</div>
                 </div>"#,
-                st.index,
-                st.index + 1,
-                st.description.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
-                st.category,
-                st.assigned_model.name()
-            )
-        })
-        .collect();
+            st.index,
+            st.index + 1,
+            st.description
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;"),
+            st.category,
+            st.assigned_model.name()
+        );
+        acc
+    });
 
     // Show plan in UI
     let plan_html = format!(
@@ -888,30 +892,31 @@ async fn handle_architect_prompt(
     );
 
     // Build completed subtask list
-    let completed_items: String = result
-        .subtask_results
-        .iter()
-        .map(|sr| {
-            let status_color = if sr.success { "#4caf50" } else { "#f44336" };
-            let status_icon = if sr.success { "✓" } else { "✗" };
-            format!(
-                r#"<div style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid {};">
+    let completed_items = result.subtask_results.iter().fold(String::new(), |mut acc, sr| {
+        let status_color = if sr.success { "#4caf50" } else { "#f44336" };
+        let status_icon = if sr.success { "✓" } else { "✗" };
+        let _ = write!(
+            acc,
+            r#"<div style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid {};">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-size:13px;font-weight:500;color:#333;">{}. {}</span>
                         <span style="color:{};">{}</span>
                     </div>
                     <div style="font-size:11px;color:#888;margin-top:4px;">{} • ${:.4}</div>
                 </div>"#,
-                status_color,
-                sr.index + 1,
-                plan.subtasks.get(sr.index).map(|s| s.description.as_str()).unwrap_or("Unknown"),
-                status_color,
-                status_icon,
-                sr.model_used.name(),
-                sr.actual_cost_usd
-            )
-        })
-        .collect();
+            status_color,
+            sr.index + 1,
+            plan.subtasks
+                .get(sr.index)
+                .map(|s| s.description.as_str())
+                .unwrap_or("Unknown"),
+            status_color,
+            status_icon,
+            sr.model_used.name(),
+            sr.actual_cost_usd
+        );
+        acc
+    });
 
     // Render final result with completion status
     let escaped_response = result
@@ -1000,6 +1005,7 @@ async fn create_client_from_routing(
         ModelChoice::LocalQwen3
         | ModelChoice::LocalMinistral3B
         | ModelChoice::LocalMinistral8B
+        | ModelChoice::LocalGlm47Flash
         | ModelChoice::LocalGemma270M
         | ModelChoice::LocalGemma4B
         | ModelChoice::LocalGemma12B
