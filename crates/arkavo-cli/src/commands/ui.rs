@@ -354,7 +354,7 @@ async fn use_cef_renderer(
 }
 
 #[cfg(feature = "cef-ui")]
-#[allow(clippy::future_not_send, clippy::format_collect)]
+#[allow(clippy::future_not_send)]
 async fn handle_prompt_async(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
@@ -777,23 +777,25 @@ async fn handle_architect_prompt(
     }
 
     // Build subtask list HTML
-    let subtask_items: String = plan
-        .subtasks
-        .iter()
-        .map(|st| {
-            format!(
-                r#"<div id="subtask-{}" style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #ccc;">
+    use std::fmt::Write;
+    let subtask_items = plan.subtasks.iter().fold(String::new(), |mut acc, st| {
+        let _ = write!(
+            acc,
+            r#"<div id="subtask-{}" style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #ccc;">
                     <div style="font-size:13px;font-weight:500;color:#333;">{}. {}</div>
                     <div style="font-size:11px;color:#888;margin-top:4px;">{:?} • {}</div>
                 </div>"#,
-                st.index,
-                st.index + 1,
-                st.description.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
-                st.category,
-                st.assigned_model.name()
-            )
-        })
-        .collect();
+            st.index,
+            st.index + 1,
+            st.description
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;"),
+            st.category,
+            st.assigned_model.name()
+        );
+        acc
+    });
 
     // Show plan in UI
     let plan_html = format!(
@@ -888,30 +890,32 @@ async fn handle_architect_prompt(
     );
 
     // Build completed subtask list
-    let completed_items: String = result
-        .subtask_results
-        .iter()
-        .map(|sr| {
-            let status_color = if sr.success { "#4caf50" } else { "#f44336" };
-            let status_icon = if sr.success { "✓" } else { "✗" };
-            format!(
-                r#"<div style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid {};">
+    use std::fmt::Write as _;
+    let completed_items = result.subtask_results.iter().fold(String::new(), |mut acc, sr| {
+        let status_color = if sr.success { "#4caf50" } else { "#f44336" };
+        let status_icon = if sr.success { "✓" } else { "✗" };
+        let _ = write!(
+            acc,
+            r#"<div style="background:white;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid {};">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-size:13px;font-weight:500;color:#333;">{}. {}</span>
                         <span style="color:{};">{}</span>
                     </div>
                     <div style="font-size:11px;color:#888;margin-top:4px;">{} • ${:.4}</div>
                 </div>"#,
-                status_color,
-                sr.index + 1,
-                plan.subtasks.get(sr.index).map(|s| s.description.as_str()).unwrap_or("Unknown"),
-                status_color,
-                status_icon,
-                sr.model_used.name(),
-                sr.actual_cost_usd
-            )
-        })
-        .collect();
+            status_color,
+            sr.index + 1,
+            plan.subtasks
+                .get(sr.index)
+                .map(|s| s.description.as_str())
+                .unwrap_or("Unknown"),
+            status_color,
+            status_icon,
+            sr.model_used.name(),
+            sr.actual_cost_usd
+        );
+        acc
+    });
 
     // Render final result with completion status
     let escaped_response = result
