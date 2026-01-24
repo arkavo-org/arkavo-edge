@@ -28,7 +28,7 @@ impl PolicyBridge {
             .as_str()
             .ok_or_else(|| ClaudeCodeError::PolicyViolation("Missing tool name".to_string()))?;
 
-        debug!("Checking permission for tool: {}", tool_name);
+        debug!("Checking permission for tool: {tool_name}");
 
         // Check basic tool permissions
         match tool_name {
@@ -57,10 +57,7 @@ impl PolicyBridge {
                 }
             }
             _ => {
-                debug!(
-                    "Unknown tool: {}, checking with authorization service",
-                    tool_name
-                );
+                debug!("Unknown tool: {tool_name}, checking with authorization service");
             }
         }
 
@@ -68,7 +65,7 @@ impl PolicyBridge {
         if let Some(path) = tool_request["path"].as_str()
             && !self.check_path_permission(path)?
         {
-            warn!("Path access denied by policy: {}", path);
+            warn!("Path access denied by policy: {path}");
             return Ok(false);
         }
 
@@ -76,12 +73,12 @@ impl PolicyBridge {
         if let Some(auth_client) = &self.auth_client {
             let decision = self.check_authorization(auth_client, tool_name).await?;
             if decision != Decision::Permit {
-                warn!("Tool {} denied by authorization service", tool_name);
+                warn!("Tool {tool_name} denied by authorization service");
                 return Ok(false);
             }
         }
 
-        debug!("Tool {} permitted", tool_name);
+        debug!("Tool {tool_name} permitted");
         Ok(true)
     }
 
@@ -93,15 +90,14 @@ impl PolicyBridge {
         // Check if path is within workspace root
         if !abs_path.starts_with(&self.config.workspace_root) {
             return Err(ClaudeCodeError::PolicyViolation(format!(
-                "Path traversal detected: {} is outside workspace root",
-                path
+                "Path traversal detected: {path} is outside workspace root"
             )));
         }
 
         // Get relative path for glob matching
         let rel_path = abs_path
             .strip_prefix(&self.config.workspace_root)
-            .map_err(|e| ClaudeCodeError::PolicyViolation(format!("Path error: {}", e)))?;
+            .map_err(|e| ClaudeCodeError::PolicyViolation(format!("Path error: {e}")))?;
 
         let rel_path_str = rel_path.to_string_lossy();
 
@@ -129,7 +125,7 @@ impl PolicyBridge {
         // Try to canonicalize if path exists, otherwise normalize manually
         let canonical = if resolved.exists() {
             resolved.canonicalize().map_err(|e| {
-                ClaudeCodeError::PolicyViolation(format!("Path resolution error: {}", e))
+                ClaudeCodeError::PolicyViolation(format!("Path resolution error: {e}"))
             })?
         } else {
             // Normalize the path manually without requiring it to exist
@@ -187,13 +183,13 @@ impl PolicyBridge {
         let decision = auth_client
             .authorize_mcp_tool(token, tool_name)
             .await
-            .map_err(|e| ClaudeCodeError::Other(format!("Authorization check failed: {}", e)))?;
+            .map_err(|e| ClaudeCodeError::Other(format!("Authorization check failed: {e}")))?;
 
         Ok(decision)
     }
 
     /// Audit a tool execution
-    pub async fn audit_tool_execution(
+    pub fn audit_tool_execution(
         &self,
         tool_name: &str,
         params: &Value,

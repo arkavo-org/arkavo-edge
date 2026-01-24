@@ -16,11 +16,11 @@ impl WebTool {
 
 #[async_trait]
 impl ClaudeCodeTool for WebTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "web_tool"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Search and fetch information from the web"
     }
 

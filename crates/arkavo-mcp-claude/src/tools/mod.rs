@@ -26,10 +26,10 @@ use crate::ClaudeCodeCapability;
 #[async_trait]
 pub trait ClaudeCodeTool: Send + Sync {
     /// Get the tool name
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Get the tool description
-    fn description(&self) -> &str;
+    fn description(&self) -> &'static str;
 
     /// Execute the tool with given parameters
     async fn execute(&self, params: Value) -> crate::Result<Value>;
@@ -171,8 +171,7 @@ impl Tool for ClaudeCodePlanTool {
         // Add planning instruction to prevent execution
         let plan_prompt = format!(
             "Please create a detailed plan for the following task. \
-             Do not execute any code, just outline the steps:\n\n{}",
-            args.prompt
+             Do not execute any code, just outline the steps:\n\n{}", args.prompt
         );
 
         let run_id = self

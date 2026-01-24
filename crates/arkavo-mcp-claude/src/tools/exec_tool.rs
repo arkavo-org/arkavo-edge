@@ -16,11 +16,11 @@ impl ExecTool {
 
 #[async_trait]
 impl ClaudeCodeTool for ExecTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "exec_tool"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Execute shell commands within the workspace"
     }
 

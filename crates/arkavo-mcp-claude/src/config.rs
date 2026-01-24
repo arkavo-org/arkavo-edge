@@ -61,6 +61,7 @@ pub struct ClaudeCodeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ToolPermissions {
     /// Allow file read operations
     #[serde(default = "default_true")]
@@ -140,15 +141,15 @@ impl ClaudeCodeConfig {
     pub fn validate(&self) -> crate::Result<()> {
         if !self.workspace_root.exists() {
             return Err(crate::ClaudeCodeError::Configuration(format!(
-                "Workspace root does not exist: {:?}",
-                self.workspace_root
+                "Workspace root does not exist: {}",
+                self.workspace_root.display()
             )));
         }
 
         if !self.workspace_root.is_dir() {
             return Err(crate::ClaudeCodeError::Configuration(format!(
-                "Workspace root is not a directory: {:?}",
-                self.workspace_root
+                "Workspace root is not a directory: {}",
+                self.workspace_root.display()
             )));
         }
 

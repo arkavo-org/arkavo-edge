@@ -234,7 +234,7 @@ impl EventMapper {
             self.agent_id.clone(),
             EventPayload::ModelResponse {
                 model: "claude-code".to_string(),
-                response: "".to_string(), // Empty for usage-only events
+                response: String::new(), // Empty for usage-only events
                 usage: Some(UsageInfo {
                     prompt_tokens,
                     completion_tokens,

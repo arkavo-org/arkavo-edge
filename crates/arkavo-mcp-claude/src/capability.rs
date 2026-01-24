@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ pub struct ClaudeCodeCapability {
 
 impl ClaudeCodeCapability {
     /// Create a new Claude Code capability
-    pub async fn new(
+    pub fn new(
         config: ClaudeCodeConfig,
         agent_id: String,
         event_writer: Arc<EventWriter>,
@@ -52,28 +52,29 @@ impl ClaudeCodeCapability {
 
     /// Prepare the capability (initialize SDK and authenticate)
     pub async fn prepare(&self) -> Result<()> {
-        let config = self.config.read().await;
+        // Create SDK bridge with config read lock scoped tightly
+        let (bridge, workspace_root) = {
+            let config = self.config.read().await;
 
-        if !config.enabled {
-            return Err(ClaudeCodeError::Configuration(
-                "Claude Code capability is disabled".to_string(),
-            ));
-        }
+            if !config.enabled {
+                return Err(ClaudeCodeError::Configuration(
+                    "Claude Code capability is disabled".to_string(),
+                ));
+            }
 
-        info!(
-            "Preparing Claude Code capability with workspace: {:?}",
-            config.workspace_root
-        );
+            let workspace = config.workspace_root.clone();
+            let bridge = SdkBridge::new(&config, self.event_mapper.clone())?;
+            drop(config);
+            (bridge, workspace)
+        };
 
-        // Create SDK bridge
-        let bridge = SdkBridge::new(&config, self.event_mapper.clone()).await?;
+        info!("Preparing Claude Code capability with workspace: {}", workspace_root.display());
 
         // Initialize authentication (OAuth or API key)
         bridge.initialize().await?;
 
-        // Store the bridge
-        let mut bridge_guard = self.sdk_bridge.write().await;
-        *bridge_guard = Some(bridge);
+        // Store the bridge (write lock scoped tightly)
+        *self.sdk_bridge.write().await = Some(bridge);
 
         // Emit session started event
         self.event_writer
@@ -115,35 +116,35 @@ impl ClaudeCodeCapability {
             }
         }
 
-        let bridge_guard = self.sdk_bridge.read().await;
-        let bridge = bridge_guard
-            .as_ref()
-            .ok_or_else(|| ClaudeCodeError::Other("SDK bridge not initialized".to_string()))?;
-
         // Generate a run ID
         let run_id = format!("run-{}", Uuid::new_v4());
 
-        debug!("Starting Claude Code run: {}", run_id);
+        debug!("Starting Claude Code run: {run_id}");
 
         // Build the full prompt with context if provided
         let full_prompt = if let Some(ctx) = context {
             format!(
-                "{}\n\nContext:\n{}",
-                prompt,
+                "{prompt}\n\nContext:\n{}",
                 serde_json::to_string_pretty(&ctx).unwrap_or_default()
             )
         } else {
             prompt
         };
 
-        // Start the query run
-        bridge.run_query(full_prompt, run_id.clone()).await?;
+        // Start the query run (read lock scoped tightly)
+        self.sdk_bridge
+            .read()
+            .await
+            .as_ref()
+            .ok_or_else(|| ClaudeCodeError::Other("SDK bridge not initialized".to_string()))?
+            .run_query(full_prompt, run_id.clone())
+            .await?;
 
         Ok(run_id)
     }
 
     /// Stop an active run (not directly supported by query API, sessions handle this)
-    pub async fn stop_run(&self, _run_id: String) -> Result<()> {
+    pub fn stop_run(&self, _run_id: String) -> Result<()> {
         // The query API handles completion automatically
         // For interactive sessions, we would close the session
         Ok(())
@@ -151,11 +152,12 @@ impl ClaudeCodeCapability {
 
     /// Shutdown the capability
     pub async fn shutdown(&self) -> Result<()> {
-        let mut bridge_guard = self.sdk_bridge.write().await;
-        if let Some(bridge) = bridge_guard.take() {
-            if let Err(e) = bridge.close_session().await {
-                tracing::warn!("Error closing Claude session: {e}");
-            }
+        // Take bridge with write lock scoped tightly
+        let bridge = self.sdk_bridge.write().await.take();
+        if let Some(bridge) = bridge
+            && let Err(e) = bridge.close_session()
+        {
+            tracing::warn!("Error closing Claude session: {e}");
         }
 
         info!("Claude Code capability shut down");
@@ -163,7 +165,7 @@ impl ClaudeCodeCapability {
     }
 
     /// List available tools
-    pub async fn list_tools(&self) -> Vec<ToolSchema> {
+    pub fn list_tools(&self) -> Vec<ToolSchema> {
         vec![
             ToolSchema {
                 aliases: None,
@@ -246,8 +248,7 @@ impl Tool for ClaudeCodeCapability {
                 // For plan mode, we add a planning instruction
                 let plan_prompt = format!(
                     "Please create a detailed plan for the following task. \
-                     Do not execute any code, just outline the steps:\n\n{}",
-                    prompt
+                     Do not execute any code, just outline the steps:\n\n{prompt}"
                 );
 
                 let run_id = self
@@ -262,40 +263,36 @@ impl Tool for ClaudeCodeCapability {
                 }))
             }
             _ => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                "Unknown tool: {}",
-                tool_name
+                "Unknown tool: {tool_name}"
             ))),
         }
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
-                name: "claude_code".to_string(),
-                aliases: None,
-                description: "Claude Code SDK integration for advanced coding tasks".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "tool": {
-                            "type": "string",
-                            "enum": ["claude_code_run", "claude_code_plan"],
-                            "description": "The specific Claude Code tool to use"
-                        },
-                        "prompt": {
-                            "type": "string",
-                            "description": "The task prompt"
-                        },
-                        "context": {
-                            "type": "object",
-                            "description": "Optional context"
-                        }
+        static SCHEMA: LazyLock<ToolSchema> = LazyLock::new(|| ToolSchema {
+            name: "claude_code".to_string(),
+            aliases: None,
+            description: "Claude Code SDK integration for advanced coding tasks".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "enum": ["claude_code_run", "claude_code_plan"],
+                        "description": "The specific Claude Code tool to use"
                     },
-                    "required": ["tool", "prompt"]
-                }),
-            });
+                    "prompt": {
+                        "type": "string",
+                        "description": "The task prompt"
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Optional context"
+                    }
+                },
+                "required": ["tool", "prompt"]
+            }),
+        });
         &SCHEMA
     }
 }
-
-use once_cell;
