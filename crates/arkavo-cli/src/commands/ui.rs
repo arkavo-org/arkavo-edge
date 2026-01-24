@@ -396,36 +396,38 @@ async fn handle_prompt_async(
             if let Ok(mcp) = mcp_result {
                 match mcp.list_tools() {
                     Ok(tools) if !tools.is_empty() => {
+                        use std::fmt::Write as _;
+                        let tools_list = tools.iter().fold(String::new(), |mut acc, t| {
+                            let _ = write!(
+                                acc,
+                                r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
+                                        <strong style="color:#333;">{}</strong><br>
+                                        <span style="color:#666;font-size:14px;">{}</span>
+                                    </div>"#,
+                                t.name
+                                    .replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;"),
+                                t.description
+                                    .replace('&', "&amp;")
+                                    .replace('<', "&lt;")
+                                    .replace('>', "&gt;")
+                            );
+                            acc
+                        });
                         let tools_html = format!(
                             r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
                                 <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
                                     <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
                                 </div>
                                 <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({} total)</h3>
+                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({}) total</h3>
                                     <div style="display:grid;gap:12px;">
-                                        {}
+                                        {tools_list}
                                     </div>
                                 </div>
                             </div>"#,
                             tools.len(),
-                            tools
-                                .iter()
-                                .map(|t| format!(
-                                    r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
-                                        <strong style="color:#333;">{}</strong><br>
-                                        <span style="color:#666;font-size:14px;">{}</span>
-                                    </div>"#,
-                                    t.name
-                                        .replace('&', "&amp;")
-                                        .replace('<', "&lt;")
-                                        .replace('>', "&gt;"),
-                                    t.description
-                                        .replace('&', "&amp;")
-                                        .replace('<', "&lt;")
-                                        .replace('>', "&gt;")
-                                ))
-                                .collect::<String>()
                         );
                         renderer.render(&tools_html, "", "").await?;
                         return Ok(());
@@ -890,7 +892,6 @@ async fn handle_architect_prompt(
     );
 
     // Build completed subtask list
-    use std::fmt::Write as _;
     let completed_items = result.subtask_results.iter().fold(String::new(), |mut acc, sr| {
         let status_color = if sr.success { "#4caf50" } else { "#f44336" };
         let status_icon = if sr.success { "✓" } else { "✗" };

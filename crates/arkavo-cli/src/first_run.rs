@@ -245,7 +245,8 @@ pub fn get_available_disk_space() -> f64 {
         let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
         if libc::statvfs(path_cstr.as_ptr(), stat.as_mut_ptr()) == 0 {
             let stat = stat.assume_init();
-            let available = stat.f_bavail * stat.f_frsize;
+            #[allow(clippy::unnecessary_cast)] // Types differ between macOS (u32) and Linux (u64)
+            let available = stat.f_bavail as u64 * stat.f_frsize as u64;
             return available as f64 / 1_000_000_000.0;
         }
     }

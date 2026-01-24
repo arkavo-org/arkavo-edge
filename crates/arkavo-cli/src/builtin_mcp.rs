@@ -3,6 +3,8 @@ use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+use tracing::{error, info};
 
 /// Built-in MCP connection that provides default tools
 pub struct BuiltinMcpConnection {
