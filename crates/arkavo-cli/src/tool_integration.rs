@@ -92,14 +92,18 @@ pub async fn process_with_tools(
         // Try to initialize Claude Code capability using default config
         // The default config checks ANTHROPIC_API_KEY env var to determine auth method
         let claude_config = ClaudeCodeConfig::default();
-        tracing::debug!("Claude config enabled: {}, workspace: {:?}", claude_config.enabled, claude_config.workspace_root);
+        tracing::debug!(
+            "Claude config enabled: {}, workspace: {:?}",
+            claude_config.enabled,
+            claude_config.workspace_root
+        );
 
         // Only attempt to register if API key is set or OAuth token is cached
         // This prevents blocking on interactive OAuth flow in non-interactive contexts
         if claude_config.enabled && arkavo_mcp_claude::is_auth_available() {
-            let event_writer = std::sync::Arc::new(
-                arkavo_events::EventWriter::new(arkavo_events::EventWriterConfig::default()),
-            );
+            let event_writer = std::sync::Arc::new(arkavo_events::EventWriter::new(
+                arkavo_events::EventWriterConfig::default(),
+            ));
             match ClaudeCodeCapability::new(
                 claude_config,
                 "arkavo-cli".to_string(),
