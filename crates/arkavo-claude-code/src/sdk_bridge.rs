@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
-use anthropic_agent_sdk::{auth::OAuthClient, query, ClaudeAgentOptions, Message};
+use anthropic_agent_sdk::{ClaudeAgentOptions, Message, auth::OAuthClient, query};
 
 use crate::event_mapper::EventMapper;
 use crate::{ClaudeCodeError, Result};
@@ -197,7 +197,9 @@ impl SdkBridge {
             Message::Result { result, .. } => {
                 debug!("Result: {:?}", result);
                 if let Some(res) = result {
-                    event_mapper.emit_result(run_id, &format!("{:?}", res)).await;
+                    event_mapper
+                        .emit_result(run_id, &format!("{:?}", res))
+                        .await;
                 }
             }
             _ => {

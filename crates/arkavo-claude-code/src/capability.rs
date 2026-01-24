@@ -127,7 +127,11 @@ impl ClaudeCodeCapability {
 
         // Build the full prompt with context if provided
         let full_prompt = if let Some(ctx) = context {
-            format!("{}\n\nContext:\n{}", prompt, serde_json::to_string_pretty(&ctx).unwrap_or_default())
+            format!(
+                "{}\n\nContext:\n{}",
+                prompt,
+                serde_json::to_string_pretty(&ctx).unwrap_or_default()
+            )
         } else {
             prompt
         };

@@ -2,7 +2,7 @@
 //! These tests require authentication (OAuth or API key)
 //! Run with: cargo test -p arkavo-claude-code --test sdk_test -- --ignored
 
-use anthropic_agent_sdk::{auth::OAuthClient, query, ClaudeAgentOptions, Message};
+use anthropic_agent_sdk::{ClaudeAgentOptions, Message, auth::OAuthClient, query};
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::time::timeout;
