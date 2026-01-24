@@ -145,14 +145,14 @@ async fn use_cef_renderer(
             && !resumable.is_empty()
         {
             let plan = &resumable[0];
-                eprintln!(
-                    "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
-                    plan.original_prompt, plan.current_subtask, plan.total_subtasks
-                );
+            eprintln!(
+                "[STARTUP] Found resumable plan: {} ({}/{} subtasks)",
+                plan.original_prompt, plan.current_subtask, plan.total_subtasks
+            );
 
-                // Show resume prompt in UI
-                let resume_html = format!(
-                    r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
+            // Show resume prompt in UI
+            let resume_html = format!(
+                r#"<div style="padding:40px;font-family:system-ui,-apple-system,sans-serif;">
                         <div style="background:#fff3cd;padding:20px;border-radius:8px;border-left:4px solid #ffc107;margin-bottom:20px;">
                             <strong style="color:#856404;">Interrupted Plan Found</strong>
                             <div style="margin-top:8px;color:#333;">"{}"</div>
@@ -164,14 +164,14 @@ async fn use_cef_renderer(
                             </div>
                         </div>
                     </div>"#,
-                    plan.original_prompt
-                        .replace('&', "&amp;")
-                        .replace('<', "&lt;")
-                        .replace('>', "&gt;"),
-                    plan.current_subtask,
-                    plan.total_subtasks
-                );
-                cef_renderer.render(&resume_html, "", "").await?;
+                plan.original_prompt
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                plan.current_subtask,
+                plan.total_subtasks
+            );
+            cef_renderer.render(&resume_html, "", "").await?;
         }
     }
 
@@ -205,8 +205,7 @@ async fn use_cef_renderer(
                 if report.component == "cef" {
                     eprintln!(
                         "[HEARTBEAT]   CEF: {:?} - {}",
-                        report.status,
-                        report.message
+                        report.status, report.message
                     );
 
                     // Check if degraded (stuck commands)
