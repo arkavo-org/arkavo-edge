@@ -16,11 +16,11 @@ impl FileTools {
 
 #[async_trait]
 impl ClaudeCodeTool for FileTools {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "file_tools"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "File read/write operations within the workspace"
     }
 

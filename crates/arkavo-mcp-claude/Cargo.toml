@@ -1,0 +1,44 @@
+[package]
+name = "arkavo-mcp-claude"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Claude Agent SDK as MCP tools for Arkavo Edge"
+repository.workspace = true
+
+[features]
+default = ["oauth"]
+# OAuth support (requires native-tls compatible platform - not musl)
+oauth = []
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "fs", "sync"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+glob = { workspace = true }
+once_cell = "1.19"
+futures = "0.3"
+
+# Claude Agent SDK (native Rust - supports OAuth for Claude Max/Pro subscribers)
+# Using fork with rustls fix until upstream PR is merged: https://github.com/bartolli/anthropic-agent-sdk/pull/2
+anthropic-agent-sdk = { git = "https://github.com/arkavo-org/anthropic-agent-sdk", branch = "rustls-tls" }
+
+# Internal dependencies
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-authorization = { path = "../arkavo-authorization" }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-budget = { path = "../arkavo-budget" }
+
+[build-dependencies]
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

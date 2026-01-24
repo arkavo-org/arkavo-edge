@@ -84,6 +84,53 @@ pub async fn process_with_tools(
     ));
     arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
 
+    // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
+    #[cfg(feature = "claude-agent")]
+    {
+        use arkavo_mcp_claude::{ClaudeCodeCapability, ClaudeCodeConfig};
+
+        // Try to initialize Claude Code capability using default config
+        // The default config checks ANTHROPIC_API_KEY env var to determine auth method
+        let claude_config = ClaudeCodeConfig::default();
+        tracing::debug!(
+            "Claude config enabled: {}, workspace: {:?}",
+            claude_config.enabled,
+            claude_config.workspace_root
+        );
+
+        // Only attempt to register if API key is set or OAuth token is cached
+        // This prevents blocking on interactive OAuth flow in non-interactive contexts
+        if claude_config.enabled && arkavo_mcp_claude::is_auth_available() {
+            let event_writer = std::sync::Arc::new(arkavo_events::EventWriter::new(
+                arkavo_events::EventWriterConfig::default(),
+            ));
+            match ClaudeCodeCapability::new(
+                claude_config,
+                "arkavo-cli".to_string(),
+                event_writer,
+                None, // budget_tracker
+                None, // auth_client
+            ) {
+                Ok(capability) => {
+                    let capability: std::sync::Arc<ClaudeCodeCapability> =
+                        std::sync::Arc::new(capability);
+                    // Prepare authentication (should succeed since we checked above)
+                    if let Err(e) = capability.prepare().await {
+                        tracing::warn!("Claude MCP tools not ready: {e}");
+                    } else {
+                        arkavo_mcp_claude::register_tools(&mut tool_registry, capability);
+                        tracing::info!("Claude MCP tools registered");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Claude MCP tools disabled: {e}");
+                }
+            }
+        } else if claude_config.enabled {
+            tracing::debug!("Claude MCP tools skipped: no API key or cached OAuth token");
+        }
+    }
+
     // Wrap registry in Arc for shared access
     let registry_arc = Arc::new(tool_registry);
 

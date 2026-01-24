@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -12,15 +12,13 @@ use arkavo_mcp::{Tool, ToolSchema};
 
 use crate::config::ClaudeCodeConfig;
 use crate::event_mapper::EventMapper;
-use crate::node_bridge::NodeBridge;
-use crate::policy_bridge::PolicyBridge;
+use crate::sdk_bridge::SdkBridge;
 use crate::{ClaudeCodeError, Result};
 
-/// Claude Code capability that integrates the Claude Code SDK
+/// Claude Code capability that integrates the native Rust Claude Agent SDK
 pub struct ClaudeCodeCapability {
     config: Arc<RwLock<ClaudeCodeConfig>>,
-    node_bridge: Arc<RwLock<Option<NodeBridge>>>,
-    policy_bridge: Arc<PolicyBridge>,
+    sdk_bridge: Arc<RwLock<Option<SdkBridge>>>,
     event_writer: Arc<EventWriter>,
     event_mapper: Arc<EventMapper>,
     budget_tracker: Option<Arc<BudgetTracker>>,
@@ -30,23 +28,20 @@ pub struct ClaudeCodeCapability {
 
 impl ClaudeCodeCapability {
     /// Create a new Claude Code capability
-    pub async fn new(
+    pub fn new(
         config: ClaudeCodeConfig,
         agent_id: String,
         event_writer: Arc<EventWriter>,
         budget_tracker: Option<Arc<BudgetTracker>>,
-        auth_client: Option<Arc<AuthorizationClient>>,
+        _auth_client: Option<Arc<AuthorizationClient>>,
     ) -> Result<Self> {
         config.validate()?;
-
-        let policy_bridge = Arc::new(PolicyBridge::new(config.clone(), auth_client.clone()));
 
         let event_mapper = Arc::new(EventMapper::new(agent_id.clone(), event_writer.clone()));
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
-            node_bridge: Arc::new(RwLock::new(None)),
-            policy_bridge,
+            sdk_bridge: Arc::new(RwLock::new(None)),
             event_writer,
             event_mapper,
             budget_tracker,
@@ -55,54 +50,34 @@ impl ClaudeCodeCapability {
         })
     }
 
-    /// Prepare the capability (initialize Node.js subprocess)
+    /// Prepare the capability (initialize SDK and authenticate)
     pub async fn prepare(&self) -> Result<()> {
-        let config = self.config.read().await;
+        // Create SDK bridge with config read lock scoped tightly
+        let (bridge, workspace_root) = {
+            let config = self.config.read().await;
 
-        if !config.enabled {
-            return Err(ClaudeCodeError::Configuration(
-                "Claude Code capability is disabled".to_string(),
-            ));
-        }
+            if !config.enabled {
+                return Err(ClaudeCodeError::Configuration(
+                    "Claude Code capability is disabled".to_string(),
+                ));
+            }
 
-        // Check for API key or auth token
-        if config.anthropic_auth_token.is_none() && std::env::var("ANTHROPIC_API_KEY").is_err() {
-            return Err(ClaudeCodeError::Configuration(
-                "Authentication not configured.\n\
-                 Please set either:\n\
-                 - ANTHROPIC_API_KEY environment variable for Claude\n\
-                 - anthropic_auth_token in config for DeepSeek or other providers"
-                    .to_string(),
-            ));
-        }
+            let workspace = config.workspace_root.clone();
+            let bridge = SdkBridge::new(&config, self.event_mapper.clone())?;
+            drop(config);
+            (bridge, workspace)
+        };
 
         info!(
-            "Preparing Claude Code capability with model: {}",
-            config.anthropic_model
+            "Preparing Claude Code capability with workspace: {}",
+            workspace_root.display()
         );
 
-        // Create and start Node.js bridge
-        let bridge = NodeBridge::new(&config, self.event_mapper.clone()).await?;
+        // Initialize authentication (OAuth or API key)
+        bridge.initialize().await?;
 
-        // Initialize the bridge - this will check for Node.js and Claude Code SDK
-        match bridge.initialize().await {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(ClaudeCodeError::Configuration(format!(
-                    "Claude Code capability initialization failed:\n{}\n\n\
-                     To enable Claude Code capability:\n\
-                     1. Install Node.js >= 18.0.0 from https://nodejs.org/\n\
-                     2. Install Claude Code SDK: npm install -g @anthropic-ai/claude-code\n\
-                     3. Set ANTHROPIC_API_KEY environment variable\n\
-                     4. Restart Arkavo",
-                    e
-                )));
-            }
-        }
-
-        // Store the bridge
-        let mut bridge_guard = self.node_bridge.write().await;
-        *bridge_guard = Some(bridge);
+        // Store the bridge (write lock scoped tightly)
+        *self.sdk_bridge.write().await = Some(bridge);
 
         // Emit session started event
         self.event_writer
@@ -130,8 +105,7 @@ impl ClaudeCodeCapability {
     pub async fn start_run(&self, prompt: String, context: Option<Value>) -> Result<String> {
         // Check budget if tracker is available
         if let Some(tracker) = &self.budget_tracker {
-            // Estimate cost for this operation (rough estimate)
-            let estimated_cost = arkavo_budget::TokenCost::from_dollars(0.01); // Estimate $0.01 per run
+            let estimated_cost = arkavo_budget::TokenCost::from_dollars(0.01);
 
             let can_afford = tracker
                 .can_afford(&self.agent_id, estimated_cost)
@@ -145,43 +119,48 @@ impl ClaudeCodeCapability {
             }
         }
 
-        let bridge_guard = self.node_bridge.read().await;
-        let bridge = bridge_guard
-            .as_ref()
-            .ok_or_else(|| ClaudeCodeError::Other("Node bridge not initialized".to_string()))?;
-
-        // Set up tool interceptor for policy enforcement
-        let policy_bridge = self.policy_bridge.clone();
-        bridge.set_tool_interceptor(move |tool_request| {
-            let policy_bridge = policy_bridge.clone();
-            Box::pin(async move { policy_bridge.check_tool_permission(tool_request).await })
-        });
-
         // Generate a run ID
         let run_id = format!("run-{}", Uuid::new_v4());
 
-        debug!("Starting Claude Code run: {}", run_id);
+        debug!("Starting Claude Code run: {run_id}");
 
-        // Start the streaming run
-        bridge.start_run(prompt, run_id.clone(), context).await?;
+        // Build the full prompt with context if provided
+        let full_prompt = if let Some(ctx) = context {
+            format!(
+                "{prompt}\n\nContext:\n{}",
+                serde_json::to_string_pretty(&ctx).unwrap_or_default()
+            )
+        } else {
+            prompt
+        };
+
+        // Start the query run (read lock scoped tightly)
+        self.sdk_bridge
+            .read()
+            .await
+            .as_ref()
+            .ok_or_else(|| ClaudeCodeError::Other("SDK bridge not initialized".to_string()))?
+            .run_query(full_prompt, run_id.clone())
+            .await?;
 
         Ok(run_id)
     }
 
-    /// Stop an active run
-    pub async fn stop_run(&self, run_id: String) -> Result<()> {
-        let bridge_guard = self.node_bridge.read().await;
-        if let Some(bridge) = bridge_guard.as_ref() {
-            bridge.stop_run(run_id).await?;
-        }
+    /// Stop an active run (not directly supported by query API, sessions handle this)
+    pub fn stop_run(&self, _run_id: String) -> Result<()> {
+        // The query API handles completion automatically
+        // For interactive sessions, we would close the session
         Ok(())
     }
 
     /// Shutdown the capability
     pub async fn shutdown(&self) -> Result<()> {
-        let mut bridge_guard = self.node_bridge.write().await;
-        if let Some(bridge) = bridge_guard.take() {
-            bridge.shutdown().await?;
+        // Take bridge with write lock scoped tightly
+        let bridge = self.sdk_bridge.write().await.take();
+        if let Some(bridge) = bridge
+            && let Err(e) = bridge.close_session()
+        {
+            tracing::warn!("Error closing Claude session: {e}");
         }
 
         info!("Claude Code capability shut down");
@@ -189,12 +168,11 @@ impl ClaudeCodeCapability {
     }
 
     /// List available tools
-    pub async fn list_tools(&self) -> Vec<ToolSchema> {
+    pub fn list_tools(&self) -> Vec<ToolSchema> {
         vec![
             ToolSchema {
                 aliases: None,
                 name: "claude_code_run".to_string(),
-
                 description: "Execute a Claude Code task with full SDK capabilities".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -251,7 +229,6 @@ impl Tool for ClaudeCodeCapability {
 
                 let context = params.get("context").cloned();
 
-                // Start a streaming run
                 let run_id = self
                     .start_run(prompt, context)
                     .await
@@ -259,7 +236,7 @@ impl Tool for ClaudeCodeCapability {
 
                 Ok(serde_json::json!({
                     "success": true,
-                    "message": "Run started",
+                    "message": "Run completed",
                     "run_id": run_id
                 }))
             }
@@ -271,65 +248,54 @@ impl Tool for ClaudeCodeCapability {
                     })?
                     .to_string();
 
-                let mut context = params
-                    .get("context")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
+                // For plan mode, we add a planning instruction
+                let plan_prompt = format!(
+                    "Please create a detailed plan for the following task. \
+                     Do not execute any code, just outline the steps:\n\n{prompt}"
+                );
 
-                // Set plan-only mode in context
-                context["options"] = serde_json::json!({
-                    "planOnly": true
-                });
-
-                // Start a streaming run in plan-only mode
                 let run_id = self
-                    .start_run(prompt, Some(context))
+                    .start_run(plan_prompt, None)
                     .await
                     .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
 
                 Ok(serde_json::json!({
                     "success": true,
-                    "message": "Planning started",
+                    "message": "Planning completed",
                     "run_id": run_id
                 }))
             }
             _ => Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                "Unknown tool: {}",
-                tool_name
+                "Unknown tool: {tool_name}"
             ))),
         }
     }
 
     fn schema(&self) -> &ToolSchema {
-        // Return a composite schema for the capability
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
-                name: "claude_code".to_string(),
-                aliases: None,
-                description: "Claude Code SDK integration for advanced coding tasks".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "tool": {
-                            "type": "string",
-                            "enum": ["claude_code_run", "claude_code_plan"],
-                            "description": "The specific Claude Code tool to use"
-                        },
-                        "prompt": {
-                            "type": "string",
-                            "description": "The task prompt"
-                        },
-                        "context": {
-                            "type": "object",
-                            "description": "Optional context"
-                        }
+        static SCHEMA: LazyLock<ToolSchema> = LazyLock::new(|| ToolSchema {
+            name: "claude_code".to_string(),
+            aliases: None,
+            description: "Claude Code SDK integration for advanced coding tasks".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "enum": ["claude_code_run", "claude_code_plan"],
+                        "description": "The specific Claude Code tool to use"
                     },
-                    "required": ["tool", "prompt"]
-                }),
-            });
+                    "prompt": {
+                        "type": "string",
+                        "description": "The task prompt"
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Optional context"
+                    }
+                },
+                "required": ["tool", "prompt"]
+            }),
+        });
         &SCHEMA
     }
 }
-
-// Add once_cell to dependencies
-use once_cell;

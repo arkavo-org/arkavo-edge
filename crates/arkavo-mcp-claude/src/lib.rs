@@ -1,32 +1,44 @@
 pub mod capability;
 pub mod config;
 pub mod event_mapper;
-pub mod jsonrpc;
-pub mod node_bridge;
 pub mod policy_bridge;
+pub mod sdk_bridge;
 pub mod tools;
 
 pub use capability::ClaudeCodeCapability;
 pub use config::{ClaudeCodeConfig, ToolPermissions};
+pub use tools::register_tools;
+
+/// Check if Claude authentication is available (API key or cached OAuth token)
+///
+/// Use this to avoid blocking on interactive OAuth flow in non-interactive contexts.
+pub fn is_auth_available() -> bool {
+    // Check for API key first
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        return true;
+    }
+
+    // Check for cached OAuth token
+    anthropic_agent_sdk::auth::OAuthClient::new()
+        .map(|c| c.is_authenticated())
+        .unwrap_or(false)
+}
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ClaudeCodeError {
-    #[error("Node.js subprocess error: {0}")]
-    NodeProcess(String),
+    #[error("SDK error: {0}")]
+    Sdk(String),
 
-    #[error("JSON-RPC error: {0}")]
-    JsonRpc(String),
+    #[error("Authentication error: {0}")]
+    Auth(String),
 
     #[error("Policy violation: {0}")]
     PolicyViolation(String),
 
     #[error("Configuration error: {0}")]
     Configuration(String),
-
-    #[error("SDK error: {0}")]
-    Sdk(String),
 
     #[error("Budget exceeded: {0}")]
     BudgetExceeded(String),

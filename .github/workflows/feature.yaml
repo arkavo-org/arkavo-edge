@@ -1212,8 +1212,13 @@ jobs:
           set +e  # Don't exit on error - we want to handle errors ourselves
           echo "Checking musl target for OpenSSL dependencies..."
 
+          # Check only the arkavo binary with musl-specific features (memory,mdns,mcp-tools)
+          # This matches the actual musl build configuration and excludes features like
+          # claude-agent that are only used on glibc targets
+          MUSL_FEATURES="memory,mdns,mcp-tools"
+
           # Check for openssl - if it's found in the tree (not the error message), fail
-          OPENSSL_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1)
+          OPENSSL_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
           OPENSSL_EXIT=$?
 
           if [ $OPENSSL_EXIT -ne 0 ] && ! echo "$OPENSSL_CHECK" | grep -q "did not match any packages"; then
@@ -1230,7 +1235,7 @@ jobs:
           fi
 
           # Check for native-tls - if it's found in the tree (not the error message), fail
-          NATIVE_TLS_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1)
+          NATIVE_TLS_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
           NATIVE_TLS_EXIT=$?
 
           if [ $NATIVE_TLS_EXIT -ne 0 ] && ! echo "$NATIVE_TLS_CHECK" | grep -q "did not match any packages"; then
@@ -1246,7 +1251,7 @@ jobs:
             exit 1
           fi
 
-          echo "✅ No OpenSSL or native-tls dependencies found in musl build"
+          echo "✅ No OpenSSL or native-tls dependencies found in musl build (features: $MUSL_FEATURES)"
           set -e  # Re-enable exit on error
 
   # Final check that depends on all critical jobs
