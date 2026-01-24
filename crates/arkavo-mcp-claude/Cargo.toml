@@ -27,7 +27,8 @@ once_cell = "1.19"
 futures = "0.3"
 
 # Claude Agent SDK (native Rust - supports OAuth for Claude Max/Pro subscribers)
-anthropic-agent-sdk = "0.2"
+# Using fork with rustls fix until upstream PR is merged: https://github.com/bartolli/anthropic-agent-sdk/pull/2
+anthropic-agent-sdk = { git = "https://github.com/arkavo-org/anthropic-agent-sdk", branch = "rustls-tls" }
 
 # Internal dependencies
 arkavo-mcp = { path = "../arkavo-mcp" }
