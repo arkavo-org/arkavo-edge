@@ -62,6 +62,8 @@ impl CefRenderer {
         self.tracker.clone()
     }
 
+    /// # Panics
+    /// Panics if commands have not been initialized (should never happen after construction).
     pub fn commands(&mut self) -> &mut DOMCommandBuilder {
         self.commands.as_mut().expect("Commands not initialized")
     }
@@ -128,6 +130,8 @@ impl AsyncCefRenderer {
         self.tracker.clone()
     }
 
+    /// # Panics
+    /// Panics if commands have not been initialized (should never happen after construction).
     pub fn commands(&mut self) -> &mut AsyncDOMCommandBuilder {
         self.commands.as_mut().expect("Commands not initialized")
     }

@@ -178,19 +178,17 @@ impl AsyncTransport {
         }
 
         // Send command
-        {
-            let mut write = self.write_half.lock().await;
-            eprintln!(
-                "[AsyncTransport] Sending command id={}, framed_size={} bytes",
-                id,
-                framed.len()
-            );
-            write
-                .write_all(&framed)
-                .await
-                .map_err(|e| CefError::UdsTransportError(e.to_string()))?;
-            eprintln!("[AsyncTransport] Command id={} sent successfully", id);
-        }
+        eprintln!(
+            "[AsyncTransport] Sending command id={id}, framed_size={} bytes",
+            framed.len()
+        );
+        self.write_half
+            .lock()
+            .await
+            .write_all(&framed)
+            .await
+            .map_err(|e| CefError::UdsTransportError(e.to_string()))?;
+        eprintln!("[AsyncTransport] Command id={id} sent successfully");
 
         Ok(rx)
     }
