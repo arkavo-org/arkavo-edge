@@ -44,51 +44,7 @@ print_warning() {
 
 check_prerequisites() {
     print_status "Checking prerequisites..."
-    
-    # Check Node.js
-    if ! command -v node &> /dev/null; then
-        print_error "Node.js is not installed. Please install Node.js >= 18.0.0"
-        echo "  brew install node  # macOS"
-        echo "  Or download from https://nodejs.org/"
-        exit 1
-    fi
-    
-    NODE_VERSION=$(node --version | cut -d'v' -f2)
-    NODE_MAJOR=$(echo $NODE_VERSION | cut -d'.' -f1)
-    if [ "$NODE_MAJOR" -lt 18 ]; then
-        print_error "Node.js version must be >= 18.0.0 (found: v$NODE_VERSION)"
-        exit 1
-    fi
-    print_status "Node.js v$NODE_VERSION ✓"
-    
-    # Check Claude Code SDK
-    if ! npm list -g @anthropic-ai/claude-code &> /dev/null; then
-        print_warning "Claude Code SDK not installed. Installing..."
-        npm install -g @anthropic-ai/claude-code
-    else
-        print_status "Claude Code SDK installed ✓"
-    fi
-    
-    # Check API credentials
-    if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-        print_error "No API credentials found!"
-        echo ""
-        echo "For Claude (Anthropic):"
-        echo "  export ANTHROPIC_API_KEY='your-api-key'"
-        echo ""
-        echo "For DeepSeek:"
-        echo "  export ANTHROPIC_BASE_URL='https://api.deepseek.com/anthropic'"
-        echo "  export ANTHROPIC_AUTH_TOKEN='sk-your-deepseek-key'"
-        echo "  export ANTHROPIC_MODEL='deepseek-chat'"
-        exit 1
-    fi
-    
-    if [ -n "$ANTHROPIC_BASE_URL" ]; then
-        print_status "Using alternative API: $ANTHROPIC_BASE_URL"
-    else
-        print_status "Using Anthropic Claude API ✓"
-    fi
-    
+
     # Check Arkavo binary
     if [ ! -f "$ARKAVO_BIN" ]; then
         print_error "Arkavo binary not found at $ARKAVO_BIN"
@@ -97,6 +53,14 @@ check_prerequisites() {
         exit 1
     fi
     print_status "Arkavo binary found ✓"
+
+    # Check authentication
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        print_status "Using API key authentication ✓"
+    else
+        print_status "Using OAuth authentication (Claude Max/Pro)"
+        print_status "If not authenticated, run: claude login"
+    fi
 }
 
 start_agent() {
@@ -254,28 +218,20 @@ case "${1:-start}" in
     test)
         test_connection
         ;;
-    --deepseek)
-        # Convenience mode for DeepSeek
-        export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-        export ANTHROPIC_MODEL="deepseek-chat"
-        if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-            print_error "Please set ANTHROPIC_AUTH_TOKEN for DeepSeek"
-            exit 1
-        fi
-        check_prerequisites
-        start_agent
-        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|test|--deepseek}"
+        echo "Usage: $0 {start|stop|restart|status|logs|test}"
         echo ""
         echo "Commands:"
-        echo "  start      - Start the Claude Code agent"
-        echo "  stop       - Stop the agent"
-        echo "  restart    - Restart the agent"
-        echo "  status     - Check agent status"
-        echo "  logs       - Follow agent logs"
-        echo "  test       - Test Claude Code SDK connection"
-        echo "  --deepseek - Start with DeepSeek configuration"
+        echo "  start   - Start the Claude Code agent"
+        echo "  stop    - Stop the agent"
+        echo "  restart - Restart the agent"
+        echo "  status  - Check agent status"
+        echo "  logs    - Follow agent logs"
+        echo "  test    - Test Claude Code SDK connection"
+        echo ""
+        echo "Authentication:"
+        echo "  OAuth (default): claude login"
+        echo "  API key: export ANTHROPIC_API_KEY='sk-ant-...'"
         exit 1
         ;;
 esac

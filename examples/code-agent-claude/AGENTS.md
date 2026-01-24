@@ -25,7 +25,11 @@ claude_code:
   enabled: true
   workspace_root: ./workspace
   budget_tokens: 200000
-  
+
+  # Authentication - OAuth is used by default for Claude Max/Pro subscribers
+  # Set use_oauth: false to require API key instead
+  use_oauth: true
+
   # Tool permissions
   tools:
     read: true
@@ -154,9 +158,8 @@ telemetry:
 
 ## Environment Variable Overrides
 
-# These can be set via environment variables:
-# ANTHROPIC_API_KEY - Claude API key
-# ANTHROPIC_BASE_URL - Alternative API endpoint (e.g., DeepSeek)
-# ANTHROPIC_AUTH_TOKEN - Alternative auth token
-# ANTHROPIC_MODEL - Override model selection
-# ANTHROPIC_SMALL_FAST_MODEL - Fast model for simple tasks
+# Authentication (choose one):
+# - OAuth: Run `claude login` to authenticate (Claude Max/Pro subscribers)
+# - API Key: Set ANTHROPIC_API_KEY environment variable
+#
+# ANTHROPIC_API_KEY - Claude API key (overrides OAuth if set)

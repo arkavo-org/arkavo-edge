@@ -1,50 +1,39 @@
 # Claude Code Agent Example
 
-This example demonstrates an Arkavo agent using the Claude Agent SDK capability to perform sophisticated coding tasks with full file system access and code generation capabilities.
+This example demonstrates an Arkavo agent using the native Rust Claude Agent SDK to perform sophisticated coding tasks with full file system access and code generation capabilities.
 
 ## Overview
 
 The Claude Code Agent showcases:
-- Integration with the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
+- Native Rust integration with `anthropic-agent-sdk` (no Node.js required)
+- OAuth authentication for Claude Max/Pro subscribers
+- API key authentication as fallback
 - Policy-controlled file operations and code generation
 - Budget tracking for API usage
 - Event streaming for real-time progress updates
-- Support for both Claude and DeepSeek APIs
 
 ## Prerequisites
 
-### 1. Install Node.js and Claude Agent SDK
+### 1. Authentication (Choose One)
 
+**Option A - OAuth (Claude Max/Pro subscribers):**
 ```bash
-# Install Node.js >= 18.0.0
-# macOS with Homebrew:
-brew install node
+# Login via Claude CLI (recommended)
+claude login
 
-# Or download from https://nodejs.org/
-
-# Install Claude Agent SDK globally
-npm install -g @anthropic-ai/claude-agent-sdk
+# Or the agent will prompt for browser authentication on first use
 ```
 
-### 2. Set API Credentials
-
-For Claude (Anthropic):
+**Option B - API Key:**
 ```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-For DeepSeek (Anthropic-compatible):
-```bash
-export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-export ANTHROPIC_AUTH_TOKEN="sk-your-deepseek-key"
-export ANTHROPIC_MODEL="deepseek-chat"
-```
-
-### 3. Build Arkavo
+### 2. Build Arkavo
 
 ```bash
 cd ../..
-cargo build --release
+cargo build
 ```
 
 ## Quick Start
@@ -198,21 +187,6 @@ wscat -c ws://localhost:8345/ws
 
 ## Advanced Usage
 
-### Using with DeepSeek
-
-DeepSeek provides an Anthropic-compatible API at lower cost:
-
-```bash
-# Set DeepSeek credentials
-export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-export ANTHROPIC_AUTH_TOKEN="sk-your-deepseek-key"
-export ANTHROPIC_MODEL="deepseek-chat"
-export ANTHROPIC_SMALL_FAST_MODEL="deepseek-chat"
-
-# Start agent with DeepSeek
-./launch_agent.sh --deepseek
-```
-
 ### Custom Workspace
 
 ```bash
@@ -223,7 +197,7 @@ mkdir -p /tmp/claude-workspace
 sed -i 's|./workspace|/tmp/claude-workspace|g' AGENTS.md
 
 # Restart agent
-./launch_agent.sh restart
+./launch.sh restart
 ```
 
 ### Rate Limiting
@@ -240,14 +214,17 @@ claude_code:
 
 ## Troubleshooting
 
-### Claude Agent SDK Not Found
+### OAuth Authentication Issues
 
 ```bash
-# Check if installed
-npm list -g @anthropic-ai/claude-agent-sdk
+# Check if already authenticated
+# The agent checks for cached tokens automatically
 
-# If not, install it
-npm install -g @anthropic-ai/claude-agent-sdk
+# Re-authenticate via Claude CLI
+claude login
+
+# Or use API key instead
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 ### API Key Issues
@@ -260,17 +237,6 @@ echo $ANTHROPIC_API_KEY
 curl https://api.anthropic.com/v1/messages \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -H "anthropic-version: 2023-06-01"
-```
-
-### Node.js Version
-
-```bash
-# Check Node.js version (must be >= 18)
-node --version
-
-# Update if needed
-brew upgrade node  # macOS
-# Or use nvm for version management
 ```
 
 ### Permission Denied
@@ -328,9 +294,8 @@ curl -X POST http://localhost:8342/v1/agent/message \
 
 ## Learn More
 
-- [Claude Agent SDK Documentation](https://docs.claude.com/en/api/agent-sdk/overview)
-- [Arkavo Claude Agent Integration](../../crates/arkavo-claude-code/README.md)
-- [DeepSeek API Documentation](https://platform.deepseek.com/docs)
+- [Claude Agent SDK Documentation](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
+- [Arkavo Claude Code Integration](../../crates/arkavo-claude-code/)
 - [Arkavo Documentation](../../README.md)
 
 ## License
