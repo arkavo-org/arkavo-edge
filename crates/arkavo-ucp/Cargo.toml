@@ -1,0 +1,29 @@
+[package]
+name = "arkavo-ucp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Universal Commerce Protocol implementation with Web3 payment handlers"
+repository.workspace = true
+
+[dependencies]
+arkavo-wallet = { path = "../arkavo-wallet" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+
+async-trait.workspace = true
+chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+uuid.workspace = true
+alloy-primitives = "0.8"
+hex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
