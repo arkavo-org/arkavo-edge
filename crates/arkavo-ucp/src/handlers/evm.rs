@@ -118,8 +118,7 @@ mod tests {
     }
 
     fn create_intent_with_crypto(address: &str) -> PaymentIntent {
-        let merchant = Merchant::new("test", "Test Merchant")
-            .with_crypto_address(address);
+        let merchant = Merchant::new("test", "Test Merchant").with_crypto_address(address);
         let amount = PaymentAmount::from_ether(0.1);
         PaymentIntent::new("agent-1", amount, merchant)
     }
@@ -144,11 +143,8 @@ mod tests {
         let merchant = Merchant::new("test", "Test")
             .with_crypto_address("0xdead000000000000000000000000000000000000");
 
-        let eth_intent = PaymentIntent::new(
-            "agent",
-            PaymentAmount::from_ether(0.1),
-            merchant.clone(),
-        );
+        let eth_intent =
+            PaymentIntent::new("agent", PaymentAmount::from_ether(0.1), merchant.clone());
         assert!(handler.can_handle(&eth_intent));
 
         let usd_intent = PaymentIntent::new(

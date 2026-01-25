@@ -14,7 +14,11 @@ pub struct Signature {
 impl Signature {
     /// Create signature from r, s components and recovery ID
     pub fn new(r: [u8; 32], s: [u8; 32], recovery_id: u8) -> Self {
-        Self { r, s, v: recovery_id }
+        Self {
+            r,
+            s,
+            v: recovery_id,
+        }
     }
 
     /// Create from k256 signature and recovery ID
@@ -77,8 +81,8 @@ impl Signature {
         let sig = K256Signature::from_slice(&[self.r.as_slice(), self.s.as_slice()].concat())
             .map_err(|_| WalletError::InvalidSignature)?;
 
-        let recovery_id = RecoveryId::try_from(self.v)
-            .map_err(|_| WalletError::InvalidSignature)?;
+        let recovery_id =
+            RecoveryId::try_from(self.v).map_err(|_| WalletError::InvalidSignature)?;
 
         VerifyingKey::recover_from_prehash(message_hash, &sig, recovery_id)
             .map_err(|_| WalletError::VerificationFailed)

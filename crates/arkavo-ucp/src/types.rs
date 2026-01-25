@@ -106,9 +106,7 @@ impl PaymentAmount {
     pub fn to_wei(&self) -> Result<U256> {
         match self.currency {
             Currency::Eth => Ok(U256::from(self.value)),
-            Currency::Usdc | Currency::Usdt => {
-                Ok(U256::from(self.value))
-            }
+            Currency::Usdc | Currency::Usdt => Ok(U256::from(self.value)),
             Currency::Usd => Err(UcpError::UnsupportedCurrency(
                 "Cannot convert USD to wei directly".to_string(),
             )),
@@ -341,8 +339,8 @@ mod tests {
     fn test_payment_intent() {
         let merchant = Merchant::new("m1", "Test");
         let amount = PaymentAmount::from_dollars(10.0);
-        let intent = PaymentIntent::new("agent-1", amount, merchant)
-            .with_description("Test payment");
+        let intent =
+            PaymentIntent::new("agent-1", amount, merchant).with_description("Test payment");
 
         assert!(!intent.id.is_nil());
         assert_eq!(intent.status, PaymentStatus::Pending);

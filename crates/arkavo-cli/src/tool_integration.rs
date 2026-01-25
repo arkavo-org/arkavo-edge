@@ -91,9 +91,9 @@ pub async fn process_with_tools(
             .await
             .map_err(|e| format!("Failed to create UCP budget tracker: {e}"))?,
     );
-    let ucp_state = std::sync::Arc::new(tokio::sync::RwLock::new(
-        arkavo_ucp::UcpState::new(ucp_budget_tracker),
-    ));
+    let ucp_state = std::sync::Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(
+        ucp_budget_tracker,
+    )));
     arkavo_ucp::register_tools(&mut tool_registry, ucp_state);
 
     // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)

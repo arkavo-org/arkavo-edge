@@ -3,8 +3,8 @@ use crate::keypair::EvmKeypair;
 use crate::mnemonic::Mnemonic;
 use hmac::Mac;
 use k256::ecdsa::SigningKey;
-use k256::elliptic_curve::ops::Add;
 use k256::elliptic_curve::PrimeField;
+use k256::elliptic_curve::ops::Add;
 use sha2::Sha512;
 use std::str::FromStr;
 
@@ -105,11 +105,12 @@ impl FromStr for DerivationPath {
                 continue;
             }
 
-            let (num_str, hardened) = if part.ends_with('\'') || part.ends_with('h') || part.ends_with('H') {
-                (&part[..part.len() - 1], true)
-            } else {
-                (part, false)
-            };
+            let (num_str, hardened) =
+                if part.ends_with('\'') || part.ends_with('h') || part.ends_with('H') {
+                    (&part[..part.len() - 1], true)
+                } else {
+                    (part, false)
+                };
 
             let index: u32 = num_str.parse().map_err(|_| {
                 WalletError::InvalidDerivationPath(format!("Invalid path component: {part}"))
@@ -168,21 +169,18 @@ impl ExtendedKey {
         }
         data.extend_from_slice(&child.to_be_bytes());
 
-        let mut mac = hmac::Hmac::<Sha512>::new_from_slice(&self.chain_code)
-            .expect("HMAC accepts any key");
+        let mut mac =
+            hmac::Hmac::<Sha512>::new_from_slice(&self.chain_code).expect("HMAC accepts any key");
         hmac::Mac::update(&mut mac, &data);
         let result = hmac::Mac::finalize(mac).into_bytes();
 
         let mut il = [0u8; 32];
         il.copy_from_slice(&result[..32]);
 
-        let parent_key =
-            k256::Scalar::from_repr_vartime(self.key.into()).ok_or_else(|| {
-                WalletError::CryptoError("Invalid parent key scalar".to_string())
-            })?;
-        let tweak = k256::Scalar::from_repr_vartime(il.into()).ok_or_else(|| {
-            WalletError::CryptoError("Invalid tweak scalar".to_string())
-        })?;
+        let parent_key = k256::Scalar::from_repr_vartime(self.key.into())
+            .ok_or_else(|| WalletError::CryptoError("Invalid parent key scalar".to_string()))?;
+        let tweak = k256::Scalar::from_repr_vartime(il.into())
+            .ok_or_else(|| WalletError::CryptoError("Invalid tweak scalar".to_string()))?;
         let child_key = parent_key.add(&tweak);
 
         let mut key = [0u8; 32];

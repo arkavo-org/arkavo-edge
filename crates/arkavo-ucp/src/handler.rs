@@ -16,7 +16,8 @@ pub trait PaymentHandler: Send + Sync {
 
     /// Check if handler can process this intent
     fn can_handle(&self, intent: &PaymentIntent) -> bool {
-        self.supported_currencies().contains(&intent.amount.currency)
+        self.supported_currencies()
+            .contains(&intent.amount.currency)
     }
 }
 
@@ -52,11 +53,8 @@ mod tests {
 
         let merchant = Merchant::new("test", "Test");
 
-        let usd_intent = PaymentIntent::new(
-            "agent",
-            PaymentAmount::from_dollars(10.0),
-            merchant.clone(),
-        );
+        let usd_intent =
+            PaymentIntent::new("agent", PaymentAmount::from_dollars(10.0), merchant.clone());
         assert!(handler.can_handle(&usd_intent));
 
         let usdc_intent = PaymentIntent::new(

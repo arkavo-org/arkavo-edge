@@ -145,7 +145,12 @@ impl PaymentTracker {
         let payments = self.payments.read().await;
         payments
             .values()
-            .filter(|r| matches!(r.status(), PaymentStatus::Pending | PaymentStatus::Processing))
+            .filter(|r| {
+                matches!(
+                    r.status(),
+                    PaymentStatus::Pending | PaymentStatus::Processing
+                )
+            })
             .cloned()
             .collect()
     }
@@ -168,7 +173,11 @@ impl PaymentTracker {
         for record in expired {
             let id = record.intent.id;
             if self
-                .update_status(id, PaymentStatus::Expired, Some("Payment expired".to_string()))
+                .update_status(
+                    id,
+                    PaymentStatus::Expired,
+                    Some("Payment expired".to_string()),
+                )
                 .await
                 .is_ok()
             {
@@ -301,7 +310,10 @@ mod tests {
 
         tracker.create(intent1).await;
         tracker.create(intent2).await;
-        tracker.complete(id2, PaymentResult::success(id2)).await.unwrap();
+        tracker
+            .complete(id2, PaymentResult::success(id2))
+            .await
+            .unwrap();
 
         let pending = tracker.get_pending().await;
         assert_eq!(pending.len(), 1);
@@ -319,8 +331,14 @@ mod tests {
         tracker.create(intent1).await;
         tracker.create(intent2).await;
 
-        tracker.complete(id1, PaymentResult::success(id1)).await.unwrap();
-        tracker.complete(id2, PaymentResult::failed(id2, "Error")).await.unwrap();
+        tracker
+            .complete(id1, PaymentResult::success(id1))
+            .await
+            .unwrap();
+        tracker
+            .complete(id2, PaymentResult::failed(id2, "Error"))
+            .await
+            .unwrap();
 
         let stats = tracker.get_stats("agent-1").await;
         assert_eq!(stats.completed, 1);
@@ -335,8 +353,14 @@ mod tests {
         let id = intent.id;
 
         tracker.create(intent).await;
-        tracker.update_status(id, PaymentStatus::Processing, Some("Started".to_string())).await.unwrap();
-        tracker.update_status(id, PaymentStatus::Signed, Some("Signed".to_string())).await.unwrap();
+        tracker
+            .update_status(id, PaymentStatus::Processing, Some("Started".to_string()))
+            .await
+            .unwrap();
+        tracker
+            .update_status(id, PaymentStatus::Signed, Some("Signed".to_string()))
+            .await
+            .unwrap();
 
         let record = tracker.get(id).await.unwrap();
         assert_eq!(record.history.len(), 3);
@@ -355,7 +379,9 @@ mod tests {
     #[tokio::test]
     async fn test_update_nonexistent() {
         let tracker = PaymentTracker::new();
-        let result = tracker.update_status(Uuid::new_v4(), PaymentStatus::Completed, None).await;
+        let result = tracker
+            .update_status(Uuid::new_v4(), PaymentStatus::Completed, None)
+            .await;
         assert!(result.is_err());
     }
 }

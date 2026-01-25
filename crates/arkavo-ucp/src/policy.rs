@@ -135,7 +135,11 @@ impl CommercePolicy {
             return PolicyDecision::deny("Merchant is blocked by policy");
         }
 
-        if !self.limits.allowed_currencies.contains(&intent.amount.currency) {
+        if !self
+            .limits
+            .allowed_currencies
+            .contains(&intent.amount.currency)
+        {
             return PolicyDecision::deny(format!(
                 "Currency {} is not allowed",
                 intent.amount.currency

@@ -27,8 +27,7 @@ impl Mnemonic {
             _ => 32,
         };
         let entropy: Vec<u8> = (0..entropy_bytes).map(|_| rand::random()).collect();
-        let inner = Bip39Mnemonic::from_entropy(&entropy)
-            .expect("entropy should be valid");
+        let inner = Bip39Mnemonic::from_entropy(&entropy).expect("entropy should be valid");
         Self { inner }
     }
 
@@ -145,7 +144,9 @@ mod tests {
 
     #[test]
     fn test_validate() {
-        assert!(Mnemonic::validate("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"));
+        assert!(Mnemonic::validate(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        ));
         assert!(!Mnemonic::validate("invalid phrase"));
     }
 

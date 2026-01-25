@@ -119,18 +119,11 @@ mod tests {
         let handler = create_handler().await;
         let merchant = Merchant::new("test", "Test");
 
-        let usd_intent = PaymentIntent::new(
-            "agent",
-            PaymentAmount::from_dollars(2.0),
-            merchant.clone(),
-        );
+        let usd_intent =
+            PaymentIntent::new("agent", PaymentAmount::from_dollars(2.0), merchant.clone());
         assert!(handler.can_handle(&usd_intent));
 
-        let eth_intent = PaymentIntent::new(
-            "agent",
-            PaymentAmount::from_ether(0.1),
-            merchant,
-        );
+        let eth_intent = PaymentIntent::new("agent", PaymentAmount::from_ether(0.1), merchant);
         assert!(!handler.can_handle(&eth_intent));
     }
 

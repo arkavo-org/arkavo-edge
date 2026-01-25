@@ -1,11 +1,11 @@
 //! Create payment intent tool
 
-use super::{error_response, success_response, UcpState};
+use super::{UcpState, error_response, success_response};
 use crate::types::{Currency, Merchant, PaymentAmount, PaymentIntent};
 use arkavo_mcp::ToolSchema;
 use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

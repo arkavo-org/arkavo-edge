@@ -1,11 +1,11 @@
 //! List payments tool
 
-use super::{success_response, UcpState};
+use super::{UcpState, success_response};
 use crate::types::PaymentStatus;
 use arkavo_mcp::ToolSchema;
 use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -57,7 +57,10 @@ impl Tool for ListPaymentsTool {
             .iter()
             .filter(|p| match status_filter {
                 "pending" => {
-                    matches!(p.status(), PaymentStatus::Pending | PaymentStatus::Processing)
+                    matches!(
+                        p.status(),
+                        PaymentStatus::Pending | PaymentStatus::Processing
+                    )
                 }
                 "completed" => matches!(p.status(), PaymentStatus::Completed),
                 "failed" => matches!(p.status(), PaymentStatus::Failed),

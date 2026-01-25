@@ -24,13 +24,11 @@ pub use handlers::evm::chains;
 pub use handlers::{BudgetPaymentHandler, EvmPaymentHandler};
 pub use policy::{CommerceLimits, CommercePolicy, PolicyDecision};
 pub use tools::{
-    register_tools, CreatePaymentIntentTool, ExecutePaymentTool, GetPaymentStatusTool,
-    ListPaymentsTool, UcpState,
+    CreatePaymentIntentTool, ExecutePaymentTool, GetPaymentStatusTool, ListPaymentsTool, UcpState,
+    register_tools,
 };
 pub use tracker::{PaymentRecord, PaymentStats, PaymentTracker};
-pub use types::{
-    Currency, Merchant, PaymentAmount, PaymentIntent, PaymentResult, PaymentStatus,
-};
+pub use types::{Currency, Merchant, PaymentAmount, PaymentIntent, PaymentResult, PaymentStatus};
 
 #[cfg(test)]
 mod tests {
@@ -127,7 +125,10 @@ mod tests {
             let id = tracker.create(intent).await;
 
             if i < 2 {
-                tracker.complete(id, PaymentResult::success(id)).await.unwrap();
+                tracker
+                    .complete(id, PaymentResult::success(id))
+                    .await
+                    .unwrap();
             }
         }
 

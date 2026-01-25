@@ -99,8 +99,8 @@ impl EvmAddress {
                 s.len()
             )));
         }
-        let bytes = hex::decode(s)
-            .map_err(|e| WalletError::InvalidAddress(format!("Invalid hex: {e}")))?;
+        let bytes =
+            hex::decode(s).map_err(|e| WalletError::InvalidAddress(format!("Invalid hex: {e}")))?;
         Self::from_slice(&bytes)
     }
 
