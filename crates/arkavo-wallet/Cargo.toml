@@ -1,0 +1,29 @@
+[package]
+name = "arkavo-wallet"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "EVM-compatible wallet with secp256k1 cryptography for Web3 transactions"
+repository.workspace = true
+
+[dependencies]
+k256 = { version = "0.13", features = ["ecdsa", "ecdsa-core", "arithmetic"] }
+sha3 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+alloy-primitives = "0.8"
+bip39 = "2.1"
+bs58 = "0.5"
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+rand.workspace = true
+hex.workspace = true
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
