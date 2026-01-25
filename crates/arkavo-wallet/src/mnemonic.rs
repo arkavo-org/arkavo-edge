@@ -39,8 +39,8 @@ impl Mnemonic {
     }
 
     /// Get the mnemonic phrase as a string
-    pub fn phrase(&self) -> &str {
-        self.inner.words().collect::<Vec<_>>().join(" ").leak()
+    pub fn phrase(&self) -> String {
+        self.inner.words().collect::<Vec<_>>().join(" ")
     }
 
     /// Get the words as a vector

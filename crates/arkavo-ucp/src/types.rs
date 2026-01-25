@@ -89,9 +89,14 @@ impl PaymentAmount {
     }
 
     /// Create amount in ether
+    ///
+    /// Note: For values > ~18.4 ETH, use `from_wei()` directly to avoid overflow.
+    /// This method uses f64 which has precision limitations for very large values.
     pub fn from_ether(ether: f64) -> Self {
+        // Saturate at u64::MAX to prevent overflow
+        let wei = (ether * 1e18).min(u64::MAX as f64) as u64;
         Self {
-            value: (ether * 1e18) as u64,
+            value: wei,
             currency: Currency::Eth,
         }
     }

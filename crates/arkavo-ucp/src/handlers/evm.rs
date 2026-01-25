@@ -79,7 +79,18 @@ impl PaymentHandler for EvmPaymentHandler {
             )));
         }
 
-        let nonce = 0;
+        // NOTE: Nonce defaults to 0 for offline signing.
+        // For production use, nonce should be fetched from the blockchain
+        // or tracked externally. This implementation is suitable for:
+        // - Single-use wallets
+        // - Testing and development
+        // - Scenarios where nonce is managed by the caller via metadata
+        let nonce = intent
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("nonce"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
         let tx = self.build_transaction(intent, nonce)?;
         let signed = tx.sign(&self.keypair);

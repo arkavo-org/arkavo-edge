@@ -48,6 +48,8 @@ impl ExecutePaymentTool {
 impl Tool for ExecutePaymentTool {
     async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
         let payment_id_str = params["payment_id"].as_str().unwrap_or("");
+        let confirmed = params["confirmed"].as_bool().unwrap_or(false);
+
         let payment_id = Uuid::parse_str(payment_id_str).map_err(|_| {
             arkavo_mcp_tools::ToolError::InvalidParams(format!(
                 "Invalid payment ID: {payment_id_str}"
@@ -68,6 +70,18 @@ impl Tool for ExecutePaymentTool {
         }
 
         let intent = &record.intent;
+
+        // Check if confirmation is required for this payment
+        let decision = state.policy.evaluate(intent).await;
+        if decision.requires_confirmation && !confirmed {
+            return Ok(error_response(&format!(
+                "Payment requires confirmation: {}. Set confirmed=true to proceed.",
+                decision
+                    .reason
+                    .unwrap_or_else(|| "amount above threshold".to_string())
+            )));
+        }
+
         let currency = intent.amount.currency;
 
         let handler = state.get_handler(currency).ok_or_else(|| {

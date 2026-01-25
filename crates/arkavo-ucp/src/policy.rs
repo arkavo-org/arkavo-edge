@@ -178,10 +178,18 @@ impl CommercePolicy {
         PolicyDecision::allow()
     }
 
+    /// Convert payment amount to cents for policy limit checks.
+    ///
+    /// Note: ETH returns 0 because there's no price oracle integration.
+    /// This means ETH payments bypass cent-based limits (max_single_payment,
+    /// require_confirmation_above). Consider implementing a price oracle
+    /// or using separate ETH-denominated limits for production use.
     fn convert_to_cents(&self, intent: &PaymentIntent) -> u64 {
         match intent.amount.currency {
             Currency::Usd => intent.amount.value,
+            // ETH: No price oracle, bypasses cent-based limits
             Currency::Eth => 0,
+            // USDC/USDT: 6 decimals, convert to cents (2 decimals)
             Currency::Usdc | Currency::Usdt => intent.amount.value / 10000,
         }
     }

@@ -66,13 +66,36 @@ impl CreatePaymentIntentTool {
 #[async_trait]
 impl Tool for CreatePaymentIntentTool {
     async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
-        let amount_value = params["amount"].as_u64().unwrap_or(0);
-        let currency_str = params["currency"].as_str().unwrap_or("USD");
-        let merchant_id = params["merchant_id"].as_str().unwrap_or("");
+        // Validate required parameters
+        let amount_value = params["amount"].as_u64().ok_or_else(|| {
+            arkavo_mcp_tools::ToolError::InvalidParams(
+                "Missing or invalid 'amount' parameter".into(),
+            )
+        })?;
+
+        if amount_value == 0 {
+            return Ok(error_response("Amount must be greater than 0"));
+        }
+
+        let currency_str = params["currency"].as_str().ok_or_else(|| {
+            arkavo_mcp_tools::ToolError::InvalidParams("Missing 'currency' parameter".into())
+        })?;
+
+        let merchant_id = params["merchant_id"].as_str().ok_or_else(|| {
+            arkavo_mcp_tools::ToolError::InvalidParams("Missing 'merchant_id' parameter".into())
+        })?;
+
+        if merchant_id.is_empty() {
+            return Ok(error_response("merchant_id cannot be empty"));
+        }
+
+        let agent_id = params["agent_id"].as_str().ok_or_else(|| {
+            arkavo_mcp_tools::ToolError::InvalidParams("Missing 'agent_id' parameter".into())
+        })?;
+
         let merchant_name = params["merchant_name"].as_str().unwrap_or(merchant_id);
         let merchant_address = params["merchant_address"].as_str();
         let description = params["description"].as_str();
-        let agent_id = params["agent_id"].as_str().unwrap_or("default");
 
         let currency = match currency_str.to_uppercase().as_str() {
             "USD" => Currency::Usd,
