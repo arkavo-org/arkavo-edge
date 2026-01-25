@@ -84,6 +84,18 @@ pub async fn process_with_tools(
     ));
     arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
 
+    // Register UCP payment tools for AI agent commerce
+    // Uses the same budget tracker infrastructure for spending limits
+    let ucp_budget_tracker = std::sync::Arc::new(
+        arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
+            .await
+            .map_err(|e| format!("Failed to create UCP budget tracker: {e}"))?,
+    );
+    let ucp_state = std::sync::Arc::new(tokio::sync::RwLock::new(
+        arkavo_ucp::UcpState::new(ucp_budget_tracker),
+    ));
+    arkavo_ucp::register_tools(&mut tool_registry, ucp_state);
+
     // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
     #[cfg(feature = "claude-agent")]
     {

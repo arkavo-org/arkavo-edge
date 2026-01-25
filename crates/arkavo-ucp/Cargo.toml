@@ -11,6 +11,7 @@ repository.workspace = true
 arkavo-wallet = { path = "../arkavo-wallet" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 async-trait.workspace = true
 chrono.workspace = true

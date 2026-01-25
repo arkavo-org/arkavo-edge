@@ -2,7 +2,8 @@
 
 use super::{success_response, UcpState};
 use crate::types::PaymentStatus;
-use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_mcp::ToolSchema;
+use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -45,10 +46,7 @@ impl ListPaymentsTool {
 
 #[async_trait]
 impl Tool for ListPaymentsTool {
-    async fn execute(
-        &self,
-        params: Value,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
         let agent_id = params["agent_id"].as_str().unwrap_or("default");
         let status_filter = params["status"].as_str().unwrap_or("all");
 

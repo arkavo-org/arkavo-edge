@@ -1,7 +1,8 @@
 //! Get payment status tool
 
 use super::{error_response, success_response, UcpState};
-use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_mcp::ToolSchema;
+use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -39,13 +40,10 @@ impl GetPaymentStatusTool {
 
 #[async_trait]
 impl Tool for GetPaymentStatusTool {
-    async fn execute(
-        &self,
-        params: Value,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
         let payment_id_str = params["payment_id"].as_str().unwrap_or("");
-        let payment_id =
-            Uuid::parse_str(payment_id_str).map_err(|_| format!("Invalid payment ID: {payment_id_str}"))?;
+        let payment_id = Uuid::parse_str(payment_id_str)
+            .map_err(|_| arkavo_mcp_tools::ToolError::InvalidParams(format!("Invalid payment ID: {payment_id_str}")))?;
 
         let state = self.state.read().await;
         let record = state.tracker.get(payment_id).await;

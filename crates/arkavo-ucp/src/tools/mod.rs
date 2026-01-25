@@ -16,7 +16,6 @@ use crate::policy::{CommerceLimits, CommercePolicy};
 use crate::tracker::PaymentTracker;
 use crate::types::Currency;
 use arkavo_budget::BudgetTracker;
-use arkavo_mcp::Tool;
 use arkavo_wallet::EvmKeypair;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -76,16 +75,26 @@ pub(crate) fn success_response(data: Value) -> Value {
 }
 
 /// Register all UCP tools with a tool registry
-pub fn register_tools<R: ToolRegistry>(registry: &mut R, state: Arc<RwLock<UcpState>>) {
-    registry.register(Box::new(CreatePaymentIntentTool::new(state.clone())));
-    registry.register(Box::new(ExecutePaymentTool::new(state.clone())));
-    registry.register(Box::new(GetPaymentStatusTool::new(state.clone())));
-    registry.register(Box::new(ListPaymentsTool::new(state)));
-}
-
-/// Trait for tool registries
-pub trait ToolRegistry {
-    fn register(&mut self, tool: Box<dyn Tool>);
+pub fn register_tools(
+    registry: &mut arkavo_mcp_tools::ToolRegistry,
+    state: Arc<RwLock<UcpState>>,
+) {
+    registry.register(
+        "ucp_create_payment",
+        Box::new(CreatePaymentIntentTool::new(state.clone())),
+    );
+    registry.register(
+        "ucp_execute_payment",
+        Box::new(ExecutePaymentTool::new(state.clone())),
+    );
+    registry.register(
+        "ucp_get_payment_status",
+        Box::new(GetPaymentStatusTool::new(state.clone())),
+    );
+    registry.register(
+        "ucp_list_payments",
+        Box::new(ListPaymentsTool::new(state)),
+    );
 }
 
 #[cfg(test)]

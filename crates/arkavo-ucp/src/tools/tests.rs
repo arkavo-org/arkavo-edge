@@ -1,5 +1,6 @@
 use super::*;
 use arkavo_budget::BudgetConfig;
+use arkavo_mcp_tools::server::Tool;
 
 async fn create_test_state() -> Arc<RwLock<UcpState>> {
     let config = BudgetConfig::default();

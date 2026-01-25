@@ -2,7 +2,8 @@
 
 use super::{error_response, success_response, UcpState};
 use crate::types::{Currency, Merchant, PaymentAmount, PaymentIntent};
-use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_mcp::ToolSchema;
+use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -64,10 +65,7 @@ impl CreatePaymentIntentTool {
 
 #[async_trait]
 impl Tool for CreatePaymentIntentTool {
-    async fn execute(
-        &self,
-        params: Value,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
         let amount_value = params["amount"].as_u64().unwrap_or(0);
         let currency_str = params["currency"].as_str().unwrap_or("USD");
         let merchant_id = params["merchant_id"].as_str().unwrap_or("");

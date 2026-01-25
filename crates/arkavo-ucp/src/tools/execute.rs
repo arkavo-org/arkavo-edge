@@ -2,7 +2,8 @@
 
 use super::{error_response, success_response, UcpState};
 use crate::types::PaymentStatus;
-use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_mcp::ToolSchema;
+use arkavo_mcp_tools::server::Tool;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -45,13 +46,10 @@ impl ExecutePaymentTool {
 
 #[async_trait]
 impl Tool for ExecutePaymentTool {
-    async fn execute(
-        &self,
-        params: Value,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(&self, params: Value) -> arkavo_mcp_tools::Result<Value> {
         let payment_id_str = params["payment_id"].as_str().unwrap_or("");
-        let payment_id =
-            Uuid::parse_str(payment_id_str).map_err(|_| format!("Invalid payment ID: {payment_id_str}"))?;
+        let payment_id = Uuid::parse_str(payment_id_str)
+            .map_err(|_| arkavo_mcp_tools::ToolError::InvalidParams(format!("Invalid payment ID: {payment_id_str}")))?;
 
         let state = self.state.read().await;
 
@@ -59,7 +57,7 @@ impl Tool for ExecutePaymentTool {
             .tracker
             .get(payment_id)
             .await
-            .ok_or_else(|| format!("Payment not found: {payment_id}"))?;
+            .ok_or_else(|| arkavo_mcp_tools::ToolError::Execution(format!("Payment not found: {payment_id}")))?;
 
         if record.status().is_terminal() {
             return Ok(error_response(&format!(
@@ -73,21 +71,24 @@ impl Tool for ExecutePaymentTool {
 
         let handler = state
             .get_handler(currency)
-            .ok_or_else(|| format!("No handler for currency: {currency}"))?;
+            .ok_or_else(|| arkavo_mcp_tools::ToolError::Execution(format!("No handler for currency: {currency}")))?;
 
         state
             .tracker
             .update_status(payment_id, PaymentStatus::Processing, None)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))?;
 
-        let result = handler.execute(intent).await.map_err(|e| e.to_string())?;
+        let result = handler
+            .execute(intent)
+            .await
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))?;
 
         state
             .tracker
             .complete(payment_id, result.clone())
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))?;
 
         Ok(success_response(json!({
             "payment_id": payment_id.to_string(),

@@ -25,7 +25,7 @@ pub use handlers::{BudgetPaymentHandler, EvmPaymentHandler};
 pub use policy::{CommerceLimits, CommercePolicy, PolicyDecision};
 pub use tools::{
     register_tools, CreatePaymentIntentTool, ExecutePaymentTool, GetPaymentStatusTool,
-    ListPaymentsTool, ToolRegistry, UcpState,
+    ListPaymentsTool, UcpState,
 };
 pub use tracker::{PaymentRecord, PaymentStats, PaymentTracker};
 pub use types::{
