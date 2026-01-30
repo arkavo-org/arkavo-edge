@@ -1,3 +1,11 @@
+# Patch Metadata (checked by build.rs)
+# BASE_COMMIT: c3b87cebf
+# VERIFY_ABSENT: GGML_ASSERT([rsets->data count] == 0)
+# VERIFY_PRESENT: Metal residency sets not freed before shutdown
+#
+# If VERIFY_ABSENT text is not found in the target file, the patch may
+# have been merged upstream and can be removed.
+
 From: Arkavo <noreply@arkavo.com>
 Subject: [PATCH] metal: convert shutdown assertion to warning log
 
