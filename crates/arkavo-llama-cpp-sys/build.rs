@@ -1,5 +1,50 @@
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
+
+fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
+    if !patches_dir.exists() {
+        return;
+    }
+
+    let mut patches: Vec<_> = std::fs::read_dir(patches_dir)
+        .expect("Failed to read patches directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "patch"))
+        .collect();
+
+    patches.sort_by_key(|e| e.path());
+
+    for entry in patches {
+        let patch_path = entry.path();
+        println!("cargo:rerun-if-changed={}", patch_path.display());
+
+        // Check if patch is already applied by doing a dry-run
+        let check = Command::new("patch")
+            .args(["--dry-run", "-p1", "-N", "-i"])
+            .arg(&patch_path)
+            .current_dir(vendor_dir)
+            .output()
+            .expect("Failed to run patch command");
+
+        if check.status.success() {
+            // Patch not yet applied, apply it
+            eprintln!("Applying patch: {}", patch_path.display());
+            let result = Command::new("patch")
+                .args(["-p1", "-N", "-i"])
+                .arg(&patch_path)
+                .current_dir(vendor_dir)
+                .status()
+                .expect("Failed to apply patch");
+
+            if !result.success() {
+                panic!("Failed to apply patch: {}", patch_path.display());
+            }
+        } else {
+            eprintln!("Patch already applied: {}", patch_path.display());
+        }
+    }
+}
 
 fn main() {
     // Skip building for musl targets - llama.cpp doesn't work well with musl
@@ -34,6 +79,12 @@ fn main() {
             }
         }
     }
+
+    // Apply patches to vendor/llama.cpp before building
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let vendor_dir = manifest_dir.join("../../vendor/llama.cpp");
+    let patches_dir = manifest_dir.join("patches");
+    apply_patches(&vendor_dir, &patches_dir);
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
 
