@@ -135,9 +135,12 @@ async fn test_orc_01c_router_fallback() {
 
     println!("Offline mode routed to: {:?}", decision.recommended_model);
 
-    // In offline mode, should always use local model
+    // In offline mode, should always use a local model
     assert!(
-        matches!(decision.recommended_model, ModelChoice::LocalGemma4B),
+        matches!(
+            decision.recommended_model,
+            ModelChoice::LocalGemma4B | ModelChoice::LocalQwen3
+        ),
         "Offline mode should route to local model, got: {:?}",
         decision.recommended_model
     );

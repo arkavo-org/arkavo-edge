@@ -11,6 +11,7 @@ mod tests {
     use tokio::time::timeout;
 
     #[tokio::test]
+    #[ignore = "Requires booted iOS simulator"]
     async fn test_xctest_with_target_app() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("\n=== XCTest With Target App Test ===\n");
 

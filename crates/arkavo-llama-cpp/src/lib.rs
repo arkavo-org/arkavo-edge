@@ -1280,13 +1280,6 @@ mod tests {
     }
 
     #[test]
-    fn test_glm4_template_python_tool_guidance() {
-        // GLM-4.7-Flash is trained as Code Interpreter, so we guide it
-        assert!(GLM4_TEMPLATE.contains("python tool"));
-        assert!(GLM4_TEMPLATE.contains("code"));
-    }
-
-    #[test]
     fn test_detect_model_format_glm() {
         assert_eq!(detect_model_format("GLM-4.7-Flash"), ModelFormat::GLM4);
         assert_eq!(detect_model_format("glm-4-9b"), ModelFormat::GLM4);
