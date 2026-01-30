@@ -1622,6 +1622,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Stop the A2A server
     handle.stop()?;
 
+    // Release GPU resources before exit to ensure Metal residency sets are cleaned up
+    server.cleanup_gpu_resources().await;
+
     // Shutdown all MCP processes
     process_manager.shutdown_all()?;
 
@@ -1643,6 +1646,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     }
 
     println!("Agent server stopped.");
+
+    // Small delay to ensure GPU cleanup completes
+    std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Explicitly exit to ensure all threads are terminated
     std::process::exit(0);

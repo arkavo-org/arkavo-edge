@@ -875,4 +875,20 @@ impl A2aServer {
             info!("Well-known HTTP server stopped");
         }
     }
+
+    /// Release GPU resources for graceful shutdown.
+    ///
+    /// Must be called before std::process::exit() to ensure Metal
+    /// residency sets are properly cleaned up.
+    pub async fn cleanup_gpu_resources(&self) {
+        info!("Releasing GPU resources for graceful shutdown");
+
+        // Clear router (holds TaskClassifier -> LlamaCppProvider -> LlamaModel)
+        *self.router.write().await = None;
+
+        // Clear LLM adapter (may hold model references)
+        *self.llm_adapter.write().await = None;
+
+        info!("GPU resources released");
+    }
 }
