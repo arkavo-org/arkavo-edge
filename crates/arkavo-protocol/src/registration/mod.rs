@@ -103,14 +103,45 @@ impl RegistrationService {
             .decode(&request.signature)
             .map_err(|e| A2aError::InvalidRequest(format!("Invalid signature: {e}")))?;
 
-        let public_key = arkavo_crypto::AgentPublicKey::from_bytes(&public_key_bytes)
-            .map_err(|e| A2aError::InvalidRequest(format!("Invalid public key format: {e}")))?;
-
-        public_key
-            .verify(&challenge.data, &signature_bytes)
-            .map_err(|_| {
-                A2aError::AuthenticationFailed("Signature verification failed".to_string())
-            })?;
+        // Detect key type by length and verify accordingly
+        // Ed25519: 32 bytes
+        // P-256 SEC1 uncompressed: 65 bytes (0x04 prefix)
+        // P-256 SEC1 compressed: 33 bytes (0x02/0x03 prefix)
+        match public_key_bytes.len() {
+            32 => {
+                // Ed25519 key (agent-to-agent)
+                let public_key =
+                    arkavo_crypto::AgentPublicKey::from_bytes(&public_key_bytes).map_err(|e| {
+                        A2aError::InvalidRequest(format!("Invalid Ed25519 public key: {e}"))
+                    })?;
+                public_key
+                    .verify(&challenge.data, &signature_bytes)
+                    .map_err(|_| {
+                        A2aError::AuthenticationFailed(
+                            "Ed25519 signature verification failed".to_string(),
+                        )
+                    })?;
+            }
+            33 | 65 => {
+                // P-256 SEC1 key (iOS Secure Enclave)
+                let public_key = arkavo_crypto::P256VerifyingKey::from_sec1_bytes(&public_key_bytes)
+                    .map_err(|e| {
+                        A2aError::InvalidRequest(format!("Invalid P-256 public key: {e}"))
+                    })?;
+                public_key
+                    .verify(&challenge.data, &signature_bytes)
+                    .map_err(|_| {
+                        A2aError::AuthenticationFailed(
+                            "P-256 signature verification failed".to_string(),
+                        )
+                    })?;
+            }
+            len => {
+                return Err(A2aError::InvalidRequest(format!(
+                    "Unsupported public key length: {len} bytes. Expected 32 (Ed25519) or 33/65 (P-256)"
+                )));
+            }
+        }
 
         let registration = Registration {
             device_id: request.device_id.clone(),
@@ -247,6 +278,72 @@ mod tests {
             device_id: "test-device".to_string(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&[0u8; 64]),
+        };
+
+        let result = service.verify_challenge(verify_request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_challenge_with_p256_key() {
+        // iOS Secure Enclave uses P-256 ECDSA, not Ed25519
+        let service = RegistrationService::new();
+        let device_id = "ios-device".to_string();
+
+        let challenge_response = service
+            .create_challenge(ChallengeRequest {
+                device_id: device_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        // Use P-256 keypair (simulating iOS Secure Enclave)
+        let keypair = arkavo_crypto::P256SigningKeypair::generate();
+        let challenge_bytes = general_purpose::STANDARD
+            .decode(&challenge_response.challenge)
+            .unwrap();
+        let signature = keypair.sign(&challenge_bytes);
+
+        // P-256 public key in SEC1 uncompressed format (65 bytes)
+        let public_key_bytes = keypair.public_key().to_sec1_bytes();
+
+        let verify_request = VerifyRequest {
+            challenge_id: challenge_response.challenge_id,
+            device_id: device_id.clone(),
+            public_key: general_purpose::STANDARD.encode(&public_key_bytes),
+            signature: general_purpose::STANDARD.encode(&signature),
+        };
+
+        let verify_response = service.verify_challenge(verify_request).await.unwrap();
+        assert!(verify_response.success);
+
+        let status = service.get_registration_status(&device_id).await.unwrap();
+        assert!(status.verified);
+    }
+
+    #[tokio::test]
+    async fn test_verify_challenge_p256_wrong_signature() {
+        let service = RegistrationService::new();
+        let device_id = "ios-device".to_string();
+
+        let challenge_response = service
+            .create_challenge(ChallengeRequest {
+                device_id: device_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        let keypair = arkavo_crypto::P256SigningKeypair::generate();
+        let wrong_data = b"wrong data";
+        let signature = keypair.sign(wrong_data);
+
+        let public_key_bytes = keypair.public_key().to_sec1_bytes();
+
+        let verify_request = VerifyRequest {
+            challenge_id: challenge_response.challenge_id,
+            device_id: device_id.clone(),
+            public_key: general_purpose::STANDARD.encode(&public_key_bytes),
+            signature: general_purpose::STANDARD.encode(&signature),
         };
 
         let result = service.verify_challenge(verify_request).await;

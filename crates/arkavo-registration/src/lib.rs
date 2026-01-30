@@ -63,14 +63,27 @@ impl AgentDescriptor {
 
     /// Generate authorization URL for mobile app scanning.
     ///
-    /// Format: `arkavo://agent/authorize?did=...&name=...&entitlements=...`
+    /// Format: `arkavo://agent/authorize?did=...&name=...&rpc=ws://...&entitlements=...`
+    ///
+    /// The `rpc` parameter provides the WebSocket JSON-RPC endpoint for the mobile
+    /// client to connect and use `registration.challenge` / `registration.verify`.
+    ///
+    /// # Panics
+    /// Panics if the endpoint contains an unroutable address (0.0.0.0) or ephemeral port (0).
     pub fn to_authorization_url(&self) -> String {
+        // Validate endpoint is routable before generating URL
+        self.validate_endpoint();
+
         let did = self.did_key.as_deref().unwrap_or("");
         let mut url = format!("arkavo://agent/authorize?did={}", urlencoding::encode(did));
 
         if let Some(name) = &self.name {
             url.push_str(&format!("&name={}", urlencoding::encode(name)));
         }
+
+        // Convert http:// endpoint to ws:// for WebSocket JSON-RPC connection
+        let ws_endpoint = self.endpoint.replacen("http://", "ws://", 1);
+        url.push_str(&format!("&rpc={}", urlencoding::encode(&ws_endpoint)));
 
         if !self.entitlements.is_empty() {
             let entitlements_str = self.entitlements.join(",");
@@ -81,6 +94,30 @@ impl AgentDescriptor {
         }
 
         url
+    }
+
+    /// Validate that the endpoint is routable by clients.
+    ///
+    /// # Panics
+    /// Panics if:
+    /// - The endpoint contains 0.0.0.0 (not routable - use actual IP)
+    /// - The endpoint contains port 0 (ephemeral - use actual bound port)
+    fn validate_endpoint(&self) {
+        if self.endpoint.contains("0.0.0.0") {
+            panic!(
+                "Cannot generate authorization URL with unroutable address 0.0.0.0. \
+                 Use the actual local IP address (e.g., 192.168.x.x). Endpoint: {}",
+                self.endpoint
+            );
+        }
+
+        if self.endpoint.ends_with(":0") || self.endpoint.contains(":0/") {
+            panic!(
+                "Cannot generate authorization URL with ephemeral port :0. \
+                 Use the actual bound port after server starts. Endpoint: {}",
+                self.endpoint
+            );
+        }
     }
 
     /// Legacy URL format for backward compatibility.
@@ -212,5 +249,92 @@ mod tests {
         let url = descriptor.to_url();
         assert!(url.starts_with("arkavo://agent?public_key="));
         assert!(!url.contains("&mdns_service="));
+    }
+
+    #[test]
+    fn test_authorization_url_contains_rpc_endpoint() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let descriptor = AgentDescriptor::new(
+            public_key,
+            "http://192.168.1.100:8342".to_string(),
+            None,
+            "test123".to_string(),
+        )
+        .with_name("test-agent")
+        .with_entitlements(vec!["agent.capability.chat".to_string()]);
+
+        let url = descriptor.to_authorization_url();
+
+        // Must contain rpc parameter for WebSocket JSON-RPC endpoint
+        assert!(
+            url.contains("rpc="),
+            "Authorization URL must contain rpc parameter for WebSocket endpoint. URL: {url}"
+        );
+        assert!(
+            url.contains("192.168.1.100"),
+            "Authorization URL must contain IP address. URL: {url}"
+        );
+        assert!(
+            url.contains("8342"),
+            "Authorization URL must contain port. URL: {url}"
+        );
+    }
+
+    #[test]
+    fn test_authorization_url_rpc_uses_websocket_scheme() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let descriptor = AgentDescriptor::new(
+            public_key,
+            "http://192.168.1.100:8342".to_string(),
+            None,
+            "ws123".to_string(),
+        )
+        .with_name("test-agent");
+
+        let url = descriptor.to_authorization_url();
+
+        // RPC endpoint should use ws:// scheme for WebSocket connection
+        assert!(
+            url.contains("rpc=ws%3A%2F%2F192.168.1.100%3A8342"),
+            "RPC endpoint must use ws:// scheme. URL: {url}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "unroutable address 0.0.0.0")]
+    fn test_authorization_url_rejects_unroutable_address() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // 0.0.0.0 is not routable - clients can't connect to it
+        let descriptor = AgentDescriptor::new(
+            public_key,
+            "http://0.0.0.0:8342".to_string(),
+            None,
+            "test".to_string(),
+        );
+
+        // This should panic because 0.0.0.0 is not routable
+        let _ = descriptor.to_authorization_url();
+    }
+
+    #[test]
+    #[should_panic(expected = "ephemeral port :0")]
+    fn test_authorization_url_rejects_port_zero() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // Port 0 means "OS assigns a port" - not valid for clients to connect to
+        let descriptor = AgentDescriptor::new(
+            public_key,
+            "http://192.168.1.100:0".to_string(),
+            None,
+            "test".to_string(),
+        );
+
+        // This should panic because port 0 is ephemeral
+        let _ = descriptor.to_authorization_url();
     }
 }

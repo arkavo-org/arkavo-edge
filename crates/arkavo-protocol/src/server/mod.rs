@@ -180,17 +180,22 @@ pub trait A2aRpc {
     async fn chat_subscribe(&self, request: ChatRequest) -> SubscriptionResult;
 
     /// Create a registration challenge
-    #[method(name = "registration.challenge")]
+    /// Uses param_kind=map so iOS can send {"device_id": "..."} directly
+    #[method(name = "registration.challenge", param_kind = map)]
     async fn registration_challenge(
         &self,
-        request: crate::registration::ChallengeRequest,
+        device_id: String,
     ) -> RpcResult<crate::registration::ChallengeResponse>;
 
     /// Verify a registration challenge signature
-    #[method(name = "registration.verify")]
+    /// Uses param_kind=map so iOS can send {challenge_id, device_id, ...} directly
+    #[method(name = "registration.verify", param_kind = map)]
     async fn registration_verify(
         &self,
-        request: crate::registration::VerifyRequest,
+        challenge_id: String,
+        device_id: String,
+        public_key: String,
+        signature: String,
     ) -> RpcResult<crate::registration::VerifyResponse>;
 
     /// Get registration status for a device
@@ -577,8 +582,9 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn registration_challenge(
         &self,
-        request: crate::registration::ChallengeRequest,
+        device_id: String,
     ) -> RpcResult<crate::registration::ChallengeResponse> {
+        let request = crate::registration::ChallengeRequest { device_id };
         handlers::registration::handle_registration_challenge(
             &self.metrics,
             &self.rate_limiter,
@@ -590,8 +596,17 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn registration_verify(
         &self,
-        request: crate::registration::VerifyRequest,
+        challenge_id: String,
+        device_id: String,
+        public_key: String,
+        signature: String,
     ) -> RpcResult<crate::registration::VerifyResponse> {
+        let request = crate::registration::VerifyRequest {
+            challenge_id,
+            device_id,
+            public_key,
+            signature,
+        };
         handlers::registration::handle_registration_verify(
             &self.metrics,
             &self.rate_limiter,

@@ -1328,7 +1328,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             .to_string();
 
         // Create agent descriptor with DID:key and default entitlements
-        let endpoint = format!("http://{}", config.listen);
+        // Use actual local IP and bound port (not 0.0.0.0:0 from config)
+        let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+        let endpoint = format!("http://{}:{}", local_ip, actual_port);
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
@@ -1652,6 +1654,19 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Explicitly exit to ensure all threads are terminated
     std::process::exit(0);
+}
+
+/// Get the local IP address for client connections.
+/// Returns the first non-loopback IPv4 address found.
+fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+
+    // Connect to a public DNS to determine our local IP
+    // This doesn't actually send any data, just determines the route
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let local_addr = socket.local_addr().ok()?;
+    Some(local_addr.ip().to_string())
 }
 
 fn broadcast_agent_mdns_sync(

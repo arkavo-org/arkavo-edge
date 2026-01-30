@@ -282,6 +282,152 @@ impl fmt::Debug for KasEcPublicKey {
     }
 }
 
+/// P-256 ECDSA keypair for iOS Secure Enclave compatibility.
+///
+/// iOS Secure Enclave uses P-256 (secp256r1) with ECDSA signatures.
+/// This type provides signing/verification compatible with iOS.
+pub struct P256SigningKeypair {
+    signing_key: p256::ecdsa::SigningKey,
+}
+
+impl P256SigningKeypair {
+    /// Generate a new random P-256 signing keypair.
+    pub fn generate() -> Self {
+        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        Self { signing_key }
+    }
+
+    /// Create from raw secret key bytes (32 bytes).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let signing_key = p256::ecdsa::SigningKey::from_bytes(bytes.into())
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Invalid P-256 secret key: {e}")))?;
+        Ok(Self { signing_key })
+    }
+
+    /// Get the secret key bytes (32 bytes).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.signing_key.to_bytes().to_vec()
+    }
+
+    /// Get the public key.
+    pub fn public_key(&self) -> P256VerifyingKey {
+        P256VerifyingKey {
+            verifying_key: *self.signing_key.verifying_key(),
+        }
+    }
+
+    /// Sign a message using ECDSA with SHA-256 (compatible with iOS ecdsaSignatureMessageX962SHA256).
+    pub fn sign(&self, message: &[u8]) -> Vec<u8> {
+        use p256::ecdsa::{Signature, signature::Signer};
+        let signature: Signature = self.signing_key.sign(message);
+        signature.to_der().as_bytes().to_vec()
+    }
+}
+
+/// P-256 ECDSA public key for verifying iOS Secure Enclave signatures.
+#[derive(Clone)]
+pub struct P256VerifyingKey {
+    verifying_key: p256::ecdsa::VerifyingKey,
+}
+
+impl P256VerifyingKey {
+    /// Create from SEC1-encoded bytes (65 bytes uncompressed, 33 bytes compressed).
+    pub fn from_sec1_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let verifying_key = p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Invalid P-256 public key: {e}")))?;
+        Ok(Self { verifying_key })
+    }
+
+    /// Create from base64-encoded SEC1 bytes.
+    pub fn from_base64(s: &str) -> Result<Self, CryptoError> {
+        let bytes = general_purpose::STANDARD
+            .decode(s)
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base64 decode error: {e}")))?;
+        Self::from_sec1_bytes(&bytes)
+    }
+
+    /// Get as SEC1 uncompressed bytes (65 bytes).
+    pub fn to_sec1_bytes(&self) -> Vec<u8> {
+        self.verifying_key.to_encoded_point(false).as_bytes().to_vec()
+    }
+
+    /// Get as base64-encoded SEC1 uncompressed.
+    pub fn to_base64(&self) -> String {
+        general_purpose::STANDARD.encode(self.to_sec1_bytes())
+    }
+
+    /// Verify an ECDSA signature (DER or fixed-size format).
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), CryptoError> {
+        use p256::ecdsa::{Signature, signature::Verifier};
+
+        // Try DER format first (what iOS produces), then fixed-size
+        let sig = Signature::from_der(signature)
+            .or_else(|_| Signature::from_slice(signature))
+            .map_err(|_| CryptoError::InvalidSignature)?;
+
+        self.verifying_key
+            .verify(message, &sig)
+            .map_err(|_| CryptoError::VerificationFailed)
+    }
+
+    /// Convert to DID:key format for P-256 public keys.
+    ///
+    /// Format: `did:key:z{base58btc(0x1200 || compressed_public_key)}`
+    /// - `z` = multibase prefix for base58btc
+    /// - `0x1200` = multicodec prefix for P-256 public key
+    pub fn to_did_key(&self) -> String {
+        // P-256 public key multicodec prefix (varint encoded 0x1200)
+        const P256_MULTICODEC: [u8; 2] = [0x80, 0x24];
+
+        let pk_bytes = self.verifying_key.to_encoded_point(true).as_bytes().to_vec();
+        let mut prefixed = Vec::with_capacity(2 + pk_bytes.len());
+        prefixed.extend_from_slice(&P256_MULTICODEC);
+        prefixed.extend_from_slice(&pk_bytes);
+
+        let encoded = bs58::encode(&prefixed).into_string();
+        format!("did:key:z{encoded}")
+    }
+
+    /// Parse a P-256 DID:key string back to a public key.
+    pub fn from_did_key(did: &str) -> Result<Self, CryptoError> {
+        const P256_MULTICODEC: [u8; 2] = [0x80, 0x24];
+
+        let encoded = did
+            .strip_prefix("did:key:z")
+            .ok_or_else(|| CryptoError::InvalidKeyFormat("Invalid DID:key prefix".to_string()))?;
+
+        let decoded = bs58::decode(encoded)
+            .into_vec()
+            .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base58 decode error: {e}")))?;
+
+        if decoded.len() < 2
+            || decoded[0] != P256_MULTICODEC[0]
+            || decoded[1] != P256_MULTICODEC[1]
+        {
+            return Err(CryptoError::InvalidKeyFormat(
+                "Invalid P-256 multicodec prefix".to_string(),
+            ));
+        }
+
+        let pk_bytes = &decoded[2..];
+        Self::from_sec1_bytes(pk_bytes)
+    }
+}
+
+impl fmt::Display for P256VerifyingKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_base64())
+    }
+}
+
+impl fmt::Debug for P256VerifyingKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("P256VerifyingKey")
+            .field("base64", &self.to_base64())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +538,71 @@ mod tests {
         let did1 = public_key.to_did_key();
         let did2 = public_key.to_did_key();
         assert_eq!(did1, did2, "DID generation should be deterministic");
+    }
+
+    // TDD: iOS Secure Enclave uses P-256 ECDSA, not Ed25519
+    // These tests define the expected behavior for iOS client registration
+
+    #[test]
+    fn test_p256_public_key_from_sec1_uncompressed() {
+        // iOS SecKeyCopyExternalRepresentation produces 65-byte SEC1 uncompressed format
+        // Format: 0x04 || x (32 bytes) || y (32 bytes)
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let sec1_bytes = public_key.to_sec1_bytes();
+
+        assert_eq!(sec1_bytes.len(), 65, "SEC1 uncompressed should be 65 bytes");
+        assert_eq!(sec1_bytes[0], 0x04, "SEC1 uncompressed starts with 0x04");
+
+        // Roundtrip
+        let restored = P256VerifyingKey::from_sec1_bytes(&sec1_bytes).unwrap();
+        assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
+    }
+
+    #[test]
+    fn test_p256_sign_and_verify() {
+        // iOS signs with ecdsaSignatureMessageX962SHA256
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"challenge data from server";
+
+        let signature = keypair.sign(message);
+        assert!(public_key.verify(message, &signature).is_ok());
+    }
+
+    #[test]
+    fn test_p256_verify_wrong_message_fails() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"correct message";
+        let wrong_message = b"wrong message";
+
+        let signature = keypair.sign(message);
+        assert!(public_key.verify(wrong_message, &signature).is_err());
+    }
+
+    #[test]
+    fn test_p256_did_key_format() {
+        // P-256 DID:key uses multicodec 0x1200 (p256-pub)
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let did = public_key.to_did_key();
+
+        // P-256 DIDs start with "did:key:zDn" (different from Ed25519 "z6Mk")
+        assert!(
+            did.starts_with("did:key:zDn"),
+            "P-256 DID should start with 'did:key:zDn', got: {}",
+            did
+        );
+    }
+
+    #[test]
+    fn test_p256_did_key_roundtrip() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let did = public_key.to_did_key();
+
+        let restored = P256VerifyingKey::from_did_key(&did).expect("Should parse P-256 DID:key");
+        assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
     }
 }
