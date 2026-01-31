@@ -1,0 +1,41 @@
+[package]
+name = "arkavo-agent"
+version = "0.58.1"
+edition = "2024"
+authors = ["Arkavo Contributors"]
+license = "Apache-2.0"
+description = "Agent lifecycle management for the Arkavo agentic CLI tool - handles configuration, registry, discovery, and registration"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["agent", "lifecycle", "registry", "discovery", "management"]
+categories = ["development-tools", "network-programming"]
+
+[dependencies]
+# Core async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Arkavo internal dependencies
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+
+# Temporary: re-export from arkavo-protocol until fully migrated
+arkavo-protocol = { path = "../arkavo-protocol" }
+
+[lints]
+workspace = true

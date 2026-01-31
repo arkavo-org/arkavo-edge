@@ -1,0 +1,46 @@
+[package]
+name = "arkavo-tasks"
+version = "0.58.1"
+edition = "2024"
+authors = ["Arkavo Contributors"]
+license = "Apache-2.0"
+description = "Task management system for the Arkavo agentic CLI - execution, planning, and storage"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["task", "execution", "planning", "orchestration", "agent"]
+categories = ["asynchronous", "data-structures"]
+
+[dependencies]
+# Core async runtime
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Unique identifiers
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Time handling
+chrono = { workspace = true }
+
+# Database for persistent task storage
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono"] }
+
+# HRM integration for task orchestration
+arkavo-hrm = { path = "../arkavo-hrm" }
+
+# Temporary: re-export from arkavo-protocol until fully migrated
+arkavo-protocol = { path = "../arkavo-protocol" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
