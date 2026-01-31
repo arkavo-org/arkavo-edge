@@ -156,7 +156,7 @@ Deprecated scenarios are removed after 2 major versions.
 
 ### CI Enforcement
 
-All PRs are checked by `.github/workflows/specs.yml`:
+All PRs are checked by `.github/workflows/feature.yaml`:
 - Schema validation
 - Required field checking
 - YAML syntax validation
