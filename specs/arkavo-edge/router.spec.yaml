@@ -1,0 +1,155 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: LLM Router with Quality Gates
+module: arkavo_router
+version: 0.57.1
+
+invariants:
+  - All routes must pass preflight moderation before model selection
+  - Quality gate retries are capped at 3 attempts with model escalation
+  - Offline mode restricts routing to local models only
+  - Streaming responses maintain backpressure via bounded channels
+  - Router metrics are updated atomically for consistency
+
+scenarios:
+  - id: ROUTER-001
+    name: Route task to optimal model
+    criticality: critical
+    given:
+      - Router initialized with classifier and selector
+      - Multiple models available with different capabilities
+      - Task has clear category and complexity
+    when: route() called with task content
+    then:
+      - Task classified by complexity and category
+      - Model selected based on capability match and cost
+      - Response streamed with RouteMetadata
+      - Metrics updated for routing decision
+    refs: [crates/arkavo-router/src/lib.rs:100-150]
+
+  - id: ROUTER-002
+    name: Quality gate with retry and escalation
+    criticality: critical
+    given:
+      - Initial model response fails validation
+      - Retry count below maximum (3)
+      - Higher-capability models available
+    when: route_with_quality_gate() validates response
+    then:
+      - Response judged by critic pipeline
+      - Failed responses trigger retry with escalated model
+      - Max retries prevents infinite loops
+      - Final response marked with validation status
+    refs: [crates/arkavo-router/src/lib.rs:200-280]
+
+  - id: ROUTER-003
+    name: Offline mode restricts to local models
+    criticality: high
+    given:
+      - Router in offline_mode=true
+      - No remote providers available
+    when: route() called with any task
+    then:
+      - Only local models (llama-cpp) considered
+      - Remote providers excluded from selection
+      - Error if no local models available
+    refs: [crates/arkavo-router/src/lib.rs:92-99]
+
+  - id: ROUTER-004
+    name: Preflight moderation blocks policy violations
+    criticality: critical
+    given:
+      - Preflight moderator configured
+      - Task contains policy-violating content
+    when: route() called before model selection
+    then:
+      - Content analyzed against moderation policies
+      - Violations rejected with PolicyId
+      - No model called for blocked content
+    refs: [crates/arkavo-router/src/preflight.rs]
+
+  - id: ROUTER-005
+    name: Stream backpressure handling
+    criticality: high
+    given:
+      - Streaming response active
+      - Consumer slower than producer
+    when: StreamChunk produced faster than consumed
+    then:
+      - Bounded channel applies backpressure
+      - Buffer size capped at 100 chunks
+      - Slow consumer doesn't OOM system
+    refs: [crates/arkavo-router/src/stream.rs]
+
+  - id: ROUTER-006
+    name: Model discovery finds available models
+    criticality: medium
+    given:
+      - Model discovery directory configured
+      - GGUF files present in directory
+    when: ModelSelector scans for models
+    then:
+      - Discovers all .gguf files
+      - Extracts metadata (parameters, quantization)
+      - Registers models for selection
+    refs: [crates/arkavo-router/src/model_discovery.rs]
+
+  - id: ROUTER-007
+    name: Connectivity checker marks providers unavailable
+    criticality: high
+    given:
+      - Provider health check fails
+      - Timeout or connection error
+    when: ConnectivityChecker detects failure
+    then:
+      - Provider marked unavailable
+      - Routing excludes failed provider
+      - Periodic retry re-enables provider
+    refs: [crates/arkavo-router/src/connectivity.rs]
+
+  - id: ROUTER-008
+    name: Tool request parsing and routing
+    criticality: high
+    given:
+      - Task requires tool execution
+      - Tool registry available
+    when: Tool request parsed from content
+    then:
+      - Tool parameters extracted
+      - ToolRegistry resolves tool implementation
+      - Tool results fed back to model
+    refs: [crates/arkavo-router/src/tool_request_parser.rs]
+
+  - id: ROUTER-009
+    name: RLM decomposition for complex tasks
+    criticality: medium
+    given:
+      - Complex multi-step task received
+      - RLM manager configured
+    when: RLM probes identify subtasks
+    then:
+      - Task decomposed into subtasks
+      - Each subtask routed independently
+      - Results synthesized into final response
+    refs: [crates/arkavo-router/src/rlm.rs]
+
+  - id: ROUTER-010
+    name: Architect planner for multi-step workflows
+    criticality: medium
+    given:
+      - Workflow requires planning
+      - Architect planner enabled
+    when: ArchitectExecutor plans workflow
+    then:
+      - Subtasks generated with dependencies
+      - Complexity scored for each subtask
+      - Plan executed with result aggregation
+    refs: [crates/arkavo-router/src/architect.rs]
+    edge_cases:
+      - condition: All models fail connectivity check
+        expected: Returns Error::NoModelsAvailable
+      - condition: Task exceeds max complexity threshold
+        expected: Rejected by preflight moderator
+      - condition: Streaming consumer dropped
+        expected: Stream aborts, resources cleaned
+    changed: "2025-01-31"

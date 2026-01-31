@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.57.1
-last_updated: 2025-01-30
+last_updated: 2025-01-31
 
 components:
   - name: registration
@@ -48,15 +48,51 @@ components:
       - 2/3 quorum threshold
       - 60-second anti-entropy interval
 
+  - name: router
+    file: router.spec.yaml
+    module: arkavo_router
+    description: LLM routing with quality gates and cost optimization
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Preflight moderation before model selection
+      - Max 3 quality gate retries with escalation
+      - Streaming bounded channels (100 chunks)
+
+  - name: tdf
+    file: tdf.spec.yaml
+    module: arkavo_tdf
+    description: Trusted Data Format encryption and policy enforcement
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - AES-256-GCM payload encryption
+      - Policy binding for integrity
+      - KAS rewrap required for decryption
+
+  - name: autolearn
+    file: autolearn.spec.yaml
+    module: arkavo_autolearn
+    description: Auto-learning with patchlets and verification
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - Patchlet verification before application
+      - Exponential decay on signals
+      - Network consensus for cross-swarm patchlets
+
 stats:
-  total_specs: 4
-  total_scenarios: 44
-  critical_scenarios: 24
+  total_specs: 7
+  total_scenarios: 71
+  critical_scenarios: 36
   coverage_areas:
     - authentication
     - cryptography
     - session_management
     - distributed_consensus
+    - routing
+    - data_protection
+    - machine_learning
     - error_handling
     - fault_tolerance
 
@@ -69,3 +105,15 @@ integration_points:
   - name: Crypto → Gossip
     description: Message signing uses crypto primitives
     specs: [CRYPTO-002, GOSSIP-002]
+
+  - name: Router → Chat Session
+    description: Chat sessions use router for quality-gated responses
+    specs: [ROUTER-002, CHAT-009]
+
+  - name: Crypto → TDF
+    description: TDF uses crypto for key wrapping and signatures
+    specs: [CRYPTO-011, TDF-002]
+
+  - name: Autolearn → Gossip
+    description: Patchlets propagate via gossip protocol
+    specs: [AUTO-005, GOSSIP-006]

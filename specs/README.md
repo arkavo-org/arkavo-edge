@@ -13,10 +13,13 @@ specs/
     ├── registration.spec.yaml     # 12 scenarios
     ├── crypto.spec.yaml           # 11 scenarios
     ├── chat-session.spec.yaml     # 13 scenarios
-    └── gossip-protocol.spec.yaml  # 8 scenarios
+    ├── gossip-protocol.spec.yaml  # 8 scenarios
+    ├── router.spec.yaml           # 10 scenarios
+    ├── tdf.spec.yaml              # 9 scenarios
+    └── autolearn.spec.yaml        # 8 scenarios
 ```
 
-**Total: 44 scenarios across 4 components**
+**Total: 71 scenarios across 7 components**
 
 ## Specification Format
 
