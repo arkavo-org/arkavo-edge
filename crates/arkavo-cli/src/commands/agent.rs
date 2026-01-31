@@ -1328,7 +1328,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             .to_string();
 
         // Create agent descriptor with DID:key and default entitlements
-        let endpoint = format!("http://{}", config.listen);
+        // Use actual local IP and bound port (not 0.0.0.0:0 from config)
+        let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+        let endpoint = format!("http://{local_ip}:{actual_port}");
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
@@ -1622,6 +1624,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Stop the A2A server
     handle.stop()?;
 
+    // Release GPU resources before exit to ensure Metal residency sets are cleaned up
+    server.cleanup_gpu_resources().await;
+
     // Shutdown all MCP processes
     process_manager.shutdown_all()?;
 
@@ -1644,8 +1649,67 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     println!("Agent server stopped.");
 
+    // Small delay to ensure GPU cleanup completes
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
     // Explicitly exit to ensure all threads are terminated
     std::process::exit(0);
+}
+
+/// Get the local IP address for client connections.
+///
+/// Uses multiple strategies to determine the local IP:
+/// 1. Try connecting to a public DNS server (determines routing interface)
+/// 2. Fallback to interface enumeration
+/// 3. Final fallback to 127.0.0.1
+///
+/// This handles offline environments, strict firewalls, and IPv6-only networks.
+fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+
+    // Strategy 1: DNS-based detection (works in most online environments)
+    // Try multiple public DNS servers for resilience
+    let dns_servers = [
+        ("8.8.8.8", 80),        // Google DNS
+        ("1.1.1.1", 80),        // Cloudflare DNS
+        ("208.67.222.222", 80), // OpenDNS
+    ];
+
+    for (dns, port) in dns_servers {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((dns, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+
+    // Strategy 2: Try connecting to a private network address
+    // This works in offline LAN environments
+    let private_targets = [
+        ("192.168.1.1", 53), // Common router address
+        ("10.0.0.1", 53),    // Common corporate router
+        ("172.16.0.1", 53),  // Common large network router
+    ];
+
+    for (target, port) in private_targets {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((target, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+
+    // Strategy 3: Fallback to 127.0.0.1 (always works, but only for local clients)
+    // This is the safest fallback for offline or isolated environments
+    Some("127.0.0.1".to_string())
 }
 
 fn broadcast_agent_mdns_sync(

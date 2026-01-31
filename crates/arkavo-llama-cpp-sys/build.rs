@@ -1,5 +1,164 @@
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
+
+struct PatchMetadata {
+    base_commit: Option<String>,
+    verify_absent: Option<String>,
+    verify_present: Option<String>,
+}
+
+fn parse_patch_metadata(patch_path: &std::path::Path) -> PatchMetadata {
+    let content = std::fs::read_to_string(patch_path).unwrap_or_default();
+    let mut meta = PatchMetadata {
+        base_commit: None,
+        verify_absent: None,
+        verify_present: None,
+    };
+
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("# BASE_COMMIT: ") {
+            meta.base_commit = Some(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("# VERIFY_ABSENT: ") {
+            meta.verify_absent = Some(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("# VERIFY_PRESENT: ") {
+            meta.verify_present = Some(val.trim().to_string());
+        }
+    }
+    meta
+}
+
+fn get_vendor_commit(vendor_dir: &std::path::Path) -> Option<String> {
+    Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(vendor_dir)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn file_contains(vendor_dir: &std::path::Path, pattern: &str) -> bool {
+    // Search in the Metal device file specifically
+    let target_file = vendor_dir.join("ggml/src/ggml-metal/ggml-metal-device.m");
+    if target_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&target_file) {
+            return content.contains(pattern);
+        }
+    }
+    // Fallback: grep the whole vendor dir
+    Command::new("grep")
+        .args(["-rq", pattern])
+        .current_dir(vendor_dir)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
+    if !patches_dir.exists() {
+        return;
+    }
+
+    let current_commit = get_vendor_commit(vendor_dir);
+
+    let mut patches: Vec<_> = std::fs::read_dir(patches_dir)
+        .expect("Failed to read patches directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "patch"))
+        .collect();
+
+    patches.sort_by_key(|e| e.path());
+
+    for entry in patches {
+        let patch_path = entry.path();
+        let patch_name = patch_path.file_name().unwrap().to_string_lossy();
+        println!("cargo:rerun-if-changed={}", patch_path.display());
+
+        let meta = parse_patch_metadata(&patch_path);
+
+        // Check if patch might be merged upstream (VERIFY_ABSENT text is gone)
+        if let Some(ref absent_text) = meta.verify_absent {
+            if !file_contains(vendor_dir, absent_text) {
+                println!(
+                    "cargo:warning=Patch {} may be merged upstream - VERIFY_ABSENT text not found. Consider removing patch.",
+                    patch_name
+                );
+                continue;
+            }
+        }
+
+        // Fail on commit drift to ensure patches are verified against correct version
+        if let (Some(ref base), Some(ref current)) = (&meta.base_commit, &current_commit) {
+            if !current.starts_with(base) && !base.starts_with(current) {
+                panic!(
+                    "Patch {} was created for commit {}, but vendor is at {}. \
+                     Update BASE_COMMIT in patch metadata or verify patch still applies.",
+                    patch_name, base, current
+                );
+            }
+        }
+
+        // Check if patch is already applied by doing a dry-run
+        let check = Command::new("patch")
+            .args(["--dry-run", "-p1", "-N", "-i"])
+            .arg(&patch_path)
+            .current_dir(vendor_dir)
+            .output()
+            .expect("Failed to run patch command");
+
+        if check.status.success() {
+            // Patch not yet applied, apply it
+            eprintln!("Applying patch: {}", patch_name);
+            let result = Command::new("patch")
+                .args(["-p1", "-N", "-i"])
+                .arg(&patch_path)
+                .current_dir(vendor_dir)
+                .output()
+                .expect("Failed to apply patch");
+
+            if !result.status.success() {
+                eprintln!("Patch output: {}", String::from_utf8_lossy(&result.stdout));
+                eprintln!("Patch stderr: {}", String::from_utf8_lossy(&result.stderr));
+                panic!(
+                    "Failed to apply patch: {}. The upstream code may have changed. \
+                     Check if the fix was merged or if the patch needs updating.",
+                    patch_name
+                );
+            }
+
+            // Verify patch was applied correctly
+            if let Some(ref present_text) = meta.verify_present {
+                if !file_contains(vendor_dir, present_text) {
+                    panic!(
+                        "Patch {} applied but VERIFY_PRESENT text not found. \
+                         The patch may have applied incorrectly.",
+                        patch_name
+                    );
+                }
+            }
+        } else {
+            // Patch didn't apply - either already applied or conflicts
+            if let Some(ref present_text) = meta.verify_present {
+                if file_contains(vendor_dir, present_text) {
+                    eprintln!("Patch already applied: {}", patch_name);
+                } else {
+                    panic!(
+                        "Patch {} failed to apply and fix is not present. \
+                         The upstream code may have changed incompatibly.",
+                        patch_name
+                    );
+                }
+            } else {
+                eprintln!("Patch already applied (assumed): {}", patch_name);
+            }
+        }
+    }
+}
 
 fn main() {
     // Skip building for musl targets - llama.cpp doesn't work well with musl
@@ -34,6 +193,12 @@ fn main() {
             }
         }
     }
+
+    // Apply patches to vendor/llama.cpp before building
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let vendor_dir = manifest_dir.join("../../vendor/llama.cpp");
+    let patches_dir = manifest_dir.join("patches");
+    apply_patches(&vendor_dir, &patches_dir);
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
 

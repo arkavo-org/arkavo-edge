@@ -875,4 +875,49 @@ impl A2aServer {
             info!("Well-known HTTP server stopped");
         }
     }
+
+    /// Release GPU resources for graceful shutdown.
+    ///
+    /// Must be called before std::process::exit() to ensure Metal
+    /// residency sets are properly cleaned up.
+    ///
+    /// Uses timeouts to prevent deadlocks if locks are held during shutdown.
+    pub async fn cleanup_gpu_resources(&self) {
+        use tokio::time::{Duration, timeout};
+
+        info!("Releasing GPU resources for graceful shutdown");
+
+        const TIMEOUT_MS: u64 = 5000; // 5 second timeout for each lock
+        let timeout_duration = Duration::from_millis(TIMEOUT_MS);
+
+        // Clear router (holds TaskClassifier -> LlamaCppProvider -> LlamaModel)
+        match timeout(timeout_duration, self.router.write()).await {
+            Ok(mut guard) => {
+                *guard = None;
+                info!("Router cleared");
+            }
+            Err(_) => {
+                warn!(
+                    "Timeout acquiring router write lock during cleanup (lock held > {}ms)",
+                    TIMEOUT_MS
+                );
+            }
+        }
+
+        // Clear LLM adapter (may hold model references)
+        match timeout(timeout_duration, self.llm_adapter.write()).await {
+            Ok(mut guard) => {
+                *guard = None;
+                info!("LLM adapter cleared");
+            }
+            Err(_) => {
+                warn!(
+                    "Timeout acquiring LLM adapter write lock during cleanup (lock held > {}ms)",
+                    TIMEOUT_MS
+                );
+            }
+        }
+
+        info!("GPU resources released");
+    }
 }
