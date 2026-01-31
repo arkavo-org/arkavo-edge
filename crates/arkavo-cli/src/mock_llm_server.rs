@@ -268,11 +268,12 @@ async fn handle_chat_completion(
     }
 
     // Check for PII/DLP in request body
-    let (blocked, block_reason) = if state.config.detection.detect_pii || state.config.detection.detect_dlp {
-        check_sensitive_data(&body, &state.config)
-    } else {
-        (false, None)
-    };
+    let (blocked, block_reason) =
+        if state.config.detection.detect_pii || state.config.detection.detect_dlp {
+            check_sensitive_data(&body, &state.config)
+        } else {
+            (false, None)
+        };
 
     // Record the request
     let request = RecordedRequest {
