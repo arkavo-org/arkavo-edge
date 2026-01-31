@@ -10,8 +10,8 @@
 //! 5. chat_close closes session properly
 
 use arkavo_protocol::config::ServerConfig;
-use arkavo_protocol::rate_limit::RateLimitConfig;
 use arkavo_protocol::openrpc::generate_openrpc_schema;
+use arkavo_protocol::rate_limit::RateLimitConfig;
 use arkavo_protocol::server::A2aServer;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
@@ -138,7 +138,7 @@ async fn test_server_binds_to_ipv4() {
     let config = ServerConfig {
         enabled: true,
         bind_address: "0.0.0.0".to_string(), // IPv4 bind address
-        port: 0,                              // Dynamic port
+        port: 0,                             // Dynamic port
         max_connections: 10,
         idle_timeout_seconds: 60,
         rate_limit: RateLimitConfig::default(),
@@ -151,8 +151,7 @@ async fn test_server_binds_to_ipv4() {
 
     // Verify we can connect via IPv4 (127.0.0.1)
     let ipv4_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), actual_port);
-    let connect_result =
-        TcpStream::connect_timeout(&ipv4_addr, Duration::from_secs(2));
+    let connect_result = TcpStream::connect_timeout(&ipv4_addr, Duration::from_secs(2));
 
     assert!(
         connect_result.is_ok(),
@@ -213,7 +212,7 @@ fn test_get_service_ip_returns_ipv4() {
         [127, 0, 0, 1]           // localhost
         | [192, 168, _, _]       // private class C
         | [10, _, _, _]          // private class A
-        | [172, 16..=31, _, _]   // private class B
+        | [172, 16..=31, _, _] // private class B
     ) || !ip.is_loopback();
 
     assert!(
@@ -322,10 +321,7 @@ async fn test_chat_open_rpc_returns_session() {
     let session_id = response["session_id"]
         .as_str()
         .expect("session_id must be a string");
-    assert!(
-        !session_id.is_empty(),
-        "session_id must not be empty"
-    );
+    assert!(!session_id.is_empty(), "session_id must not be empty");
 
     handle.stop().expect("Server must stop cleanly");
 }
@@ -360,7 +356,10 @@ async fn test_chat_close_invalid_session_returns_error() {
 
     // Call chat_close with non-existent session
     let result: Result<serde_json::Value, _> = client
-        .request("chat_close", jsonrpsee::rpc_params!["non_existent_session_id"])
+        .request(
+            "chat_close",
+            jsonrpsee::rpc_params!["non_existent_session_id"],
+        )
         .await;
 
     // Should return an error for invalid session
@@ -540,7 +539,9 @@ async fn test_ios_registration_via_rpc() {
     // Server uses param_kind=map, so we send named params directly (not wrapped in array)
     use jsonrpsee::core::params::ObjectParams;
     let mut challenge_params = ObjectParams::new();
-    challenge_params.insert("device_id", "did:key:z6Mk123456789abcdef").unwrap();
+    challenge_params
+        .insert("device_id", "did:key:z6Mk123456789abcdef")
+        .unwrap();
 
     let challenge_response: serde_json::Value = client
         .request("registration.challenge", challenge_params)
@@ -566,11 +567,9 @@ async fn test_ios_registration_via_rpc() {
 
     // Step 2: Sign challenge and verify (iOS signs with its private key)
     // Challenge is base64-encoded, must decode before signing
-    let challenge_bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        challenge_b64,
-    )
-    .expect("challenge must be valid base64");
+    let challenge_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, challenge_b64)
+            .expect("challenge must be valid base64");
 
     // Generate keypair and sign the decoded challenge
     let keypair = arkavo_crypto::AgentKeypair::generate();
@@ -580,9 +579,18 @@ async fn test_ios_registration_via_rpc() {
     // Server uses param_kind=map, so we send named params directly
     let mut verify_params = ObjectParams::new();
     verify_params.insert("challenge_id", challenge_id).unwrap();
-    verify_params.insert("device_id", "did:key:z6Mk123456789abcdef").unwrap();
-    verify_params.insert("public_key", public_key.to_base64()).unwrap();
-    verify_params.insert("signature", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &signature)).unwrap();
+    verify_params
+        .insert("device_id", "did:key:z6Mk123456789abcdef")
+        .unwrap();
+    verify_params
+        .insert("public_key", public_key.to_base64())
+        .unwrap();
+    verify_params
+        .insert(
+            "signature",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &signature),
+        )
+        .unwrap();
 
     let verify_response: serde_json::Value = client
         .request("registration.verify", verify_params)

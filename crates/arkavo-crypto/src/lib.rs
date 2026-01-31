@@ -348,7 +348,10 @@ impl P256VerifyingKey {
 
     /// Get as SEC1 uncompressed bytes (65 bytes).
     pub fn to_sec1_bytes(&self) -> Vec<u8> {
-        self.verifying_key.to_encoded_point(false).as_bytes().to_vec()
+        self.verifying_key
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec()
     }
 
     /// Get as base64-encoded SEC1 uncompressed.
@@ -379,7 +382,11 @@ impl P256VerifyingKey {
         // P-256 public key multicodec prefix (varint encoded 0x1200)
         const P256_MULTICODEC: [u8; 2] = [0x80, 0x24];
 
-        let pk_bytes = self.verifying_key.to_encoded_point(true).as_bytes().to_vec();
+        let pk_bytes = self
+            .verifying_key
+            .to_encoded_point(true)
+            .as_bytes()
+            .to_vec();
         let mut prefixed = Vec::with_capacity(2 + pk_bytes.len());
         prefixed.extend_from_slice(&P256_MULTICODEC);
         prefixed.extend_from_slice(&pk_bytes);
@@ -400,9 +407,7 @@ impl P256VerifyingKey {
             .into_vec()
             .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base58 decode error: {e}")))?;
 
-        if decoded.len() < 2
-            || decoded[0] != P256_MULTICODEC[0]
-            || decoded[1] != P256_MULTICODEC[1]
+        if decoded.len() < 2 || decoded[0] != P256_MULTICODEC[0] || decoded[1] != P256_MULTICODEC[1]
         {
             return Err(CryptoError::InvalidKeyFormat(
                 "Invalid P-256 multicodec prefix".to_string(),

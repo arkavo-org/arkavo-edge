@@ -110,8 +110,8 @@ impl RegistrationService {
         match public_key_bytes.len() {
             32 => {
                 // Ed25519 key (agent-to-agent)
-                let public_key =
-                    arkavo_crypto::AgentPublicKey::from_bytes(&public_key_bytes).map_err(|e| {
+                let public_key = arkavo_crypto::AgentPublicKey::from_bytes(&public_key_bytes)
+                    .map_err(|e| {
                         A2aError::InvalidRequest(format!("Invalid Ed25519 public key: {e}"))
                     })?;
                 public_key
@@ -124,10 +124,10 @@ impl RegistrationService {
             }
             33 | 65 => {
                 // P-256 SEC1 key (iOS Secure Enclave)
-                let public_key = arkavo_crypto::P256VerifyingKey::from_sec1_bytes(&public_key_bytes)
-                    .map_err(|e| {
-                        A2aError::InvalidRequest(format!("Invalid P-256 public key: {e}"))
-                    })?;
+                let public_key = arkavo_crypto::P256VerifyingKey::from_sec1_bytes(
+                    &public_key_bytes,
+                )
+                .map_err(|e| A2aError::InvalidRequest(format!("Invalid P-256 public key: {e}")))?;
                 public_key
                     .verify(&challenge.data, &signature_bytes)
                     .map_err(|_| {
