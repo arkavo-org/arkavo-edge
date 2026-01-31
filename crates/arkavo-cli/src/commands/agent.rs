@@ -1330,7 +1330,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Create agent descriptor with DID:key and default entitlements
         // Use actual local IP and bound port (not 0.0.0.0:0 from config)
         let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-        let endpoint = format!("http://{}:{}", local_ip, actual_port);
+        let endpoint = format!("http://{local_ip}:{actual_port}");
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
