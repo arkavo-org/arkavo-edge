@@ -883,10 +883,10 @@ impl A2aServer {
     ///
     /// Uses timeouts to prevent deadlocks if locks are held during shutdown.
     pub async fn cleanup_gpu_resources(&self) {
-        use tokio::time::{timeout, Duration};
-        
+        use tokio::time::{Duration, timeout};
+
         info!("Releasing GPU resources for graceful shutdown");
-        
+
         const TIMEOUT_MS: u64 = 5000; // 5 second timeout for each lock
         let timeout_duration = Duration::from_millis(TIMEOUT_MS);
 
@@ -897,7 +897,10 @@ impl A2aServer {
                 info!("Router cleared");
             }
             Err(_) => {
-                warn!("Timeout acquiring router write lock during cleanup (lock held > {}ms)", TIMEOUT_MS);
+                warn!(
+                    "Timeout acquiring router write lock during cleanup (lock held > {}ms)",
+                    TIMEOUT_MS
+                );
             }
         }
 
@@ -908,7 +911,10 @@ impl A2aServer {
                 info!("LLM adapter cleared");
             }
             Err(_) => {
-                warn!("Timeout acquiring LLM adapter write lock during cleanup (lock held > {}ms)", TIMEOUT_MS);
+                warn!(
+                    "Timeout acquiring LLM adapter write lock during cleanup (lock held > {}ms)",
+                    TIMEOUT_MS
+                );
             }
         }
 

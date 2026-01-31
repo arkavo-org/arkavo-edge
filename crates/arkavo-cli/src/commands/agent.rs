@@ -1657,7 +1657,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 }
 
 /// Get the local IP address for client connections.
-/// 
+///
 /// Uses multiple strategies to determine the local IP:
 /// 1. Try connecting to a public DNS server (determines routing interface)
 /// 2. Fallback to interface enumeration
@@ -1665,16 +1665,16 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 ///
 /// This handles offline environments, strict firewalls, and IPv6-only networks.
 fn get_local_ip() -> Option<String> {
-    use std::net::{UdpSocket, IpAddr, Ipv4Addr};
-    
+    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+
     // Strategy 1: DNS-based detection (works in most online environments)
     // Try multiple public DNS servers for resilience
     let dns_servers = [
-        ("8.8.8.8", 80),      // Google DNS
-        ("1.1.1.1", 80),      // Cloudflare DNS
+        ("8.8.8.8", 80),        // Google DNS
+        ("1.1.1.1", 80),        // Cloudflare DNS
         ("208.67.222.222", 80), // OpenDNS
     ];
-    
+
     for (dns, port) in dns_servers {
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
             if socket.connect((dns, port)).is_ok() {
@@ -1687,15 +1687,15 @@ fn get_local_ip() -> Option<String> {
             }
         }
     }
-    
+
     // Strategy 2: Try connecting to a private network address
     // This works in offline LAN environments
     let private_targets = [
-        ("192.168.1.1", 53),   // Common router address
-        ("10.0.0.1", 53),      // Common corporate router
-        ("172.16.0.1", 53),    // Common large network router
+        ("192.168.1.1", 53), // Common router address
+        ("10.0.0.1", 53),    // Common corporate router
+        ("172.16.0.1", 53),  // Common large network router
     ];
-    
+
     for (target, port) in private_targets {
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
             if socket.connect((target, port)).is_ok() {
@@ -1708,7 +1708,7 @@ fn get_local_ip() -> Option<String> {
             }
         }
     }
-    
+
     // Strategy 3: Fallback to 127.0.0.1 (always works, but only for local clients)
     // This is the safest fallback for offline or isolated environments
     Some("127.0.0.1".to_string())
