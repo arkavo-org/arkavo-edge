@@ -202,10 +202,65 @@ components:
       - Bounded streaming buffers
       - Errors without panics
 
+  - name: github
+    file: github.spec.yaml
+    module: arkavo_github
+    description: GitHub integration and issue operations
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - All API calls authenticated
+      - Rate limits respected
+      - Issue operations atomic
+
+  - name: git
+    file: git.spec.yaml
+    module: arkavo_git
+    description: Git repository operations
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Repository state validated
+      - Conventional commit messages
+      - Safety checks prevent destruction
+
+  - name: deepseek
+    file: deepseek.spec.yaml
+    module: arkavo_deepseek
+    description: DeepSeek LLM provider
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - API key required
+      - SSE streaming
+      - OpenAI-compatible schema
+
+  - name: kimi
+    file: kimi.spec.yaml
+    module: arkavo_kimi
+    description: Kimi (Moonshot) LLM provider
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Native Kimi API
+      - Token usage tracked
+      - Context length respected
+
+  - name: workspace
+    file: workspace.spec.yaml
+    module: arkavo_workspace
+    description: Containerized workspace management
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Ephemeral isolated workspaces
+      - Resource quotas enforced
+      - Network disabled by default
+
 stats:
-  total_specs: 18
-  total_scenarios: 149
-  critical_scenarios: 78
+  total_specs: 23
+  total_scenarios: 177
+  critical_scenarios: 94
   coverage_areas:
     - authentication
     - authorization
@@ -224,6 +279,8 @@ stats:
     - dataflow_orchestration
     - task_orchestration
     - llm_providers
+    - vcs_integration
+    - containerization
     - error_handling
     - fault_tolerance
 
@@ -292,3 +349,23 @@ integration_points:
   - name: Dataflow → Events
     description: Dataflow emits events for pipeline lifecycle
     specs: [DATA-003, EVENT-001]
+
+  - name: Git → GitHub
+    description: Git operations push to GitHub remotes
+    specs: [GIT-005, GITHUB-005]
+
+  - name: LLM Core → DeepSeek
+    description: DeepSeek provider implements LLM core trait
+    specs: [LLM-001, DEEP-001]
+
+  - name: LLM Core → Kimi
+    description: Kimi provider implements LLM core trait
+    specs: [LLM-001, KIMI-001]
+
+  - name: Workspace → MCP Tools
+    description: MCP tools use workspaces for isolated execution
+    specs: [MCP-003, WORKSPACE-002]
+
+  - name: GitHub → Task Orchestration
+    description: Issue handler creates tasks from GitHub issues
+    specs: [GITHUB-004, ORCH-001]

@@ -28,10 +28,15 @@ specs/
     ├── dataflow.spec.yaml      # 6 scenarios
     ├── task-orchestration.spec.yaml # 8 scenarios
     ├── agent-auth.spec.yaml    # 6 scenarios
-    └── llm-core.spec.yaml      # 6 scenarios
+    ├── llm-core.spec.yaml      # 6 scenarios
+    ├── github.spec.yaml        # 5 scenarios
+    ├── git.spec.yaml           # 6 scenarios
+    ├── deepseek.spec.yaml      # 5 scenarios
+    ├── kimi.spec.yaml          # 5 scenarios
+    └── workspace.spec.yaml     # 6 scenarios
 ```
 
-**Total: 149 scenarios across 18 components**
+**Total: 177 scenarios across 23 components**
 
 ## Specification Format
 

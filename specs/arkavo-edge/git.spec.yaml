@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Git Repository Operations
+module: arkavo_git
+version: 0.57.1
+
+invariants:
+  - All operations validate repository state first
+  - Commit messages follow conventional format
+  - Safety checks prevent destructive operations
+  - Remote operations use configured credentials
+
+scenarios:
+  - id: GIT-001
+    name: Initialize new repository
+    criticality: medium
+    given:
+      - Path provided
+      - Git not initialized
+    when: init_repo() called
+    then:
+      - .git directory created
+      - Initial branch created
+      - Repository ready
+    refs: [crates/arkavo-git/src/lib.rs:29-32]
+
+  - id: GIT-002
+    name: Get repository status
+    criticality: high
+    given:
+      - Repository open
+      - Working directory has changes
+    when: status() called
+    then:
+      - Modified files listed
+      - Staged files identified
+      - Untracked files shown
+      - Branch name included
+    refs: [crates/arkavo-git/src/lib.rs:38-40]
+
+  - id: GIT-003
+    name: Create commit with AI-generated message
+    criticality: high
+    given:
+      - Changes staged
+      - CommitMessageGenerator available
+    when: auto_commit() called
+    then:
+      - Changes analyzed
+      - Message generated
+      - AI suffix added
+      - Commit created
+    refs: [crates/arkavo-git/src/lib.rs:108-123]
+
+  - id: GIT-004
+    name: Safely undo last commit
+    criticality: medium
+    given:
+      - Repository has commits
+      - Undo requested
+    when: undo_last_commit() called
+    then:
+      - Parent commit identified
+      - Soft reset performed
+      - Changes preserved
+      - No data loss
+    refs: [crates/arkavo-git/src/lib.rs:82-91]
+
+  - id: GIT-005
+    name: Sync with upstream remote
+    criticality: medium
+    given:
+      - Remote configured
+      - Network available
+    when: sync_upstream() called
+    then:
+      - Current branch determined
+      - Pull from origin performed
+      - Changes merged
+      - Local updated
+    refs: [crates/arkavo-git/src/lib.rs:97-100]
+
+  - id: GIT-006
+    name: Create and checkout branch
+    criticality: medium
+    given:
+      - Repository open
+      - Branch name valid
+    when: create_branch() and checkout_branch()
+    then:
+      - Branch created from HEAD
+      - Checkout performed
+      - Working directory updated
+    refs: [crates/arkavo-git/src/lib.rs:54-60]
+    edge_cases:
+      - condition: Repository not initialized
+        expected: Returns GitError::RepositoryNotFound
+      - condition: Merge conflicts on pull
+        expected: Returns GitError::MergeConflict with details
+      - condition: Invalid branch name
+        expected: Returns GitError::InvalidBranchName
+    changed: "2025-01-31"

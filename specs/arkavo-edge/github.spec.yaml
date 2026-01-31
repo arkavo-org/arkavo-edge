@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: GitHub Integration and Operations
+module: arkavo_github
+version: 0.57.1
+
+invariants:
+  - All GitHub API calls use authentication
+  - Rate limits are respected and tracked
+  - Issue operations are atomic
+  - Polling respects configured intervals
+
+scenarios:
+  - id: GITHUB-001
+    name: Authenticate as GitHub App
+    criticality: critical
+    given:
+      - GitHubApp initialized
+      - App credentials configured
+    when: authenticate() called
+    then:
+      - JWT generated for app
+      - Access token obtained
+      - Token cached until expiry
+      - Ready for API calls
+    refs: [crates/arkavo-github/src/app_auth.rs]
+
+  - id: GITHUB-002
+    name: Create issue with labels
+    criticality: high
+    given:
+      - Authenticated client
+      - Repository access
+    when: create_issue() called
+    then:
+      - Issue created in repo
+      - Labels applied
+      - Assignees set
+      - Issue URL returned
+    refs: [crates/arkavo-github/src/issue_ops.rs]
+
+  - id: GITHUB-003
+    name: Poll organization for new issues
+    criticality: medium
+    given:
+      - OrgPollingConfig set
+      - Multiple repos in org
+    when: poll_organization() runs
+    then:
+      - Discovers repos
+      - Checks each for new issues
+      - Returns filtered issues
+      - Respects rate limits
+    refs: [crates/arkavo-github/src/org_polling.rs]
+
+  - id: GITHUB-004
+    name: Handle issue with AI-generated response
+    criticality: high
+    given:
+      - IssueHandler initialized
+      - New issue detected
+    when: handle_issue() called
+    then:
+      - Issue analyzed
+      - Response generated
+      - Comment posted
+      - Labels updated
+    refs: [crates/arkavo-github/src/issue_handler.rs]
+
+  - id: GITHUB-005
+    name: Merge pull request with checks
+    criticality: high
+    given:
+      - PR approved
+      - Checks passing
+    when: merge_pr() called
+    then:
+      - Merge method selected
+      - PR merged
+      - Branch deleted (optional)
+      - Merge commit returned
+    refs: [crates/arkavo-github/src/operations.rs]
+    edge_cases:
+      - condition: Rate limit exceeded
+        expected: Returns GitHubError::RateLimited with reset time
+      - condition: Authentication expired
+        expected: Refreshes token, retries operation
+      - condition: Issue not found
+        expected: Returns GitHubError::NotFound
+    changed: "2025-01-31"

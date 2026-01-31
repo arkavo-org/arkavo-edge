@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: DeepSeek LLM Provider
+module: arkavo_deepseek
+version: 0.57.1
+
+invariants:
+  - API key required for all requests
+  - Streaming uses SSE format
+  - Request/response follow OpenAI-compatible schema
+  - Rate limits tracked per endpoint
+
+scenarios:
+  - id: DEEP-001
+    name: Send chat completion request
+    criticality: critical
+    given:
+      - DeepSeekClient configured
+      - API key valid
+    when: chat_completion() called
+    then:
+      - Request serialized
+      - HTTP POST to API
+      - Response parsed
+      - ChatMessage returned
+    refs: [crates/arkavo-deepseek/src/client.rs]
+
+  - id: DEEP-002
+    name: Stream chat responses via SSE
+    criticality: critical
+    given:
+      - Streaming enabled
+      - Network available
+    when: stream_chat() called
+    then:
+      - SSE connection established
+      - Deltas received incrementally
+      - Stream ends with [DONE]
+      - Errors handled gracefully
+    refs: [crates/arkavo-deepseek/src/stream.rs]
+
+  - id: DEEP-003
+    name: Use reasoning model for complex tasks
+    criticality: medium
+    given:
+      - Reasoning model selected (R1)
+      - Complex prompt provided
+    when: chat_completion() with reasoning
+    then:
+      - Chain-of-thought generated
+      - Reasoning content available
+      - Final answer extracted
+    refs: [crates/arkavo-deepseek/src/types.rs]
+
+  - id: DEEP-004
+    name: Handle API errors with retry
+    criticality: high
+    given:
+      - Request fails
+      - Retry policy configured
+    when: Error received
+    then:
+      - Error categorized
+      - Retry with backoff
+      - Max attempts enforced
+      - Final error returned
+    refs: [crates/arkavo-deepseek/src/client.rs]
+
+  - id: DEEP-005
+    name: Strict mode for JSON output
+    criticality: medium
+    given:
+      - Strict mode enabled
+      - JSON schema provided
+    when: Request with response_format
+    then:
+      - Schema sent to API
+      - Validated JSON returned
+      - Parse errors handled
+    refs: [crates/arkavo-deepseek/src/strict_mode.rs]
+    edge_cases:
+      - condition: API key invalid
+        expected: Returns DeepSeekError::Authentication
+      - condition: Model overloaded
+        expected: Returns DeepSeekError::RateLimit with retry-after
+      - condition: Stream disconnected
+        expected: Returns partial response, logs warning
+    changed: "2025-01-31"

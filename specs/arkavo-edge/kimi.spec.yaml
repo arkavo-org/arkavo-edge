@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Kimi (Moonshot) LLM Provider
+module: arkavo_kimi
+version: 0.57.1
+
+invariants:
+  - Native Kimi API (not OpenAI-compatible)
+  - Token usage tracked per request
+  - Context length respected per model
+  - Retry with exponential backoff
+
+scenarios:
+  - id: KIMI-001
+    name: Send native Kimi chat request
+    criticality: critical
+    given:
+      - KimiClient configured
+      - API key valid
+    when: chat_completion() called
+    then:
+      - Native request format used
+      - HTTP POST to Moonshot API
+      - Response parsed
+      - Token usage returned
+    refs: [crates/arkavo-kimi/src/client.rs]
+
+  - id: KIMI-002
+    name: Stream responses with native format
+    criticality: critical
+    given:
+      - Streaming enabled
+      - Stream endpoint available
+    when: stream_chat() called
+    then:
+      - SSE stream established
+      - Kimi delta format parsed
+      - Stream completion signaled
+      - Usage stats at end
+    refs: [crates/arkavo-kimi/src/stream.rs]
+
+  - id: KIMI-003
+    name: Select model by context needs
+    criticality: medium
+    given:
+      - Different context lengths needed
+      - Multiple models available
+    when: Model selected
+    then:
+      - 8k model for short context
+      - 32k model for medium
+      - 128k model for long
+      - Auto-selected if not specified
+    refs: [crates/arkavo-kimi/src/types.rs]
+
+  - id: KIMI-004
+    name: Retry failed requests with backoff
+    criticality: high
+    given:
+      - Request fails transiently
+      - Retry config set
+    when: Retry triggered
+    then:
+      - Exponential backoff applied
+      - Max retries enforced
+      - Timeout respected
+      - Final error if exhausted
+    refs: [crates/arkavo-kimi/src/retry.rs]
+
+  - id: KIMI-005
+    name: Handle partial message generation
+    criticality: medium
+    given:
+      - Long response requested
+      - Context limit approached
+    when: Partial response generated
+    then:
+      - Finish reason set to "length"
+      - Partial content returned
+      - Token usage accurate
+    refs: [crates/arkavo-kimi/src/types.rs]
+    edge_cases:
+      - condition: Context length exceeded
+        expected: Returns KimiError::ContextLengthExceeded
+      - condition: Invalid API key
+        expected: Returns KimiError::Authentication
+      - condition: Request timeout
+        expected: Returns KimiError::Timeout, triggers retry
+    changed: "2025-01-31"

@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Containerized Workspace Management
+module: arkavo_workspace
+version: 0.57.1
+
+invariants:
+  - Workspaces are ephemeral and isolated
+  - Resource quotas enforced (CPU, memory)
+  - Network access disabled by default
+  - Container runtime detected automatically
+
+scenarios:
+  - id: WORKSPACE-001
+    name: Create isolated workspace container
+    criticality: high
+    given:
+      - Docker or Podman available
+      - WorkspaceTool initialized
+    when: create workspace action
+    then:
+      - Container image pulled
+      - Container started
+      - Resource limits applied
+      - Workspace ID returned
+    refs: [crates/arkavo-workspace/src/workspace.rs]
+
+  - id: WORKSPACE-002
+    name: Execute command in workspace
+    criticality: critical
+    given:
+      - Workspace running
+      - Command provided
+    when: execute action
+    then:
+      - Command runs in container
+      - stdout/stderr captured
+      - Exit code returned
+      - Timeout enforced
+    refs: [crates/arkavo-workspace/src/workspace.rs]
+
+  - id: WORKSPACE-003
+    name: Clone repository into workspace
+    criticality: high
+    given:
+      - Workspace created
+      - repo_url provided
+    when: create with repo_url
+    then:
+      - Git clone executed
+      - Code available in workspace
+      - Ready for operations
+    refs: [crates/arkavo-workspace/src/workspace.rs:43-46]
+
+  - id: WORKSPACE-004
+    name: Enforce resource quotas
+    criticality: high
+    given:
+      - cpu_limit specified
+      - memory_limit specified
+    when: Container started
+    then:
+      - CPU quota applied
+      - Memory limit set
+      - OOM killer configured
+      - Processes throttled if needed
+    refs: [crates/arkavo-workspace/src/workspace.rs:51-62]
+
+  - id: WORKSPACE-005
+    name: Cleanup workspace after use
+    criticality: medium
+    given:
+      - Workspace exists
+      - Cleanup requested
+    when: cleanup action
+    then:
+      - Container stopped
+      - Files removed
+      - Resources freed
+      - Workspace ID invalidated
+    refs: [crates/arkavo-workspace/src/workspace.rs]
+
+  - id: WORKSPACE-006
+    name: Detect container runtime
+    criticality: medium
+    given:
+      - WorkspaceTool initializing
+    when: detect_runtime() called
+    then:
+      - Docker checked first
+      - Podman fallback
+      - Runtime name returned
+      - Error if neither found
+    refs: [crates/arkavo-workspace/src/workspace.rs:78-100]
+    edge_cases:
+      - condition: Container runtime not found
+        expected: Returns WorkspaceError::ContainerRuntime
+      - condition: Resource quota exceeds system
+        expected: Returns WorkspaceError::ResourceLimit
+      - condition: Network disabled but needed
+        expected: Execution fails with network error
+    changed: "2025-01-31"
