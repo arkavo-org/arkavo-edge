@@ -1665,7 +1665,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 ///
 /// This handles offline environments, strict firewalls, and IPv6-only networks.
 fn get_local_ip() -> Option<String> {
-    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+    use std::net::UdpSocket;
 
     // Strategy 1: DNS-based detection (works in most online environments)
     // Try multiple public DNS servers for resilience
@@ -1676,14 +1676,13 @@ fn get_local_ip() -> Option<String> {
     ];
 
     for (dns, port) in dns_servers {
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect((dns, port)).is_ok() {
-                if let Ok(local_addr) = socket.local_addr() {
-                    let ip = local_addr.ip();
-                    if !ip.is_loopback() && ip.is_ipv4() {
-                        return Some(ip.to_string());
-                    }
-                }
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((dns, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
             }
         }
     }
@@ -1697,14 +1696,13 @@ fn get_local_ip() -> Option<String> {
     ];
 
     for (target, port) in private_targets {
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect((target, port)).is_ok() {
-                if let Ok(local_addr) = socket.local_addr() {
-                    let ip = local_addr.ip();
-                    if !ip.is_loopback() && ip.is_ipv4() {
-                        return Some(ip.to_string());
-                    }
-                }
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((target, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
             }
         }
     }
