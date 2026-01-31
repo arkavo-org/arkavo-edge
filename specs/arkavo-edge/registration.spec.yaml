@@ -138,7 +138,7 @@ scenarios:
       - Old challenge invalidated
       - Device can only have one active challenge at a time
     refs: [crates/arkavo-protocol/src/registration/mod.rs:65-66]
-    changed: 2025-01-31
+    changed: "2025-01-31"
 
   - id: REG-011
     name: Handle challenge storage failure
@@ -155,7 +155,7 @@ scenarios:
         expected: Panic or error recovery
       - condition: Out of memory
         expected: System-level allocation failure
-    changed: 2025-01-31
+    changed: "2025-01-31"
 
   - id: REG-012
     name: Handle registration persistence failure
@@ -178,4 +178,4 @@ scenarios:
         expected: Returns InvalidRequest("Challenge not found")
       - condition: Concurrent verify calls with same challenge
         expected: First succeeds, subsequent return "Challenge not found"
-    changed: 2025-01-31
+    changed: "2025-01-31"

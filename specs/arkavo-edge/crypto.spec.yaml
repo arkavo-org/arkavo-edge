@@ -142,13 +142,12 @@ scenarios:
       - Same secret derived by both parties
       - Used for TDF encryption key wrapping
     refs: [crates/arkavo-crypto/src/lib.rs:228-235]
-
-  edge_cases:
-    - condition: Invalid signature length (not 64 bytes for Ed25519)
-      expected: Returns InvalidSignature error
-    - condition: DID:key with wrong multicodec prefix
-      expected: Returns InvalidKeyFormat with specific error message
-    - condition: Base64 decode failure
-      expected: Returns InvalidKeyFormat with decode error details
-    - condition: P-256 signature format unparseable
-      expected: Returns InvalidSignature
+    edge_cases:
+      - condition: Invalid signature length (not 64 bytes for Ed25519)
+        expected: Returns InvalidSignature error
+      - condition: DID:key with wrong multicodec prefix
+        expected: Returns InvalidKeyFormat with specific error message
+      - condition: Base64 decode failure
+        expected: Returns InvalidKeyFormat with decode error details
+      - condition: P-256 signature format unparseable
+        expected: Returns InvalidSignature

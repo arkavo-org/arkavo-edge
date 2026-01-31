@@ -155,7 +155,7 @@ scenarios:
       - Metrics record router failure
       - Session remains active for retry
     refs: [crates/arkavo-protocol/src/chat_session.rs:894-917]
-    changed: 2025-01-31
+    changed: "2025-01-31"
 
   - id: CHAT-012
     name: Handle tool execution timeout
@@ -170,7 +170,7 @@ scenarios:
       - Partial results included if available
       - Session continues, tool call marked failed
     refs: [crates/arkavo-protocol/src/chat_session.rs:803-836]
-    changed: 2025-01-31
+    changed: "2025-01-31"
 
   - id: CHAT-013
     name: Reject malformed delta message
@@ -201,4 +201,4 @@ scenarios:
         expected: Accumulates full response before sending single delta
       - condition: Router succeeds but tool registry missing
         expected: Tool calls logged but not executed, response still delivered
-    changed: 2025-01-31
+    changed: "2025-01-31"

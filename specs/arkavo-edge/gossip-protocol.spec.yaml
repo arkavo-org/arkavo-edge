@@ -114,11 +114,10 @@ scenarios:
       - Pending votes cleared
       - Patch/lesson may be retried
     refs: [crates/arkavo-gossip/src/consensus.rs]
-
-  edge_cases:
-    - condition: Network partition during consensus
-      expected: Partitioned nodes may reach different consensus; resolved on reconnection via anti-entropy
-    - condition: Validator set changes during vote
-      expected: Quorum threshold calculated at vote start; changes don't affect in-progress votes
-    - condition: Clock skew between peers
-      expected: Timestamps used for ordering only; consensus based on votes not time
+    edge_cases:
+      - condition: Network partition during consensus
+        expected: Partitioned nodes may reach different consensus; resolved on reconnection via anti-entropy
+      - condition: Validator set changes during vote
+        expected: Quorum threshold calculated at vote start; changes don't affect in-progress votes
+      - condition: Clock skew between peers
+        expected: Timestamps used for ordering only; consensus based on votes not time
