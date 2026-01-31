@@ -11,144 +11,6 @@ jobs:
   validate:
     name: Validate Specs
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        check:
-          - name: schema
-            cmd: |
-              npm install -g ajv ajv-formats js-yaml 2>/dev/null
-              node -e "
-                const Ajv = require('ajv');
-                const addFormats = require('ajv-formats');
-                const fs = require('fs');
-                
-                const ajv = new Ajv({strict: false});
-                addFormats(ajv);
-                
-                const schema = JSON.parse(fs.readFileSync('specs/schema.json'));
-                const validate = ajv.compile(schema);
-                
-                let failed = false;
-                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
-                
-                for (const file of files) {
-                  const content = fs.readFileSync('specs/arkavo-edge/' + file, 'utf8');
-                  const yaml = require('js-yaml');
-                  const spec = yaml.load(content);
-                  
-                  if (!validate(spec)) {
-                    console.error('❌ ' + file + ':');
-                    validate.errors.forEach(e => console.error('  - ' + e.instancePath + ': ' + e.message));
-                    failed = true;
-                  } else {
-                    console.log('✅ ' + file);
-                  }
-                }
-                
-                process.exit(failed ? 1 : 0);
-              "
-          
-          - name: required-fields
-            cmd: |
-              npm install -g js-yaml 2>/dev/null
-              node -e "
-                const fs = require('fs');
-                const yaml = require('js-yaml');
-                const path = require('path');
-                
-                const specsDir = 'specs/arkavo-edge';
-                const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.spec.yaml'));
-                let errors = [];
-                
-                for (const file of files) {
-                  const content = fs.readFileSync(path.join(specsDir, file), 'utf8');
-                  const spec = yaml.load(content);
-                  
-                  if (!spec.feature) errors.push(file + ': Missing feature');
-                  if (!spec.module) errors.push(file + ': Missing module');
-                  if (!spec.version) errors.push(file + ': Missing version');
-                  if (!spec.invariants) errors.push(file + ': Missing invariants');
-                  if (!spec.scenarios) errors.push(file + ': Missing scenarios');
-                  
-                  for (const s of spec.scenarios || []) {
-                    if (!s.id) errors.push(file + ': Scenario missing id');
-                    if (!s.name) errors.push(file + ': Scenario missing name');
-                    if (!s.criticality) errors.push(file + ': ' + s.id + ' missing criticality');
-                    if (!['critical','high','medium','low'].includes(s.criticality)) {
-                      errors.push(file + ': ' + s.id + ' invalid criticality');
-                    }
-                    if (!s.given) errors.push(file + ': ' + s.id + ' missing given');
-                    if (!s.when) errors.push(file + ': ' + s.id + ' missing when');
-                    if (!s.then) errors.push(file + ': ' + s.id + ' missing then');
-                    if (s.id && !/^[A-Z]+-\\d+$/.test(s.id)) {
-                      errors.push(file + ': ' + s.id + ' invalid id format');
-                    }
-                  }
-                }
-                
-                if (errors.length) {
-                  console.error('❌ Errors:');
-                  errors.forEach(e => console.error('  - ' + e));
-                  process.exit(1);
-                }
-                console.log('✅ All required fields present');
-              "
-          
-          - name: index-sync
-            cmd: |
-              npm install -g js-yaml 2>/dev/null
-              node -e "
-                const fs = require('fs');
-                const yaml = require('js-yaml');
-                
-                const index = yaml.load(fs.readFileSync('specs/arkavo-edge/index.yaml', 'utf8'));
-                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
-                
-                // Check all components exist
-                for (const comp of index.components || []) {
-                  if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
-                    console.error('❌ Missing file: ' + comp.file);
-                    process.exit(1);
-                  }
-                  
-                  // Verify scenario count matches
-                  const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
-                  const actualCount = spec.scenarios?.length || 0;
-                  if (comp.scenario_count !== actualCount) {
-                    console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
-                    process.exit(1);
-                  }
-                }
-                
-                console.log('✅ Index synchronized (' + index.components.length + ' components)');
-              "
-          
-          - name: stats
-            cmd: |
-              npm install -g js-yaml 2>/dev/null
-              node -e "
-                const fs = require('fs');
-                const yaml = require('js-yaml');
-                const path = require('path');
-                
-                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
-                let total = 0, critical = 0, high = 0;
-                
-                console.log('\\n📊 Spec Statistics');
-                console.log('==================');
-                
-                for (const file of files) {
-                  const spec = yaml.load(fs.readFileSync(path.join('specs/arkavo-edge', file), 'utf8'));
-                  const count = spec.scenarios?.length || 0;
-                  const crit = spec.scenarios?.filter(s => s.criticality === 'critical').length || 0;
-                  const h = spec.scenarios?.filter(s => s.criticality === 'high').length || 0;
-                  total += count; critical += crit; high += h;
-                  console.log((file + ':').padEnd(30) + count + ' (C:' + crit + ' H:' + h + ')');
-                }
-                
-                console.log('─────────────────────────────────');
-                console.log(('Total:').padEnd(30) + total + ' (C:' + critical + ' H:' + high + ')');
-              "
     steps:
       - uses: actions/checkout@v4
       
@@ -156,5 +18,136 @@ jobs:
         with:
           node-version: '20'
       
-      - name: ${{ matrix.check.name }}
-        run: ${{ matrix.check.cmd }}
+      - name: Install dependencies
+        run: npm install -g ajv ajv-formats js-yaml
+      
+      - name: Validate schema
+        run: |
+          node << 'NODE_SCRIPT'
+          const Ajv = require('ajv');
+          const addFormats = require('ajv-formats');
+          const fs = require('fs');
+          const yaml = require('js-yaml');
+          
+          const ajv = new Ajv({strict: false});
+          addFormats(ajv);
+          
+          const schema = JSON.parse(fs.readFileSync('specs/schema.json'));
+          const validate = ajv.compile(schema);
+          
+          let failed = false;
+          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          
+          for (const file of files) {
+            const content = fs.readFileSync('specs/arkavo-edge/' + file, 'utf8');
+            const spec = yaml.load(content);
+            
+            if (!validate(spec)) {
+              console.error('❌ ' + file + ':');
+              validate.errors.forEach(e => console.error('  - ' + e.instancePath + ': ' + e.message));
+              failed = true;
+            } else {
+              console.log('✅ schema: ' + file);
+            }
+          }
+          
+          process.exit(failed ? 1 : 0);
+          NODE_SCRIPT
+      
+      - name: Check required fields
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('js-yaml');
+          const path = require('path');
+          
+          const specsDir = 'specs/arkavo-edge';
+          const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.spec.yaml'));
+          let errors = [];
+          
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(specsDir, file), 'utf8');
+            const spec = yaml.load(content);
+            
+            if (!spec.feature) errors.push(file + ': Missing feature');
+            if (!spec.module) errors.push(file + ': Missing module');
+            if (!spec.version) errors.push(file + ': Missing version');
+            if (!spec.invariants) errors.push(file + ': Missing invariants');
+            if (!spec.scenarios) errors.push(file + ': Missing scenarios');
+            
+            for (const s of spec.scenarios || []) {
+              if (!s.id) errors.push(file + ': Scenario missing id');
+              if (!s.name) errors.push(file + ': Scenario missing name');
+              if (!s.criticality) errors.push(file + ': ' + s.id + ' missing criticality');
+              if (!['critical','high','medium','low'].includes(s.criticality)) {
+                errors.push(file + ': ' + s.id + ' invalid criticality');
+              }
+              if (!s.given) errors.push(file + ': ' + s.id + ' missing given');
+              if (!s.when) errors.push(file + ': ' + s.id + ' missing when');
+              if (!s.then) errors.push(file + ': ' + s.id + ' missing then');
+              if (s.id && !/^[A-Z]+-\d+$/.test(s.id)) {
+                errors.push(file + ': ' + s.id + ' invalid id format');
+              }
+            }
+          }
+          
+          if (errors.length) {
+            console.error('❌ Errors:');
+            errors.forEach(e => console.error('  - ' + e));
+            process.exit(1);
+          }
+          console.log('✅ required-fields: all fields present');
+          NODE_SCRIPT
+      
+      - name: Check index sync
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('js-yaml');
+          
+          const index = yaml.load(fs.readFileSync('specs/arkavo-edge/index.yaml', 'utf8'));
+          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          
+          for (const comp of index.components || []) {
+            if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
+              console.error('❌ Missing file: ' + comp.file);
+              process.exit(1);
+            }
+            
+            const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
+            const actualCount = spec.scenarios?.length || 0;
+            if (comp.scenario_count !== actualCount) {
+              console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
+              process.exit(1);
+            }
+          }
+          
+          console.log('✅ index-sync: ' + index.components.length + ' components');
+          NODE_SCRIPT
+      
+      - name: Generate stats
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('js-yaml');
+          const path = require('path');
+          
+          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          let total = 0, critical = 0, high = 0;
+          
+          console.log('\n📊 Spec Statistics');
+          console.log('==================');
+          
+          for (const file of files) {
+            const spec = yaml.load(fs.readFileSync(path.join('specs/arkavo-edge', file), 'utf8'));
+            const count = spec.scenarios?.length || 0;
+            const crit = spec.scenarios?.filter(s => s.criticality === 'critical').length || 0;
+            const h = spec.scenarios?.filter(s => s.criticality === 'high').length || 0;
+            total += count; critical += crit; high += h;
+            console.log((file + ':').padEnd(35) + count + ' (C:' + crit + ' H:' + h + ')');
+          }
+          
+          console.log('─────────────────────────────────────');
+          console.log(('Total:').padEnd(35) + total + ' (C:' + critical + ' H:' + high + ')');
+          console.log('');
+          NODE_SCRIPT
