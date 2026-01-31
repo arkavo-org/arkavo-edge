@@ -12,7 +12,7 @@
 use arkavo_protocol::config::ServerConfig;
 use arkavo_protocol::openrpc::generate_openrpc_schema;
 use arkavo_protocol::rate_limit::RateLimitConfig;
-use arkavo_protocol::server::A2aServer;
+use arkavo_server::A2aServer;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
 

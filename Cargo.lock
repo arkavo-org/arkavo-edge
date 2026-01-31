@@ -1378,6 +1378,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-router",
+ "arkavo-server",
  "arkavo-tdf",
  "async-trait",
  "axum",

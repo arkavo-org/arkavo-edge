@@ -69,7 +69,7 @@ pub use metrics_subscription::{
 };
 pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
-pub use rate_limit::{RateLimitConfig, RateLimiter};
+pub use rate_limit::{IpRateLimiter, RateLimitConfig, RateLimiter, spawn_cleanup_task};
 pub use registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
     VerifyResponse,

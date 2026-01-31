@@ -132,6 +132,7 @@ tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-server = { path = "../arkavo-server" }
 
 [[bin]]
 name = "export-schema"

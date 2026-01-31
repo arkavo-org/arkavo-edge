@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn test_did_key_parsing_valid() {
         // Create a valid DID:key (34 bytes: 2 prefix + 32 key)
-        let valid_did = "did:key:z6MkhaMVofF2gC8rV3h8Ym6P9NqRtWxYzAbCdEfGhIjKlMnOpQrStUv";
+        let _valid_did = "did:key:z6MkhaMVofF2gC8rV3h8Ym6P9NqRtWxYzAbCdEfGhIjKlMnOpQrStUv";
 
         // This should parse successfully (will fail if not exactly 34 bytes after decoding)
         // Note: This is a test with a placeholder DID - real test would need proper base58 encoding
