@@ -9,11 +9,14 @@ specs/
 ├── schema.json              # JSON Schema for validation
 ├── README.md                # This file
 └── arkavo-edge/             # Per-component specs
-    ├── registration.spec.yaml
-    ├── crypto.spec.yaml
-    ├── chat-session.spec.yaml
-    └── gossip-protocol.spec.yaml
+    ├── index.yaml                 # Component index with cross-references
+    ├── registration.spec.yaml     # 12 scenarios
+    ├── crypto.spec.yaml           # 11 scenarios
+    ├── chat-session.spec.yaml     # 13 scenarios
+    └── gossip-protocol.spec.yaml  # 8 scenarios
 ```
+
+**Total: 44 scenarios across 4 components**
 
 ## Specification Format
 
@@ -86,3 +89,77 @@ npx ajv-cli validate -s specs/schema.json -d "specs/**/*.spec.yaml"
 2. Update `changed:` date when modifying existing scenarios
 3. Include `refs:` pointing to relevant source code
 4. Run validation before committing
+
+## Spec Maintenance Process
+
+### When to Update Specs
+
+- **Before** any behavior change (spec-first development)
+- When adding new features or capabilities
+- When fixing bugs that change observable behavior
+- When adding new error handling or edge cases
+
+### Update Workflow
+
+1. **Update spec file**
+   - Add or modify scenario(s)
+   - Set `changed: YYYY-MM-DD` for modifications
+   - Ensure `refs:` point to correct source locations
+
+2. **Validate the spec**
+   ```bash
+   npx ajv-cli validate -s specs/schema.json -d specs/arkavo-edge/<component>.spec.yaml
+   ```
+
+3. **Update implementation**
+   - Implement behavior changes
+   - Add or update tests
+   - Ensure code matches spec
+
+4. **Update index.yaml**
+   - Increment scenario_count if adding scenarios
+   - Update last_updated date
+
+5. **PR requirements**
+   - Link spec changes in PR description
+   - Include before/after behavior diff
+   - Update version if breaking changes
+
+### Review Requirements
+
+| Change Type | Required Review |
+|-------------|-----------------|
+| Critical scenario changes | Security + Architect |
+| New error scenarios | Tech Lead |
+| Documentation only | Peer |
+| Version bump | Architect |
+
+### Versioning
+
+Specs follow semantic versioning:
+
+- **MAJOR**: Breaking behavior changes (e.g., new required field)
+- **MINOR**: New scenarios without breaking changes
+- **PATCH**: Documentation updates, typo fixes
+
+### Deprecation Policy
+
+```yaml
+# Mark deprecated scenarios
+- id: OLD-001
+  deprecated: true
+  deprecated_since: "2025-01-31"
+  replacement: NEW-001
+```
+
+Deprecated scenarios are removed after 2 major versions.
+
+### CI Enforcement
+
+All PRs are checked by `.github/workflows/specs.yml`:
+- Schema validation
+- Required field checking
+- YAML syntax validation
+- Statistics generation
+
+**Specs must pass validation before merge.**

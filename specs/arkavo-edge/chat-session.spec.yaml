@@ -142,6 +142,57 @@ scenarios:
       - Metrics reflect zombie state
     refs: [crates/arkavo-protocol/src/chat_session.rs:706-712,957-963]
 
+  - id: CHAT-011
+    name: Handle router service unavailability
+    criticality: high
+    given:
+      - Router configured as primary handler
+      - Router service returns error or times out
+    when: route_with_quality_gate fails
+    then:
+      - Returns A2aError with router error details
+      - Error delta sent to client with ROUTER_ERROR code
+      - Metrics record router failure
+      - Session remains active for retry
+    refs: [crates/arkavo-protocol/src/chat_session.rs:894-917]
+    changed: 2025-01-31
+
+  - id: CHAT-012
+    name: Handle tool execution timeout
+    criticality: high
+    given:
+      - Tool registry available
+      - Tool call requires external execution
+    when: Tool execution exceeds timeout threshold
+    then:
+      - Timeout error returned in tool result
+      - is_error=true in tool result delta
+      - Partial results included if available
+      - Session continues, tool call marked failed
+    refs: [crates/arkavo-protocol/src/chat_session.rs:803-836]
+    changed: 2025-01-31
+
+  - id: CHAT-013
+    name: Reject malformed delta message
+    criticality: medium
+    given:
+      - Delta stream processing active
+      - Incoming delta fails schema validation
+    when: Malformed delta received
+    then:
+      - Delta dropped, error logged
+      - Metrics record malformed delta
+      - Stream continues (fault isolation)
+      - Client receives ERROR delta with details
+    edge_cases:
+      - condition: Invalid UTF-8 in text content
+        expected: Sanitized or rejected with error
+      - condition: Negative sequence number
+        expected: Rejected, stream continues
+      - condition: Missing required fields
+        expected: Rejected with validation error
+    changed: 2025-01-31
+
   edge_cases:
     - condition: send_message to non-existent session
       expected: Returns A2aError::SessionNotFound
@@ -151,3 +202,5 @@ scenarios:
       expected: Returns A2aError::MessageSendFailed
     - condition: Aggregated streaming mode
       expected: Accumulates full response before sending single delta
+    - condition: Router succeeds but tool registry missing
+      expected: Tool calls logged but not executed, response still delivered

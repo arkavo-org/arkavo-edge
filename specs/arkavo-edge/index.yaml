@@ -9,7 +9,7 @@ components:
     module: arkavo_protocol::registration
     description: Device and agent onboarding with challenge-response
     criticality: critical
-    scenario_count: 9
+    scenario_count: 12
     invariants:
       - Challenge IDs are SHA-256 unique
       - 300-second TTL on challenges
@@ -31,7 +31,7 @@ components:
     module: arkavo_protocol::chat_session
     description: LLM chat session lifecycle management
     criticality: high
-    scenario_count: 10
+    scenario_count: 13
     invariants:
       - UUID v4 session IDs
       - State machine: Active → Closing → Closed
@@ -50,13 +50,15 @@ components:
 
 stats:
   total_specs: 4
-  total_scenarios: 38
-  critical_scenarios: 20
+  total_scenarios: 44
+  critical_scenarios: 24
   coverage_areas:
     - authentication
     - cryptography
     - session_management
     - distributed_consensus
+    - error_handling
+    - fault_tolerance
 
 # Cross-component behaviors
 integration_points:
