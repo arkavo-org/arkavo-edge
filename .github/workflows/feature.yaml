@@ -18,16 +18,19 @@ jobs:
         with:
           node-version: '20'
       
-      - name: Install dependencies
-        run: npm install -g ajv ajv-formats js-yaml
+      - name: Create temp package.json
+        run: |
+          cd /tmp
+          npm init -y
+          npm install ajv ajv-formats js-yaml
       
       - name: Validate schema
         run: |
           node << 'NODE_SCRIPT'
-          const Ajv = require('ajv');
-          const addFormats = require('ajv-formats');
+          const Ajv = require('/tmp/node_modules/ajv');
+          const addFormats = require('/tmp/node_modules/ajv-formats');
           const fs = require('fs');
-          const yaml = require('js-yaml');
+          const yaml = require('/tmp/node_modules/js-yaml');
           
           const ajv = new Ajv({strict: false});
           addFormats(ajv);
@@ -58,7 +61,7 @@ jobs:
         run: |
           node << 'NODE_SCRIPT'
           const fs = require('fs');
-          const yaml = require('js-yaml');
+          const yaml = require('/tmp/node_modules/js-yaml');
           const path = require('path');
           
           const specsDir = 'specs/arkavo-edge';
@@ -103,10 +106,9 @@ jobs:
         run: |
           node << 'NODE_SCRIPT'
           const fs = require('fs');
-          const yaml = require('js-yaml');
+          const yaml = require('/tmp/node_modules/js-yaml');
           
           const index = yaml.load(fs.readFileSync('specs/arkavo-edge/index.yaml', 'utf8'));
-          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
           
           for (const comp of index.components || []) {
             if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
@@ -129,7 +131,7 @@ jobs:
         run: |
           node << 'NODE_SCRIPT'
           const fs = require('fs');
-          const yaml = require('js-yaml');
+          const yaml = require('/tmp/node_modules/js-yaml');
           const path = require('path');
           
           const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
