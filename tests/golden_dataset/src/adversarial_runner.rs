@@ -178,7 +178,7 @@ impl AdversarialRunner {
                     collector.record_critic_check(CriticCheckResult {
                         check_id: evidence.check_id.clone(),
                         passed: evidence.status.is_passed(),
-                        latency_ms: evidence.latency_ms,
+                        latency_ms: evidence.latency_us / 1000, // Convert us to ms
                         severity: Some(format!("{:?}", evidence.severity)),
                         message: Some(evidence.description.clone()),
                     });
