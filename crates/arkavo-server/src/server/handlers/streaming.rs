@@ -2,7 +2,7 @@ use arkavo_llm::{DeltaStream, DeltaType, LlmClientAdapter, StreamId, StreamLlmMo
 use arkavo_protocol::chat_session::ChatSessionManager;
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
-use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent, StreamEndReason};
+use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent};
 use futures::StreamExt;
 use jsonrpsee::{PendingSubscriptionSink, SubscriptionMessage, core::SubscriptionResult};
 use std::sync::Arc;

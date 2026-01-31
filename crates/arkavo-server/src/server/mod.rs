@@ -55,7 +55,7 @@ use arkavo_protocol::types::{
     AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, AgentSpecializeRequest,
     AgentSpecializeResponse, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
-    KasRewrapRequest, KasRewrapResponse, MessageDelta, MessageSendRequest, MessageSendResponse,
+    KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
     TaskGetResponse, TaskResponse, UserMessage,
 };

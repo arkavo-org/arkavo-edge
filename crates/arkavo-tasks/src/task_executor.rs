@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, interval};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 /// Configuration for task executor.
@@ -135,7 +135,7 @@ impl TaskExecutor {
     }
 
     /// Shutdown the task executor.
-    pub async fn shutdown(&self) -> Result<()> {
+    pub fn shutdown(&self) -> Result<()> {
         let _ = self.shutdown_tx.send(());
         Ok(())
     }
@@ -256,7 +256,7 @@ impl TaskExecutor {
         self.store.update_task(task).await?;
 
         self.metrics
-            .record_task_status_change(&format!("{:?}", old_status), "Completed");
+            .record_task_status_change(&format!("{old_status:?}"), "Completed");
 
         self.event_tx
             .send(TaskEvent::Completed { task_id: *task_id })

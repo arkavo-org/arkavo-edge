@@ -4,9 +4,8 @@ use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::openrpc;
 use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{
-    AgentCapabilitiesGetResponse, AgentDiscoverFilter, DiscoverFeaturesDisclose,
-    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, InteractionMode,
-    McpToolInfo,
+    AgentDiscoverFilter, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType,
 };
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
