@@ -1,0 +1,82 @@
+feature: Configuration Transport over A2A
+module: arkavo_config_transport
+version: 0.57.1
+
+invariants:
+  - Encrypted bundles transported via A2A agent.config.* RPC
+  - Payloads signed by orchestrator
+  - Transport envelope includes version
+  - Base64 encoding for binary data
+
+scenarios:
+  - id: CFGT-001
+    name: Create transport client
+    criticality: high
+    given:
+      - A2A client available
+      - Target agent identified
+    when: ConfigTransportClient::new called
+    then:
+      - Client configured
+      - A2A connection ready
+    refs: [crates/arkavo-config-transport/src/client.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: CFGT-002
+    name: Send encrypted bundle to agent
+    criticality: critical
+    given:
+      - Client initialized
+      - EncryptedBundle available
+      - Signature computed
+    when: send_bundle called
+    then:
+      - Bundle encoded to Base64
+      - TransportEnvelope created
+      - A2A agent.config.update sent
+      - Acknowledgment awaited
+    refs: [crates/arkavo-config-transport/src/client.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Agent unreachable
+        expected: Transport error, retry
+      - condition: Signature invalid
+        expected: Rejection by target
+      - condition: Bundle too large
+        expected: Size limit error
+
+  - id: CFGT-003
+    name: Receive bundle on transport server
+    criticality: critical
+    given:
+      - Server running
+      - agent.config.update received
+    when: ConfigTransportServer processes
+    then:
+      - Envelope validated
+      - Signature verified
+      - Bundle decoded
+      - Applied to agent config
+    refs: [crates/arkavo-config-transport/src/server.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Version mismatch
+        expected: Protocol version error
+      - condition: Unknown payload type
+        expected: Unsupported type error
+      - condition: Base64 decode fails
+        expected: Decode error
+
+  - id: CFGT-004
+    name: Request config from agent
+    criticality: medium
+    given:
+      - Client connected
+      - Config key specified
+    when: get_config called
+    then:
+      - agent.config.get sent
+      - Response awaited
+      - Config value returned
+    refs: [crates/arkavo-config-transport/src/client.rs:100-150]
+    changed: "2025-01-31"

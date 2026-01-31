@@ -1,0 +1,110 @@
+feature: Device Attestation and Security State
+module: arkavo_attestation
+version: 0.57.1
+
+invariants:
+  - Platform evidence collected via attestor trait
+  - "Security state: Trusted, Suspicious, Compromised, Unknown"
+  - "Attestation types: TPM Quote, Secure Enclave, Software Fingerprint"
+  - Evidence includes timestamp and device ID
+
+scenarios:
+  - id: ATT-001
+    name: Detect platform code
+    criticality: high
+    given:
+      - Running on supported platform
+    when: detect_platform_code called
+    then:
+      - OS detected
+      - Architecture identified
+      - Platform code returned (e.g., "macos-arm64")
+    refs: [crates/arkavo-attestation/src/lib.rs:77-90]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Unsupported platform
+        expected: Generic code or error
+
+  - id: ATT-002
+    name: Create platform evidence from identity
+    criticality: critical
+    given:
+      - AgentIdentity available
+      - Platform code known
+    when: PlatformEvidence::from_agent_identity called
+    then:
+      - Device ID captured
+      - Platform state set to Unknown
+      - Timestamp recorded
+      - Evidence blob initialized
+    refs: [crates/arkavo-attestation/src/lib.rs:47-62]
+    changed: "2025-01-31"
+
+  - id: ATT-003
+    name: Collect evidence via platform attestor
+    criticality: critical
+    given:
+      - PlatformAttestor implemented
+      - Hardware attestation available
+    when: collect_evidence called
+    then:
+      - TPM quote or secure enclave data gathered
+      - Evidence blob populated
+      - Security state assessed
+    refs: [crates/arkavo-attestation/src/lib.rs:64-68]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Hardware unavailable
+        expected: Software fingerprint fallback
+      - condition: Attestation fails
+        expected: Error with fallback options
+
+  - id: ATT-004
+    name: Get security state
+    criticality: high
+    given:
+      - Attestor initialized
+      - Evidence collected
+    when: get_security_state called
+    then:
+      - State evaluated (Trusted/Suspicious/Compromised/Unknown)
+      - Cached value returned
+    refs: [crates/arkavo-attestation/src/lib.rs:66-68]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Evidence stale
+        expected: Re-collect before assessment
+      - condition: Indicators mixed
+        expected: Most conservative state
+
+  - id: ATT-005
+    name: Report attestation capabilities
+    criticality: medium
+    given:
+      - Platform analyzed
+    when: get_capabilities called
+    then:
+      - AttestationType returned
+      - Freshness support indicated
+      - Hardware binding support noted
+    refs: [crates/arkavo-attestation/src/lib.rs:70-76]
+    changed: "2025-01-31"
+
+  - id: ATT-006
+    name: Validate evidence freshness
+    criticality: high
+    given:
+      - PlatformEvidence with timestamp
+      - Maximum age threshold
+    when: Freshness checked
+    then:
+      - Age calculated
+      - Within threshold accepted
+      - Expired rejected
+    refs: [crates/arkavo-attestation/src/evidence.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Clock skew detected
+        expected: Tolerance applied
+      - condition: Future timestamp
+        expected: Validation error

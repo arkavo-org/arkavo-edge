@@ -1,0 +1,152 @@
+feature: TDF Iroh P2P Transport
+module: crate::tdf_iroh
+version: 0.57.1
+
+invariants:
+  - Transport handles raw bytes only, no encryption
+  - Tickets are self-contained and transferable
+  - Embedded Iroh node lifecycle managed automatically
+  - Content-addressed storage ensures data integrity
+
+scenarios:
+  - id: IROH-001
+    name: Create Iroh transport
+    criticality: critical
+    given:
+      - System has network access
+      - Iroh node can be spawned
+    when: IrohTransport::new is called
+    then:
+      - Embedded node starts
+      - Blob store is initialized
+      - Network stack ready
+      - Transport ready for operations
+    refs: [crates/arkavo-tdf-iroh/src/transport.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Port already in use
+        expected: Auto-selects alternative port
+      - condition: Insufficient disk space
+        expected: IrohError with space requirements
+
+  - id: IROH-002
+    name: Stage blob data
+    criticality: critical
+    given:
+      - Transport is initialized
+      - Data bytes are provided
+    when: stage is called
+    then:
+      - Data is written to blob store
+      - Content hash computed
+      - Ticket created with hash and node info
+      - Data is now available for fetch
+    refs: [crates/arkavo-tdf-iroh/src/transport.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Empty data
+        expected: Valid ticket for zero-length blob
+      - condition: Large data (GBs)
+        expected: Streaming write with progress
+
+  - id: IROH-003
+    name: Fetch blob via ticket
+    criticality: critical
+    given:
+      - Valid ticket from peer
+      - Transport is initialized
+    when: fetch is called with ticket
+    then:
+      - Ticket is parsed for hash and node info
+      - P2P connection established
+      - Blob retrieved from peer
+      - Data returned as bytes
+    refs: [crates/arkavo-tdf-iroh/src/transport.rs:100-150]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Peer unreachable
+        expected: Timeout error with retry options
+      - condition: Data not found
+        expected: HashNotFound error
+
+  - id: IROH-004
+    name: Serialize and deserialize ticket
+    criticality: high
+    given:
+      - IrohTicket is created
+    when: Serialization occurs
+    then:
+      - Ticket converts to string format
+      - Contains node ID and hash
+      - Deserialization reconstructs ticket
+      - Round-trip preserves data
+    refs: [crates/arkavo-tdf-iroh/src/ticket.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid ticket format
+        expected: Parse error with format hint
+      - condition: Ticket version mismatch
+        expected: Version-specific handling
+
+  - id: IROH-005
+    name: Manage Iroh node lifecycle
+    criticality: high
+    given:
+      - Node configuration provided
+    when: Node starts, runs, stops
+    then:
+      - Node binds to network
+      - Accepts incoming connections
+      - Graceful shutdown on drop
+      - Resources cleaned up
+    refs: [crates/arkavo-tdf-iroh/src/node.rs:1-80]
+    changed: "2025-01-31"
+
+  - id: IROH-006
+    name: Configure node parameters
+    criticality: medium
+    given:
+      - IrohNodeConfig is created
+    when: Config is applied
+    then:
+      - Listen addresses set
+      - Blob store path configured
+      - RPC enabled/disabled per settings
+      - Relay settings applied
+    refs: [crates/arkavo-tdf-iroh/src/node.rs:80-120]
+    changed: "2025-01-31"
+
+  - id: IROH-007
+    name: Handle transport errors
+    criticality: high
+    given:
+      - Transport operation fails
+    when: Error occurs
+    then:
+      - IrohError is returned
+      - Error context preserved
+      - Retryable errors identified
+      - Recovery suggestions included
+    refs: [crates/arkavo-tdf-iroh/src/error.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Network partition
+        expected: Connectivity error with diagnostics
+      - condition: Storage full
+        expected: Storage error with cleanup hint
+
+  - id: IROH-008
+    name: Integrate with TDF encryptor
+    criticality: high
+    given:
+      - TdfEncryptor encrypts data
+      - IrohTransport stages data
+    when: Encrypted blob is shared
+    then:
+      - Encryption occurs first
+      - Encrypted bytes staged
+      - Ticket shared over control plane
+      - Fetch yields encrypted data
+      - Decryption by recipient
+    refs: [crates/arkavo-tdf-iroh/src/lib.rs:15-34]
+    changed: "2025-01-31"

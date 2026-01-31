@@ -1,0 +1,171 @@
+feature: A2A Protocol and Agent Communication
+module: arkavo_protocol
+version: 0.57.1
+
+invariants:
+  - A2A protocol enables agent-to-agent communication
+  - WebSocket and HTTP transports supported
+  - Registration with challenge-response authentication
+  - Task execution with persistence
+  - mDNS discovery for local agents
+
+scenarios:
+  - id: PROTO-001
+    name: Create A2A server
+    criticality: critical
+    given:
+      - Configuration provided
+      - Transport configured
+    when: A2aServer::new called
+    then:
+      - Server initialized
+      - Transports bound
+      - Ready for connections
+    refs: [crates/arkavo-protocol/src/server.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: PROTO-002
+    name: Establish WebSocket transport
+    criticality: critical
+    given:
+      - WebSocket endpoint specified
+      - TLS configured
+    when: WebSocketTransport::new called
+    then:
+      - Connection established
+      - Bidirectional messaging ready
+      - Framing protocol applied
+    refs: [crates/arkavo-protocol/src/websocket.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: TLS handshake fails
+        expected: Security error
+      - condition: Connection timeout
+        expected: Timeout error
+
+  - id: PROTO-003
+    name: Send A2A request
+    criticality: critical
+    given:
+      - Transport connected
+      - Request serialized
+    when: A2aTransport::send called
+    then:
+      - Request framed
+      - Sent over transport
+      - Response awaited
+    refs: [crates/arkavo-protocol/src/transport.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: PROTO-004
+    name: Handle agent discovery via mDNS
+    criticality: high
+    given:
+      - mDNS feature enabled
+      - Network available
+    when: DiscoveryService::discover called
+    then:
+      - mDNS browse started
+      - Agents discovered
+      - Service info extracted
+    refs: [crates/arkavo-protocol/src/discovery.rs:1-60, crates/arkavo-protocol/src/mdns.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: mDNS unavailable
+        expected: Discovery error
+      - condition: No agents found
+        expected: Empty result
+
+  - id: PROTO-005
+    name: Bridge A2A to MCP
+    criticality: high
+    given:
+      - A2A message received
+      - MCP tool invoked
+    when: A2aMcpBridge::convert called
+    then:
+      - A2A parsed
+      - MCP request created
+      - Response bridged back
+    refs: [crates/arkavo-protocol/src/a2a_mcp_bridge.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: PROTO-006
+    name: Execute task with persistence
+    criticality: critical
+    given:
+      - TaskExecutor initialized
+      - TaskStore available
+      - Task defined
+    when: TaskExecutor::execute called
+    then:
+      - Task persisted
+      - Execution started
+      - Events logged
+      - Completion saved
+    refs: [crates/arkavo-protocol/src/task_executor.rs:1-60, crates/arkavo-protocol/src/task_store.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Store unavailable
+        expected: Execution continues, warning logged
+      - condition: Crash mid-execution
+        expected: Recovery from persisted state
+
+  - id: PROTO-007
+    name: Enforce rate limiting
+    criticality: high
+    given:
+      - RateLimiter configured
+      - Request arrives
+    when: RateLimiter::check called
+    then:
+      - Limit checked
+      - Status returned (allow/deny)
+      - Cleanup scheduled
+    refs: [crates/arkavo-protocol/src/rate_limit.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Limit exceeded
+        expected: RateLimitStatus::Exceeded
+      - condition: IP not tracked
+        expected: New entry created
+
+  - id: PROTO-008
+    name: Configure agent security
+    criticality: critical
+    given:
+      - Security settings provided
+    when: SecurityConfig::apply called
+    then:
+      - AuthMethod set
+      - TLS version configured
+      - Settings validated
+    refs: [crates/arkavo-protocol/src/security.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: PROTO-009
+    name: Collect RPC metrics
+    criticality: medium
+    given:
+      - MetricsCollector active
+      - RPC executed
+    when: RpcTimer::record called
+    then:
+      - Latency measured
+      - Counter incremented
+      - Histogram updated
+    refs: [crates/arkavo-protocol/src/metrics.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: PROTO-010
+    name: Handle protocol errors
+    criticality: high
+    given:
+      - Protocol operation fails
+    when: Error propagates
+    then:
+      - A2aError created
+      - Transport errors wrapped
+      - Context preserved
+    refs: [crates/arkavo-protocol/src/error.rs:1-40]
+    changed: "2025-01-31"

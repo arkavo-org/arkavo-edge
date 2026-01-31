@@ -1,0 +1,144 @@
+feature: EVM Wallet with secp256k1 Cryptography
+module: arkavo_wallet
+version: 0.57.1
+
+invariants:
+  - All crypto operations offline (no RPC calls)
+  - secp256k1 for key generation and signing
+  - EIP-55 checksum for addresses
+  - BIP39/BIP44 standard compliance
+
+scenarios:
+  - id: WAL-001
+    name: Generate BIP39 mnemonic
+    criticality: critical
+    given:
+      - CSPRNG available
+      - Wordlist loaded
+    when: Mnemonic::generate is called
+    then:
+      - 128-256 bits entropy generated
+      - Checksum computed
+      - 12-24 words selected
+      - Mnemonic phrase returned
+    refs: [crates/arkavo-wallet/src/mnemonic.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Entropy source failure
+        expected: Error, operation fails
+      - condition: Invalid wordlist
+        expected: WordlistError
+
+  - id: WAL-002
+    name: Create HD wallet from mnemonic
+    criticality: critical
+    given:
+      - Valid mnemonic provided
+      - Optional passphrase
+    when: HdWallet::from_mnemonic is called
+    then:
+      - Seed derived via PBKDF2
+      - Master key generated
+      - Derivation path ready
+      - Wallet instance returned
+    refs: [crates/arkavo-wallet/src/hd.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid mnemonic checksum
+        expected: Validation error
+      - condition: Empty mnemonic
+        expected: Invalid input error
+
+  - id: WAL-003
+    name: Derive Ethereum keypair
+    criticality: critical
+    given:
+      - HD wallet initialized
+      - Account index provided
+    when: derive_ethereum is called
+    then:
+      - BIP44 path m/44'/60'/0'/0/index used
+      - Private key derived
+      - Public key computed (secp256k1)
+      - EvmKeypair with address returned
+    refs: [crates/arkavo-wallet/src/hd.rs:60-100, crates/arkavo-wallet/src/keypair.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Hardened derivation needed
+        expected: Hardened flag used
+      - condition: Index out of bounds
+        expected: IndexTooLarge error
+
+  - id: WAL-004
+    name: Build and sign transaction
+    criticality: critical
+    given:
+      - EvmKeypair has funds
+      - Transaction parameters set
+      - Chain ID specified
+    when: Transaction::sign is called
+    then:
+      - Transaction serialized (RLP)
+      - Hash computed (keccak256)
+      - Signature created (secp256k1)
+      - SignedTransaction returned
+    refs: [crates/arkavo-wallet/src/transaction.rs:1-80, crates/arkavo-wallet/src/signature.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Insufficient funds (validation)
+        expected: Warning (offline, no balance check)
+      - condition: Invalid chain ID
+        expected: InvalidChain error
+      - condition: Gas limit too low
+        expected: Validation warning
+
+  - id: WAL-005
+    name: Recover signer from transaction
+    criticality: high
+    given:
+      - SignedTransaction available
+    when: recover_signer is called
+    then:
+      - Signature parsed
+      - Public key recovered
+      - Address derived
+      - EvmAddress returned
+    refs: [crates/arkavo-wallet/src/signature.rs:50-80, crates/arkavo-wallet/src/transaction.rs:80-120]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid signature format
+        expected: Parse error
+      - condition: Recovery ID invalid
+        expected: RecoveryError
+
+  - id: WAL-006
+    name: Generate EIP-55 checksummed address
+    criticality: medium
+    given:
+      - Raw address bytes (20)
+    when: EvmAddress::to_checksum is called
+    then:
+      - Keccak256 hash of lowercase hex
+      - Mixed case applied per hash nibbles
+      - Checksummed string returned
+    refs: [crates/arkavo-wallet/src/address.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Verify checksum fails
+        expected: false returned
+      - condition: All lowercase input
+        expected: Valid checksum (case insensitive)
+
+  - id: WAL-007
+    name: Export to DID key format
+    criticality: low
+    given:
+      - EvmKeypair has public key
+    when: to_did_key is called
+    then:
+      - Public key extracted
+      - Multicodec prefix added (secp256k1)
+      - Base58 encoded
+      - did:key:z... format returned
+    refs: [crates/arkavo-wallet/src/keypair.rs:50-80]
+    changed: "2025-01-31"

@@ -1,0 +1,98 @@
+feature: UI Code Generation
+module: arkavo_ui_generator
+version: 0.57.1
+
+invariants:
+  - UI generated from intent and context
+  - Router used for model selection
+  - HTML/CSS/JS output
+  - Cost and timing tracked
+
+scenarios:
+  - id: UIG-001
+    name: Initialize UI generator
+    criticality: high
+    given:
+      - Router available
+    when: UiGenerator::new called
+    then:
+      - Router connected
+      - Prompt builder ready
+      - Renderer initialized
+    refs: [crates/arkavo-ui-generator/src/lib.rs:70-85]
+    changed: "2025-01-31"
+
+  - id: UIG-002
+    name: Generate UI from intent
+    criticality: critical
+    given:
+      - User intent provided
+      - Context available
+      - Preferences set
+    when: generate called
+    then:
+      - Prompt built
+      - LLM invoked via router
+      - Response parsed
+      - GeneratedUi returned
+    refs: [crates/arkavo-ui-generator/src/lib.rs:85-120]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Intent ambiguous
+        expected: Clarification requested
+      - condition: Generation fails
+        expected: Error with partial result
+
+  - id: UIG-003
+    name: Build generation prompt
+    criticality: medium
+    given:
+      - Intent and context available
+    when: PromptBuilder::build called
+    then:
+      - Template selected
+      - Variables populated
+      - Prompt formatted
+    refs: [crates/arkavo-ui-generator/src/prompt.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: UIG-004
+    name: Render generated code
+    criticality: medium
+    given:
+      - LLM response received
+    when: CodeRenderer::render called
+    then:
+      - HTML extracted
+      - CSS extracted
+      - JavaScript extracted
+      - Structured output
+    refs: [crates/arkavo-ui-generator/src/renderer.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: UIG-005
+    name: Track generation metadata
+    criticality: low
+    given:
+      - Generation complete
+    when: Metadata captured
+    then:
+      - Model recorded
+      - Time measured
+      - Cost calculated
+      - Version tracked
+    refs: [crates/arkavo-ui-generator/src/lib.rs:60-68]
+    changed: "2025-01-31"
+
+  - id: UIG-006
+    name: Stream UI generation progress
+    criticality: medium
+    given:
+      - Streaming requested
+    when: streaming::handle_progress called
+    then:
+      - Chunks received
+      - Progress emitted
+      - Completion signaled
+    refs: [crates/arkavo-ui-generator/src/streaming.rs:1-50]
+    changed: "2025-01-31"

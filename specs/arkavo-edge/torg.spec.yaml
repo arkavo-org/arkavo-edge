@@ -1,0 +1,145 @@
+feature: TØRG Constrained Decoding for Policy Graphs
+module: arkavo_torg
+version: 0.57.1
+
+invariants:
+  - Token mapping bridges model vocabulary to TØRG tokens
+  - Logit masking enforces valid graph syntax during generation
+  - Sampler state tracks partial graph construction
+  - Graph evaluation completes in under 1 microsecond
+
+scenarios:
+  - id: TORG-001
+    name: Create Qwen3 token mapping from vocabulary
+    criticality: high
+    given:
+      - Qwen3 model vocabulary available
+      - Token IDs mapped to TØRG tokens
+    when: Qwen3TokenMap::from_vocab is called
+    then:
+      - Vocabulary parsed for special tokens
+      - Token IDs mapped to graph tokens
+      - TokenMapping struct returned
+    refs: [crates/arkavo-torg/src/qwen3.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Unknown token in vocab
+        expected: Warning, token skipped
+      - condition: Missing required token
+        expected: TokenMapping error
+
+  - id: TORG-002
+    name: Create Ministral token mapping
+    criticality: high
+    given:
+      - Ministral model vocabulary available
+    when: MinistralTokenMap::from_vocab is called
+    then:
+      - Ministral-specific tokens handled
+      - Mapping compatible with Mistral format
+      - TokenMapping ready for sampler
+    refs: [crates/arkavo-torg/src/ministral.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: TORG-003
+    name: Initialize TorgLlamaSampler
+    criticality: critical
+    given:
+      - TokenMapping created
+      - Vocabulary size known
+    when: TorgLlamaSampler::new is called
+    then:
+      - Sampler state initialized
+      - ConstrainedDecoder created
+      - Ready for token feeding
+    refs: [crates/arkavo-torg/src/sampler.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: TORG-004
+    name: Get logit bias for current decoder state
+    criticality: critical
+    given:
+      - Sampler is initialized
+      - Decoder has current state
+    when: get_logit_bias is called
+    then:
+      - Valid next tokens computed
+      - Invalid tokens receive -inf bias
+      - Bias array returned for vocab
+    refs: [crates/arkavo-torg/src/sampler.rs:60-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Dead-end state reached
+        expected: All tokens invalid, error state
+      - condition: Graph complete
+        expected: EOS token only valid
+
+  - id: TORG-005
+    name: Feed sampled token to advance state
+    criticality: critical
+    given:
+      - Sampler has current state
+      - Token was sampled from biased distribution
+    when: feed_token is called
+    then:
+      - Token validated against mapping
+      - Decoder state advanced
+      - Partial graph updated
+    refs: [crates/arkavo-torg/src/sampler.rs:100-140]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid token for state
+        expected: DecodeError with state info
+      - condition: Token ID out of range
+        expected: InvalidToken error
+
+  - id: TORG-006
+    name: Finish sampling and extract graph
+    criticality: critical
+    given:
+      - Sampling complete (EOS reached)
+      - Sampler has final state
+    when: finish is called
+    then:
+      - Complete graph built from tokens
+      - Graph validated
+      - Graph struct returned
+    refs: [crates/arkavo-torg/src/sampler.rs:140-180]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Incomplete graph
+        expected: BuildError with missing parts
+      - condition: Invalid graph structure
+        expected: Validation error
+
+  - id: TORG-007
+    name: Evaluate graph on inputs
+    criticality: critical
+    given:
+      - Valid Graph constructed
+      - Input values provided
+    when: graph.evaluate is called
+    then:
+      - Boolean operations executed
+      - All outputs computed
+      - Result returned (<1μs)
+    refs: [crates/arkavo-torg/src/lib.rs:30-35]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Input count mismatch
+        expected: EvalError with details
+      - condition: Circular reference
+        expected: Detection and error
+
+  - id: TORG-008
+    name: Format TØRG system prompt
+    criticality: medium
+    given:
+      - Prompt template loaded
+    when: format_prompt is called
+    then:
+      - Template populated with context
+      - Valid for constrained decoding
+      - Prompt string returned
+    refs: [crates/arkavo-torg/src/prompt.rs:1-50]
+    changed: "2025-01-31"

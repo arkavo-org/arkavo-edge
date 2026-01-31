@@ -1,0 +1,104 @@
+feature: TØRG Compiled Circuits with Pre-allocated Buffers
+module: arkavo_torg_circuits
+version: 0.57.1
+
+invariants:
+  - Compiled circuits have pre-allocated input/output buffers
+  - Zero-allocation during evaluation (nanosecond operation)
+  - Feature map length must match circuit inputs
+  - Thread-safe via parking_lot::Mutex
+
+scenarios:
+  - id: TRC-001
+    name: Compile circuit from graph and features
+    criticality: critical
+    given:
+      - TØRG Graph available
+      - Feature extractors defined
+      - Feature count matches inputs
+    when: CompiledCircuit::new is called
+    then:
+      - Graph stored in circuit
+      - Feature map validated
+      - Input buffer allocated
+      - Output buffer allocated
+    refs: [crates/arkavo-torg-circuits/src/lib.rs:40-75]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Feature count mismatch
+        expected: Panic with detailed message
+      - condition: Empty graph
+        expected: Zero-size buffers
+
+  - id: TRC-002
+    name: Evaluate circuit with feature extraction
+    criticality: critical
+    given:
+      - CompiledCircuit initialized
+      - Input data provided
+    when: evaluate is called
+    then:
+      - Input buffer locked
+      - Features extracted into buffer
+      - Circuit evaluated
+      - First failing output index returned (or None)
+    refs: [crates/arkavo-torg-circuits/src/lib.rs:77-99]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: All outputs true
+        expected: None returned (policy passes)
+      - condition: Multiple failures
+        expected: First failure index only
+      - condition: Evaluation panics
+        expected: Poisoned mutex handling
+
+  - id: TRC-003
+    name: Implement CircuitFeature trait
+    criticality: high
+    given:
+      - Custom feature type defined
+      - Input type specified
+    when: CircuitFeature methods called
+    then:
+      - extract returns bool from input
+      - name returns descriptive string
+      - Trait bounds satisfied
+    refs: [crates/arkavo-torg-circuits/src/lib.rs:13-25]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Input missing feature
+        expected: Default value (false)
+      - condition: Complex extraction
+        expected: Synchronous computation
+
+  - id: TRC-004
+    name: Thread-safe concurrent evaluations
+    criticality: high
+    given:
+      - CompiledCircuit shared across threads
+      - Multiple evaluations requested
+    when: Concurrent evaluate calls occur
+    then:
+      - Mutex locks prevent data races
+      - Evaluations serialized safely
+      - No buffer corruption
+    refs: [crates/arkavo-torg-circuits/src/lib.rs:30-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: High contention
+        expected: parking_lot optimizes for this
+      - condition: Lock poisoned
+        expected: Error propagated
+
+  - id: TRC-005
+    name: Zero-allocation evaluation performance
+    criticality: medium
+    given:
+      - Circuit compiled and ready
+    when: evaluate runs repeatedly
+    then:
+      - No heap allocations during eval
+      - Stack-only operations
+      - Consistent nanosecond latency
+    refs: [crates/arkavo-torg-circuits/src/lib.rs:85-95]
+    changed: "2025-01-31"

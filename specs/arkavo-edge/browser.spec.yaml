@@ -1,0 +1,104 @@
+feature: Browser Automation and Live Injection
+module: arkavo_browser
+version: 0.57.1
+
+invariants:
+  - BrowserTool provides MCP-compatible browser automation
+  - LiveInjector enables runtime script injection
+  - Page navigation and element interaction supported
+  - Screenshots and PDF generation available
+
+scenarios:
+  - id: BROWS-001
+    name: Create browser tool instance
+    criticality: high
+    given:
+      - Browser automation backend available
+    when: BrowserTool::new called
+    then:
+      - Browser instance initialized
+      - Ready for automation
+    refs: [crates/arkavo-browser/src/browser.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: BROWS-002
+    name: Navigate to URL
+    criticality: high
+    given:
+      - BrowserTool initialized
+      - Valid URL provided
+    when: navigate_to called
+    then:
+      - Page loads
+      - DOM ready
+      - Navigation complete
+    refs: [crates/arkavo-browser/src/browser.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid URL
+        expected: Navigation error
+      - condition: Timeout
+        expected: Timeout error
+
+  - id: BROWS-003
+    name: Inject script into page
+    criticality: high
+    given:
+      - Page loaded
+      - JavaScript provided
+    when: LiveInjector::inject called
+    then:
+      - Script executed in page context
+      - Results returned
+    refs: [crates/arkavo-browser/src/live_inject.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Script error
+        expected: Error details returned
+      - condition: CSP blocks injection
+        expected: CSP error
+
+  - id: BROWS-004
+    name: Click element by selector
+    criticality: medium
+    given:
+      - Page loaded
+      - Element exists
+    when: click_element called
+    then:
+      - Element found
+      - Click event fired
+      - Page updates if applicable
+    refs: [crates/arkavo-browser/src/browser.rs:100-150]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Element not found
+        expected: NotFound error
+      - condition: Element not clickable
+        expected: Interactability error
+
+  - id: BROWS-005
+    name: Extract page content
+    criticality: medium
+    given:
+      - Page loaded
+    when: get_content called
+    then:
+      - Text content extracted
+      - Structured data parsed
+      - Results returned
+    refs: [crates/arkavo-browser/src/browser.rs:150-200]
+    changed: "2025-01-31"
+
+  - id: BROWS-006
+    name: Handle browser errors
+    criticality: high
+    given:
+      - Browser operation fails
+    when: Error propagates
+    then:
+      - BrowserError created
+      - Context preserved
+      - Recovery suggestions included
+    refs: [crates/arkavo-browser/src/error.rs:1-40]
+    changed: "2025-01-31"

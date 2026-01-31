@@ -1,0 +1,122 @@
+feature: MCP Runtime Implementation
+module: arkavo_mcp_runtime
+version: 0.57.1
+
+invariants:
+  - Server handles JSON-RPC 2.0 protocol
+  - Client connections managed via ClientHandle
+  - Tools execute with timeout and cancellation
+  - Transports support stdio, SSE, and WebSocket
+
+scenarios:
+  - id: MCPR-001
+    name: Create MCP server
+    criticality: critical
+    given:
+      - Transport configured
+      - Tools registered
+    when: McpServer::new is called
+    then:
+      - Server state initialized
+      - Transport bound
+      - Ready to accept connections
+    refs: [crates/arkavo-mcp-runtime/src/server.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: MCPR-002
+    name: Accept client connection
+    criticality: critical
+    given:
+      - Server is running
+      - Client attempts connection
+    when: Connection established
+    then:
+      - ClientHandle created
+      - State tracked
+      - Capabilities exchanged
+    refs: [crates/arkavo-mcp-runtime/src/client.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Duplicate client ID
+        expected: Reject or replace existing
+      - condition: Max clients reached
+        expected: Connection refused
+
+  - id: MCPR-003
+    name: Execute tool with timeout
+    criticality: critical
+    given:
+      - Client connected
+      - Tool registered
+      - Request received
+    when: Tool invoked
+    then:
+      - Tool executes with deadline
+      - Result or timeout returned
+      - Cancellation supported
+    refs: [crates/arkavo-mcp-runtime/src/runtime.rs:1-60, crates/arkavo-mcp-runtime/src/tools.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Tool panics
+        expected: Error response, isolation
+      - condition: Timeout occurs
+        expected: Timeout error, cleanup
+
+  - id: MCPR-004
+    name: Create stdio transport
+    criticality: high
+    given:
+      - Stdio available
+    when: StdioTransport::new called
+    then:
+      - stdin/stdout wrapped
+      - JSON-RPC framing applied
+      - Transport ready
+    refs: [crates/arkavo-mcp-runtime/src/transport.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: MCPR-005
+    name: Create SSE transport
+    criticality: high
+    given:
+      - HTTP server available
+      - Endpoint configured
+    when: SseTransport created
+    then:
+      - Server-sent events configured
+      - Bidirectional over HTTP
+      - Connection managed
+    refs: [crates/arkavo-mcp-runtime/src/transport.rs:50-100]
+    changed: "2025-01-31"
+
+  - id: MCPR-006
+    name: Poll endpoint with adaptive backoff
+    criticality: medium
+    given:
+      - PollableEndpoint configured
+      - Polling strategy set
+    when: poll executed
+    then:
+      - Initial interval used
+      - Backoff on empty responses
+      - Reset on new data
+    refs: [crates/arkavo-mcp-runtime/src/polling.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Endpoint unreachable
+        expected: Exponential backoff
+      - condition: Max backoff exceeded
+        expected: Error or continue
+
+  - id: MCPR-007
+    name: Handle runtime errors
+    criticality: high
+    given:
+      - Runtime operation fails
+    when: Error occurs
+    then:
+      - RuntimeError created
+      - Transport errors classified
+      - Client errors propagated
+    refs: [crates/arkavo-mcp-runtime/src/runtime.rs:60-100]
+    changed: "2025-01-31"

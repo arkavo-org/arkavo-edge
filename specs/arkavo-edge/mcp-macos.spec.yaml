@@ -1,0 +1,168 @@
+feature: MCP macOS Test Harness
+module: crate::mcp_macos
+version: 0.57.1
+
+invariants:
+  - Only functional on macOS targets
+  - iOS simulator tests require valid device bundle
+  - Gherkin scenarios must parse without ambiguity
+  - State transitions are atomic and observable
+
+scenarios:
+  - id: MCPM-001
+    name: Initialize test harness
+    criticality: critical
+    given:
+      - Running on macOS platform
+      - Test configuration is provided
+    when: TestHarness is created
+    then:
+      - State store is initialized
+      - Bridge to simulator is ready
+      - Execution context is prepared
+      - Harness is in idle state
+    refs: [crates/arkavo-mcp-macos/src/lib.rs:75-120]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Not running on macOS
+        expected: NotAvailableOnThisPlatform struct provided
+      - condition: Simulator not installed
+        expected: Bridge error with installation instructions
+
+  - id: MCPM-002
+    name: Parse Gherkin feature file
+    criticality: high
+    given:
+      - Valid Gherkin syntax
+      - Feature file exists
+    when: Feature is parsed
+    then:
+      - Features, scenarios, steps extracted
+      - Background steps are associated
+      - Tags are preserved
+      - Data tables are parsed
+    refs: [crates/arkavo-mcp-macos/src/gherkin.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Syntax error in feature
+        expected: GherkinParse error with line number
+      - condition: Undefined step
+        expected: Warning with suggestion
+
+  - id: MCPM-003
+    name: Execute test scenario
+    criticality: critical
+    given:
+      - Feature is parsed
+      - Step definitions are registered
+    when: Scenario is executed
+    then:
+      - Given steps run in order
+      - When action is performed
+      - Then assertions are verified
+      - Results are recorded
+    refs: [crates/arkavo-mcp-macos/src/execution.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Step definition missing
+        expected: Execution error with available steps
+      - condition: Assertion fails
+        expected: Failure with expected vs actual
+
+  - id: MCPM-004
+    name: Manage execution state
+    criticality: high
+    given:
+      - StateStore is initialized
+    when: State transitions occur
+    then:
+      - State changes are persisted
+      - Concurrent access is safe
+      - History is maintained
+      - Cleanup on completion
+    refs: [crates/arkavo-mcp-macos/src/state_store.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: MCPM-005
+    name: Launch iOS simulator
+    criticality: high
+    given:
+      - Running on macOS
+      - Simulator bundle is available
+    when: Simulator is launched via bridge
+    then:
+      - Device type is validated
+      - Simulator boots
+      - Application installs
+      - Bridge connection established
+    refs: [crates/arkavo-mcp-macos/src/bridge.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Device type unavailable
+        expected: Bridge error with available devices
+      - condition: Boot timeout
+        expected: Error with timeout details
+
+  - id: MCPM-006
+    name: Integrate with MCP protocol
+    criticality: high
+    given:
+      - MCP server is running
+      - Test harness is initialized
+    when: MCP tools are invoked
+    then:
+      - Tool calls are routed to harness
+      - Results are formatted as MCP responses
+      - Progress updates are streamed
+      - Errors are properly serialized
+    refs: [crates/arkavo-mcp-macos/src/mcp.rs:1-50, crates/arkavo-mcp-macos/src/integration.rs:1-40]
+    changed: "2025-01-31"
+
+  - id: MCPM-007
+    name: Generate test report
+    criticality: medium
+    given:
+      - Test execution completed
+      - Results are available
+    when: Report is generated
+    then:
+      - Pass/fail statistics calculated
+      - Duration metrics included
+      - Failed scenarios detailed
+      - Export to multiple formats
+    refs: [crates/arkavo-mcp-macos/src/reporting.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: MCPM-008
+    name: Use AI for test assistance
+    criticality: medium
+    given:
+      - AI module is configured
+      - Test context is available
+    when: AI assistance is requested
+    then:
+      - Context is sent to AI
+      - Suggestions are generated
+      - Step definitions can be proposed
+      - Results are integrated
+    refs: [crates/arkavo-mcp-macos/src/ai.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: AI service unavailable
+        expected: Graceful degradation to manual mode
+      - condition: Invalid suggestion
+        expected: User confirmation required
+
+  - id: MCPM-009
+    name: Handle memory operations
+    criticality: medium
+    given:
+      - memory feature is enabled
+      - Memory operations are requested
+    when: Memory functions called
+    then:
+      - MemoryError is converted to TestError
+      - Operations are atomic
+      - Rollback on failure
+    refs: [crates/arkavo-mcp-macos/src/lib.rs:64-67]
+    changed: "2025-01-31"

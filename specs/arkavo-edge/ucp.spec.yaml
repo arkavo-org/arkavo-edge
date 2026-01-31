@@ -1,0 +1,135 @@
+feature: Universal Commerce Protocol
+module: arkavo_ucp
+version: 0.57.1
+
+invariants:
+  - Payment intents with lifecycle management
+  - Budget integration for fiat (USD)
+  - EVM wallet for crypto (ETH)
+  - Policy-based authorization
+  - Offline transaction signing (no RPC)
+
+scenarios:
+  - id: UCP-001
+    name: Create payment intent
+    criticality: critical
+    given:
+      - Agent identified
+      - Amount specified
+      - Merchant known
+    when: PaymentIntent::new called
+    then:
+      - Intent created
+      - ID assigned
+      - Status pending
+    refs: [crates/arkavo-ucp/src/types.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: UCP-002
+    name: Evaluate payment against commerce policy
+    criticality: critical
+    given:
+      - PaymentIntent created
+      - Budget tracked
+      - Limits configured
+    when: CommercePolicy::evaluate called
+    then:
+      - Budget checked
+      - Limits verified
+      - Decision returned (allow/deny)
+    refs: [crates/arkavo-ucp/src/policy.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Insufficient budget
+        expected: Denied with reason
+      - condition: Limit exceeded
+        expected: Denied with limit info
+
+  - id: UCP-003
+    name: Execute budget payment (USD)
+    criticality: critical
+    given:
+      - Budget tracker available
+      - Intent approved
+    when: BudgetPaymentHandler::execute called
+    then:
+      - Budget deducted
+      - Payment recorded
+      - Result returned
+    refs: [crates/arkavo-ucp/src/handlers.rs:1-50, crates/arkavo-ucp/src/lib.rs:40-62]
+    changed: "2025-01-31"
+
+  - id: UCP-004
+    name: Execute EVM payment (ETH)
+    criticality: critical
+    given:
+      - EVM keypair available
+      - Intent approved
+      - Chain ID specified
+    when: EvmPaymentHandler::execute called
+    then:
+      - Transaction built
+      - Signed offline
+      - Result with signed_tx returned
+    refs: [crates/arkavo-ucp/src/handlers.rs:50-100, crates/arkavo-ucp/src/lib.rs:64-80]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Insufficient balance (check)
+        expected: Warning (offline signing)
+      - condition: Invalid chain ID
+        expected: Error
+
+  - id: UCP-005
+    name: Track payment status
+    criticality: high
+    given:
+      - Payment initiated
+    when: PaymentTracker::create called
+    then:
+      - Record created
+      - Status tracked
+      - History maintained
+    refs: [crates/arkavo-ucp/src/tracker.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: UCP-006
+    name: Complete payment lifecycle
+    criticality: high
+    given:
+      - Payment pending
+      - Execution result available
+    when: tracker.complete called
+    then:
+      - Status updated
+      - Result stored
+      - Record finalized
+    refs: [crates/arkavo-ucp/src/tracker.rs:60-100]
+    changed: "2025-01-31"
+
+  - id: UCP-007
+    name: Register MCP tools for payments
+    criticality: medium
+    given:
+      - ToolRegistry available
+      - UCP state initialized
+    when: register_tools called
+    then:
+      - CreatePaymentIntentTool registered
+      - ExecutePaymentTool registered
+      - GetPaymentStatusTool registered
+      - ListPaymentsTool registered
+    refs: [crates/arkavo-ucp/src/tools.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: UCP-008
+    name: Get payment statistics
+    criticality: low
+    given:
+      - Payments recorded
+    when: PaymentStats::compute called
+    then:
+      - Total volume calculated
+      - Success rate computed
+      - Average amount computed
+    refs: [crates/arkavo-ucp/src/tracker.rs:100-150]
+    changed: "2025-01-31"

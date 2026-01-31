@@ -1,0 +1,139 @@
+feature: Qualcomm SNPE Hardware Acceleration
+module: arkavo_snpe
+version: 0.57.1
+
+invariants:
+  - SNPE library loaded dynamically at runtime (no build dependency)
+  - Falls back to CPU if SNPE unavailable
+  - Linux aarch64 only (Qualcomm platforms)
+  - "Multi-target priority: GPU > DSP > CPU"
+
+scenarios:
+  - id: SNPE-001
+    name: Initialize SNPE runtime dynamically
+    criticality: critical
+    given:
+      - Running on Linux aarch64
+      - SNPE SDK may or may not be installed
+    when: initialize is called
+    then:
+      - Library searched in /opt/snpe/lib
+      - SNPE_ROOT environment checked
+      - LD_LIBRARY_PATH searched
+      - Runtime loaded via dlopen
+      - Success or graceful fallback logged
+    refs: [crates/arkavo-snpe/src/lib.rs:30-50, crates/arkavo-snpe/src/loader.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Library not found
+        expected: Warning logged, CPU fallback
+      - condition: Wrong architecture
+        expected: Compile-time exclusion
+      - condition: Permission denied
+        expected: Error with permission hint
+
+  - id: SNPE-002
+    name: Load DLC model for inference
+    criticality: critical
+    given:
+      - SNPE runtime available
+      - DLC model file exists
+      - Target runtime selected
+    when: SnpeRuntime::load_model is called
+    then:
+      - DLC container parsed
+      - Model validated
+      - Target runtime configured
+      - Model ready for inference
+    refs: [crates/arkavo-snpe/src/runtime.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Corrupted DLC file
+        expected: SnpeError with parse details
+      - condition: Unsupported model version
+        expected: Version mismatch error
+      - condition: Target unavailable
+        expected: Auto-fallback to available target
+
+  - id: SNPE-003
+    name: Execute inference on target
+    criticality: critical
+    given:
+      - Model loaded
+      - Input tensors prepared
+      - Runtime initialized
+    when: inference is executed
+    then:
+      - Input tensors validated
+      - Inference executed on target (GPU/DSP/CPU)
+      - Output tensors populated
+      - Latency measured
+      - Results returned
+    refs: [crates/arkavo-snpe/src/runtime.rs:60-100, crates/arkavo-snpe/src/tensor.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Input shape mismatch
+        expected: Tensor validation error
+      - condition: Runtime crash
+        expected: Error recovery, fallback attempt
+      - condition: Timeout
+        expected: Cancellation, partial results
+
+  - id: SNPE-004
+    name: Convert tensors for SNPE format
+    criticality: high
+    given:
+      - Raw data available
+      - TensorShape defined
+    when: SnpeTensor::from_data is called
+    then:
+      - Data layout converted if needed
+      - Quantization applied if configured
+      - Memory aligned for target
+      - Tensor ready for inference
+    refs: [crates/arkavo-snpe/src/tensor.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Data size mismatch
+        expected: Shape validation error
+      - condition: Unsupported data type
+        expected: Type conversion attempted or error
+
+  - id: SNPE-005
+    name: Detect available acceleration targets
+    criticality: medium
+    given:
+      - SNPE runtime initialized
+      - Hardware capabilities queried
+    when: RuntimeCapabilities is checked
+    then:
+      - GPU availability detected
+      - DSP availability detected
+      - CPU always available
+      - Priority order established
+    refs: [crates/arkavo-snpe/src/accelerator.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: GPU present but unsupported
+        expected: Excluded from available targets
+      - condition: DSP busy
+        expected: Available but marked loaded
+
+  - id: SNPE-006
+    name: Handle SNPE errors gracefully
+    criticality: high
+    given:
+      - SNPE operation fails
+    when: Error is propagated
+    then:
+      - Error type classified
+      - User message provided
+      - Fallback attempted if possible
+      - SnpeError returned
+    refs: [crates/arkavo-snpe/src/error.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Unknown error code
+        expected: Generic error with raw code
+      - condition: Memory error
+        expected: Suggestion to reduce batch size

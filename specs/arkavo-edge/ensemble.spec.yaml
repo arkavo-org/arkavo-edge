@@ -1,0 +1,149 @@
+feature: Policy Ensemble with Counterfactual Evaluation
+module: arkavo_ensemble
+version: 0.57.1
+
+invariants:
+  - Maximum K candidates maintained (default 5)
+  - Counterfactual evaluation on every real input
+  - Candidates violating invariants discarded immediately
+  - Promotion requires 24h sustained advantage + bounded model checking
+
+scenarios:
+  - id: ENS-001
+    name: Create policy ensemble with production policy
+    criticality: critical
+    given:
+      - Production policy layer exists
+      - Invariant layer is configured
+      - Cost function is defined
+    when: PolicyEnsemble is initialized
+    then:
+      - Production policy stored as active
+      - Invariants referenced for validation
+      - Cost function ready for evaluation
+      - Candidate list empty
+    refs: [crates/arkavo-ensemble/src/ensemble.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid invariant layer
+        expected: EnsembleError with invariant validation
+      - condition: Null cost function
+        expected: Configuration error
+
+  - id: ENS-002
+    name: Add candidate policy to ensemble
+    criticality: high
+    given:
+      - Ensemble has capacity (candidates < K)
+      - Candidate policy is provided
+      - Generation method is specified
+    when: add_candidate is called
+    then:
+      - Candidate assigned unique ID
+      - State set to Evaluating
+      - Generation method recorded
+      - Candidate added to registry
+    refs: [crates/arkavo-ensemble/src/candidate.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Ensemble at capacity
+        expected: Error with removal suggestion
+      - condition: Candidate violates invariant
+        expected: Immediate rejection
+
+  - id: ENS-003
+    name: Evaluate counterfactually on real input
+    criticality: critical
+    given:
+      - Ensemble is initialized
+      - Real input is available
+      - Candidates are registered
+    when: evaluate_counterfactual is called
+    then:
+      - Production policy evaluated
+      - All candidates evaluated on same input
+      - Costs computed for each
+      - Regret calculated (actual - counterfactual)
+      - Results returned in sub-microsecond
+    refs: [crates/arkavo-ensemble/src/ensemble.rs:50-100, crates/arkavo-ensemble/src/regret.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Candidate evaluation timeout
+        expected: Excluded from results, marked degraded
+      - condition: All candidates fail
+        expected: Production result only, error logged
+
+  - id: ENS-004
+    name: Accumulate regret over attribution window
+    criticality: high
+    given:
+      - Counterfactual evaluations occurring
+      - Attribution window configured (default 1s)
+    when: Outcomes recorded in RegretAccumulator
+    then:
+      - Cumulative regret tracked per candidate
+      - Outcomes attributed to inputs within window
+      - Maximum outcomes limit respected
+      - Statistics computed over window
+    refs: [crates/arkavo-ensemble/src/regret.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Window expires with no outcomes
+        expected: Regret calculation continues
+      - condition: Maximum outcomes exceeded
+        expected: Oldest outcomes evicted (FIFO)
+
+  - id: ENS-005
+    name: Check for promotion candidates
+    criticality: critical
+    given:
+      - Regret accumulated over time
+      - Candidates have evaluation history
+    when: check_promotions is called
+    then:
+      - Statistical significance tested
+      - Candidates with positive regret flagged
+      - 24h sustained advantage verified
+      - Bounded model checking scheduled
+      - PromotionCandidate returned for qualified
+    refs: [crates/arkavo-ensemble/src/promotion.rs:1-60, crates/arkavo-ensemble/src/statistics.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Insufficient data for significance
+        expected: No promotion, continue evaluation
+      - condition: Model checking fails
+        expected: Candidate rejected, flagged for review
+
+  - id: ENS-006
+    name: Generate candidate via LLM synthesis
+    criticality: medium
+    given:
+      - SynthesisContext is prepared
+      - LLM synthesizer is available
+    when: generate_llm_candidate is called
+    then:
+      - Policy context formatted as prompt
+      - LLM generates candidate policy
+      - Generated policy validated
+      - Returns candidate or error
+    refs: [crates/arkavo-ensemble/src/generator.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: LLM produces invalid policy
+        expected: Validation error, retry or fail
+      - condition: Synthesis timeout
+        expected: Partial result or timeout error
+
+  - id: ENS-007
+    name: Compute weighted cost across multiple objectives
+    criticality: medium
+    given:
+      - Multiple cost functions defined
+      - Weights sum to 1.0
+    when: WeightedCost evaluates policy
+    then:
+      - Each component cost computed
+      - Weighted sum calculated
+      - Normalized result returned
+    refs: [crates/arkavo-ensemble/src/cost.rs:1-60]
+    changed: "2025-01-31"

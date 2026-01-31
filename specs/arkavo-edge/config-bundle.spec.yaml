@@ -1,0 +1,83 @@
+feature: Configuration Bundle Management
+module: arkavo_config_bundle
+version: 0.57.1
+
+invariants:
+  - Bundle IDs are UUID v4
+  - Settings stored as JSON values
+  - Secrets never serialized in plaintext
+  - Validation before distribution
+
+scenarios:
+  - id: CFG-001
+    name: Create configuration bundle
+    criticality: high
+    given:
+      - Target agent/role specified
+      - Settings defined
+    when: ConfigurationBundle::new called
+    then:
+      - UUID v4 assigned
+      - Target stored
+      - Settings validated
+      - Metadata populated
+    refs: [crates/arkavo-config-bundle/src/lib.rs:9-20]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid target pattern
+        expected: Validation error
+      - condition: Empty settings
+        expected: Warning, bundle created
+
+  - id: CFG-002
+    name: Validate bundle before distribution
+    criticality: critical
+    given:
+      - Bundle created
+      - Secrets may be included
+    when: validate is called
+    then:
+      - Required attributes checked
+      - Entitlements validated
+      - Secrets encrypted
+      - Result returned
+    refs: [crates/arkavo-config-bundle/src/lib.rs:9-20, crates/arkavo-config-bundle/src/error.rs:1-30]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Missing required attribute
+        expected: Validation error with field
+      - condition: Invalid entitlement
+        expected: Authorization error
+
+  - id: CFG-003
+    name: Define agent role with capabilities
+    criticality: medium
+    given:
+      - Role name provided
+      - Purpose specified
+    when: AgentRole created
+    then:
+      - Name stored
+      - Purpose documented
+      - Capabilities listed
+    refs: [crates/arkavo-config-bundle/src/lib.rs:29-34]
+    changed: "2025-01-31"
+
+  - id: CFG-004
+    name: Grant resource entitlements
+    criticality: high
+    given:
+      - Resource type specified
+      - Resource ID provided
+    when: Entitlement created
+    then:
+      - Type validated (McpTool, FileSystem, etc.)
+      - Permissions assigned
+      - Stored in bundle
+    refs: [crates/arkavo-config-bundle/src/lib.rs:36-59]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Duplicate entitlement
+        expected: Merge or reject based on policy
+      - condition: Unsupported resource type
+        expected: Type validation error

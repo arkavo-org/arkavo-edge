@@ -1,0 +1,109 @@
+feature: Hierarchical Reasoning Model Orchestration
+module: arkavo_hrm
+version: 0.57.1
+
+invariants:
+  - Conductor manages GlobalTaskState for complex tasks
+  - BurstContract enforces bounded execution with budgets
+  - TaskStore enables crash recovery via persistence
+  - Loop detection prevents strategic thrashing
+
+scenarios:
+  - id: HRM-001
+    name: Create conductor with task store
+    criticality: critical
+    given:
+      - TaskStore implementation provided
+    when: Conductor::new called
+    then:
+      - Store connected
+      - Conductor ready
+      - State management active
+    refs: [crates/arkavo-hrm/src/lib.rs:22-30, crates/arkavo-hrm/src/conductor.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: HRM-002
+    name: Create task with budget
+    criticality: critical
+    given:
+      - Conductor initialized
+      - Task description provided
+      - Budget configured
+    when: create_task called
+    then:
+      - GlobalTaskState initialized
+      - Subtasks decomposed
+      - Budget allocated
+      - Task persisted
+    refs: [crates/arkavo-hrm/src/conductor.rs:50-100, crates/arkavo-hrm/src/schemas.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Budget insufficient for task
+        expected: Warning or rejection
+      - condition: Decomposition fails
+        expected: Error with reason
+
+  - id: HRM-003
+    name: Execute burst with bounded contract
+    criticality: critical
+    given:
+      - Task active
+      - BurstContract defined
+    when: burst_execute called
+    then:
+      - Budget enforced
+      - Execution bounded
+      - Result or partial result returned
+      - State updated
+    refs: [crates/arkavo-hrm/src/burst.rs:1-60, crates/arkavo-hrm/src/conductor.rs:100-150]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Budget exceeded mid-execution
+        expected: Graceful termination
+      - condition: Crash during burst
+        expected: Recovery from TaskStore
+
+  - id: HRM-004
+    name: Detect and prevent loop patterns
+    criticality: high
+    given:
+      - Multiple bursts executed
+      - State tracked
+    when: Pattern analyzed
+    then:
+      - Loop signature detected
+      - Strategic thrashing flagged
+      - Intervention triggered
+    refs: [crates/arkavo-hrm/src/conductor.rs:150-200]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Similar but valid patterns
+        expected: Tolerance for legitimate cycles
+
+  - id: HRM-005
+    name: Persist task state for recovery
+    criticality: high
+    given:
+      - TaskStore available
+      - State changes occur
+    when: TaskStore::save called
+    then:
+      - GlobalTaskState serialized
+      - Stored durably
+      - Recovery possible
+    refs: [crates/arkavo-hrm/src/store.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: HRM-006
+    name: Handle continuation hints
+    criticality: medium
+    given:
+      - Burst nearly complete
+      - Hint generation triggered
+    when: ContinuationHint created
+    then:
+      - Remaining work identified
+      - Context strategy selected
+      - Handover prepared
+    refs: [crates/arkavo-hrm/src/burst.rs:60-100]
+    changed: "2025-01-31"

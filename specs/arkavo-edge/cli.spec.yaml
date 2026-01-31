@@ -1,0 +1,115 @@
+feature: Arkavo Edge CLI Interface
+module: arkavo_cli
+version: 0.57.1
+
+invariants:
+  - Tracing subscriber initialized once on first run
+  - API keys loaded from .arkavo/AGENTS.md
+  - First-run experience checks model availability
+  - Commands dispatch to appropriate handlers
+
+scenarios:
+  - id: CLI-001
+    name: Initialize CLI with tracing
+    criticality: high
+    given:
+      - CLI invoked first time
+      - Environment may have RUST_LOG
+    when: run is called
+    then:
+      - Tracing subscriber initialized once
+      - Log level respects RUST_LOG
+      - Clean output formatting
+    refs: [crates/arkavo-cli/src/lib.rs:19-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: RUST_LOG invalid
+        expected: Default to error level
+      - condition: Subscriber already init
+        expected: Once ensures single init
+
+  - id: CLI-002
+    name: Execute first-run flow
+    criticality: high
+    given:
+      - No models configured
+      - Not help/version command
+    when: First run detected
+    then:
+      - Async runtime created
+      - handle_first_run executed
+      - Model discovery initiated
+    refs: [crates/arkavo-cli/src/lib.rs:49-55]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: First run fails
+        expected: Error with setup instructions
+      - condition: Help/version command
+        expected: First run skipped
+
+  - id: CLI-003
+    name: Dispatch agent command
+    criticality: high
+    given:
+      - Args contain "agent"
+      - Subcommand provided
+    when: Agent command matched
+    then:
+      - commands::agent::execute called
+      - Args passed through
+      - Result propagated
+    refs: [crates/arkavo-cli/src/lib.rs:61-62]
+    changed: "2025-01-31"
+
+  - id: CLI-004
+    name: Dispatch chat command
+    criticality: high
+    given:
+      - Args contain "chat"
+    when: Chat command matched
+    then:
+      - commands::chat::execute called
+      - Interactive chat started
+      - Result propagated
+    refs: [crates/arkavo-cli/src/lib.rs:63]
+    changed: "2025-01-31"
+
+  - id: CLI-005
+    name: Dispatch task command
+    criticality: high
+    given:
+      - Args contain "task"
+    when: Task command matched
+    then:
+      - commands::task::execute called
+      - Task orchestration started
+      - Result propagated
+    refs: [crates/arkavo-cli/src/lib.rs:64]
+    changed: "2025-01-31"
+
+  - id: CLI-006
+    name: Handle missing command (default to agent)
+    criticality: medium
+    given:
+      - No command provided
+    when: Empty args
+    then:
+      - Defaults to agent run
+      - Interactive mode started
+    refs: [crates/arkavo-cli/src/lib.rs:56-59]
+    changed: "2025-01-31"
+
+  - id: CLI-007
+    name: Platform-specific test command
+    criticality: low
+    given:
+      - macOS with mcp-tools feature
+    when: Test command executed
+    then:
+      - iOS simulator tests run
+      - Results reported
+    refs: [crates/arkavo-cli/src/lib.rs:67-74]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Not macOS
+        expected: Error message, early exit

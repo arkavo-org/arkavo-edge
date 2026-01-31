@@ -257,10 +257,398 @@ components:
       - Resource quotas enforced
       - Network disabled by default
 
+  - name: gemini
+    file: gemini.spec.yaml
+    module: arkavo_gemini
+    description: Gemini AI provider with live sessions
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Gemini API version validated
+      - SSE auto-reconnect on failures
+      - Tool definitions match schema
+
+  - name: qwen
+    file: qwen.spec.yaml
+    module: arkavo_qwen
+    description: Qwen AI provider with multi-modal
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - Region determines endpoint
+      - Multi-modal requires compatible model
+      - Stream ordering maintained
+
+  - name: mcp-macos
+    file: mcp-macos.spec.yaml
+    module: arkavo_mcp_macos
+    description: MCP test harness for macOS/iOS
+    criticality: high
+    scenario_count: 9
+    invariants:
+      - macOS-only functionality
+      - Gherkin parses unambiguously
+      - State transitions atomic
+
+  - name: mcp-claude
+    file: mcp-claude.spec.yaml
+    module: arkavo_mcp_claude
+    description: MCP integration with Claude Code
+    criticality: high
+    scenario_count: 9
+    invariants:
+      - Auth via API key or OAuth
+      - Tool permissions explicit
+      - Budget tracking enforced
+
+  - name: tdf-iroh
+    file: tdf-iroh.spec.yaml
+    module: arkavo_tdf_iroh
+    description: TDF blob transport via Iroh P2P
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Raw bytes only, no encryption
+      - Tickets self-contained
+      - Embedded node lifecycle managed
+
+  - name: ensemble
+    file: ensemble.spec.yaml
+    module: arkavo_ensemble
+    description: Policy ensemble with counterfactual evaluation
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - Maximum K candidates maintained
+      - Counterfactual evaluation on every input
+      - Promotion requires 24h sustained advantage
+
+  - name: sat
+    file: sat.spec.yaml
+    module: arkavo_sat
+    description: SAT solver integration for TØRG analysis
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - CNF extraction preserves semantics
+      - Boundary probes identify satisfiable inputs
+      - Cache respects TTL
+
+  - name: sbe
+    file: sbe.spec.yaml
+    module: arkavo_sbe
+    description: Symbolic Boundary Evolution hierarchical layers
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Layer isolation enforced
+      - Patchlets cannot modify higher layers
+      - Adaptive rollback within 100ms timeout
+
+  - name: snpe
+    file: snpe.spec.yaml
+    module: arkavo_snpe
+    description: Qualcomm SNPE hardware acceleration
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Dynamic loading at runtime
+      - Falls back to CPU if unavailable
+      - Linux aarch64 only
+
+  - name: cef
+    file: cef.spec.yaml
+    module: arkavo_cef
+    description: Chromium Embedded Framework UI renderer
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - CEF process spawned with UDS
+      - DOM commands execute asynchronously
+      - Health tracking for all commands
+
+  - name: wallet
+    file: wallet.spec.yaml
+    module: arkavo_wallet
+    description: EVM wallet with secp256k1 cryptography
+    criticality: critical
+    scenario_count: 7
+    invariants:
+      - All crypto operations offline
+      - secp256k1 for signing
+      - EIP-55 checksum compliance
+
+  - name: code-search
+    file: code-search.spec.yaml
+    module: arkavo_code_search
+    description: Code search and refactoring tools
+    criticality: medium
+    scenario_count: 5
+    invariants:
+      - Tools implement MCP Tool trait
+      - CodeGrep uses regex patterns
+      - Comby does structural refactoring
+
+  - name: torg
+    file: torg.spec.yaml
+    module: arkavo_torg
+    description: TØRG constrained decoding for policy graphs
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Token mapping bridges vocab to TØRG
+      - Logit masking enforces syntax
+      - Graph evaluation under 1μs
+
+  - name: torg-circuits
+    file: torg-circuits.spec.yaml
+    module: arkavo_torg_circuits
+    description: TØRG compiled circuits with pre-allocated buffers
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Pre-allocated buffers
+      - Zero-allocation evaluation
+      - Thread-safe via Mutex
+
+  - name: cli
+    file: cli.spec.yaml
+    module: arkavo_cli
+    description: Arkavo Edge CLI interface
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - Tracing initialized once
+      - First-run checks models
+      - Commands dispatch to handlers
+
+  - name: mcp-runtime
+    file: mcp-runtime.spec.yaml
+    module: arkavo_mcp_runtime
+    description: MCP runtime implementation
+    criticality: critical
+    scenario_count: 7
+    invariants:
+      - JSON-RPC 2.0 protocol
+      - Tool execution with timeout
+      - Multiple transports supported
+
+  - name: config-bundle
+    file: config-bundle.spec.yaml
+    module: arkavo_config_bundle
+    description: Configuration bundle management
+    criticality: high
+    scenario_count: 4
+    invariants:
+      - UUID v4 bundle IDs
+      - Settings as JSON values
+      - Validation before distribution
+
+  - name: config-encryption
+    file: config-encryption.spec.yaml
+    module: arkavo_config_encryption
+    description: Configuration bundle encryption
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - OpenTDF policy encryption
+      - KAS required for decryption
+      - Tamper-evident bundles
+
+  - name: config-transport
+    file: config-transport.spec.yaml
+    module: arkavo_config_transport
+    description: Configuration transport over A2A
+    criticality: high
+    scenario_count: 4
+    invariants:
+      - A2A agent.config.* RPC
+      - Orchestrator-signed payloads
+      - Base64 binary encoding
+
+  - name: hrm
+    file: hrm.spec.yaml
+    module: arkavo_hrm
+    description: Hierarchical Reasoning Model orchestration
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Conductor manages GlobalTaskState
+      - BurstContract enforces budgets
+      - Loop detection prevents thrashing
+
+  - name: repo
+    file: repo.spec.yaml
+    module: arkavo_repo
+    description: Repository context management
+    criticality: medium
+    scenario_count: 5
+    invariants:
+      - Info gathered from path
+      - File count recursive
+      - Git metadata extracted
+
+  - name: context
+    file: context.spec.yaml
+    module: arkavo_context
+    description: Context management and compression
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Semantic chunking
+      - Deduplication
+      - Compression pipeline
+
+  - name: attestation
+    file: attestation.spec.yaml
+    module: arkavo_attestation
+    description: Device attestation and security state
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Platform evidence collected
+      - Security state: Trusted/Suspicious/Compromised
+      - Timestamp and device ID in evidence
+
+  - name: browser
+    file: browser.spec.yaml
+    module: arkavo_browser
+    description: Browser automation and live injection
+    criticality: medium
+    scenario_count: 6
+    invariants:
+      - BrowserTool provides MCP automation
+      - LiveInjector enables script injection
+      - Page navigation and interaction supported
+
+  - name: agui
+    file: agui.spec.yaml
+    module: arkavo_agui
+    description: Arkavo GUI application gateway
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - AgUiGateway manages connections
+      - mDNS discovery for peers
+      - Health and ROI metrics
+
+  - name: ui-core
+    file: ui-core.spec.yaml
+    module: arkavo_ui_core
+    description: UI core library
+    criticality: medium
+    scenario_count: 4
+    invariants:
+      - UIContent defines renderable content
+      - UIEvent represents interactions
+      - UserInterface trait abstracts implementations
+
+  - name: ui-generator
+    file: ui-generator.spec.yaml
+    module: arkavo_ui_generator
+    description: UI code generation from intent
+    criticality: medium
+    scenario_count: 6
+    invariants:
+      - UI generated from intent and context
+      - Router used for model selection
+      - HTML/CSS/JS output
+
+  - name: terminal
+    file: terminal.spec.yaml
+    module: arkavo_terminal
+    description: Terminal UI application
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - Terminal UI with async event loop
+      - LLM integration via channels
+      - Multi-terminal management
+
+  - name: debugger
+    file: debugger.spec.yaml
+    module: arkavo_debugger
+    description: Session debugger and diagnostics
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Session recording for replay
+      - Error pattern detection
+      - Health monitoring
+
+  - name: critic
+    file: critic.spec.yaml
+    module: arkavo_critic
+    description: LLM response critic and verification
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Verification pipeline with priority checks
+      - Fast checks first (Circuit <1μs)
+      - Evidence collection
+
+  - name: ucp
+    file: ucp.spec.yaml
+    module: arkavo_ucp
+    description: Universal Commerce Protocol
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Payment intents with lifecycle
+      - Budget integration for fiat
+      - EVM wallet for crypto
+      - Offline transaction signing
+
+  - name: titan
+    file: titan.spec.yaml
+    module: arkavo_titan
+    description: Titan Monitor - Runtime anomaly detection
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - Zero-copy inspection engine
+      - Less than 5μs overhead
+      - Three-level surprise detection
+
+  - name: mcp-mesh
+    file: mcp-mesh.spec.yaml
+    module: arkavo_mcp_mesh
+    description: MCP tools for agent mesh orchestration
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - Agent discovery via mDNS
+      - Task delegation to specialists
+      - A2A protocol for mesh
+
+  - name: protocol
+    file: protocol.spec.yaml
+    module: arkavo_protocol
+    description: A2A protocol and agent communication
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - A2A enables agent-to-agent communication
+      - WebSocket and HTTP transports
+      - Registration with challenge-response
+      - Task execution with persistence
+
+  - name: orchestrator
+    file: orchestrator.spec.yaml
+    module: arkavo_orchestrator
+    description: Issue orchestration and cognitive engine
+    criticality: critical
+    scenario_count: 11
+    invariants:
+      - Orchestrator manages issue lifecycle
+      - CognitiveEngine plans complex tasks
+      - IssueAnalyzer determines complexity
+      - IssueRouter selects strategy
+
 stats:
-  total_specs: 23
-  total_scenarios: 177
-  critical_scenarios: 94
+  total_specs: 58
+  total_scenarios: 418
+  critical_scenarios: 185
   coverage_areas:
     - authentication
     - authorization
@@ -283,6 +671,26 @@ stats:
     - containerization
     - error_handling
     - fault_tolerance
+    - policy_graphs
+    - circuit_evaluation
+    - cli_interface
+    - mcp_runtime
+    - configuration_management
+    - orchestration
+    - repository_management
+    - context_management
+    - device_attestation
+    - browser_automation
+    - gui_gateway
+    - ui_generation
+    - terminal_ui
+    - debugging
+    - response_verification
+    - commerce_protocol
+    - anomaly_detection
+    - mesh_orchestration
+    - agent_protocol
+    - issue_orchestration
 
 # Cross-component behaviors
 integration_points:
@@ -369,3 +777,151 @@ integration_points:
   - name: GitHub → Task Orchestration
     description: Issue handler creates tasks from GitHub issues
     specs: [GITHUB-004, ORCH-001]
+
+  - name: LLM Core → Gemini
+    description: Gemini provider implements LLM core trait
+    specs: [LLM-001, GEM-002]
+
+  - name: LLM Core → Qwen
+    description: Qwen provider implements LLM core trait
+    specs: [LLM-001, QWE-002]
+
+  - name: TDF → TDF Iroh
+    description: TDF uses Iroh for P2P blob transport
+    specs: [TDF-001, IROH-002]
+
+  - name: MCP Claude → MCP Tools
+    description: Claude Code tools registered in MCP registry
+    specs: [MCPC-003, MCP-001]
+
+  - name: Ensemble → SBE
+    description: Ensemble uses SBE for hierarchical policy layers
+    specs: [ENS-001, SBE-001]
+
+  - name: SBE → Autolearn
+    description: Autolearn generates patchlets for adaptive layer
+    specs: [SBE-003, AUTO-001]
+
+  - name: SAT → Ensemble
+    description: SAT solver validates candidates before promotion
+    specs: [SAT-002, ENS-005]
+
+  - name: Code Search → MCP Tools
+    description: Code search tools registered in MCP
+    specs: [CS-001, MCP-001]
+
+  - name: CEF → Router
+    description: CEF renderer for UI interactions with router
+    specs: [CEF-002, ROUTER-001]
+
+  - name: SNPE → Router
+    description: SNPE acceleration for on-device inference in routing
+    specs: [SNPE-003, ROUTER-001]
+
+  - name: Wallet → TDF
+    description: Wallet keys for TDF policy signatures
+    specs: [WAL-003, TDF-002]
+
+  - name: Torg → SAT
+    description: SAT analyzes TØRG policy graphs
+    specs: [TORG-007, SAT-001]
+
+  - name: Torg → Torg Circuits
+    description: Circuits compile TØRG graphs for fast evaluation
+    specs: [TORG-006, TRC-001]
+
+  - name: CLI → MCP Runtime
+    description: CLI uses MCP runtime for tool execution
+    specs: [CLI-003, MCPR-003]
+
+  - name: Config Bundle → Config Encryption
+    description: Bundles encrypted before transport
+    specs: [CFG-002, CFGE-002]
+
+  - name: Config Encryption → Config Transport
+    description: Encrypted bundles transported over A2A
+    specs: [CFGE-002, CFGT-002]
+
+  - name: HRM → Task Orchestration
+    description: HRM orchestrates complex multi-step tasks
+    specs: [HRM-002, ORCH-001]
+
+  - name: Repo → Code Search
+    description: Repository context informs code search
+    specs: [REPO-004, CS-002]
+
+  - name: Context → Router
+    description: Context compression for router prompts
+    specs: [CTX-004, ROUTER-001]
+
+  - name: Attestation → Registration
+    description: Device attestation during registration
+    specs: [ATT-003, REG-001]
+
+  - name: Attestation → Device Identity
+    description: Attestation uses device identity
+    specs: [ATT-002, DEVICE-004]
+
+  - name: Browser → MCP Tools
+    description: Browser tools registered in MCP
+    specs: [BROWS-001, MCP-001]
+
+  - name: AgUI → Gossip
+    description: AgUI gateway uses gossip for peer discovery
+    specs: [AGUI-002, GOSSIP-001]
+
+  - name: UI Generator → Router
+    description: UI Generator uses router for model selection
+    specs: [UIG-002, ROUTER-001]
+
+  - name: Terminal → LLM Core
+    description: Terminal UI sends requests via LLM core
+    specs: [TERM-003, LLM-001]
+
+  - name: Debugger → Events
+    description: Debugger records session events
+    specs: [DBG-001, EVENT-001]
+
+  - name: Critic → Torg
+    description: Critic uses TØRG circuits for verification
+    specs: [CRIT-003, TORG-007]
+
+  - name: UCP → Wallet
+    description: UCP uses wallet for crypto payments
+    specs: [UCP-004, WAL-004]
+
+  - name: UCP → Budget
+    description: UCP uses budget for fiat payments
+    specs: [UCP-003, BUDGET-001]
+
+  - name: Titan → Torg Circuits
+    description: Titan monitors circuit evaluations
+    specs: [TITAN-002, TRC-002]
+
+  - name: MCP Mesh → Protocol
+    description: Mesh uses A2A protocol
+    specs: [MESH-005, PROTO-001]
+
+  - name: Protocol → Registration
+    description: Protocol includes registration for auth
+    specs: [PROTO-001, REG-001]
+
+  - name: Protocol → Chat Session
+    description: Protocol manages chat sessions
+    specs: [PROTO-001, CHAT-001]
+
+  - name: Orchestrator → GitHub
+    description: Orchestrator processes GitHub issues
+    specs: [ORCH-010, GITHUB-004]
+
+  - name: Orchestrator → Task Orchestration
+    description: Orchestrator uses task executor
+    specs: [ORCH-009, ORCH-006]
+
+  - name: Orchestrator → HRM
+    description: Orchestrator uses HRM for complex tasks
+    specs: [ORCH-004, HRM-002]
+
+  - name: Orchestrator → Critic
+    description: Orchestrator verifies with critic
+    specs: [ORCH-005, CRIT-006]
