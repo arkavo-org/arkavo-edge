@@ -158,10 +158,54 @@ components:
       - Events immutable once created
       - Schema version tracked
 
+  - name: dataflow
+    file: dataflow.spec.yaml
+    module: arkavo_dataflow
+    description: Dataflow engine and pipeline orchestration
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Pipelines have unique UUIDs
+      - Blueprint validation required
+      - Sandboxed execution
+
+  - name: task-orchestration
+    file: task-orchestration.spec.yaml
+    module: arkavo_protocol::task_executor
+    description: Task planning, execution, and HRM
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Deterministic task IDs
+      - State persists across restarts
+      - Concurrency limits respected
+
+  - name: agent-auth
+    file: agent-auth.spec.yaml
+    module: arkavo_agent_auth
+    description: Agent authentication and token management
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Tokens stored encrypted
+      - Single-use challenges
+      - Credentials never logged
+
+  - name: llm-core
+    file: llm-core.spec.yaml
+    module: arkavo_llm
+    description: LLM client core and streaming
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Common Provider trait
+      - Bounded streaming buffers
+      - Errors without panics
+
 stats:
-  total_specs: 14
-  total_scenarios: 123
-  critical_scenarios: 61
+  total_specs: 18
+  total_scenarios: 149
+  critical_scenarios: 78
   coverage_areas:
     - authentication
     - authorization
@@ -177,6 +221,9 @@ stats:
     - observability
     - tool_execution
     - audit_logging
+    - dataflow_orchestration
+    - task_orchestration
+    - llm_providers
     - error_handling
     - fault_tolerance
 
@@ -229,3 +276,19 @@ integration_points:
   - name: Memory → MCP Tools
     description: MCP tools use memory for context storage
     specs: [MEM-001, MCP-001]
+
+  - name: Task Orchestration → Router
+    description: Task executor uses router for LLM calls
+    specs: [ORCH-002, ROUTER-001]
+
+  - name: Agent Auth → Registration
+    description: Agent authentication used during registration
+    specs: [AAUTH-001, REG-001]
+
+  - name: LLM Core → Router
+    description: Router uses LLM core for provider abstraction
+    specs: [LLM-001, ROUTER-001]
+
+  - name: Dataflow → Events
+    description: Dataflow emits events for pipeline lifecycle
+    specs: [DATA-003, EVENT-001]

@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent Authentication and Tokens
+module: arkavo_agent_auth
+version: 0.57.1
+
+invariants:
+  - Tokens are stored encrypted at rest
+  - Token refresh before expiration
+  - Challenges are single-use
+  - Client credentials never logged
+
+scenarios:
+  - id: AAUTH-001
+    name: Request authentication token
+    criticality: critical
+    given:
+      - AgentAuthClient initialized
+      - Valid credentials provided
+    when: request_token() called
+    then:
+      - Token request sent to auth server
+      - Credentials validated
+      - Token response received
+      - Token stored securely
+    refs: [crates/arkavo-agent-auth/src/client.rs]
+
+  - id: AAUTH-002
+    name: Store token securely
+    criticality: critical
+    given:
+      - Token received
+      - Storage available
+    when: store_token() called
+    then:
+      - Token encrypted
+      - Written to platform storage
+      - Metadata preserved
+      - Returns success
+    refs: [crates/arkavo-agent-auth/src/storage.rs]
+
+  - id: AAUTH-003
+    name: Load stored token
+    criticality: high
+    given:
+      - Token previously stored
+      - Storage accessible
+    when: load_token() called
+    then:
+      - Token read from storage
+      - Decrypted
+      - Returns token and metadata
+      - Error if not found
+    refs: [crates/arkavo-agent-auth/src/storage.rs]
+
+  - id: AAUTH-004
+    name: Refresh expired token
+    criticality: high
+    given:
+      - Token near expiration
+      - Refresh token available
+    when: refresh_token() called
+    then:
+      - Refresh request sent
+      - New token received
+      - Old token replaced
+      - Storage updated
+    refs: [crates/arkavo-agent-auth/src/client.rs]
+
+  - id: AAUTH-005
+    name: Complete challenge-response auth
+    criticality: critical
+    given:
+      - Challenge received
+      - Private key available
+    when: respond_to_challenge() called
+    then:
+      - Challenge signed
+      - Response sent
+      - Token received on success
+      - Error on invalid signature
+    refs: [crates/arkavo-agent-auth/src/types.rs]
+
+  - id: AAUTH-006
+    name: Delete token on logout
+    criticality: medium
+    given:
+      - Token stored
+      - Logout requested
+    when: delete_token() called
+    then:
+      - Token removed from storage
+      - Metadata cleared
+      - Returns success
+      - Subsequent loads fail
+    refs: [crates/arkavo-agent-auth/src/storage.rs]
+    edge_cases:
+      - condition: Auth server unreachable
+        expected: Returns AgentAuthError::ConnectionFailed
+      - condition: Invalid credentials
+        expected: Returns AgentAuthError::AuthenticationFailed
+      - condition: Token storage corrupted
+        expected: Deletes corrupted data, returns error
+    changed: "2025-01-31"

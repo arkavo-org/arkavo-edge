@@ -6,27 +6,32 @@ Machine-readable BDD specifications for the Arkavo Edge platform.
 
 ```
 specs/
-├── schema.json              # JSON Schema for validation
-├── README.md                # This file
-└── arkavo-edge/             # Per-component specs
-    ├── index.yaml                 # Component index with cross-references
-    ├── registration.spec.yaml     # 12 scenarios
-    ├── crypto.spec.yaml           # 11 scenarios
-    ├── chat-session.spec.yaml     # 13 scenarios
-    ├── gossip-protocol.spec.yaml  # 8 scenarios
-    ├── router.spec.yaml           # 10 scenarios
-    ├── tdf.spec.yaml              # 9 scenarios
-    ├── autolearn.spec.yaml        # 8 scenarios
-    ├── memory.spec.yaml           # 7 scenarios
-    ├── budget.spec.yaml           # 7 scenarios
-    ├── authorization.spec.yaml    # 6 scenarios
-    ├── device-identity.spec.yaml  # 6 scenarios
-    ├── observability.spec.yaml    # 8 scenarios
-    ├── mcp-tools.spec.yaml        # 10 scenarios
-    └── events.spec.yaml           # 8 scenarios
+├── schema.json                 # JSON Schema for validation
+├── README.md                   # This file
+├── FUTURE.md                   # Roadmap and future work
+└── arkavo-edge/                # Per-component specs
+    ├── index.yaml              # Component index
+    ├── registration.spec.yaml  # 12 scenarios
+    ├── crypto.spec.yaml        # 11 scenarios
+    ├── chat-session.spec.yaml  # 13 scenarios
+    ├── gossip-protocol.spec.yaml # 8 scenarios
+    ├── router.spec.yaml        # 10 scenarios
+    ├── tdf.spec.yaml           # 9 scenarios
+    ├── autolearn.spec.yaml     # 8 scenarios
+    ├── memory.spec.yaml        # 7 scenarios
+    ├── budget.spec.yaml        # 7 scenarios
+    ├── authorization.spec.yaml # 6 scenarios
+    ├── device-identity.spec.yaml # 6 scenarios
+    ├── observability.spec.yaml # 8 scenarios
+    ├── mcp-tools.spec.yaml     # 10 scenarios
+    ├── events.spec.yaml        # 8 scenarios
+    ├── dataflow.spec.yaml      # 6 scenarios
+    ├── task-orchestration.spec.yaml # 8 scenarios
+    ├── agent-auth.spec.yaml    # 6 scenarios
+    └── llm-core.spec.yaml      # 6 scenarios
 ```
 
-**Total: 123 scenarios across 14 components**
+**Total: 149 scenarios across 18 components**
 
 ## Specification Format
 

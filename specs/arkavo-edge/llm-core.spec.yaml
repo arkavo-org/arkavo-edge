@@ -1,0 +1,106 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: LLM Core Client and Streaming
+module: arkavo_llm
+version: 0.57.1
+
+invariants:
+  - All providers implement common Provider trait
+  - Streaming responses use bounded buffers
+  - Tool calls parsed from model output
+  - Errors propagated without panics
+  - Messages validated before sending
+
+scenarios:
+  - id: LLM-001
+    name: Send chat request to provider
+    criticality: critical
+    given:
+      - LlmClient initialized
+      - Provider configured
+      - Messages prepared
+    when: chat() called
+    then:
+      - Request validated
+      - Sent to provider
+      - Response received
+      - Parsed into Message
+    refs: [crates/arkavo-llm/src/client.rs]
+
+  - id: LLM-002
+    name: Stream chat responses
+    criticality: critical
+    given:
+      - Streaming enabled
+      - Provider supports streaming
+    when: stream_chat() called
+    then:
+      - Stream established
+      - Deltas received incrementally
+      - Stream ends with reason
+      - Errors mid-stream handled
+    refs: [crates/arkavo-llm/src/stream.rs,crates/arkavo-llm/src/stream_model.rs]
+
+  - id: LLM-003
+    name: Parse tool calls from response
+    criticality: high
+    given:
+      - Model supports tools
+      - Tool requested in prompt
+    when: ToolParser processes response
+    then:
+      - Tool calls extracted
+      - Parameters parsed
+      - Validation applied
+      - Returns ParsedToolCall
+    refs: [crates/arkavo-llm/src/tool_parser.rs]
+
+  - id: LLM-004
+    name: Execute tool with results
+    criticality: high
+    given:
+      - ToolCall parsed
+      - ToolRegistry available
+    when: ToolExecutor executes
+    then:
+      - Tool looked up in registry
+      - Executed with parameters
+      - Result captured
+      - Formatted for model
+    refs: [crates/arkavo-llm/src/tool_executor.rs]
+
+  - id: LLM-005
+    name: Switch provider dynamically
+    criticality: medium
+    given:
+      - Multiple providers available
+      - Current provider failing
+    when: Provider switched
+    then:
+      - New provider instantiated
+      - Config applied
+      - Connection tested
+      - Fallback to working provider
+    refs: [crates/arkavo-llm/src/provider.rs]
+
+  - id: LLM-006
+    name: Handle provider errors gracefully
+    criticality: high
+    given:
+      - Request in progress
+      - Network error occurs
+    when: Error received from provider
+    then:
+      - Error converted to LlmError
+      - Stream terminated cleanly
+      - Error propagated to caller
+      - No panic
+    refs: [crates/arkavo-llm/src/error.rs]
+    edge_cases:
+      - condition: Provider rate limit hit
+        expected: Returns Error::RateLimited with retry-after
+      - condition: Model not found
+        expected: Returns Error::ModelNotAvailable
+      - condition: Stream consumer dropped
+        expected: Stream aborts, resources cleaned
+    changed: "2025-01-31"

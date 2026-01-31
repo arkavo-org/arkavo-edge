@@ -1,0 +1,132 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Task Orchestration and Execution
+module: arkavo_protocol::task_executor
+version: 0.57.1
+
+invariants:
+  - Tasks have deterministic IDs based on content
+  - Task state persists across restarts
+  - Executor respects concurrency limits
+  - Failed tasks are retryable with backoff
+  - Task dependencies resolved before execution
+
+scenarios:
+  - id: ORCH-001
+    name: Plan task with dependencies
+    criticality: high
+    given:
+      - TaskPlanner initialized
+      - Task description provided
+    when: plan_task() called
+    then:
+      - Task analyzed for complexity
+      - Subtasks generated if needed
+      - Dependencies identified
+      - Execution plan created
+    refs: [crates/arkavo-protocol/src/task_planner.rs]
+
+  - id: ORCH-002
+    name: Execute task with executor
+    criticality: critical
+    given:
+      - TaskExecutor initialized
+      - Task plan available
+    when: execute_task() called
+    then:
+      - Dependencies checked
+      - Resources acquired
+      - Task executed
+      - Results stored
+    refs: [crates/arkavo-protocol/src/task_executor.rs]
+
+  - id: ORCH-003
+    name: Store task state persistently
+    criticality: high
+    given:
+      - SqliteTaskStore initialized
+      - Task state changing
+    when: TaskStore::save() called
+    then:
+      - State serialized
+      - Written to SQLite
+      - Timestamp recorded
+      - Recoverable after restart
+    refs: [crates/arkavo-protocol/src/task_store.rs]
+
+  - id: ORCH-004
+    name: Retry failed task with backoff
+    criticality: high
+    given:
+      - Task failed
+      - Retry policy configured
+    when: retry_task() called
+    then:
+      - Backoff calculated
+      - Delay applied
+      - Task re-executed
+      - Max retries enforced
+    refs: [crates/arkavo-protocol/src/task_executor.rs]
+
+  - id: ORCH-005
+    name: Human review for ambiguous tasks
+    criticality: medium
+    given:
+      - Conductor initialized
+      - Task requires clarification
+    when: request_human_review() called
+    then:
+      - Review request queued
+      - Human notified
+      - Task paused
+      - Resumes after response
+    refs: [crates/arkavo-hrm/src/conductor.rs]
+
+  - id: ORCH-006
+    name: Parallel subtask execution
+    criticality: medium
+    given:
+      - Task decomposed into subtasks
+      - No dependencies between subtasks
+    when: execute_subtasks() called
+    then:
+      - Subtasks executed concurrently
+      - Results aggregated
+      - Parent task completed
+    refs: [crates/arkavo-protocol/src/task_executor.rs]
+
+  - id: ORCH-007
+    name: Task cancellation
+    criticality: medium
+    given:
+      - Task in progress
+      - Cancellation requested
+    when: cancel_task() called
+    then:
+      - Cancellation signal sent
+      - Running tasks stopped
+      - Subtasks cancelled
+      - State updated to cancelled
+    refs: [crates/arkavo-protocol/src/task_executor.rs]
+
+  - id: ORCH-008
+    name: Task progress tracking
+    criticality: low
+    given:
+      - Long-running task active
+      - Progress updates available
+    when: progress events generated
+    then:
+      - Progress percentage calculated
+      - ETA computed
+      - Events emitted
+      - UI updated
+    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    edge_cases:
+      - condition: Circular dependency detected
+        expected: Returns error with dependency cycle
+      - condition: Resource exhaustion
+        expected: Queues task, retries when available
+      - condition: Human review timeout
+        expected: Escalates or fails with timeout
+    changed: "2025-01-31"
