@@ -1,1282 +1,161 @@
-name: Feature
-
-# Feature Strategy:
-# - Default features include: memory, mdns (portable across all platforms)
-# - mdns uses pure Rust implementation (mdns-sd crate, no system dependencies)
-# - All builds include mdns since it's now pure Rust
-# - coverage tests may exclude some features due to tarpaulin limitations
+name: Feature Specs
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  CARGO_NET_TIMEOUT: 10
+    paths:
+      - 'specs/**'
+      - '.github/workflows/feature.yaml'
 
 jobs:
-  # Version check from PR
-  version-check:
-    name: Verify Version Increment
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout PR branch
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get PR branch version
-        id: pr_version
-        run: |
-          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "PR branch version: $VERSION"
-
-      - name: Get main branch version
-        id: main_version
-        run: |
-          git fetch origin main:main
-          MAIN_VERSION=$(git show main:Cargo.toml | grep '^version =' | head -n 1 | cut -d'"' -f2)
-          echo "version=$MAIN_VERSION" >> $GITHUB_OUTPUT
-          echo "Main branch version: $MAIN_VERSION"
-
-      - name: Compare versions
-        run: |
-          PR_VERSION="${{ steps.pr_version.outputs.version }}"
-          MAIN_VERSION="${{ steps.main_version.outputs.version }}"
-
-          echo "Comparing versions:"
-          echo "  Main branch: $MAIN_VERSION"
-          echo "  PR branch:   $PR_VERSION"
-
-          # Function to compare semantic versions
-          version_gt() {
-            test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
-          }
-
-          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
-            echo "❌ ERROR: Version has not been incremented!"
-            echo "The version in Cargo.toml must be greater than the current version on main branch."
-            echo ""
-            echo "Current version on main: $MAIN_VERSION"
-            echo "Your PR version:        $PR_VERSION"
-            echo ""
-            echo "Please update the version in Cargo.toml to a higher version number."
-            echo "For example, if current is 0.1.0, you could use 0.1.1, 0.2.0, or 1.0.0"
-            exit 1
-          elif version_gt "$MAIN_VERSION" "$PR_VERSION"; then
-            echo "❌ ERROR: PR version is lower than main branch version!"
-            echo "The version in Cargo.toml must be greater than the current version on main branch."
-            echo ""
-            echo "Current version on main: $MAIN_VERSION"
-            echo "Your PR version:        $PR_VERSION"
-            exit 1
-          else
-            echo "✅ Version has been properly incremented from $MAIN_VERSION to $PR_VERSION"
-          fi
-
-      - name: Check version format
-        run: |
-          VERSION="${{ steps.pr_version.outputs.version }}"
-
-          # Verify semantic versioning format (X.Y.Z)
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "❌ ERROR: Invalid version format!"
-            echo "Version must follow semantic versioning (X.Y.Z)"
-            echo "Current version: $VERSION"
-            exit 1
-          fi
-
-          echo "✅ Version format is valid: $VERSION"
-
-
-  # Quick checks that can run in parallel
-  format:
-    name: Format Check
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
-
-  hardcoded-paths:
-    name: No Hardcoded Paths
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check for hardcoded user paths
-        run: |
-          echo "Checking for hardcoded user-specific paths in Rust source files..."
-
-          # Patterns that indicate real hardcoded local paths (not test fixtures)
-          # Excludes:
-          #   - /home/user/ (generic test fixture)
-          #   - /Users/arkavo-agent (documentation)
-          #   - Paths inside #[cfg(test)] blocks are acceptable
-
-          FOUND=0
-
-          # Check for macOS user paths (e.g., /Users/paul/, /Users/john/)
-          # but NOT /Users/user/ or /Users/arkavo-agent
-          if grep -r --include="*.rs" -nE '/Users/[a-z]+/' crates/ 2>/dev/null | grep -vE '/Users/(user|arkavo-agent)/'; then
-            echo "Found macOS user-specific paths:"
-            grep -r --include="*.rs" -nE '/Users/[a-z]+/' crates/ 2>/dev/null | grep -vE '/Users/(user|arkavo-agent)/'
-            FOUND=1
-          fi
-
-          # Check for /Volumes/ (macOS mounted volumes)
-          if grep -r --include="*.rs" -n '/Volumes/' crates/ 2>/dev/null; then
-            echo "Found macOS volume paths:"
-            grep -r --include="*.rs" -n '/Volumes/' crates/ 2>/dev/null
-            FOUND=1
-          fi
-
-          # Check for specific home directories (not generic /home/user/)
-          if grep -r --include="*.rs" -nE '/home/[a-z]+/' crates/ 2>/dev/null | grep -vE '/home/user/'; then
-            echo "Found Linux user-specific paths:"
-            grep -r --include="*.rs" -nE '/home/[a-z]+/' crates/ 2>/dev/null | grep -vE '/home/user/'
-            FOUND=1
-          fi
-
-          if [ $FOUND -eq 1 ]; then
-            echo ""
-            echo "❌ ERROR: Found hardcoded user-specific paths!"
-            echo "These paths will fail on other machines and in CI."
-            echo "Use runtime path discovery instead (e.g., dirs::home_dir(), model_discovery::find_gguf_model)"
-            exit 1
-          fi
-
-          echo "✅ No hardcoded paths found"
-
-  # Combined test + lint jobs for maximum cache reuse
-  # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
-  test-and-lint:
-    name: Test & Lint (${{ matrix.group }})
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false  # Run all groups even if one fails
-      matrix:
-        group:
-          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-workspace (44K LOC)
-          - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
-          - routing     # arkavo-router, arkavo-dataflow (42K LOC)
-          - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui (34K LOC)
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-
-      - name: Install CMake, mold linker, and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-lint-${{ matrix.group }}"
-
-      # Step 1: Run tests first (produces full codegen artifacts)
-      - name: Run tests with mold linker
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: |
-          if [ "${{ matrix.group }}" = "core" ]; then
-            cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
-            cargo test --locked -p arkavo-memory --lib
-            cargo test --locked -p arkavo-memory --test mcp_integration_test
-            cargo test --locked -p arkavo-budget
-            cargo test --locked -p arkavo-context
-          elif [ "${{ matrix.group }}" = "protocol" ]; then
-            cargo test --locked -p arkavo-protocol
-            cargo test --locked -p arkavo-observability
-            cargo test --locked -p arkavo-workspace
-          elif [ "${{ matrix.group }}" = "tools" ]; then
-            cargo test --locked -p arkavo-mcp-tools
-          elif [ "${{ matrix.group }}" = "routing" ]; then
-            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
-            cargo test --locked -p arkavo-dataflow
-          elif [ "${{ matrix.group }}" = "ui" ]; then
-            cargo test --locked -p arkavo-terminal
-            cargo test --locked -p arkavo-ui-generator
-            cargo test --locked -p arkavo-agui --no-default-features --features mdns
-            # Check arkavo-cli with cef-ui feature to catch exhaustive match errors
-            cargo check --locked -p arkavo-cli --features cef-ui
-          fi
-
-      # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
-      - name: Run clippy on lib and bins
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: |
-          if [ "${{ matrix.group }}" = "core" ]; then
-            cargo clippy --locked -p arkavo-llm --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-memory --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-budget --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-context --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "protocol" ]; then
-            cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "tools" ]; then
-            cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "routing" ]; then
-            cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
-            cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
-          elif [ "${{ matrix.group }}" = "ui" ]; then
-            cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
-            # Lint arkavo-cli with cef-ui feature (catches exhaustive match errors before release)
-            cargo clippy --locked -p arkavo-cli --lib --bins --features cef-ui -- -D warnings
-          fi
-
-  test-kimi-feature:
-    name: Test Kimi Feature
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-kimi"
-      
-      - name: Test arkavo-kimi crate
-        run: |
-          # Test the arkavo-kimi crate directly (14 tests, should be fast)
-          cargo test -p arkavo-kimi --all-targets
-      
-      - name: Test arkavo-llm with kimi feature
-        run: |
-          # Test arkavo-llm with kimi feature enabled (no live API calls)
-          cargo test -p arkavo-llm --lib --no-default-features --features kimi
-      
-      - name: Check kimi dependencies
-        run: |
-          # Quick check that kimi feature doesn't add unexpected dependencies
-          # Use cargo tree to analyze dependencies instead of building twice
-          echo "=== Dependencies without kimi feature ==="
-          cargo tree -p arkavo --no-default-features --edges normal --prefix none | sort > /tmp/deps-base.txt
-          echo "=== Dependencies with kimi feature ==="
-          cargo tree -p arkavo --no-default-features --features kimi --edges normal --prefix none | sort > /tmp/deps-kimi.txt
-          echo "=== New dependencies added by kimi feature ==="
-          comm -13 /tmp/deps-base.txt /tmp/deps-kimi.txt || true
-          
-          # Count new dependencies
-          NEW_DEPS=$(comm -13 /tmp/deps-base.txt /tmp/deps-kimi.txt | wc -l)
-          echo "Kimi feature adds $NEW_DEPS new dependencies"
-          
-          # Fail if kimi adds too many dependencies (more than 20)
-          if [ $NEW_DEPS -gt 20 ]; then
-            echo "ERROR: Kimi feature adds too many dependencies ($NEW_DEPS > 20)!"
-            exit 1
-          fi
-
-  # Dependency audit with cargo-deny
-  # Uses EmbarkStudios action with matrix strategy for optimal CI behavior
-  cargo-deny:
-    name: Dependency Audit (${{ matrix.checks }})
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        checks:
-          - advisories
-          - bans licenses sources
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check ${{ matrix.checks }}
-          # Advisories run separately so new RustSec entries don't break unrelated PRs
-          # bans, licenses, sources run together as they're deterministic
-
-  build-linux:
-    name: Build Linux (${{ matrix.target || matrix.device }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-            features: default
-            artifact_name: arkavo-x86_64-linux
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-22.04
-            features: memory,mdns,mcp-tools
-            artifact_name: arkavo-x86_64-linux-musl
-          # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
-          - os: ubuntu-24.04-arm
-            features: memory,mdns,llm-remote,mcp-tools,gemini,web-ui
-            artifact_name: arkavo-aarch64-linux-rpi5
-            device: rpi5
-          # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
-          # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
-          # See: docs/uno-q-hardware-acceleration-blockers.md for details
-          - os: ubuntu-24.04-arm
-            features: llama-cpp,snpe,memory,mdns,gemini,mcp-tools
-            artifact_name: arkavo-aarch64-linux-uno-q
-            device: uno-q
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-
-          echo "DEBUG: matrix.device = '${{ matrix.device }}'"
-          echo "DEBUG: matrix.target = '${{ matrix.target }}'"
-          echo "DEBUG: matrix.features = '${{ matrix.feature }}'"
-
-          if [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Installing dependencies for Arduino UNO Q (llama.cpp CPU-only)"
-            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
-          elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Installing dependencies for Raspberry Pi 5 (llama.cpp with CPU backend)"
-            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
-          else
-            echo "Installing dependencies for x86_64 builds"
-            sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-          fi
-
-      # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
-      # The Qualcomm Neural Processing SDK enables hardware-accelerated inference
-      # on Arduino UNO Q (QRB2210) with GPU/DSP support.
-      #
-      # Runtime detection: Binary searches /opt/snpe, $SNPE_ROOT, $LD_LIBRARY_PATH
-      # Download SDK from: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
-      # License: Proprietary (cannot redistribute - users install separately)
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target || '' }}
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-${{ matrix.device || matrix.target }}"
-
-      - name: Install build tools
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
-            # Install musl tools for static build
-            # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-            sudo apt-get update
-            sudo apt-get install -y musl-tools musl-dev
-          fi
-
-      - name: Build
-        env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: musl-g++
-          AR_x86_64_unknown_linux_musl: ar
-          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-          # For glibc build, ensure static linking of OpenMP
-          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: |
-          if [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76, CPU-only)
-            echo "Building for Raspberry Pi 5 (native ARM64, CPU-only)"
-            export ARKAVO_TARGET_DEVICE=rpi5
-            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
-          elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build (Cortex-A53 with llama.cpp)
-            # Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)
-            # See docs/uno-q-hardware-acceleration-blockers.md for investigation details
-            echo "Building for Arduino UNO Q (Cortex-A53 with llama.cpp CPU backend)"
-            export ARKAVO_TARGET_DEVICE=uno-q
-            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
-          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support (x86_64)
-            cargo build --release --target ${{ matrix.target }} -p arkavo
-          else
-            # Static musl build for containers
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
-          fi
-
-      - name: Prepare release artifact
-        run: |
-          mkdir -p release-package
-          # For native ARM64 builds, binary is in target/release; for others, target/<triple>/release
-          if [ -n "${{ matrix.device }}" ]; then
-            cp target/release/arkavo release-package/${{ matrix.artifact_name }}
-          else
-            cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
-          fi
-          chmod +x release-package/${{ matrix.artifact_name }}
-
-          # Create feature manifest
-          if [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
-          elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
-            echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable" >> release-package/features.txt
-            echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
-            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
-          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build (x86_64)" > release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
-          else
-            echo "Static build (${{ matrix.target }})" > release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
-          fi
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: release-package/
-          retention-days: 1
-
-  build-macos:
-    name: Build macOS (ARM64)
-    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-aarch64"
-
-      # Regression test for Issue #114 - Run before full build to catch issues early
-      - name: Test Issue #114 - No Xcode Prompts
-        run: |
-          echo "Testing regression for issue #114..."
-
-          # Build without default features to avoid embeddings
-          echo "Building arkavo-mcp-macos..."
-          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
-
-          # Run the regression test
-          echo "Running regression test..."
-          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
-            echo "::error::Regression test failed"
-            exit 1
-          }
-
-          # Test that discovery tools don't prompt
-          echo "Testing Swift discovery tool..."
-          cd crates/arkavo-mcp-macos
-
-          # Create a minimal PATH that excludes Xcode but includes Rust
-          CARGO_BIN="${HOME}/.cargo/bin"
-          if [ ! -d "$CARGO_BIN" ]; then
-            # GitHub Actions might have cargo in a different location
-            CARGO_BIN=$(dirname $(which cargo))
-          fi
-
-          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
-          echo "Using PATH: $MINIMAL_PATH"
-
-          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
-
-          # Ensure no prompt-related output
-          if grep -i "command line tools\|xcode-select" output.log; then
-            echo "::error::Regression failure: Found Xcode installation prompt"
-            exit 1
-          fi
-
-          echo "✅ Issue #114 regression test passed"
-          cd ../..
-
-      - name: Install idb-companion
-        run: |
-          brew tap facebook/fb
-          brew install idb-companion
-
-      - name: Build
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: cargo build --release --target aarch64-apple-darwin
-
-      - name: Check binary size
-        run: |
-          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
-          SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "Binary size: ${SIZE_MB}MB"
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
-            exit 1
-          fi
-
-      - name: Prepare release artifact with ONNX Runtime
-        run: |
-          mkdir -p release-package
-          cp target/aarch64-apple-darwin/release/arkavo release-package/
-          # Download ONNX Runtime for macOS ARM64
-          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
-          mkdir -p ort-temp
-          tar -xzf ort-osx.tgz -C ort-temp --strip-components=1
-          # Copy the dylib next to the binary for zero-config
-          cp ort-temp/lib/libonnxruntime*.dylib release-package/
-          chmod +x release-package/arkavo
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: arkavo-aarch64-apple-darwin
-          path: release-package/
-          retention-days: 1
-
-  # Windows build job
-  build-windows:
-    name: Build Windows
-    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup vendor/llama.cpp
-        shell: bash
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-
-      # Install C++ build tools for future llama.cpp support
-      # Note: Currently building with windows-default (no C++ deps), but this
-      # ensures we're ready when llama.cpp is enabled on Windows
-      - name: Setup MSVC C++ Build Tools
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Install CMake
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-          cmake --version
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-windows"
-
-      - name: Build Windows binary
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: |
-          cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
-
-      - name: Check binary
-        run: |
-          Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
-          $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
-          Write-Host "Binary size: $([math]::Round($size, 2))MB"
-          if ($size -gt 60) {
-            Write-Error "Binary size exceeds 60MB limit"
-            exit 1
-          }
-          Write-Host "✅ Binary size is within limit"
-
-      - name: Prepare release artifact
-        run: |
-          New-Item -ItemType Directory -Force -Path release-package
-          Copy-Item target\x86_64-pc-windows-msvc\release\arkavo.exe release-package\
-          Write-Output "Windows build with memory and remote LLM support" > release-package\features.txt
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arkavo-x86_64-windows
-          path: release-package/
-          retention-days: 1
-
-  # Performance check can run independently
-  performance-check:
-    name: Performance Check
-    needs: build-linux
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Download release artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux
-      - name: Check binary size
-        run: |
-          SIZE=$(du -b arkavo-x86_64-linux | cut -f1)
-          SIZE_MB=$(( SIZE / 1024 / 1024 ))
-          echo "Binary size: $SIZE_MB MB"
-
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
-            exit 1
-          fi
-          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
-
-  # Smoke tests depend on builds
-  smoke-test-linux:
-    name: Smoke Test Linux (${{ matrix.container }})
-    needs: build-linux
-    runs-on: ubuntu-22.04
+  validate:
+    name: Validate Specs
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        container:
-          - alpine:latest
-          - ubuntu:latest
-          - ubuntu:22.04
-    container:
-      image: ${{ matrix.container }}
-    steps:
-      - name: Download musl binary for Alpine
-        if: contains(matrix.container, 'alpine')
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux-musl
-
-      - name: Download glibc binary for Ubuntu
-        if: contains(matrix.container, 'ubuntu')
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux
-
-      - name: Test binary
-        run: |
-          chmod +x arkavo*
-          ./arkavo* --version
-
-  smoke-test-macos:
-    name: Smoke Test macOS
-    needs: build-macos
-    runs-on: macos-latest
-    steps:
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-aarch64-apple-darwin
-
-      - name: Test binary
-        run: |
-          chmod +x arkavo
-          # Test with bundled ONNX Runtime library
-          ./arkavo --version
-
-  smoke-test-windows:
-    name: Smoke Test Windows
-    needs: build-windows
-    runs-on: windows-2022
-    steps:
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-windows
-
-      - name: Test binary
-        run: |
-          .\arkavo.exe --version
-          # Test help command
-          .\arkavo.exe --help
-
-  # Binary functionality smoke test
-  binary-smoke-test:
-    name: Binary Smoke Test
-    needs: [build-linux]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux
-          path: ./
-      
-      # No runtime dependencies needed for pure Rust mDNS
-      
-      - name: Test binary size
-        run: |
-          echo "=== Binary Size Check ==="
-          chmod +x arkavo-x86_64-linux
+        check:
+          - name: schema
+            cmd: |
+              npm install -g ajv ajv-formats js-yaml 2>/dev/null
+              node -e "
+                const Ajv = require('ajv');
+                const addFormats = require('ajv-formats');
+                const fs = require('fs');
+                
+                const ajv = new Ajv({strict: false});
+                addFormats(ajv);
+                
+                const schema = JSON.parse(fs.readFileSync('specs/schema.json'));
+                const validate = ajv.compile(schema);
+                
+                let failed = false;
+                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+                
+                for (const file of files) {
+                  const content = fs.readFileSync('specs/arkavo-edge/' + file, 'utf8');
+                  const yaml = require('js-yaml');
+                  const spec = yaml.load(content);
+                  
+                  if (!validate(spec)) {
+                    console.error('❌ ' + file + ':');
+                    validate.errors.forEach(e => console.error('  - ' + e.instancePath + ': ' + e.message));
+                    failed = true;
+                  } else {
+                    console.log('✅ ' + file);
+                  }
+                }
+                
+                process.exit(failed ? 1 : 0);
+              "
           
-          SIZE=$(stat --format=%s arkavo-x86_64-linux)
-          SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "Binary size: ${SIZE_MB}MB"
+          - name: required-fields
+            cmd: |
+              npm install -g js-yaml 2>/dev/null
+              node -e "
+                const fs = require('fs');
+                const yaml = require('js-yaml');
+                const path = require('path');
+                
+                const specsDir = 'specs/arkavo-edge';
+                const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.spec.yaml'));
+                let errors = [];
+                
+                for (const file of files) {
+                  const content = fs.readFileSync(path.join(specsDir, file), 'utf8');
+                  const spec = yaml.load(content);
+                  
+                  if (!spec.feature) errors.push(file + ': Missing feature');
+                  if (!spec.module) errors.push(file + ': Missing module');
+                  if (!spec.version) errors.push(file + ': Missing version');
+                  if (!spec.invariants) errors.push(file + ': Missing invariants');
+                  if (!spec.scenarios) errors.push(file + ': Missing scenarios');
+                  
+                  for (const s of spec.scenarios || []) {
+                    if (!s.id) errors.push(file + ': Scenario missing id');
+                    if (!s.name) errors.push(file + ': Scenario missing name');
+                    if (!s.criticality) errors.push(file + ': ' + s.id + ' missing criticality');
+                    if (!['critical','high','medium','low'].includes(s.criticality)) {
+                      errors.push(file + ': ' + s.id + ' invalid criticality');
+                    }
+                    if (!s.given) errors.push(file + ': ' + s.id + ' missing given');
+                    if (!s.when) errors.push(file + ': ' + s.id + ' missing when');
+                    if (!s.then) errors.push(file + ': ' + s.id + ' missing then');
+                    if (s.id && !/^[A-Z]+-\\d+$/.test(s.id)) {
+                      errors.push(file + ': ' + s.id + ' invalid id format');
+                    }
+                  }
+                }
+                
+                if (errors.length) {
+                  console.error('❌ Errors:');
+                  errors.forEach(e => console.error('  - ' + e));
+                  process.exit(1);
+                }
+                console.log('✅ All required fields present');
+              "
           
-          # Check against the standard 60MB limit
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 60MB limit"
-            exit 1
-          fi
+          - name: index-sync
+            cmd: |
+              npm install -g js-yaml 2>/dev/null
+              node -e "
+                const fs = require('fs');
+                const yaml = require('js-yaml');
+                
+                const index = yaml.load(fs.readFileSync('specs/arkavo-edge/index.yaml', 'utf8'));
+                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+                
+                // Check all components exist
+                for (const comp of index.components || []) {
+                  if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
+                    console.error('❌ Missing file: ' + comp.file);
+                    process.exit(1);
+                  }
+                  
+                  // Verify scenario count matches
+                  const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
+                  const actualCount = spec.scenarios?.length || 0;
+                  if (comp.scenario_count !== actualCount) {
+                    console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
+                    process.exit(1);
+                  }
+                }
+                
+                console.log('✅ Index synchronized (' + index.components.length + ' components)');
+              "
           
-          # Note if it's optimized (under 40MB means no heavy ML deps)
-          if [ $SIZE_MB -le 40 ]; then
-            echo "✅ Binary is highly optimized (${SIZE_MB}MB ≤ 40MB - no heavy ML deps)"
-          else
-            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
-          fi
-      
-      - name: Test basic commands
-        run: |
-          echo "=== Testing Basic Commands ==="
-          
-          # Test version
-          ./arkavo-x86_64-linux --version || exit 1
-          echo "✅ --version works"
-          
-          # Test help
-          ./arkavo-x86_64-linux --help > help.txt || exit 1
-          echo "✅ --help works"
-          
-          # Verify expected commands are present
-          grep -q "serve" help.txt || { echo "❌ 'serve' command missing"; exit 1; }
-          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
-          grep -q "chat" help.txt || { echo "❌ 'chat' command missing"; exit 1; }
-          echo "✅ Expected commands present"
-      
-      - name: Test server startup
-        run: |
-          echo "=== Testing Server Startup ==="
-          
-          # Try to start the server and check it responds
-          timeout 5 ./arkavo-x86_64-linux serve 2>&1 | tee server.log || true
-          
-          # Check for expected startup messages
-          if grep -qE "Starting|Listening|serve|Server" server.log; then
-            echo "✅ Server startup messages detected"
-          else
-            echo "⚠️ Server might not have started properly"
-            cat server.log
-          fi
-      
-      - name: Test task command
-        run: |
-          echo "=== Testing Task Command ==="
-
-          # Test task help
-          ./arkavo-x86_64-linux task --help 2>&1 | tee task.log || true
-
-          # Should at least not crash
-          if grep -qE "task|Task|Plan and apply" task.log; then
-            echo "✅ Task command works"
-          else
-            echo "⚠️ Unexpected task output"
-            cat task.log
-          fi
-
-      - name: Test chat command
-        run: |
-          echo "=== Testing Chat Command ==="
-
-          # Test chat help
-          ./arkavo-x86_64-linux chat --prompt hi 2>&1 | tee chat.log || true
-
-          if grep -qE "Hi|Generated|help" chat.log; then
-            echo "✅ Chat command available"
-          else
-            echo "⚠️ Chat command output unexpected"
-            cat chat.log
-          fi
-      
-      - name: Verify no heavy dependencies
-        run: |
-          echo "=== Checking Binary Dependencies ==="
-          
-          # Use ldd to check shared libraries (won't show Rust static deps, but can catch some issues)
-          ldd arkavo-x86_64-linux | tee deps.log || true
-          
-          # Basic check - should not have unusual number of dependencies
-          DEP_COUNT=$(ldd arkavo-x86_64-linux | wc -l)
-          echo "Shared library dependencies: $DEP_COUNT"
-          
-          if [ $DEP_COUNT -gt 50 ]; then
-            echo "⚠️ Unusually high number of dependencies"
-          fi
-          
-          echo "✅ Dependency check complete"
-
-  # Schema validation jobs
-  validate-openrpc:
-    name: Validate OpenRPC Schema
-    runs-on: ubuntu-22.04
+          - name: stats
+            cmd: |
+              npm install -g js-yaml 2>/dev/null
+              node -e "
+                const fs = require('fs');
+                const yaml = require('js-yaml');
+                const path = require('path');
+                
+                const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+                let total = 0, critical = 0, high = 0;
+                
+                console.log('\\n📊 Spec Statistics');
+                console.log('==================');
+                
+                for (const file of files) {
+                  const spec = yaml.load(fs.readFileSync(path.join('specs/arkavo-edge', file), 'utf8'));
+                  const count = spec.scenarios?.length || 0;
+                  const crit = spec.scenarios?.filter(s => s.criticality === 'critical').length || 0;
+                  const h = spec.scenarios?.filter(s => s.criticality === 'high').length || 0;
+                  total += count; critical += crit; high += h;
+                  console.log((file + ':').padEnd(30) + count + ' (C:' + crit + ' H:' + h + ')');
+                }
+                
+                console.log('─────────────────────────────────');
+                console.log(('Total:').padEnd(30) + total + ' (C:' + critical + ' H:' + high + ')');
+              "
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "schema"
-
-      - name: Install validation tools
-        run: |
-          # Install jq for JSON validation
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-          # Install oasdiff for breaking change detection (Go binary, no npm)
-          wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
-          tar -xzf oasdiff.tar.gz
-          sudo mv oasdiff /usr/local/bin/
-          rm oasdiff.tar.gz
-
-      - name: Build schema tools
-        run: |
-          cargo build -p arkavo-protocol --bin export-schema --bin validate-schema --features demo || echo "Schema tools not yet available"
-
-      - name: Generate and validate schemas
-        run: |
-          # Check if export-schema exists
-          if cargo run -p arkavo-protocol --bin export-schema --features demo > schema.json 2>/dev/null; then
-            # Create schemas directory
-            mkdir -p schemas/openrpc schemas/config schemas/wire/v1
-            cp schema.json schemas/openrpc/
-
-            # Basic JSON validation with jq
-            if ! jq . schema.json > /dev/null 2>&1; then
-              echo "❌ Invalid JSON in schema"
-              exit 1
-            fi
-
-            # Validate OpenRPC structure
-            echo "Validating OpenRPC schema structure..."
-
-            # Check required fields
-            if ! jq -e '.openrpc' schema.json > /dev/null; then
-              echo "❌ Missing required field: openrpc"
-              exit 1
-            fi
-
-            if ! jq -e '.info' schema.json > /dev/null; then
-              echo "❌ Missing required field: info"
-              exit 1
-            fi
-
-            if ! jq -e '.methods' schema.json > /dev/null; then
-              echo "❌ Missing required field: methods"
-              exit 1
-            fi
-
-            # Validate OpenRPC version
-            OPENRPC_VERSION=$(jq -r '.openrpc' schema.json)
-            if [[ ! "$OPENRPC_VERSION" =~ ^1\.[0-9]+\.[0-9]+$ ]]; then
-              echo "❌ Invalid OpenRPC version: $OPENRPC_VERSION"
-              exit 1
-            fi
-
-            # Check method structure
-            jq -e '.methods[] | select(.name == null or .params == null or .result == null)' schema.json > /dev/null && {
-              echo "❌ Methods must have name, params, and result fields"
-              exit 1
-            } || true
-
-            # Validate method names follow convention
-            INVALID_METHODS=$(jq -r '.methods[].name | select(test("^[a-z_]+$") | not)' schema.json || true)
-            if [ -n "$INVALID_METHODS" ]; then
-              echo "⚠️  Warning: Method names should be lowercase with underscores:"
-              echo "$INVALID_METHODS"
-            fi
-
-            # Check for method descriptions
-            METHODS_WITHOUT_DESC=$(jq -r '.methods[] | select(.description == null) | .name' schema.json || true)
-            if [ -n "$METHODS_WITHOUT_DESC" ]; then
-              echo "⚠️  Warning: Methods without descriptions:"
-              echo "$METHODS_WITHOUT_DESC"
-            fi
-
-            # Run Rust-based validation
-            if cargo run -p arkavo-protocol --bin validate-schema --features demo 2>/dev/null; then
-              echo "✅ Rust schema validation passed"
-            fi
-
-            echo "✅ Schema validation completed"
-          else
-            echo "⚠️ Schema export not yet implemented - skipping validation"
-          fi
-
-  check-schema-backwards-compatibility:
-    name: Check Schema Backwards Compatibility
-    runs-on: ubuntu-22.04
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "schema-compat"
-
-      - name: Install jq for JSON comparison
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Check for breaking changes
-        run: |
-          # Check if export-schema binary exists
-          if cargo run -p arkavo-protocol --bin export-schema --features demo > /dev/null 2>&1; then
-            # Generate current schema
-            cargo run -p arkavo-protocol --bin export-schema --features demo > schema-current.json
-
-            # Checkout base branch
-            git checkout ${{ github.base_ref }}
-
-            # Check if export-schema exists in base
-            if cargo run -p arkavo-protocol --bin export-schema --features demo > schema-base.json 2>/dev/null; then
-              # Switch back to PR branch
-              git checkout -
-
-              # Check for breaking changes using jq
-              echo "Checking for breaking changes..."
-
-              # Extract method names from both schemas
-              BASE_METHODS=$(jq -r '.methods[].name' schema-base.json | sort)
-              CURRENT_METHODS=$(jq -r '.methods[].name' schema-current.json | sort)
-
-              # Check for removed methods (breaking change)
-              REMOVED_METHODS=$(comm -23 <(echo "$BASE_METHODS") <(echo "$CURRENT_METHODS"))
-              if [ -n "$REMOVED_METHODS" ]; then
-                echo "❌ Breaking change: Methods removed:"
-                echo "$REMOVED_METHODS"
-                exit 1
-              fi
-
-              # Check for changes in required parameters
-              for method in $BASE_METHODS; do
-                if echo "$CURRENT_METHODS" | grep -q "^$method$"; then
-                  # Get required params from base
-                  BASE_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-base.json 2>/dev/null | sort || true)
-                  # Get required params from current
-                  CURRENT_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-current.json 2>/dev/null | sort || true)
-
-                  # Check for removed required params (breaking change)
-                  if [ -n "$BASE_REQUIRED" ]; then
-                    REMOVED_PARAMS=$(comm -23 <(echo "$BASE_REQUIRED") <(echo "$CURRENT_REQUIRED") || true)
-                    if [ -n "$REMOVED_PARAMS" ]; then
-                      echo "❌ Breaking change: Required parameters removed from $method:"
-                      echo "$REMOVED_PARAMS"
-                      exit 1
-                    fi
-                  fi
-                fi
-              done
-
-              echo "✅ No breaking changes detected"
-            else
-              echo "⚠️ Schema export doesn't exist in base branch - skipping compatibility check"
-            fi
-          else
-            echo "⚠️ Schema export not yet implemented - skipping compatibility check"
-          fi
-
-  validate-doc-snippets:
-    name: Validate Documentation Code Snippets
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Test documentation examples
-        run: |
-          # Test Rust doc examples
-          cargo test --doc -p arkavo-protocol || echo "No doc tests in arkavo-protocol"
-
-      - name: Validate JSON snippets in docs
-        run: |
-          # Extract and validate JSON snippets from markdown files
-          for md in docs/**/*.md README.md; do
-            if [ -f "$md" ]; then
-              echo "Checking $md for JSON snippets..."
-              # Extract JSON code blocks and validate them
-              awk '/```json/{flag=1;next}/```/{flag=0}flag' "$md" > temp.json || true
-              if [ -s temp.json ]; then
-                jq . temp.json > /dev/null 2>&1 || echo "Invalid JSON in $md"
-              fi
-            fi
-          done
-
-  validate-xtask-schema:
-    name: Validate Schemas with xtask
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "xtask"
-      - name: Run schema validation
-        run: cargo run -p xtask -- schema-gen --check
-
-  # Zero-config and portability verification
-  zero-config-check:
-    name: Zero Configuration Check
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       
-      - name: Check for hardcoded paths
-        run: |
-          echo "Verifying no hardcoded paths..."
-          
-          PATTERNS=(
-            "/Applications/Xcode.app"
-            "/usr/local/bin"
-            "/opt/homebrew"
-            "$HOME/Library"
-            "~/.config"
-          )
-          
-          for pattern in "${PATTERNS[@]}"; do
-            # Exclude arkavo-mcp-macos (macOS-specific paths) and arkavo-agui (CEF renderer search paths with fallback)
-            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target --exclude-dir=arkavo-mcp-macos --exclude-dir=arkavo-agui | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
-              echo "::error::Found hardcoded path: $pattern"
-              exit 1
-            fi
-          done
-          
-      - name: Check for required environment variables
-        run: |
-          echo "Verifying no required environment variables..."
-
-          # Check for env::var calls that require configuration
-          # Exclude build.rs files and test files, and allow standard env vars and optional API keys
-          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL"; then
-            echo "::error::Found required environment variables"
-            exit 1
-          fi
-
-  # Verify no OpenSSL dependency for musl builds
-  no-openssl-check:
-    name: Verify No OpenSSL Dependency
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "no-openssl"
-
-      - name: Check for OpenSSL in musl dependency tree
-        run: |
-          set +e  # Don't exit on error - we want to handle errors ourselves
-          echo "Checking musl target for OpenSSL dependencies..."
-
-          # Check only the arkavo binary with musl-specific features (memory,mdns,mcp-tools)
-          # This matches the actual musl build configuration and excludes features like
-          # claude-agent that are only used on glibc targets
-          MUSL_FEATURES="memory,mdns,mcp-tools"
-
-          # Check for openssl - if it's found in the tree (not the error message), fail
-          OPENSSL_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
-          OPENSSL_EXIT=$?
-
-          if [ $OPENSSL_EXIT -ne 0 ] && ! echo "$OPENSSL_CHECK" | grep -q "did not match any packages"; then
-            echo "::error::cargo tree failed to check OpenSSL dependencies"
-            echo "$OPENSSL_CHECK"
-            exit 1
-          fi
-
-          if echo "$OPENSSL_CHECK" | grep -q "openssl v" ; then
-            echo "::error::Found OpenSSL dependency in musl build! This will cause cross-compilation failures."
-            echo "::error::Use rustls instead of native-tls for all TLS dependencies."
-            echo "$OPENSSL_CHECK"
-            exit 1
-          fi
-
-          # Check for native-tls - if it's found in the tree (not the error message), fail
-          NATIVE_TLS_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
-          NATIVE_TLS_EXIT=$?
-
-          if [ $NATIVE_TLS_EXIT -ne 0 ] && ! echo "$NATIVE_TLS_CHECK" | grep -q "did not match any packages"; then
-            echo "::error::cargo tree failed to check native-tls dependencies"
-            echo "$NATIVE_TLS_CHECK"
-            exit 1
-          fi
-
-          if echo "$NATIVE_TLS_CHECK" | grep -q "native-tls v" ; then
-            echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
-            echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
-            echo "$NATIVE_TLS_CHECK"
-            exit 1
-          fi
-
-          echo "✅ No OpenSSL or native-tls dependencies found in musl build (features: $MUSL_FEATURES)"
-          set -e  # Re-enable exit on error
-
-  # Final check that depends on all critical jobs
-  release-readiness:
-    name: Release Readiness
-    needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
-    runs-on: ubuntu-22.04
-    if: always()
-    steps:
-      - name: Check job results
-        run: |
-          if [[ "${{ needs.version-check.result }}" != "success" || \
-                "${{ needs.format.result }}" != "success" || \
-                "${{ needs.test-and-lint.result }}" != "success" || \
-                "${{ needs.cargo-deny.result }}" != "success" || \
-                "${{ needs.smoke-test-linux.result }}" != "success" || \
-                "${{ needs.smoke-test-macos.result }}" != "success" || \
-                "${{ needs.binary-smoke-test.result }}" != "success" || \
-                "${{ needs.performance-check.result }}" != "success" || \
-                "${{ needs.validate-openrpc.result }}" != "success" || \
-                "${{ needs.validate-doc-snippets.result }}" != "success" || \
-                "${{ needs.zero-config-check.result }}" != "success" || \
-                "${{ needs.validate-xtask-schema.result }}" != "success" || \
-                "${{ needs.no-openssl-check.result }}" != "success" ]]; then
-            echo "One or more required checks failed"
-            exit 1
-          fi
-          echo "All checks passed! This PR is ready for merge."
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: ${{ matrix.check.name }}
+        run: ${{ matrix.check.cmd }}
