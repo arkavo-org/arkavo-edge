@@ -1,0 +1,69 @@
+# Arkavo Edge Behavior Specification Index
+
+version: 0.57.1
+last_updated: 2025-01-30
+
+components:
+  - name: registration
+    file: registration.spec.yaml
+    module: arkavo_protocol::registration
+    description: Device and agent onboarding with challenge-response
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - Challenge IDs are SHA-256 unique
+      - 300-second TTL on challenges
+      - Dual-key support (Ed25519 + P-256)
+
+  - name: crypto
+    file: crypto.spec.yaml
+    module: arkavo_crypto
+    description: Cryptographic primitives and key management
+    criticality: critical
+    scenario_count: 11
+    invariants:
+      - Ed25519: 32-byte keys, 64-byte signatures
+      - P-256 SEC1: 65-byte uncompressed keys
+      - DID:key with multicodec prefixes
+
+  - name: chat-session
+    file: chat-session.spec.yaml
+    module: arkavo_protocol::chat_session
+    description: LLM chat session lifecycle management
+    criticality: high
+    scenario_count: 10
+    invariants:
+      - UUID v4 session IDs
+      - State machine: Active → Closing → Closed
+      - 100-delta back-pressure threshold
+
+  - name: gossip-protocol
+    file: gossip-protocol.spec.yaml
+    module: arkavo_gossip
+    description: Decentralized message propagation and consensus
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - Ed25519 signatures on all messages
+      - 2/3 quorum threshold
+      - 60-second anti-entropy interval
+
+stats:
+  total_specs: 4
+  total_scenarios: 38
+  critical_scenarios: 20
+  coverage_areas:
+    - authentication
+    - cryptography
+    - session_management
+    - distributed_consensus
+
+# Cross-component behaviors
+integration_points:
+  - name: Registration → Chat Session
+    description: Authenticated sessions use verified device registrations
+    specs: [REG-002, REG-003, CHAT-001]
+
+  - name: Crypto → Gossip
+    description: Message signing uses crypto primitives
+    specs: [CRYPTO-002, GOSSIP-002]

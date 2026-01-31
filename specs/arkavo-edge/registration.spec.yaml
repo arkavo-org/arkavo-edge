@@ -1,0 +1,135 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Device and Agent Registration
+module: arkavo_protocol::registration
+version: 0.57.1
+
+invariants:
+  - Challenge IDs are cryptographically unique (SHA-256 of random 32 bytes)
+  - Challenges expire after exactly 300 seconds (CHALLENGE_TTL_SECONDS)
+  - Device ID must match between challenge creation and verification
+  - Signature verification supports both Ed25519 (32 bytes) and P-256 SEC1 (33/65 bytes)
+  - Successful verification creates a permanent registration record
+
+scenarios:
+  - id: REG-001
+    name: Create challenge for new device
+    criticality: high
+    given:
+      - RegistrationService is initialized
+      - Device ID is a valid did:key string
+    when: create_challenge is called with ChallengeRequest
+    then:
+      - Returns ChallengeResponse with unique challenge_id
+      - challenge is base64-encoded 32 random bytes
+      - timestamp is current Unix epoch seconds
+      - Challenge is stored with 5-minute TTL
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:48-75]
+
+  - id: REG-002
+    name: Verify challenge with Ed25519 signature
+    criticality: high
+    given:
+      - Valid challenge exists for device_id
+      - Challenge has not expired
+      - Ed25519 keypair (32 bytes) is available
+    when: verify_challenge called with valid signature over challenge data
+    then:
+      - Signature is verified against Ed25519 public key
+      - Registration record created with verified=true
+      - Returns VerifyResponse.success=true
+      - Device status shows verified
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:110-124]
+
+  - id: REG-003
+    name: Verify challenge with P-256 SEC1 signature (iOS Secure Enclave)
+    criticality: high
+    given:
+      - Valid challenge exists for device_id
+      - P-256 SEC1 key (33 or 65 bytes) from iOS Secure Enclave
+      - Signature is DER-encoded ECDSA
+    when: verify_challenge called with P-256 public key and signature
+    then:
+      - Detects key type by length (33 compressed or 65 uncompressed)
+      - Verifies ECDSA signature with SHA-256
+      - Registration record created with verified=true
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:125-144]
+
+  - id: REG-004
+    name: Challenge expiration cleanup
+    criticality: medium
+    given:
+      - Multiple challenges exist in storage
+      - Some challenges are older than 300 seconds
+    when: create_challenge is called (triggers cleanup)
+    then:
+      - Expired challenges are removed from storage
+      - New challenge is still created successfully
+      - Active challenges remain unaffected
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:68-69,180-187]
+
+  - id: REG-005
+    name: Reject expired challenge verification
+    criticality: high
+    given:
+      - Challenge exists but is older than 300 seconds
+    when: verify_challenge called after TTL expires
+    then:
+      - Returns A2aError::InvalidRequest("Challenge expired")
+      - No registration is created
+      - Challenge remains in storage until cleanup
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:90-92]
+
+  - id: REG-006
+    name: Reject challenge with device ID mismatch
+    criticality: high
+    given:
+      - Challenge was created for device_id "A"
+    when: verify_challenge called with device_id "B"
+    then:
+      - Returns A2aError::InvalidRequest("Device ID mismatch")
+      - No registration is created
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:94-96]
+
+  - id: REG-007
+    name: Reject invalid signature
+    criticality: high
+    given:
+      - Valid challenge exists
+      - Signature was created over different data
+    when: verify_challenge called with wrong signature
+    then:
+      - Returns A2aError::AuthenticationFailed
+      - No registration is created
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:119-123,132-137]
+
+  - id: REG-008
+    name: Reject unsupported key length
+    criticality: medium
+    given:
+      - Public key is provided with unsupported length
+    when: verify_challenge called with key length not in {32, 33, 65}
+    then:
+      - Returns A2aError::InvalidRequest with descriptive message
+      - Lists expected lengths (32 for Ed25519, 33/65 for P-256)
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:139-143]
+
+  - id: REG-009
+    name: Query registration status
+    criticality: medium
+    given:
+      - Device may or may not be registered
+    when: get_registration_status called
+    then:
+      - Returns verified=true if registration exists
+      - Returns verified=false with timestamp=0 if not found
+      - Device ID is preserved in response
+    refs: [crates/arkavo-protocol/src/registration/mod.rs:163-178]
+
+  edge_cases:
+    - condition: System time before UNIX_EPOCH
+      expected: create_challenge panics (documented)
+    - condition: Base64 decode failure on public_key
+      expected: Returns InvalidRequest with decode error details
+    - condition: Non-existent challenge_id
+      expected: Returns InvalidRequest("Challenge not found")
