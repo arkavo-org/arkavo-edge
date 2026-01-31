@@ -136,10 +136,32 @@ components:
       - Session lifecycle tracked
       - Health reports aggregate status
 
+  - name: mcp-tools
+    file: mcp-tools.spec.yaml
+    module: arkavo_mcp_tools
+    description: MCP tool registry and execution
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Tools registered before execution
+      - Schemas define valid parameters
+      - Progressive disclosure supported
+
+  - name: events
+    file: events.spec.yaml
+    module: arkavo_events
+    description: Event system and audit logging
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - Events have unique UUIDs
+      - Events immutable once created
+      - Schema version tracked
+
 stats:
-  total_specs: 12
-  total_scenarios: 105
-  critical_scenarios: 52
+  total_specs: 14
+  total_scenarios: 123
+  critical_scenarios: 61
   coverage_areas:
     - authentication
     - authorization
@@ -153,6 +175,8 @@ stats:
     - cost_management
     - identity_management
     - observability
+    - tool_execution
+    - audit_logging
     - error_handling
     - fault_tolerance
 
@@ -193,3 +217,15 @@ integration_points:
   - name: Authorization → TDF
     description: TDF uses authorization for access decisions
     specs: [AUTHZ-001, TDF-004]
+
+  - name: MCP Tools → Router
+    description: Router uses tool registry for execution
+    specs: [MCP-001, ROUTER-008]
+
+  - name: Events → Observability
+    description: Observability consumes events for metrics
+    specs: [EVENT-005, OBS-002]
+
+  - name: Memory → MCP Tools
+    description: MCP tools use memory for context storage
+    specs: [MEM-001, MCP-001]

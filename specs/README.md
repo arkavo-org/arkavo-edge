@@ -21,10 +21,12 @@ specs/
     ├── budget.spec.yaml           # 7 scenarios
     ├── authorization.spec.yaml    # 6 scenarios
     ├── device-identity.spec.yaml  # 6 scenarios
-    └── observability.spec.yaml    # 8 scenarios
+    ├── observability.spec.yaml    # 8 scenarios
+    ├── mcp-tools.spec.yaml        # 10 scenarios
+    └── events.spec.yaml           # 8 scenarios
 ```
 
-**Total: 105 scenarios across 12 components**
+**Total: 123 scenarios across 14 components**
 
 ## Specification Format
 
