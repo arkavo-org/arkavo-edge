@@ -7,7 +7,8 @@ use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
 use arkavo_llm::{LlmClient, LlmClientAdapter, LlmConfig};
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
-use crate::auth::NoOpAuthBackend;
+// SECURITY FIX (CRI-001): NoOpAuthBackend removed
+// Use JwtAuthBackend or MultiAuthBackend for production
 use crate::config::{BufferConfig, ServerConfig};
 use crate::error::{A2aError, Result};
 use crate::mcp_registry::McpRegistry;
@@ -806,7 +807,7 @@ impl A2aServer {
             event_writer: self.event_writer.read().await.clone(),
             session_id: self.session_id.clone(),
             event_sequence: self.event_sequence.clone(),
-            auth_backend: Arc::new(NoOpAuthBackend),
+            auth_backend: Arc::new(crate::auth::JwtAuthBackend::new("change-me-in-production")),
             registration_service: Arc::new(crate::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,

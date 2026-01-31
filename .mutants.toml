@@ -1,0 +1,118 @@
+# Mutation Testing Configuration for Arkavo Edge
+# 
+# Run with: cargo mutants --config-file .mutants.toml
+#
+# Targets critical security and protocol components for mutation testing.
+# Goal: 80%+ mutation score on critical crates.
+
+# Crate-specific configuration
+[crate.arkavo-crypto]
+# Test all public functions - security critical
+test_tool = "cargo"
+test_args = ["test", "--lib"]
+# Exclude debug/display implementations from mutation
+exclude_re = [
+    "fmt::Debug",
+    "fmt::Display",
+    "Error::fmt",
+]
+
+[crate.arkavo-authorization]
+test_tool = "cargo"
+test_args = ["test", "--lib"]
+exclude_re = [
+    "fmt::",
+]
+
+[crate.arkavo-tdf]
+test_tool = "cargo"
+test_args = ["test", "--lib"]
+exclude_re = [
+    "fmt::",
+    "Debug",
+]
+
+[crate.arkavo-protocol]
+test_tool = "cargo"
+test_args = ["test", "--lib"]
+exclude_re = [
+    "fmt::",
+    "tracing::",
+    "debug!",
+    "info!",
+    "warn!",
+    "error!",
+]
+
+[crate.arkavo-gossip]
+test_tool = "cargo"
+test_args = ["test", "--lib"]
+exclude_re = [
+    "fmt::",
+    "tracing::",
+]
+
+# Global configuration
+[global]
+# Timeout for each mutant test run (seconds)
+timeout = 300
+
+# Number of parallel jobs
+jobs = 4
+
+# Output format
+output = "tree"
+
+# Don't mutate these patterns globally
+exclude_re = [
+    # Logging and instrumentation
+    "tracing::",
+    "#\[tracing::instrument",
+    "log::",
+    "debug!",
+    "info!",
+    "warn!",
+    "error!",
+    "trace!",
+    
+    # Formatting
+    "fmt::Debug",
+    "fmt::Display",
+    "fmt::Formatter",
+    
+    # Test code
+    "#\[cfg(test)]",
+    "mod tests",
+    
+    # Documentation
+    "///",
+    "//!",
+    
+    # Serialization helpers
+    "serde::",
+    "Serialize",
+    "Deserialize",
+]
+
+# Require these patterns to be mutated (safety checks)
+require_re = [
+    # Comparison operators in security contexts
+    "==",
+    "!=",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    
+    # Logical operators
+    "&&",
+    "||",
+    "!",
+    
+    # Arithmetic in cryptographic contexts
+    "+ ",
+    "- ",
+    "* ",
+    "/ ",
+    "% ",
+]

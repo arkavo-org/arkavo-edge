@@ -1,0 +1,236 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: TDF Security and Control Plane Protection
+module: arkavo_tdf::security
+version: 1.0.0
+
+invariants:
+  - All control plane messages are TDF-encrypted
+  - Policy decisions are cryptographically bound to data
+  - Data encryption keys never leave KAS without authorization
+  - TDF-JSON and TDF-CBOR formats have equivalent security properties
+  - Policy binding prevents tampering with access rules
+  - Attribute-based access control (ABAC) evaluated before key release
+
+scenarios:
+  - id: TDFS-001
+    name: Control plane commands encrypted with TDF
+    criticality: critical
+    given:
+      - Agent receives control command from orchestrator
+      - Command contains sensitive configuration
+    when: Command is processed
+    then:
+      - Command payload is TDF-encrypted
+      - Only authorized agents can decrypt
+      - Command integrity verified via policy binding
+      - Unauthorized decryption attempts logged and rejected
+    refs: [crates/arkavo-tdf/src/control_plane.rs]
+
+  - id: TDFS-002
+    name: Configuration bundle TDF encryption
+    criticality: critical
+    given:
+      - Configuration bundle contains secrets
+      - Bundle needs distribution to edge agents
+    when: Bundle is encrypted for transport
+    then:
+      - Bundle encrypted as TDF payload
+      - Policy restricts decryption to specific agent identities
+      - Dissemination controls enforce geographic restrictions
+      - Bundle integrity protected by policy binding
+    refs: [crates/arkavo-config-bundle/src/encryption.rs]
+
+  - id: TDFS-003
+    name: TDF-JSON format for API compatibility
+    criticality: high
+    given:
+      - API clients expect JSON format
+      - TDF encryption required for response data
+    when: TdfJsonEncryptor processes data
+    then:
+      - Manifest encoded as JSON (application/json)
+      - EncryptionInformation embedded in JSON structure
+      - Payload base64-encoded in JSON field
+      - Same security properties as binary TDF
+    refs: [crates/arkavo-tdf/src/formats/json.rs]
+
+  - id: TDFS-004
+    name: TDF-CBOR format for efficiency
+    criticality: high
+    given:
+      - Bandwidth-constrained environment
+      - Binary efficiency preferred over JSON
+    when: TdfCborEncryptor processes data
+    then:
+      - Manifest encoded as CBOR (application/cbor)
+      - Smaller payload size than equivalent JSON
+      - Same cryptographic protections as TDF-JSON
+      - Parsing more efficient than JSON for large manifests
+    refs: [crates/arkavo-tdf/src/formats/cbor.rs]
+
+  - id: TDFS-005
+    name: Format negotiation between agents
+    criticality: medium
+    given:
+      - Two agents communicating via A2A
+      - Each supports different TDF formats
+    when: Connection is established
+    then:
+      - Agents negotiate common TDF format
+      - TDF-JSON is default fallback
+      - TDF-CBOR used when both support it
+      - Format choice logged for audit
+    refs: [crates/arkavo-tdf/src/formats/negotiation.rs]
+
+  - id: TDFS-006
+    name: Policy binding prevents policy tampering
+    criticality: critical
+    given:
+      - TDF manifest contains policy
+      - Attacker attempts to modify policy
+    when: Policy binding is verified
+    then:
+      - Policy hash computed and compared to binding
+      - Modified policy fails integrity check
+      - Decryption refused if binding invalid
+      - Tampering attempt logged with forensic details
+    refs: [crates/arkavo-tdf/src/policy_binding.rs]
+
+  - id: TDFS-007
+    name: Key escrow for data recovery
+    criticality: high
+    given:
+      - Organization requires data recovery capability
+      - User loses access to their keys
+    when: Escrow policy is configured
+    then:
+      - Recovery key generated and escrowed securely
+      - Escrow access requires multiple approvals
+      - All escrow operations auditable
+      - Escrow key access triggers alerts
+    refs: [crates/arkavo-tdf/src/escrow.rs]
+
+  - id: TDFS-008
+    name: Attribute authority verification
+    criticality: critical
+    given:
+      - Policy references external attributes
+      - Attribute authority issues signed claims
+    when: Attributes are evaluated
+    then:
+      - Attribute authority signature verified
+      - Attribute certificates checked for expiration
+      - Revoked attributes rejected
+      - Attribute provenance logged
+    refs: [crates/arkavo-tdf/src/attribute_authority.rs]
+
+  - id: TDFS-009
+    name: Time-based policy enforcement
+    criticality: high
+    given:
+      - Policy includes temporal constraints
+      - Data access attempted outside allowed time window
+    when: ABAC evaluation occurs
+    then:
+      - Current time checked against policy constraints
+      - Access denied outside permitted hours
+      - Time window validation cryptographically bound
+      - Policy engine uses tamper-evident time source
+    refs: [crates/arkavo-tdf/src/temporal_policy.rs]
+
+  - id: TDFS-010
+    name: Data residency enforcement
+    criticality: high
+    given:
+      - Policy requires data stay in specific jurisdiction
+      - KAS servers available in multiple regions
+    when: Key rewrap is requested
+    then:
+      - KAS location verified against policy
+      - Keys only released from approved regions
+      - Cross-border key transfer blocked
+      - Residency violation logged
+    refs: [crates/arkavo-tdf/src/residency.rs]
+
+  - id: TDFS-011
+    name: Secure key hierarchy
+    criticality: critical
+    given:
+      - TDF uses key encryption keys (KEKs)
+      - KEKs protect data encryption keys (DEKs)
+    when: Key hierarchy is established
+    then:
+      - Root KEK stored in hardware security module
+      - Intermediate KEKs rotated regularly
+      - DEKs never stored in plaintext
+      - Key derivation uses approved algorithms
+    refs: [crates/arkavo-tdf/src/key_hierarchy.rs]
+
+  - id: TDFS-012
+    name: Offline policy evaluation
+    criticality: medium
+    given:
+      - Agent lacks network connectivity
+      - Policy decision needed for cached data
+    when: Offline access is attempted
+    then:
+      - Cached policy signature verified
+      - Policy freshness checked against max age
+      - Offline access limited by cached constraints
+      - Offline access logged for later audit
+    refs: [crates/arkavo-tdf/src/offline_policy.rs]
+
+  - id: TDFS-013
+    name: Forward secrecy for key agreement
+    criticality: critical
+    given:
+      - ECDH used for key agreement with KAS
+      - Long-term keys may be compromised
+    when: Key agreement occurs
+    then:
+      - Ephemeral keys generated per session
+      - Session keys derived from ephemeral exchange
+      - Compromise of long-term key doesn't expose past sessions
+      - Ephemeral keys destroyed after use
+    refs: [crates/arkavo-tdf/src/forward_secrecy.rs]
+
+  - id: TDFS-014
+    name: Policy update propagation
+    criticality: high
+    given:
+      - Policy is updated for existing encrypted data
+      - Data owners need to reflect new policy
+    when: Policy update is distributed
+    then:
+      - New policy signed by authority
+      - Old policy remains valid for existing sessions
+      - New accesses use updated policy
+      - Policy update cryptographically linked to previous
+    refs: [crates/arkavo-tdf/src/policy_update.rs]
+
+  - id: TDFS-015
+    name: TDF payload obfuscation
+    criticality: medium
+    given:
+      - Encrypted payload may leak metadata via size
+      - Traffic analysis could reveal patterns
+    when: Large payload is encrypted
+    then:
+      - Optional padding added to mask true size
+      - Padding indistinguishable from real data
+      - Size rounded to configurable block boundaries
+      - Padding amount logged for capacity planning
+    refs: [crates/arkavo-tdf/src/obfuscation.rs]
+    edge_cases:
+      - condition: KAS unavailable during decryption
+        expected: Returns TdfError::KasUnavailable with retry guidance
+      - condition: Policy attributes malformed
+        expected: Returns TdfError::InvalidPolicy with parse details
+      - condition: Clock skew causes temporal policy failure
+        expected: Returns TdfError::TemporalViolation with time details
+      - condition: TDF-JSON with invalid base64 payload
+        expected: Returns TdfError::InvalidPayload with decode error
+      - condition: TDF-CBOR with truncated data
+        expected: Returns TdfError::InvalidPayload with CBOR error
+    changed: "2025-01-31"

@@ -9,6 +9,7 @@
 
 pub mod adversarial_runner;
 pub mod adversary;
+pub mod fault_injection;
 pub mod metrics;
 pub mod runner;
 

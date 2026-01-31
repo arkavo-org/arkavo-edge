@@ -1,6 +1,6 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.57.2
+version: 0.58.0
 last_updated: 2025-01-31
 
 components:
@@ -645,10 +645,35 @@ components:
       - IssueAnalyzer determines complexity
       - IssueRouter selects strategy
 
+  - name: network-security
+    file: network-security.spec.yaml
+    module: arkavo_edge::security::network
+    description: Network security and secure defaults
+    criticality: critical
+    scenario_count: 17
+    invariants:
+      - Localhost binding by default
+      - Authentication always required
+      - TLS required for non-localhost
+      - SSRF protection active
+      - Setup tokens never logged
+
+  - name: tdf-security
+    file: tdf-security.spec.yaml
+    module: arkavo_tdf::security
+    description: TDF control plane protection and format security
+    criticality: critical
+    scenario_count: 15
+    invariants:
+      - Control plane commands TDF-encrypted
+      - TDF-JSON and TDF-CBOR equivalent security
+      - Policy binding prevents tampering
+      - Forward secrecy for key agreement
+
 stats:
-  total_specs: 58
-  total_scenarios: 418
-  critical_scenarios: 185
+  total_specs: 60
+  total_scenarios: 450
+  critical_scenarios: 201
   coverage_areas:
     - authentication
     - authorization
@@ -691,6 +716,8 @@ stats:
     - mesh_orchestration
     - agent_protocol
     - issue_orchestration
+    - network_security
+    - tdf_security
 
 # Cross-component behaviors
 integration_points:
@@ -925,3 +952,23 @@ integration_points:
   - name: Orchestrator → Critic
     description: Orchestrator verifies with critic
     specs: [ORCH-005, CRIT-006]
+
+  - name: Network Security → Protocol
+    description: Network security enforced on protocol layer
+    specs: [NET-004, NET-006, PROTO-001]
+
+  - name: Network Security → Agent Auth
+    description: Authentication requirements enforced
+    specs: [NET-001, NET-008, AAUTH-001]
+
+  - name: TDF Security → Config Encryption
+    description: Control plane uses TDF encryption
+    specs: [TDFS-002, CFGE-002]
+
+  - name: TDF Security → TDF
+    description: TDF security extends base TDF functionality
+    specs: [TDFS-001, TDF-001]
+
+  - name: TDF Security → Authorization
+    description: ABAC policy enforcement
+    specs: [TDFS-004, AUTHZ-001]

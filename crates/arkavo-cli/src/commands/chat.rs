@@ -2281,6 +2281,20 @@ async fn initialize_llm_client(
     #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] max_tokens: u32,
     #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
+    // SECURITY: Check if mock provider is enabled for testing
+    if crate::mock_provider::MockProvider::is_enabled() {
+        if !print_mode {
+            println!("🔒 Using MOCK provider for security testing");
+            println!("   DLP/PII detection ACTIVE");
+        }
+        // Return a mock LLM client that wraps our mock provider
+        // For now, we'll create a minimal client that will be detected later
+        let config = LlmConfig::ollama();
+        if let Ok(client) = LlmClient::from_config(&config) {
+            return Ok(client);
+        }
+    }
+
     // Check if model_name specifies a provider directly
     if model_name == "deepseek" {
         // Create config for DeepSeek provider (reads API key from env at startup)

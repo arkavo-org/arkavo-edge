@@ -9,6 +9,7 @@ pub mod auth;
 pub mod chat_session;
 pub mod config;
 pub mod config_transport;
+pub mod data_classification;
 pub mod discovery;
 pub mod error;
 pub mod file_transfer;
@@ -25,6 +26,7 @@ pub mod push_notifications;
 pub mod rate_limit;
 pub mod registration;
 pub mod security;
+pub mod security_fixes;
 pub mod server;
 pub mod session_persistence;
 pub mod task_executor;
@@ -36,6 +38,9 @@ pub mod websocket;
 
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
+pub use data_classification::{
+    ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
+};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;

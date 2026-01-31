@@ -17,6 +17,9 @@ serde_json = "1.0"
 [dependencies.arkavo-protocol]
 path = ".."
 
+[dependencies.arkavo-tdf]
+path = "../../arkavo-tdf"
+
 
 [[bin]]
 name = "fuzz_rate_limit"
@@ -35,6 +38,20 @@ bench = false
 [[bin]]
 name = "fuzz_rate_limit_concurrent"
 path = "fuzz_targets/fuzz_rate_limit_concurrent.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_a2a_message"
+path = "fuzz_targets/fuzz_a2a_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tdf_policy"
+path = "fuzz_targets/fuzz_tdf_policy.rs"
 test = false
 doc = false
 bench = false

@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -231,10 +231,12 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "base64 0.22.1",
+ "bs58",
  "ed25519-dalek",
+ "p256",
  "rand 0.8.5",
  "serde",
  "thiserror 2.0.12",
@@ -242,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -273,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -291,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "bincode",
  "chrono",
@@ -308,13 +310,14 @@ version = "0.0.0"
 dependencies = [
  "arbitrary",
  "arkavo-protocol",
+ "arkavo-tdf",
  "libfuzzer-sys",
  "serde_json",
 ]
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "bytes",
  "dashmap",
@@ -333,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "git2",
  "tempfile",
@@ -342,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -358,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -379,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -397,14 +400,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-llama-cpp-sys",
 ]
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "bindgen",
  "cmake",
@@ -413,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -445,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -455,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -463,11 +466,13 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-tdf",
+ "async-recursion",
  "async-trait",
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "git2",
+ "lazy_static",
  "octocrab",
  "regex",
  "reqwest",
@@ -478,11 +483,12 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
 name = "arkavo-memory"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -501,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -518,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -532,6 +538,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-router",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
  "crossbeam-queue",
@@ -554,6 +561,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-tungstenite",
+ "tower 0.5.2",
  "tracing",
  "urlencoding",
  "uuid",
@@ -562,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -599,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -617,11 +625,22 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.53.2"
+version = "0.57.2"
 dependencies = [
  "parking_lot",
  "torg-core",
  "torg-serde",
+]
+
+[[package]]
+name = "async-recursion"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -693,6 +712,64 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "axum"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+dependencies = [
+ "async-trait",
+ "axum-core",
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "itoa",
+ "matchit",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sha1",
+ "sync_wrapper",
+ "tokio",
+ "tokio-tungstenite",
+ "tower 0.5.2",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -706,6 +783,12 @@ dependencies = [
  "rustc-demangle",
  "windows-targets 0.52.6",
 ]
+
+[[package]]
+name = "base16ct"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
 name = "base64"
@@ -816,6 +899,15 @@ name = "borrow-or-share"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
+
+[[package]]
+name = "bs58"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "bstr"
@@ -1177,6 +1269,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "crypto-bigint"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
+dependencies = [
+ "generic-array",
+ "rand_core 0.6.4",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1336,6 +1440,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c7a8fb8a9fbf66c1f703fe16184d10ca0ee9d23be5b4436400408ba54a95005"
 
 [[package]]
+name = "ecdsa"
+version = "0.16.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
+dependencies = [
+ "der",
+ "digest",
+ "elliptic-curve",
+ "rfc6979",
+ "signature",
+ "spki",
+]
+
+[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1366,6 +1484,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "elliptic-curve"
+version = "0.13.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
+dependencies = [
+ "base16ct",
+ "crypto-bigint",
+ "digest",
+ "ff",
+ "generic-array",
+ "group",
+ "hkdf",
+ "pem-rfc7468",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "sec1",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1492,6 +1631,16 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "ff"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
+dependencies = [
+ "rand_core 0.6.4",
+ "subtle",
+]
 
 [[package]]
 name = "fiat-crypto"
@@ -1689,6 +1838,7 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+ "zeroize",
 ]
 
 [[package]]
@@ -1817,6 +1967,17 @@ dependencies = [
  "rand 0.8.5",
  "smallvec",
  "spinning_top",
+]
+
+[[package]]
+name = "group"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
+dependencies = [
+ "ff",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -2811,6 +2972,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchit"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3203,6 +3370,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3421,6 +3600,15 @@ checksum = "ff24dfcda44452b9816fff4cd4227e1bb73ff5a2f1bc1105aa92fb8565ce44d2"
 dependencies = [
  "proc-macro2",
  "syn",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+dependencies = [
+ "elliptic-curve",
 ]
 
 [[package]]
@@ -3752,6 +3940,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rfc6979"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+dependencies = [
+ "hmac",
+ "subtle",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4027,6 +4225,20 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "sec1"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
+dependencies = [
+ "base16ct",
+ "der",
+ "generic-array",
+ "pkcs8",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "secrecy"
@@ -4969,6 +5181,7 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

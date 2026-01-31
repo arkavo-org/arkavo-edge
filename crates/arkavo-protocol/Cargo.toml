@@ -48,6 +48,12 @@ urlencoding = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+# Security dependencies
+lru = { workspace = true }
+ipnet = "2.9"
+lazy_static = "1.4"
+bs58 = "0.5"
+
 # Logging
 tracing = { workspace = true }
 
@@ -125,6 +131,7 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
+arkavo-crypto = { path = "../arkavo-crypto" }
 
 [[bin]]
 name = "export-schema"

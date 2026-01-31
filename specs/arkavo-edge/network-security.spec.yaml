@@ -1,0 +1,267 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Network Security and Secure Defaults
+module: arkavo_edge::security::network
+version: 1.0.0
+
+invariants:
+  - Agent binds to localhost (127.0.0.1) only by default
+  - Authentication is REQUIRED, not optional
+  - No "skip auth for localhost" behavior
+  - First-run setup requires credential configuration
+  - Public exposure requires explicit opt-in with warnings
+  - Host header must match expected values (anti-rebinding)
+  - Egress to private/metadata IPs is blocked by default
+  - Setup tokens never appear in logs or stdout
+
+scenarios:
+  - id: NET-001
+    name: Secure-by-default authentication requirement
+    criticality: critical
+    given:
+      - Fresh agent installation
+      - No configuration has been performed
+    when: Agent is started for first time
+    then:
+      - Agent refuses to start without authentication configured
+      - User is guided through mandatory security setup
+      - Random strong API key is generated if user doesn't provide one
+      - Agent functionality is locked until setup completes
+    refs: [crates/arkavo-config-bundle/src/first_run.rs]
+
+  - id: NET-002
+    name: Localhost-only binding by default
+    criticality: critical
+    given:
+      - Agent is started with default configuration
+      - No explicit network binding is configured
+    when: Agent binds to network interface
+    then:
+      - Agent binds ONLY to 127.0.0.1, not 0.0.0.0
+      - External network access is impossible without explicit configuration
+      - Warning is displayed if admin changes to public binding
+    refs: [crates/arkavo-protocol/src/server_bind.rs]
+
+  - id: NET-003
+    name: Public binding requires explicit acknowledgment
+    criticality: high
+    given:
+      - Administrator wants to expose agent publicly
+      - Configuration is changed to bind to 0.0.0.0 or public IP
+    when: Public binding is configured
+    then:
+      - User must explicitly acknowledge security implications
+      - TLS is REQUIRED for public binding
+      - Authentication strength is validated
+      - Warning banner is shown in logs
+    refs: [crates/arkavo-config-bundle/src/network_config.rs]
+
+  - id: NET-004
+    name: No localhost trust exemption
+    criticality: critical
+    given:
+      - Request arrives from localhost (127.0.0.1)
+      - Request does not include authentication
+    when: Request is processed
+    then:
+      - Request is REJECTED - localhost is not trusted
+      - Same authentication required for all sources
+      - No "trust local" configuration option exists
+    refs: [crates/arkavo-protocol/src/auth_enforcer.rs]
+
+  - id: NET-005
+    name: Reverse proxy header validation
+    criticality: critical
+    given:
+      - Agent is deployed behind reverse proxy
+      - Proxy is configured to add secret header
+    when: Request arrives via proxy
+    then:
+      - Agent validates expected secret header from proxy
+      - X-Forwarded-For is only trusted if secret header present
+      - Requests without secret header are rejected
+      - Header secret is not logged or exposed
+    refs: [crates/arkavo-protocol/src/proxy_validator.rs]
+
+  - id: NET-006
+    name: Host header validation (anti-rebinding)
+    criticality: critical
+    given:
+      - Request arrives from browser or client
+      - Agent is bound to localhost
+    when: HTTP headers are parsed
+    then:
+      - Host header must equal configured allowed hosts
+      - For localhost binding, only "localhost", "127.0.0.1", "[::1]" accepted
+      - Requests with external Host headers are dropped
+      - Prevents browser-based DNS rebinding attacks
+    refs: [crates/arkavo-protocol/src/host_validator.rs]
+
+  - id: NET-007
+    name: Block cloud metadata and internal network access
+    criticality: critical
+    given:
+      - Agent attempts to fetch a URL via browsing or tool call
+      - URL resolves to private IP or cloud metadata endpoint
+    when: Outbound connection is initiated
+    then:
+      - Connection is BLOCKED by default
+      - Blocked ranges include 169.254.169.254, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
+      - Explicit allowlist can override for known-safe internal services
+      - Log entry shows "SSRF attempt blocked"
+    refs: [crates/arkavo-dataflow/src/egress_filter.rs]
+
+  - id: NET-008
+    name: Ephemeral setup token (secure first-run)
+    criticality: critical
+    given:
+      - First run of agent (no admin user configured)
+      - Setup token must be securely delivered
+    when: Agent initializes for first time
+    then:
+      - One-time setup token is generated (cryptographically random)
+      - Token is NOT printed to stdout or logs
+      - Token is written to file with mode 0600
+      - Token expires after 10 minutes OR first successful use
+      - After expiry/use, token file is securely deleted
+    refs: [crates/arkavo-agent-auth/src/bootstrap.rs]
+
+  - id: NET-009
+    name: TLS required for non-localhost
+    criticality: critical
+    given:
+      - Agent is configured for network access
+      - Binding is not localhost
+    when: Server starts
+    then:
+      - TLS is mandatory - plaintext HTTP is rejected
+      - Minimum TLS 1.2 is enforced
+      - Weak cipher suites are disabled
+    refs: [crates/arkavo-protocol/src/tls_enforcer.rs]
+
+  - id: NET-010
+    name: Rate limiting per IP
+    criticality: high
+    given:
+      - Multiple requests from single IP
+      - Requests exceed threshold
+    when: Rate limit is exceeded
+    then:
+      - Further requests are rejected (429)
+      - Exponential backoff is applied
+      - Sustained abuse triggers temp ban
+    refs: [crates/arkavo-protocol/src/rate_limiter.rs]
+
+  - id: NET-011
+    name: Admin interface separate from public API
+    criticality: high
+    given:
+      - Agent has administrative interface
+      - Agent has public-facing API
+    when: Interfaces are configured
+    then:
+      - Admin interface binds to different port
+      - Admin interface requires stronger authentication
+      - Admin actions require re-authentication for sensitive ops
+    refs: [crates/arkavo-agui/src/admin_isolation.rs]
+
+  - id: NET-012
+    name: Security configuration audit on startup
+    criticality: high
+    given:
+      - Agent starts up
+      - Configuration is loaded
+    when: Startup completes
+    then:
+      - Security configuration is audited
+      - Insecure settings generate warnings
+      - Critical misconfigurations prevent startup
+    refs: [crates/arkavo-config-bundle/src/security_audit.rs]
+
+  - id: NET-013
+    name: Service fingerprint minimization
+    criticality: medium
+    given:
+      - External scanner probes agent ports
+      - Scanner attempts to identify service
+    when: Probe requests are received
+    then:
+      - Minimal information is revealed in responses
+      - Version numbers are not exposed
+      - Generic error responses for unauthenticated requests
+    refs: [crates/arkavo-protocol/src/fingerprint_guard.rs]
+
+  - id: NET-014
+    name: DNS resolution validation before connection
+    criticality: high
+    given:
+      - Agent is about to connect to external URL
+      - URL contains hostname (not raw IP)
+    when: DNS resolution occurs
+    then:
+      - Resolved IP is checked BEFORE connection is made
+      - Time-of-check/time-of-use mitigated by re-checking at connect
+      - DNS rebinding during connection is blocked
+    refs: [crates/arkavo-dataflow/src/dns_validator.rs]
+
+  - id: NET-015
+    name: Prompt injection attack prevention
+    criticality: critical
+    given:
+      - User provides a prompt to the agent
+      - Prompt contains injection attack patterns
+    when: Input is processed
+    then:
+      - Prompt is sanitized before processing
+      - System instructions cannot be overridden
+      - Injection patterns are detected and neutralized
+      - Attack attempt is logged for security audit
+    refs: [crates/arkavo-cli/src/prompt_validation.rs]
+    edge_cases:
+      - condition: Multi-turn injection attack
+        expected: Context reset or session termination
+      - condition: Unicode obfuscation in injection
+        expected: Normalization and detection
+      - condition: Indirect injection via file content
+        expected: File content sandboxing
+
+  - id: NET-016
+    name: Command injection via LLM output is prevented
+    criticality: critical
+    given:
+      - LLM generates response to user query
+      - Response may contain shell commands or code
+    when: Response is processed
+    then:
+      - Commands are not auto-executed
+      - User confirmation required before execution
+      - Dangerous commands are flagged
+      - Execution is sandboxed
+    refs: [crates/arkavo-cli/src/command_guard.rs]
+    edge_cases:
+      - condition: LLM suggests "rm -rf /"
+        expected: Blocked with warning, requires explicit confirmation
+      - condition: LLM generates download script
+        expected: Scanned for malicious content before execution
+
+  - id: NET-017
+    name: Egress audit logging
+    criticality: high
+    given:
+      - Agent makes any outbound network request
+      - Request may be user-initiated or agent-autonomous
+    when: Outbound connection is established
+    then:
+      - Destination URL/IP is logged
+      - Request initiator (user command, tool, autonomous) is recorded
+      - Response size and status logged
+      - Audit trail enables forensic analysis
+    refs: [crates/arkavo-observability/src/egress_audit.rs]
+    edge_cases:
+      - condition: DNS resolution fails
+        expected: Log shows "DNS failed" with attempted hostname
+      - condition: Connection timeout
+        expected: Log shows "Connection timeout" after configured duration
+      - condition: TLS handshake failure
+        expected: Log shows "TLS error" with certificate details
+    changed: "2025-01-31"
