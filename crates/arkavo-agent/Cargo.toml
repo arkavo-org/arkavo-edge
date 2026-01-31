@@ -24,18 +24,31 @@ thiserror = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# Time handling
+chrono = { workspace = true }
+
+# Random number generation
+rand = { workspace = true }
+
+# Cryptographic hashing
+sha2 = { workspace = true }
+
+# Hex encoding
+hex = { workspace = true }
+
+# Base64 encoding
+base64 = { workspace = true }
+
 # Utilities
 uuid = { workspace = true }
 
-# Database
-sqlx = { workspace = true }
-
 # Arkavo internal dependencies
 arkavo-crypto = { path = "../arkavo-crypto" }
-arkavo-mcp = { path = "../arkavo-mcp" }
-
-# Temporary: re-export from arkavo-protocol until fully migrated
 arkavo-protocol = { path = "../arkavo-protocol" }
+
+[features]
+default = []
+mdns = ["arkavo-protocol/mdns"]
 
 [lints]
 workspace = true

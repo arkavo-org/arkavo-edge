@@ -1,9 +1,10 @@
 //! KAS A2A RPC handlers for TDF key operations.
 
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::types::{
-    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
+use arkavo_protocol::types::{
+    KasPolicyBinding, KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest,
+    KasRewrapResponse,
 };
 use arkavo_tdf::KasA2aHandler;
 use jsonrpsee::types::ErrorObjectOwned;
@@ -132,9 +133,7 @@ pub async fn handle_kas_public_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metrics::MetricsCollector;
-    use crate::rate_limit::{RateLimitConfig, RateLimiter};
-    use crate::types::KasPolicyBinding;
+
     use std::sync::Arc;
 
     fn create_test_metrics() -> Arc<MetricsCollector> {

@@ -9,13 +9,14 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
 // Use JwtAuthBackend or MultiAuthBackend for production
-use crate::config::{BufferConfig, ServerConfig};
-use crate::error::{A2aError, Result};
-use crate::mcp_registry::McpRegistry;
-use crate::metrics::MetricsCollector;
-use crate::rate_limit::RateLimiter;
-use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
-use crate::task_store::{SqliteTaskStore, TaskStore};
+use arkavo_protocol::chat_session;
+use arkavo_protocol::config::{BufferConfig, ServerConfig};
+use arkavo_protocol::error::{A2aError, Result};
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::metrics::MetricsCollector;
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_tasks::task_executor::{TaskExecutor, TaskExecutorConfig};
+use arkavo_tasks::task_store::{SqliteTaskStore, TaskStore};
 
 use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
@@ -138,7 +139,7 @@ impl A2aServer {
 
     #[allow(dead_code)]
     async fn reload_configuration_from_content(&self, content: &str) -> Result<()> {
-        use crate::agent_config::parse_agents_config;
+        use arkavo_protocol::agent_config::parse_agents_config;
 
         let configs = parse_agents_config(content)
             .map_err(|e| A2aError::Configuration(format!("Failed to parse config: {e}")))?;
@@ -743,7 +744,7 @@ impl A2aServer {
             info!(
                 "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
             );
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            Arc::new(chat_session::ChatSessionManager::with_config(
                 None,
                 Some(router_instance),
                 tool_registry.clone(),
@@ -752,7 +753,7 @@ impl A2aServer {
             ))
         } else if llm_adapter.is_some() {
             info!("✓ ChatSessionManager will be created WITH LLM adapter");
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            Arc::new(chat_session::ChatSessionManager::with_config(
                 llm_adapter.clone(),
                 None,
                 None,
@@ -763,7 +764,7 @@ impl A2aServer {
             warn!(
                 "✗ ChatSessionManager will be created WITHOUT LLM adapter or router - messages will fail!"
             );
-            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+            Arc::new(chat_session::ChatSessionManager::with_config(
                 None,
                 None,
                 None,
@@ -807,8 +808,10 @@ impl A2aServer {
             event_writer: self.event_writer.read().await.clone(),
             session_id: self.session_id.clone(),
             event_sequence: self.event_sequence.clone(),
-            auth_backend: Arc::new(crate::auth::JwtAuthBackend::new("change-me-in-production")),
-            registration_service: Arc::new(crate::registration::RegistrationService::new()),
+            auth_backend: Arc::new(arkavo_protocol::auth::JwtAuthBackend::new(
+                "change-me-in-production",
+            )),
+            registration_service: Arc::new(arkavo_agent::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: self.learning_bus.read().await.clone(),

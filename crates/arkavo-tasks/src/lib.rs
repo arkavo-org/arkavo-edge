@@ -7,7 +7,11 @@
 //!
 //! ## Architecture
 //!
-//! The crate is organized into three main modules:
+//! The crate is organized into four main modules:
+//!
+//! - **`agent_registry`**: Tracks available agents and their capabilities for task routing.
+//!
+//! - **`error`**: Error types for task operations, including the main [`TaskError`] enum.
 //!
 //! - **`task_executor`**: Handles the actual execution of tasks, managing the lifecycle
 //!   from submission through completion or failure. Provides async execution with
@@ -20,6 +24,9 @@
 //! - **`task_store`**: Persistent storage for tasks using SQLite via sqlx. Supports
 //!   querying task history, resuming interrupted tasks, and audit logging.
 //!
+//! - **`types`**: Core types for task management including [`Task`], [`TaskStatus`],
+//!   [`Message`], [`AgentCard`], and more.
+//!
 //! ## Integration
 //!
 //! This crate integrates with:
@@ -29,7 +36,21 @@
 
 #![warn(unreachable_pub)]
 
-// Re-export from arkavo-protocol until fully migrated
-pub use arkavo_protocol::task_executor;
-pub use arkavo_protocol::task_planner;
-pub use arkavo_protocol::task_store;
+pub mod agent_registry;
+pub mod error;
+pub mod task_executor;
+pub mod task_planner;
+pub mod task_store;
+pub mod types;
+
+// Re-export main types
+pub use agent_registry::{AgentInfo, AgentRegistry};
+pub use error::{Result, TaskError};
+pub use task_executor::{MetricsCollector, TaskEvent, TaskExecutor, TaskExecutorConfig};
+pub use task_planner::{SubTask, SubTaskStatus, TaskPlan, TaskPlanError, TaskPlanner};
+pub use task_store::{SqliteTaskStore, TaskStore};
+pub use types::{
+    AgentCapabilities, AgentCard, AgentExtension, AgentProvider, AgentSkill, AiCapability,
+    DeviceCapabilities, DevicePlatform, Message, MessagePart, SecurityRequirement, SecurityScheme,
+    SecuritySchemeType, SensorType, Task, TaskErrorInfo, TaskOffer, TaskProgress, TaskStatus,
+};

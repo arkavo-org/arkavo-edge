@@ -1,9 +1,9 @@
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::registration::{
+use arkavo_agent::registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
     VerifyResponse,
 };
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 

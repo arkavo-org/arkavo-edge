@@ -9,16 +9,23 @@
 //! - `http`: HTTP session management and client handling
 //! - `session_persistence`: Persistent storage for session state using SQLite
 //! - `push_notifications`: Push notification delivery and management
+//! - `error`: Error types and result definitions for session operations
 //!
 //! # Architecture
 //!
 //! The session crate provides a unified interface for managing various types
 //! of communication sessions, abstracting the underlying transport mechanisms
 //! and providing persistent state management.
+//!
+//! Note: The session-related modules are implemented in arkavo-protocol and
+//! re-exported here for organizational purposes. This crate provides additional
+//! session-focused error types and utilities.
 
 #![warn(unreachable_pub)]
 
-// Re-export from arkavo-protocol until fully migrated
+pub mod error;
+
+// Re-export session-related modules from arkavo-protocol
 pub use arkavo_protocol::chat_session;
 pub use arkavo_protocol::http;
 pub use arkavo_protocol::push_notifications;
@@ -26,9 +33,21 @@ pub use arkavo_protocol::session_persistence;
 pub use arkavo_protocol::websocket;
 
 // Re-export commonly used types
+pub use arkavo_protocol::chat_session::ChatSessionManager;
+pub use arkavo_protocol::http::HttpTransport;
+pub use arkavo_protocol::push_notifications::{
+    EventType, NotificationChannel, PushNotification, PushNotificationService, Subscription,
+    SubscriptionFilter, SubscriptionRequest, SubscriptionResponse,
+};
+pub use arkavo_protocol::session_persistence::{
+    NoOpSessionPersistence, PersistedMessage, PersistedSession, SessionPersistence,
+    SqliteSessionPersistence,
+};
+pub use arkavo_protocol::websocket::WebSocketTransport;
+
+// Re-export types from arkavo-protocol that are used in session management
+pub use arkavo_protocol::auth::SessionAuth;
 pub use arkavo_protocol::types::ChatSession;
-pub use http::HttpTransport;
-pub use websocket::WebSocketTransport;
 
 use thiserror::Error;
 
@@ -76,4 +95,21 @@ pub trait Session: Send + Sync {
 
     /// Closes the session
     fn close(&mut self) -> Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_error_display() {
+        let err = SessionError::NotFound("test".to_string());
+        assert_eq!(err.to_string(), "session not found: test");
+    }
+
+    #[test]
+    fn test_session_id_type() {
+        let id = SessionId::new_v4();
+        assert!(!id.to_string().is_empty());
+    }
 }

@@ -1,8 +1,8 @@
-use crate::auth::AuthBackend;
-use crate::chat_session::ChatSessionManager;
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::types::{ChatOpenRequest, ChatSession, UserMessage};
+use arkavo_protocol::auth::AuthBackend;
+use arkavo_protocol::chat_session::ChatSessionManager;
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_protocol::types::{ChatOpenRequest, ChatSession, UserMessage};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};

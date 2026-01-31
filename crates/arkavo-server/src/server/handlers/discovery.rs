@@ -1,12 +1,13 @@
-use crate::mcp_registry::McpRegistry;
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::openrpc;
-use crate::rate_limit::RateLimiter;
-use crate::types::{
-    AgentDiscoverFilter, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
-    FeatureDisclosure, FeatureType,
-};
 use arkavo_events::{Event, EventPayload, EventWriter};
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::openrpc;
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_protocol::types::{
+    AgentCapabilitiesGetResponse, AgentDiscoverFilter, DiscoverFeaturesDisclose,
+    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, InteractionMode,
+    McpToolInfo,
+};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
@@ -239,8 +240,8 @@ pub async fn handle_agent_capabilities_get(
     mcp_registry: &Arc<McpRegistry>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     public_key: Option<&str>,
-) -> Result<crate::types::AgentCapabilitiesGetResponse, ErrorObjectOwned> {
-    use crate::types::{AgentCapabilitiesGetResponse, InteractionMode, McpToolInfo};
+) -> Result<arkavo_protocol::types::AgentCapabilitiesGetResponse, ErrorObjectOwned> {
+    use arkavo_protocol::types::{AgentCapabilitiesGetResponse, InteractionMode, McpToolInfo};
 
     let timer = RpcTimer::new("agent.capabilities.get".to_string(), metrics.clone());
 

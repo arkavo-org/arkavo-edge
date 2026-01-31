@@ -35,28 +35,32 @@ pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
 pub use well_known::{WellKnownState, start_well_known_server};
 
-use crate::auth::AuthBackend;
-use crate::mcp_registry::McpRegistry;
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::task_executor::TaskExecutor;
-use crate::task_store::TaskStore;
+use arkavo_agent::registration::{
+    ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
+    VerifyResponse,
+};
+use arkavo_events::{Event, EventPayload, EventWriter};
+use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
+use arkavo_llm::LlmClientAdapter;
+use arkavo_protocol::auth::AuthBackend;
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
-use crate::types::TaskStatus;
-use crate::types::{
+use arkavo_protocol::types::TaskStatus;
+use arkavo_protocol::types::{
     AgentBroadcast, AgentCapabilitiesGetResponse, AgentConfigGetRequest, AgentConfigGetResponse,
     AgentConfigRestoreRequest, AgentConfigRestoreResponse, AgentConfigUpdateRequest,
     AgentConfigUpdateResponse, AgentConfigValidateRequest, AgentConfigValidateResponse,
     AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, AgentSpecializeRequest,
     AgentSpecializeResponse, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
-    KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
+    KasRewrapRequest, KasRewrapResponse, MessageDelta, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
     TaskGetResponse, TaskResponse, UserMessage,
 };
-use arkavo_events::{Event, EventPayload, EventWriter};
-use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
-use arkavo_llm::LlmClientAdapter;
+use arkavo_tasks::task_executor::TaskExecutor;
+use arkavo_tasks::task_store::TaskStore;
 use async_trait::async_trait;
 use jsonrpsee::types::ErrorObjectOwned;
 use jsonrpsee::{
@@ -182,10 +186,7 @@ pub trait A2aRpc {
     /// Create a registration challenge
     /// Uses param_kind=map so iOS can send {"device_id": "..."} directly
     #[method(name = "registration.challenge", param_kind = map)]
-    async fn registration_challenge(
-        &self,
-        device_id: String,
-    ) -> RpcResult<crate::registration::ChallengeResponse>;
+    async fn registration_challenge(&self, device_id: String) -> RpcResult<ChallengeResponse>;
 
     /// Verify a registration challenge signature
     /// Uses param_kind=map so iOS can send {challenge_id, device_id, ...} directly
@@ -196,14 +197,11 @@ pub trait A2aRpc {
         device_id: String,
         public_key: String,
         signature: String,
-    ) -> RpcResult<crate::registration::VerifyResponse>;
+    ) -> RpcResult<VerifyResponse>;
 
     /// Get registration status for a device
     #[method(name = "registration.status")]
-    async fn registration_status(
-        &self,
-        device_id: String,
-    ) -> RpcResult<crate::registration::RegistrationStatus>;
+    async fn registration_status(&self, device_id: String) -> RpcResult<RegistrationStatus>;
 
     /// Handle incoming gossip message from peer
     #[method(name = "gossip/message")]
@@ -247,14 +245,14 @@ pub struct A2aRpcImpl {
     pub(crate) mcp_registry: Arc<McpRegistry>,
     pub(crate) agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     pub(crate) llm_adapter: Option<Arc<LlmClientAdapter>>,
-    pub(crate) chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
+    pub(crate) chat_sessions: Arc<arkavo_protocol::chat_session::ChatSessionManager>,
     pub(crate) task_store: Arc<dyn TaskStore>,
     pub(crate) task_executor: Arc<TaskExecutor>,
     pub(crate) event_writer: Option<Arc<EventWriter>>,
     pub(crate) session_id: String,
     pub(crate) event_sequence: Arc<tokio::sync::RwLock<u64>>,
     pub(crate) auth_backend: Arc<dyn AuthBackend>,
-    pub(crate) registration_service: Arc<crate::registration::RegistrationService>,
+    pub(crate) registration_service: Arc<RegistrationService>,
     /// HRM Conductor for task orchestration
     pub(crate) conductor: Arc<Conductor<InMemoryTaskStore>>,
     /// Router for LLM calls during HRM task execution
@@ -580,11 +578,8 @@ impl A2aRpcServer for A2aRpcImpl {
         .await
     }
 
-    async fn registration_challenge(
-        &self,
-        device_id: String,
-    ) -> RpcResult<crate::registration::ChallengeResponse> {
-        let request = crate::registration::ChallengeRequest { device_id };
+    async fn registration_challenge(&self, device_id: String) -> RpcResult<ChallengeResponse> {
+        let request = ChallengeRequest { device_id };
         handlers::registration::handle_registration_challenge(
             &self.metrics,
             &self.rate_limiter,
@@ -600,8 +595,8 @@ impl A2aRpcServer for A2aRpcImpl {
         device_id: String,
         public_key: String,
         signature: String,
-    ) -> RpcResult<crate::registration::VerifyResponse> {
-        let request = crate::registration::VerifyRequest {
+    ) -> RpcResult<VerifyResponse> {
+        let request = VerifyRequest {
             challenge_id,
             device_id,
             public_key,
@@ -616,10 +611,7 @@ impl A2aRpcServer for A2aRpcImpl {
         .await
     }
 
-    async fn registration_status(
-        &self,
-        device_id: String,
-    ) -> RpcResult<crate::registration::RegistrationStatus> {
+    async fn registration_status(&self, device_id: String) -> RpcResult<RegistrationStatus> {
         handlers::registration::handle_registration_status(
             &self.metrics,
             &self.rate_limiter,

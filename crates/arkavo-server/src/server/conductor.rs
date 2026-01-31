@@ -1,11 +1,11 @@
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::mcp_bridge::McpBridgeTool;
 use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
-use crate::mcp_registry::McpRegistry;
-use crate::task_executor::TaskExecutor;
-use crate::types::TaskProgress;
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
 use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::types::TaskProgress;
+use arkavo_tasks::task_executor::TaskExecutor;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 

@@ -1,6 +1,20 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::significant_drop_in_scrutinee)]
 
+//! # Arkavo Protocol
+//!
+//! Core A2A protocol implementation for the Arkavo agentic CLI tool.
+//!
+//! This crate contains the essential protocol types and communication primitives.
+//! Related functionality has been moved to focused crates:
+//!
+//! - **`arkavo-security`** - Authentication, OAuth2, rate limiting, data classification
+//! - **`arkavo-agent`** - Agent configuration, registry, discovery, registration
+//! - **`arkavo-session`** - Chat sessions, WebSocket, HTTP, session persistence
+//! - **`arkavo-tasks`** - Task execution, planning, and storage
+//! - **`arkavo-server`** - A2A server implementation (JSON-RPC, handlers, HTTP)
+
+// Core protocol modules (kept in this crate)
 pub mod a2a;
 pub mod a2a_mcp_bridge;
 pub mod agent_config;
@@ -27,7 +41,6 @@ pub mod rate_limit;
 pub mod registration;
 pub mod security;
 pub mod security_fixes;
-pub mod server;
 pub mod session_persistence;
 pub mod task_executor;
 pub mod task_planner;
@@ -36,7 +49,10 @@ pub mod transport;
 pub mod types;
 pub mod websocket;
 
+// Re-export commonly used types from core modules
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
+pub use auth::{AuthBackend, JwtAuthBackend, MultiAuthBackend, SessionAuth};
+pub use chat_session::ChatSessionManager;
 pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use data_classification::{
     ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
@@ -53,15 +69,13 @@ pub use metrics_subscription::{
 };
 pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
-pub use rate_limit::{
-    IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
-};
+pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub use registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
     VerifyResponse,
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
-pub use server::A2aServer;
+pub use session_persistence::SqliteSessionPersistence;
 pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
 pub use task_store::{SqliteTaskStore, Task, TaskStore};
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};

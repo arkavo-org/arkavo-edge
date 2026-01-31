@@ -1,4 +1,4 @@
-use crate::mcp_registry::McpRegistry;
+use arkavo_protocol::mcp_registry::{McpRegistry, Tool};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ pub struct McpBridgeTool {
 }
 
 impl McpBridgeTool {
-    pub fn new(registry: Arc<McpRegistry>, tool: crate::mcp_registry::Tool) -> Self {
+    pub fn new(registry: Arc<McpRegistry>, tool: Tool) -> Self {
         Self {
             registry,
             schema: arkavo_mcp_tools::ToolSchema {

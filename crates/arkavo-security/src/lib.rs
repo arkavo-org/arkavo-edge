@@ -30,17 +30,19 @@
 #![warn(missing_docs)]
 #![warn(unreachable_pub)]
 
-// Re-export from arkavo-protocol until fully migrated
-pub use arkavo_protocol::auth;
-pub use arkavo_protocol::data_classification;
-pub use arkavo_protocol::oauth2;
-pub use arkavo_protocol::rate_limit;
-pub use arkavo_protocol::security;
-pub use arkavo_protocol::security_fixes;
+pub mod auth;
+pub mod data_classification;
+pub mod error;
+pub mod oauth2;
+pub mod rate_limit;
+pub mod security;
+pub mod security_fixes;
 
 /// Re-export common types for convenience.
 pub mod prelude {
-    pub use arkavo_protocol::security::{SecurityConfig, TlsSettings};
+    pub use crate::auth::{AuthBackend, JwtAuthBackend, SessionAuth};
+    pub use crate::error::{Result, SecurityError};
+    pub use crate::security::{SecurityConfig, TlsSettings};
 }
 
 /// Crate version information.

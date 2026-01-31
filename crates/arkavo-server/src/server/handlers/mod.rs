@@ -1,4 +1,5 @@
 #![allow(unreachable_pub)]
+#![allow(clippy::significant_drop_tightening)]
 
 pub(super) mod chat;
 pub(super) mod config;

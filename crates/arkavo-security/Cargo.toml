@@ -10,9 +10,6 @@ keywords = ["security", "auth", "oauth2", "jwt", "rate-limiting"]
 categories = ["authentication", "web-programming"]
 
 [dependencies]
-# Temporary: re-export from arkavo-protocol until fully migrated
-arkavo-protocol = { path = "../arkavo-protocol" }
-
 # Core async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 
@@ -22,6 +19,9 @@ serde_json = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
@@ -40,6 +40,7 @@ reqwest = { workspace = true, features = ["json"] }
 
 # URL handling
 url = { workspace = true }
+urlencoding = "2"
 
 # Time handling
 chrono = { workspace = true }
@@ -53,6 +54,11 @@ rand = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
+
+# For security_fixes.rs
+ipnet = "2"
+bs58 = "0.5"
+crossbeam-queue = "0.3"
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -27,6 +27,7 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 http = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 
 # Serialization
 serde = { workspace = true }
@@ -47,13 +48,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 dashmap = { workspace = true }
 
-# LLM support for chat sessions
-arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
-
-# Router for intelligent model selection
-arkavo-router = { path = "../arkavo-router" }
-
-# Temporary: re-export from arkavo-protocol until fully migrated
+# Protocol types (core dependency)
 arkavo-protocol = { path = "../arkavo-protocol" }
 
 [lints]

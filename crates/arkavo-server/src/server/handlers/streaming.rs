@@ -1,8 +1,8 @@
-use crate::chat_session::ChatSessionManager;
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::types::{ChatRequest, MessageDelta, MessageDeltaContent};
 use arkavo_llm::{DeltaStream, DeltaType, LlmClientAdapter, StreamId, StreamLlmModel};
+use arkavo_protocol::chat_session::ChatSessionManager;
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent, StreamEndReason};
 use futures::StreamExt;
 use jsonrpsee::{PendingSubscriptionSink, SubscriptionMessage, core::SubscriptionResult};
 use std::sync::Arc;
@@ -57,7 +57,7 @@ pub async fn handle_message_stream(
                 message_id: uuid::Uuid::new_v4().to_string(),
                 sequence: 1,
                 delta: MessageDeltaContent::StreamEnd {
-                    reason: crate::types::StreamEndReason::Complete,
+                    reason: StreamEndReason::Complete,
                 },
                 timestamp: chrono::Utc::now(),
             };

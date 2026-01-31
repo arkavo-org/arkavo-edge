@@ -12,10 +12,12 @@ categories = ["asynchronous", "data-structures"]
 [dependencies]
 # Core async runtime
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+async-trait = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -36,7 +38,7 @@ sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "macros", "uui
 # HRM integration for task orchestration
 arkavo-hrm = { path = "../arkavo-hrm" }
 
-# Temporary: re-export from arkavo-protocol until fully migrated
+# Protocol types
 arkavo-protocol = { path = "../arkavo-protocol" }
 
 [dev-dependencies]

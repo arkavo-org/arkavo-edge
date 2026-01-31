@@ -63,6 +63,7 @@ members = [
     "crates/arkavo-security",
     "crates/arkavo-critic",
     "crates/arkavo-tasks",
+    "crates/arkavo-server",
     "crates/arkavo-torg-circuits",
     "crates/arkavo-session",
     "tests/golden_dataset",

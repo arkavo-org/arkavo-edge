@@ -1,7 +1,7 @@
 use super::conductor::execute_with_conductor;
 use super::mcp_bridge::McpBridgeTool;
-use crate::mcp_registry::McpRegistry;
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
+use arkavo_protocol::mcp_registry::{McpRegistry, Tool};
 use std::sync::Arc;
 
 /// Agent planning state for startup goal creation
@@ -46,10 +46,8 @@ pub async fn run_startup_planning_phase(
 
     // 1b. Generate parameter aliases for each MCP server (if not already done)
     // Group tools by server and generate aliases
-    let mut servers_needing_aliases: std::collections::HashMap<
-        String,
-        Vec<crate::mcp_registry::Tool>,
-    > = std::collections::HashMap::new();
+    let mut servers_needing_aliases: std::collections::HashMap<String, Vec<Tool>> =
+        std::collections::HashMap::new();
     for tool in &tools {
         if let Some((server, tool_name)) = tool.name.split_once(':')
             && !mcp_registry.has_param_aliases(server).await
@@ -223,7 +221,7 @@ fn extract_goals_from_response(response: &str) -> Vec<AgentGoal> {
 #[allow(deprecated)] // route_with_tools bypasses architect mode
 async fn generate_param_aliases(
     server_name: &str,
-    tools: &[crate::mcp_registry::Tool],
+    tools: &[Tool],
     router: &Arc<arkavo_router::Router>,
 ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
     use std::collections::HashMap;

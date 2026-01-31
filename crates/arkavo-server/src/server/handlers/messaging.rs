@@ -1,14 +1,14 @@
-use crate::mcp_registry::McpRegistry;
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::task_executor::TaskExecutor;
-use crate::task_store::TaskStore;
-use crate::types::{
-    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, Message,
-    MessageSendRequest, MessageSendResponse, TaskStatus,
-};
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_protocol::types::{
+    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, Message, MessagePart,
+    MessageSendRequest, MessageSendResponse, TaskError, TaskStatus,
+};
+use arkavo_tasks::task_executor::TaskExecutor;
+use arkavo_tasks::task_store::TaskStore;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -43,7 +43,7 @@ pub async fn handle_message_send(
         .parts
         .iter()
         .filter_map(|part| match part {
-            crate::types::MessagePart::Text { content } => Some(content.clone()),
+            MessagePart::Text { content } => Some(content.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -84,14 +84,16 @@ pub async fn handle_message_send(
                     {
                         Ok(result_content) => {
                             let result_message = Message {
-                                parts: vec![crate::types::MessagePart::Text {
+                                parts: vec![arkavo_protocol::types::MessagePart::Text {
                                     content: result_content,
                                 }],
                                 metadata: None,
                             };
+                            let result_value = serde_json::to_value(&result_message)
+                                .unwrap_or(serde_json::Value::Null);
 
                             if let Err(e) = task_executor
-                                .complete_task(&task_id_clone, result_message)
+                                .complete_task(&task_id_clone, result_value)
                                 .await
                             {
                                 warn!("Failed to complete task {}: {}", task_id_clone, e);
@@ -100,7 +102,7 @@ pub async fn handle_message_send(
                             }
                         }
                         Err(error_msg) => {
-                            let error = crate::types::TaskError {
+                            let error = TaskError {
                                 code: "HRM_EXECUTION_ERROR".to_string(),
                                 message: error_msg.clone(),
                                 details: None,

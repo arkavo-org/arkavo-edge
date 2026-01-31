@@ -29,3 +29,24 @@ pub use arkavo_protocol::agent_config;
 pub use arkavo_protocol::agent_registry;
 pub use arkavo_protocol::discovery;
 pub use arkavo_protocol::registration;
+
+// Re-export main types for convenience
+pub use agent_config::{
+    AgentConfig, McpServerConfig, RuntimeConfig, WorkspacePaths, parse_agents_config,
+    parse_runtime_config, parse_workspace_paths,
+};
+pub use agent_registry::{AgentInfo, AgentRegistry};
+pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
+pub use registration::{
+    ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
+    VerifyResponse,
+};
+
+/// Error types for agent operations.
+pub mod error;
+
+/// Type definitions.
+pub mod types;
+
+pub use error::{AgentError, Result};
+pub use types::{AgentCapabilitiesGetResponse, DeviceCapabilities, McpToolInfo};

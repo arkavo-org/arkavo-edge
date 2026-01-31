@@ -1,10 +1,10 @@
-use crate::metrics::{MetricsCollector, RpcTimer};
-use crate::rate_limit::RateLimiter;
-use crate::task_executor::TaskExecutor;
-use crate::task_store::TaskStore;
-use crate::types::{
+use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
+use arkavo_protocol::rate_limit::RateLimiter;
+use arkavo_protocol::types::{
     Message, TaskCancelRequest, TaskCancelResponse, TaskGetRequest, TaskGetResponse, TaskStatus,
 };
+use arkavo_tasks::task_executor::TaskExecutor;
+use arkavo_tasks::task_store::TaskStore;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
@@ -44,7 +44,7 @@ pub async fn handle_tasks_get(
                     .flatten()
                     .and_then(|v| serde_json::from_value::<Message>(v).ok())
             } else {
-                task.result
+                None
             };
 
             let response = TaskGetResponse {

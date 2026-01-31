@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::mcp_registry::McpRegistry;
-use crate::types::{AgentCapabilities, AgentCard, AgentProvider, AgentSkill};
+use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::types::{AgentCapabilities, AgentCard, AgentProvider, AgentSkill};
 
 use super::config_helpers::AgentMetadata;
 

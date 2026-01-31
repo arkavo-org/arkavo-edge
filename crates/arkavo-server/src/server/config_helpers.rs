@@ -1,6 +1,7 @@
-use crate::error::{A2aError, Result};
-use crate::mcp_registry::McpRegistry;
 use arkavo_llm::LlmClientAdapter;
+use arkavo_protocol::agent_config::parse_agents_config;
+use arkavo_protocol::error::{A2aError, Result};
+use arkavo_protocol::mcp_registry::McpRegistry;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -89,8 +90,6 @@ pub(super) async fn reload_configuration_for_watcher(
     _llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
     mcp_registry: Arc<McpRegistry>,
 ) -> Result<()> {
-    use crate::agent_config::parse_agents_config;
-
     // Validate configuration before applying
     if content.trim().is_empty() {
         return Err(A2aError::Configuration(
