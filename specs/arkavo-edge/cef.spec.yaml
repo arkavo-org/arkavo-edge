@@ -1,0 +1,150 @@
+feature: Chromium Embedded Framework UI Renderer
+module: arkavo_cef
+version: 0.57.2
+
+invariants:
+  - CEF process spawned with UDS for communication
+  - DOM commands execute asynchronously
+  - Health tracking for all commands
+  - Socket path unique per process
+
+scenarios:
+  - id: CEF-001
+    name: Spawn CEF renderer process
+    criticality: critical
+    given:
+      - Renderer binary exists
+      - Temp directory writable
+    when: CefRenderer::new is called
+    then:
+      - Unique socket path generated
+      - CEF process spawned
+      - Socket waits for connection (10s timeout)
+      - UDS transport established
+      - Command tracker initialized
+    refs: [crates/arkavo-cef/src/lib.rs:30-60, crates/arkavo-cef/src/process.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Binary not found
+        expected: CefError with path info
+      - condition: Socket timeout
+        expected: Spawn error with timeout details
+      - condition: Port/socket in use
+        expected: Retry with new path
+
+  - id: CEF-002
+    name: Execute DOM command
+    criticality: high
+    given:
+      - CEF renderer connected
+      - DOMCommandBuilder available
+      - Command is valid
+    when: DOM operation is sent
+    then:
+      - Command serialized to protocol
+      - Sent via UDS transport
+      - Command tracked for health
+      - Response awaited asynchronously
+    refs: [crates/arkavo-cef/src/dom_commands.rs:1-60, crates/arkavo-cef/src/protocol.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Connection lost
+        expected: Error with reconnection attempt
+      - condition: Invalid DOM operation
+        expected: Protocol error with details
+      - condition: Renderer crashed
+        expected: Health report indicates failure
+
+  - id: CEF-003
+    name: Track command health
+    criticality: high
+    given:
+      - Commands are executing
+      - CommandTracker is active
+    when: Health report is requested
+    then:
+      - Success/failure rates calculated
+      - Latency percentiles computed
+      - Recent errors summarized
+      - HealthSnapshot returned
+    refs: [crates/arkavo-cef/src/command_tracker.rs:1-60, crates/arkavo-cef/src/health_reporter.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: No commands executed yet
+        expected: Empty but valid report
+      - condition: Tracker memory limit
+        expected: Old entries evicted
+
+  - id: CEF-004
+    name: Handle async DOM operations
+    criticality: medium
+    given:
+      - AsyncTransport is configured
+      - Multiple operations pending
+    when: AsyncDOMCommandBuilder executes
+    then:
+      - Operations batched efficiently
+      - Concurrent execution managed
+      - Results correlated with requests
+      - Completion notifications sent
+    refs: [crates/arkavo-cef/src/async_dom_commands.rs:1-60, crates/arkavo-cef/src/async_transport.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Operation dependency cycle
+        expected: Detection and error
+      - condition: Partial batch failure
+        expected: Individual result status
+
+  - id: CEF-005
+    name: Receive DOM events
+    criticality: medium
+    given:
+      - Renderer is active
+      - Page has event listeners
+    when: try_recv_event is called
+    then:
+      - Events polled from transport
+      - DOMEvent deserialized
+      - Event returned if available
+      - None if no events pending
+    refs: [crates/arkavo-cef/src/lib.rs:70-80, crates/arkavo-cef/src/protocol.rs:50-80]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Event queue overflow
+        expected: Oldest events dropped
+      - condition: Deserialize error
+        expected: Error logged, event skipped
+
+  - id: CEF-006
+    name: Communicate via UDS transport
+    criticality: critical
+    given:
+      - Socket path is valid
+      - Process is running
+    when: UdsTransport connects
+    then:
+      - Unix socket opened
+      - Connection to CEF process
+      - Bidirectional communication ready
+      - Messages framed correctly
+    refs: [crates/arkavo-cef/src/uds.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Permission denied
+        expected: Error with permission hint
+      - condition: Process died
+        expected: Connection error on next operation
+
+  - id: CEF-007
+    name: Handle CEF errors
+    criticality: high
+    given:
+      - CEF operation fails
+    when: Error propagates
+    then:
+      - CefError created with context
+      - Original error preserved
+      - Recovery suggestions included
+      - Result::Err returned
+    refs: [crates/arkavo-cef/src/error.rs:1-40]
+    changed: "2025-01-31"

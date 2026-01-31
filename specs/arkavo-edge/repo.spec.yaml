@@ -1,0 +1,89 @@
+feature: Repository Context Management
+module: arkavo_repo
+version: 0.57.2
+
+invariants:
+  - Repository info gathered from path
+  - File count calculated recursively
+  - Git metadata extracted if available
+  - Language detection for files
+
+scenarios:
+  - id: REPO-001
+    name: Get repository info from path
+    criticality: high
+    given:
+      - Valid path provided
+      - Directory exists
+    when: get_repo_info called
+    then:
+      - Path canonicalized
+      - Files counted
+      - RepoInfo returned
+    refs: [crates/arkavo-repo/src/lib.rs:1-15]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Path does not exist
+        expected: Io error
+      - condition: Permission denied
+        expected: Permission error
+
+  - id: REPO-002
+    name: Calculate file count recursively
+    criticality: medium
+    given:
+      - Repository directory
+      - Nested subdirectories
+    when: File counting occurs
+    then:
+      - All files enumerated
+      - Gitignored files excluded
+      - Binary files counted
+      - Total returned
+    refs: [crates/arkavo-repo/src/lib.rs:7-15]
+    changed: "2025-01-31"
+
+  - id: REPO-003
+    name: Extract git metadata
+    criticality: medium
+    given:
+      - Git repository detected
+      - .git directory exists
+    when: Git info extracted
+    then:
+      - Current branch identified
+      - Latest commit hash retrieved
+      - Remote URLs listed
+    refs: [crates/arkavo-repo/src/repository_context.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Not a git repo
+        expected: None for git fields
+      - condition: No commits yet
+        expected: Empty commit info
+
+  - id: REPO-004
+    name: Detect primary language
+    criticality: low
+    given:
+      - Source files present
+    when: Language detection runs
+    then:
+      - File extensions analyzed
+      - Lines of code counted
+      - Primary language identified
+    refs: [crates/arkavo-repo/src/repository_context.rs:50-100]
+    changed: "2025-01-31"
+
+  - id: REPO-005
+    name: Build repository context for agent
+    criticality: high
+    given:
+      - RepoInfo collected
+    when: RepositoryContext created
+    then:
+      - Context formatted
+      - Relevant files included
+      - Size limits respected
+    refs: [crates/arkavo-repo/src/repository_context.rs:100-150]
+    changed: "2025-01-31"

@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Device Identity Management
+module: arkavo_device_identity
+version: 0.57.2
+
+invariants:
+  - Device ID is unique per installation
+  - Device ID persists across app restarts
+  - Storage is platform-appropriate (Keychain on macOS/iOS)
+  - Device ID format is valid UUID v4
+
+scenarios:
+  - id: DEVICE-001
+    name: Get or create device ID on first launch
+    criticality: high
+    given:
+      - Application launched first time
+      - No existing device ID stored
+    when: get_or_create_device_id() called
+    then:
+      - New UUID v4 generated
+      - Stored in platform secure storage
+      - Same ID returned on subsequent calls
+    refs: [crates/arkavo-device-identity/src/lib.rs,crates/arkavo-device-identity/src/storage.rs]
+
+  - id: DEVICE-002
+    name: Retrieve existing device ID
+    criticality: high
+    given:
+      - Device ID previously stored
+      - Storage accessible
+    when: get_device_id() called
+    then:
+      - Returns existing device ID
+      - No new ID generated
+      - Consistent across calls
+    refs: [crates/arkavo-device-identity/src/lib.rs]
+
+  - id: DEVICE-003
+    name: Store device ID explicitly
+    criticality: medium
+    given:
+      - Device ID created
+      - Storage writeable
+    when: store_device_id() called
+    then:
+      - ID persisted to storage
+      - Overwrites any existing ID
+      - Returns success
+    refs: [crates/arkavo-device-identity/src/lib.rs]
+
+  - id: DEVICE-004
+    name: Create agent identity with device
+    criticality: high
+    given:
+      - Device ID available
+      - App version known
+    when: AgentIdentity::new() called
+    then:
+      - Device ID included
+      - App version recorded
+      - New agent ID generated
+    refs: [crates/arkavo-device-identity/src/lib.rs]
+
+  - id: DEVICE-005
+    name: Device ID roundtrip conversion
+    criticality: medium
+    given:
+      - Valid DeviceId
+    when: Converted to bytes and back
+    then:
+      - 16 bytes extracted
+      - Same ID reconstructed
+      - UUID format preserved
+    refs: [crates/arkavo-device-identity/src/lib.rs]
+
+  - id: DEVICE-006
+    name: Platform-specific secure storage
+    criticality: high
+    given:
+      - macOS/iOS platform
+      - Keychain accessible
+    when: Device ID stored
+    then:
+      - Uses Keychain on Apple platforms
+      - Protected from other apps
+      - Survives app reinstall
+    refs: [crates/arkavo-device-identity/src/storage.rs]
+    edge_cases:
+      - condition: Storage unavailable (permissions)
+        expected: Returns DeviceIdentityError::Storage
+      - condition: Corrupted stored data
+        expected: Generates new ID, overwrites corrupt data
+      - condition: Platform not supported
+        expected: Returns DeviceIdentityError::UnsupportedPlatform
+    changed: "2025-01-31"

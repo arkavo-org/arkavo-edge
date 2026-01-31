@@ -1,0 +1,118 @@
+feature: Code Search and Refactoring Tools
+module: arkavo_code_search
+version: 0.57.2
+
+invariants:
+  - All tools implement arkavo_mcp::Tool trait
+  - CodeGrep searches with regex patterns
+  - Comby performs structural refactoring
+  - TreeSitter provides AST-based search
+
+scenarios:
+  - id: CS-001
+    name: Register code search tools
+    criticality: high
+    given:
+      - ToolRegistry is available
+      - Tools not yet registered
+    when: register_tools is called
+    then:
+      - CodeGrepTool registered
+      - CombyTool registered
+      - TreeSitterTool registered
+      - Tools ready for invocation
+    refs: [crates/arkavo-code-search/src/lib.rs:10-15]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Registry already has tool with same name
+        expected: Overwrite or error based on policy
+      - condition: Tool initialization fails
+        expected: Registration error
+
+  - id: CS-002
+    name: Search code with regex pattern
+    criticality: high
+    given:
+      - CodeGrepTool initialized
+      - Directory contains source files
+      - Pattern is valid regex
+    when: CodeGrepTool executes search
+    then:
+      - Files scanned recursively
+      - Pattern matched against content
+      - Results include file, line, context
+      - Formatted as MCP tool result
+    refs: [crates/arkavo-code-search/src/codegrep.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid regex pattern
+        expected: RegexError with explanation
+      - condition: Binary files encountered
+        expected: Skipped or handled per config
+      - condition: Permission denied on file
+        expected: Warning, continue search
+
+  - id: CS-003
+    name: Perform structural refactoring with Comby
+    criticality: high
+    given:
+      - CombyTool initialized
+      - Match template provided
+      - Rewrite template provided
+    when: CombyTool executes refactor
+    then:
+      - Templates parsed
+      - Code matched structurally
+      - Rewrites applied
+      - Changes previewed or applied
+    refs: [crates/arkavo-code-search/src/comby.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid match template
+        expected: Parse error with location
+      - condition: No matches found
+        expected: Empty result with info
+      - condition: Ambiguous match
+        expected: Multiple options or error
+
+  - id: CS-004
+    name: Parse code with TreeSitter
+    criticality: high
+    given:
+      - TreeSitterTool initialized
+      - Language grammar available
+      - Source code provided
+    when: TreeSitterTool parses
+    then:
+      - Grammar loaded for language
+      - AST constructed
+      - Query executed if provided
+      - Matches returned with node info
+    refs: [crates/arkavo-code-search/src/treesitter.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Parse errors in source
+        expected: Partial AST with error nodes
+      - condition: Language not supported
+        expected: UnsupportedLanguage error
+      - condition: Invalid query syntax
+        expected: QueryParseError
+
+  - id: CS-005
+    name: Handle code search errors
+    criticality: medium
+    given:
+      - Code search operation fails
+    when: Error propagates
+    then:
+      - CodeSearchError created
+      - Context preserved
+      - User-friendly message
+      - Result::Err returned
+    refs: [crates/arkavo-code-search/src/error.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: IO error during search
+        expected: Io variant with path
+      - condition: Timeout
+        expected: Timeout variant

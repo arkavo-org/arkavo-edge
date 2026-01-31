@@ -1,0 +1,153 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Cryptographic Primitives
+module: arkavo_crypto
+version: 0.57.2
+
+invariants:
+  - All key material uses constant-time operations where applicable
+  - Ed25519 signatures are 64 bytes, public keys are 32 bytes
+  - P-256 SEC1 uncompressed keys are 65 bytes (0x04 prefix)
+  - DID:key format includes proper multicodec prefixes (0xed01 for Ed25519, 0x1200 for P-256)
+  - Signatures are deterministic or use secure randomness
+
+scenarios:
+  - id: CRYPTO-001
+    name: Generate Ed25519 agent keypair
+    criticality: critical
+    given:
+      - OS provides secure random number generator
+    when: AgentKeypair::generate() is called
+    then:
+      - Creates 32-byte signing key from OS random
+      - Public key can be derived
+      - Same keypair produces identical signatures
+    refs: [crates/arkavo-crypto/src/lib.rs:23-26]
+
+  - id: CRYPTO-002
+    name: Sign and verify with Ed25519
+    criticality: critical
+    given:
+      - Valid AgentKeypair exists
+    when: sign() called then verify() with public key
+    then:
+      - Signature is 64 bytes
+      - Verification succeeds with original message
+      - Verification fails with modified message
+    refs: [crates/arkavo-crypto/src/lib.rs:51-53,141-151]
+
+  - id: CRYPTO-003
+    name: Serialize and restore Ed25519 keypair
+    criticality: high
+    given:
+      - Existing AgentKeypair with known secret
+    when: to_bytes() then from_bytes()
+    then:
+      - Serialized form is exactly 32 bytes
+      - Restored keypair produces identical signatures
+      - Invalid length returns InvalidKeyFormat error
+    refs: [crates/arkavo-crypto/src/lib.rs:28-43]
+
+  - id: CRYPTO-004
+    name: Ed25519 public key to DID:key format
+    criticality: high
+    given:
+      - Valid Ed25519 public key
+    when: to_did_key() is called
+    then:
+      - Output starts with "did:key:z6Mk"
+      - Contains multicodec prefix 0xed01
+      - Uses base58btc encoding
+    refs: [crates/arkavo-crypto/src/lib.rs:96-108]
+
+  - id: CRYPTO-005
+    name: Parse Ed25519 DID:key string
+    criticality: high
+    given:
+      - Valid did:key string from to_did_key()
+    when: from_did_key() is called
+    then:
+      - Extracts public key bytes
+      - Validates multicodec prefix
+      - Returns InvalidKeyFormat for invalid prefixes
+    refs: [crates/arkavo-crypto/src/lib.rs:113-139]
+
+  - id: CRYPTO-006
+    name: Generate P-256 signing keypair (iOS compatibility)
+    criticality: high
+    given:
+      - OS provides secure random number generator
+    when: P256SigningKeypair::generate() is called
+    then:
+      - Creates P-256 ECDSA keypair
+      - Public key exportable in SEC1 format
+      - Compatible with iOS Secure Enclave
+    refs: [crates/arkavo-crypto/src/lib.rs:294-298]
+
+  - id: CRYPTO-007
+    name: Sign with P-256 ECDSA (DER format)
+    criticality: high
+    given:
+      - Valid P256SigningKeypair
+    when: sign() called with message
+    then:
+      - Produces DER-encoded ECDSA signature
+      - Compatible with iOS ecdsaSignatureMessageX962SHA256
+    refs: [crates/arkavo-crypto/src/lib.rs:320-324]
+
+  - id: CRYPTO-008
+    name: Verify P-256 signature with auto format detection
+    criticality: high
+    given:
+      - P256VerifyingKey from SEC1 bytes
+      - Signature in DER or fixed-size format
+    when: verify() is called
+    then:
+      - Attempts DER parsing first
+      - Falls back to fixed-size format
+      - Returns VerificationFailed on invalid signature
+    refs: [crates/arkavo-crypto/src/lib.rs:363-374]
+
+  - id: CRYPTO-009
+    name: P-256 public key SEC1 encoding
+    criticality: high
+    given:
+      - Valid P256VerifyingKey
+    when: to_sec1_bytes() called
+    then:
+      - Uncompressed format is 65 bytes (0x04 || x || y)
+      - Compressed format is 33 bytes (0x02/0x03 || x)
+    refs: [crates/arkavo-crypto/src/lib.rs:335-339,350-355]
+
+  - id: CRYPTO-010
+    name: P-256 to DID:key format
+    criticality: medium
+    given:
+      - Valid P-256 public key
+    when: to_did_key() is called
+    then:
+      - Output starts with "did:key:zDn" (different from Ed25519)
+      - Contains multicodec prefix 0x1200 (varint encoded as 0x80 0x24)
+      - Uses compressed public key
+    refs: [crates/arkavo-crypto/src/lib.rs:381-396]
+
+  - id: CRYPTO-011
+    name: ECDH key agreement for KAS operations
+    criticality: high
+    given:
+      - Two KasEcKeypairs (local and peer)
+    when: diffie_hellman() called with peer public key
+    then:
+      - Returns 32-byte shared secret
+      - Same secret derived by both parties
+      - Used for TDF encryption key wrapping
+    refs: [crates/arkavo-crypto/src/lib.rs:228-235]
+    edge_cases:
+      - condition: Invalid signature length (not 64 bytes for Ed25519)
+        expected: Returns InvalidSignature error
+      - condition: DID:key with wrong multicodec prefix
+        expected: Returns InvalidKeyFormat with specific error message
+      - condition: Base64 decode failure
+        expected: Returns InvalidKeyFormat with decode error details
+      - condition: P-256 signature format unparseable
+        expected: Returns InvalidSignature

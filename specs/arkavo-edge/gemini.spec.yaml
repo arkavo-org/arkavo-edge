@@ -1,0 +1,182 @@
+feature: Gemini AI Provider
+module: crate::gemini
+version: 0.57.2
+
+invariants:
+  - Gemini API version must be valid and supported
+  - SSE stream connections auto-reconnect on transient failures
+  - Tool definitions must match Gemini Function Declaration schema
+  - Live session maintains connection state across interactions
+
+scenarios:
+  - id: GEM-001
+    name: Initialize REST client with API key
+    criticality: critical
+    given:
+      - Valid Gemini API key is available
+      - Target API version is configured
+    when: RestClient is initialized with configuration
+    then:
+      - Client stores API key securely
+      - Base URL includes API version
+      - Client is ready for API calls
+    refs: [crates/arkavo-gemini/src/rest_client.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: API key is empty
+        expected: Initialization fails with Authentication error
+      - condition: Invalid API version
+        expected: Client uses default stable version
+
+  - id: GEM-002
+    name: Execute tool-based conversation
+    criticality: high
+    given:
+      - REST client is initialized
+      - Tool definitions are registered
+      - User message requires tool execution
+    when: Generation request is sent with tools
+    then:
+      - Response contains function call
+      - Tool is executed with provided arguments
+      - Result is sent back in follow-up request
+      - Final response includes tool results
+    refs: [crates/arkavo-gemini/src/dispatcher.rs:1-50, crates/arkavo-gemini/src/types.rs:1-30]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Tool execution fails
+        expected: Error is reported to model gracefully
+      - condition: Tool not found
+        expected: Model is informed of available tools
+
+  - id: GEM-003
+    name: Stream response via SSE
+    criticality: high
+    given:
+      - REST client is initialized
+      - Streaming generation is requested
+    when: Stream endpoint is called
+    then:
+      - SSE connection is established
+      - Chunks arrive as generated
+      - Stream ends with finish reason
+      - Connection closes cleanly
+    refs: [crates/arkavo-gemini/src/sse_stream.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Network interruption
+        expected: Auto-reconnect resumes from last chunk
+      - condition: Server error
+        expected: Error event is propagated to caller
+
+  - id: GEM-004
+    name: Establish live session connection
+    criticality: critical
+    given:
+      - SetupConfig contains API key and model
+      - WebSocket endpoint is available
+    when: LiveSessionClient connects
+    then:
+      - WebSocket handshake succeeds
+      - Setup message is sent with config
+      - Connection state becomes active
+      - Bidirectional communication ready
+    refs: [crates/arkavo-gemini/src/live_client.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Setup fails
+        expected: Connection closes with error details
+      - condition: Model unavailable
+        expected: Connection refused with retry-after
+
+  - id: GEM-005
+    name: Send audio content in live session
+    criticality: medium
+    given:
+      - Live session is active
+      - Audio data is in supported format
+    when: Client content with audio is sent
+    then:
+      - Audio chunks are streamed to server
+      - Server processes audio in real-time
+      - Response contains transcribed/interpreted content
+    refs: [crates/arkavo-gemini/src/types.rs:30-60]
+    changed: "2025-01-31"
+
+  - id: GEM-006
+    name: Handle server tool calls in live session
+    criticality: high
+    given:
+      - Live session is active
+      - Server message contains function call
+    when: Function call is received
+    then:
+      - Arguments are parsed from message
+      - Registered tool is dispatched
+      - ToolResponse is sent back to server
+    refs: [crates/arkavo-gemini/src/dispatcher.rs:50-100]
+    changed: "2025-01-31"
+
+  - id: GEM-007
+    name: Register and dispatch tools
+    criticality: high
+    given:
+      - ToolRegistry is initialized
+      - Tool implementation implements handler trait
+    when: Tool is registered and invoked
+    then:
+      - Definition matches FunctionDeclaration schema
+      - Handler is stored in registry
+      - Dispatch routes to correct handler
+      - Result is properly formatted
+    refs: [crates/arkavo-gemini/src/dispatcher.rs:1-80]
+    changed: "2025-01-31"
+
+  - id: GEM-008
+    name: Handle Gemini API errors
+    criticality: high
+    given:
+      - Client is making API request
+      - Server returns error response
+    when: Error HTTP status is received
+    then:
+      - Error is parsed from response body
+      - GeminiError type is returned
+      - Retryable errors are distinguished
+      - Error details are preserved
+    refs: [crates/arkavo-gemini/src/error.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Rate limit exceeded
+        expected: RateLimit variant with retry-after header
+      - condition: Invalid API key
+        expected: Authentication variant
+
+  - id: GEM-009
+    name: Configure generation parameters
+    criticality: medium
+    given:
+      - GenerationConfig is provided
+    when: Config is applied to request
+    then:
+      - Temperature is bounded [0.0, 2.0]
+      - Max output tokens is respected
+      - Stop sequences terminate generation
+      - Response mime type is set
+    refs: [crates/arkavo-gemini/src/types.rs:60-90]
+    changed: "2025-01-31"
+
+  - id: GEM-010
+    name: Parse streaming response chunks
+    criticality: high
+    given:
+      - SSE stream is active
+      - Chunks arrive over time
+    when: Each chunk is received
+    then:
+      - JSON is parsed successfully
+      - Content delta is extracted
+      - Usage metadata accumulates
+      - Finish reason is detected
+    refs: [crates/arkavo-gemini/src/sse_stream.rs:50-100]
+    changed: "2025-01-31"

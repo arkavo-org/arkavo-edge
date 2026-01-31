@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "arkavo-behavior-spec",
+  "title": "Arkavo Behavior Specification",
+  "description": "Schema for BDD-style behavior specifications",
+  "type": "object",
+  "required": ["feature", "module", "scenarios"],
+  "properties": {
+    "feature": {
+      "type": "string",
+      "description": "Human-readable feature name"
+    },
+    "module": {
+      "type": "string",
+      "description": "Rust module path (e.g., arkavo_protocol::registration)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the specification"
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Global rules that must always hold"
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "criticality", "given", "when", "then"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z]+-\\d+$",
+            "description": "Scenario identifier (e.g., REG-001)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Descriptive scenario name"
+          },
+          "criticality": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"],
+            "description": "Business impact level"
+          },
+          "given": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Preconditions"
+          },
+          "when": {
+            "type": "string",
+            "description": "Action/trigger"
+          },
+          "then": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Expected outcomes"
+          },
+          "edge_cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "condition": { "type": "string" },
+                "expected": { "type": "string" }
+              }
+            }
+          },
+          "refs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Source file references (path:line-range)"
+          },
+          "changed": {
+            "type": "string",
+            "format": "date",
+            "description": "Last modification date (YYYY-MM-DD)"
+          }
+        }
+      }
+    }
+  }
+}

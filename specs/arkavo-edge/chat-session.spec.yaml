@@ -1,0 +1,204 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Chat Session Management
+module: arkavo_protocol::chat_session
+version: 0.57.2
+
+invariants:
+  - Each session has a unique UUID v4 identifier
+  - Sessions transition through states Active → Closing → Closed
+  - Sessions auto-expire after TTL (default 3600 seconds) with 60-second check interval
+  - Maximum 100 in-flight deltas before back-pressure is applied
+  - Delta sequences are monotonically increasing per message
+
+scenarios:
+  - id: CHAT-001
+    name: Create authenticated chat session
+    criticality: high
+    given:
+      - ChatSessionManager is initialized
+      - Optional SessionAuth with user claims
+    when: create_session() called with auth
+    then:
+      - Returns ChatSession with UUID v4 session_id
+      - Session state is Active
+      - Metrics tracking initialized
+      - TTL cleaner monitors session
+    refs: [crates/arkavo-protocol/src/chat_session.rs:111-240]
+
+  - id: CHAT-002
+    name: Send message to active session
+    criticality: high
+    given:
+      - Session exists and is Active
+      - LLM adapter or router is configured
+    when: send_message() called with UserMessage
+    then:
+      - Message is queued for processing
+      - Metrics recorded for message sent
+      - Returns Ok(()) on success
+    refs: [crates/arkavo-protocol/src/chat_session.rs:243-279]
+
+  - id: CHAT-003
+    name: Reject message to non-active session
+    criticality: high
+    given:
+      - Session exists but state is not Active (Closing/Closed/Zombie)
+    when: send_message() called
+    then:
+      - Returns A2aError::SessionNotFound
+      - Logs warning with current state
+      - No message processing initiated
+    refs: [crates/arkavo-protocol/src/chat_session.rs:248-253]
+
+  - id: CHAT-004
+    name: Stream LLM deltas with back-pressure
+    criticality: high
+    given:
+      - Session handler processing message
+      - Streaming mode enabled
+    when: More than 100 in-flight deltas without acknowledgment
+    then:
+      - Handler pauses at back-pressure threshold
+      - Waits for process_metrics_ack notification
+      - Resumes when acknowledgment received
+    refs: [crates/arkavo-protocol/src/chat_session.rs:621-630]
+
+  - id: CHAT-005
+    name: Process metrics acknowledgment
+    criticality: medium
+    given:
+      - Session exists with pending deltas
+      - Client sends acknowledgment with last_seq
+    when: process_metrics_ack() called
+    then:
+      - Updates last_acked_seq
+      - Recalculates in-flight count
+      - Notifies back-pressure waiter
+    refs: [crates/arkavo-protocol/src/chat_session.rs:390-419]
+
+  - id: CHAT-006
+    name: Close session gracefully
+    criticality: high
+    given:
+      - Active session exists
+    when: close_session() called
+    then:
+      - State transitions to Closing
+      - Task manager shuts down
+      - Session removed from tracking
+      - Metrics collector records closure
+      - Stream end delta sent if handler active
+    refs: [crates/arkavo-protocol/src/chat_session.rs:334-368]
+
+  - id: CHAT-007
+    name: TTL cleaner removes expired sessions
+    criticality: medium
+    given:
+      - Session has been inactive for TTL seconds
+    when: TTL cleaner runs (every 60 seconds)
+    then:
+      - Expired sessions marked for cleanup
+      - Metrics updated with cleanup event
+      - Cleanup callback invoked with session_id
+    refs: [crates/arkavo-protocol/src/chat_session.rs:81-94]
+
+  - id: CHAT-008
+    name: Get delta stream for session
+    criticality: high
+    given:
+      - Session exists and is Active
+    when: get_delta_stream() called
+    then:
+      - Returns mpsc::Receiver for deltas
+      - Broadcast channel subscribed
+      - Delta metrics recorded on receive
+    refs: [crates/arkavo-protocol/src/chat_session.rs:283-330]
+
+  - id: CHAT-009
+    name: Handle session with router and tools
+    criticality: high
+    given:
+      - Router configured (not raw LLM adapter)
+      - Tool registry may be available
+    when: Message received in router mode
+    then:
+      - Routes through quality gate (max 3 retries)
+      - Executes tool calls if registry available
+      - Formats tool results and re-routes
+      - Sends tool call and result deltas
+    refs: [crates/arkavo-protocol/src/chat_session.rs:718-966]
+
+  - id: CHAT-010
+    name: Session enters zombie state on abnormal exit
+    criticality: medium
+    given:
+      - Session handler exits unexpectedly
+      - Session not in Closing state
+    when: Handler loop terminates
+    then:
+      - Session marked as Zombie
+      - Warning logged for cleanup needed
+      - Metrics reflect zombie state
+    refs: [crates/arkavo-protocol/src/chat_session.rs:706-712,957-963]
+
+  - id: CHAT-011
+    name: Handle router service unavailability
+    criticality: high
+    given:
+      - Router configured as primary handler
+      - Router service returns error or times out
+    when: route_with_quality_gate fails
+    then:
+      - Returns A2aError with router error details
+      - Error delta sent to client with ROUTER_ERROR code
+      - Metrics record router failure
+      - Session remains active for retry
+    refs: [crates/arkavo-protocol/src/chat_session.rs:894-917]
+    changed: "2025-01-31"
+
+  - id: CHAT-012
+    name: Handle tool execution timeout
+    criticality: high
+    given:
+      - Tool registry available
+      - Tool call requires external execution
+    when: Tool execution exceeds timeout threshold
+    then:
+      - Timeout error returned in tool result
+      - is_error=true in tool result delta
+      - Partial results included if available
+      - Session continues, tool call marked failed
+    refs: [crates/arkavo-protocol/src/chat_session.rs:803-836]
+    changed: "2025-01-31"
+
+  - id: CHAT-013
+    name: Reject malformed delta message
+    criticality: medium
+    given:
+      - Delta stream processing active
+      - Incoming delta fails schema validation
+    when: Malformed delta received
+    then:
+      - Delta dropped, error logged
+      - Metrics record malformed delta
+      - Stream continues (fault isolation)
+      - Client receives ERROR delta with details
+    edge_cases:
+      - condition: Invalid UTF-8 in text content
+        expected: Sanitized or rejected with error
+      - condition: Negative sequence number
+        expected: Rejected, stream continues
+      - condition: Missing required fields
+        expected: Rejected with validation error
+      - condition: send_message to non-existent session
+        expected: Returns A2aError::SessionNotFound
+      - condition: No LLM adapter or router configured
+        expected: Returns A2aError::NoLlmAdapter
+      - condition: Message channel closed during send
+        expected: Returns A2aError::MessageSendFailed
+      - condition: Aggregated streaming mode
+        expected: Accumulates full response before sending single delta
+      - condition: Router succeeds but tool registry missing
+        expected: Tool calls logged but not executed, response still delivered
+    changed: "2025-01-31"

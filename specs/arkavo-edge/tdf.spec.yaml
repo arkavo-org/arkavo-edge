@@ -1,0 +1,145 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Trusted Data Format (TDF) Encryption
+module: arkavo_tdf
+version: 0.57.2
+
+invariants:
+  - All TDF manifests include policy binding for integrity
+  - Encryption uses AES-256-GCM for payload encryption
+  - Key access requires KAS (Key Access Server) rewrap
+  - Policy attributes are cryptographically bound to payload
+  - Streaming encryption handles GB-scale data without OOM
+
+scenarios:
+  - id: TDF-001
+    name: Encrypt data with policy
+    criticality: critical
+    given:
+      - TdfEncryptor initialized
+      - Policy with attributes defined
+      - Data payload ready
+    when: encrypt() called with data and policy
+    then:
+      - Payload encrypted with AES-256-GCM
+      - EncryptionInformation generated with key access
+      - PolicyBinding cryptographically binds policy to payload
+      - TdfManifest returned with all components
+    refs: [crates/arkavo-tdf/src/traits.rs]
+
+  - id: TDF-002
+    name: Decrypt data with KAS rewrap
+    criticality: critical
+    given:
+      - TdfDecryptor initialized
+      - Valid TdfManifest with encrypted payload
+      - KAS client authenticated
+    when: decrypt() called with manifest
+    then:
+      - KeyAccessObject sent to KAS for rewrap
+      - Symmetric key unwraps payload
+      - Plaintext returned to caller
+      - Invalid keys return TdfError::DecryptionFailed
+    refs: [crates/arkavo-tdf/src/traits.rs,crates/arkavo-tdf/src/kas_client.rs]
+
+  - id: TDF-003
+    name: Policy builder with ABAC attributes
+    criticality: high
+    given:
+      - PolicyBuilder initialized
+      - ABAC attributes defined
+    when: PolicyBuilder constructs policy
+    then:
+      - Attributes added to policy
+      - PolicyBinding generated
+      - Policy serializes to JSON
+    refs: [crates/arkavo-tdf/src/policy.rs]
+
+  - id: TDF-004
+    name: ABAC evaluation for access decision
+    criticality: critical
+    given:
+      - Policy with ABAC attributes
+      - Subject attributes from authentication
+      - Resource attributes from TDF
+    when: AbacEvaluator evaluates access request
+    then:
+      - Attributes compared against policy
+      - Decision returns Permit or Deny
+      - Denied access returns AbacError::AccessDenied
+    refs: [crates/arkavo-tdf/src/abac.rs]
+
+  - id: TDF-005
+    name: Delegation token verification
+    criticality: high
+    given:
+      - DelegationToken issued by trusted root
+      - Token claims include delegated permissions
+    when: DelegationVerifier validates token
+    then:
+      - Token signature verified against trusted root
+      - Claims extracted and validated
+      - Expired tokens return DelegationError::Expired
+    refs: [crates/arkavo-tdf/src/delegation.rs]
+
+  - id: TDF-006
+    name: Streaming encryption for large files
+    criticality: high
+    given:
+      - GB-scale data to encrypt
+      - Streaming encryptor configured
+    when: encrypt_stream() processes chunks
+    then:
+      - Data chunked into manageable segments
+      - Each chunk encrypted independently
+      - Memory usage bounded (no OOM)
+      - Manifest aggregates segment metadata
+    refs: [crates/arkavo-tdf/src/traits.rs]
+
+  - id: TDF-007
+    name: Blob transport stages encrypted payload
+    criticality: medium
+    given:
+      - Encrypted payload ready
+      - BlobTransport configured (S3/filesystem)
+    when: stage() called with payload
+    then:
+      - Payload uploaded to storage backend
+      - Ticket/reference returned
+      - TransportError on failure
+    refs: [crates/arkavo-tdf/src/traits.rs]
+
+  - id: TDF-008
+    name: A2A KAS handler processes rewrap requests
+    criticality: high
+    given:
+      - KasA2aHandler initialized
+      - Rewrap request received via A2A
+      - Requester authenticated
+    when: handle_rewrap() processes request
+    then:
+      - Request validated
+      - Key unwrapped and rewrapped for requester
+      - KasRewrapResponse returned
+    refs: [crates/arkavo-tdf/src/a2a_handler.rs]
+
+  - id: TDF-009
+    name: OpenTDF integration for standard compliance
+    criticality: medium
+    given:
+      - OpenTDF feature enabled
+      - Standard TDF manifest received
+    when: OpenTdfService processes manifest
+    then:
+      - Manifest parsed per OpenTDF spec
+      - Encryption/decryption compatible with standard
+      - Interoperability with other TDF implementations
+    refs: [crates/arkavo-tdf/src/opentdf_impl.rs]
+    edge_cases:
+      - condition: KAS server unreachable
+        expected: Returns TransportError::ConnectionFailed
+      - condition: Policy binding verification fails
+        expected: Returns TdfError::IntegrityCheckFailed
+      - condition: Subject lacks required attributes
+        expected: AbacEvaluator returns Decision::Deny
+    changed: "2025-01-31"

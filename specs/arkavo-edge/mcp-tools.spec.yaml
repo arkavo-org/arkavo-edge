@@ -1,0 +1,161 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: MCP Tool Registry and Execution
+module: arkavo_mcp_tools
+version: 0.57.2
+
+invariants:
+  - All tools must be registered before execution
+  - Tool schemas define valid parameters
+  - Registry supports progressive disclosure for small models
+  - Tool execution is sandboxed where possible
+  - Results are validated against schema
+
+scenarios:
+  - id: MCP-001
+    name: Register built-in tools in registry
+    criticality: high
+    given:
+      - ToolRegistry initialized
+      - MemoryStorage available
+    when: ToolRegistry::new() called
+    then:
+      - All built-in tools registered
+      - Tools categorized by function
+      - Schemas validated
+      - Registry ready for discovery
+    refs: [crates/arkavo-mcp-tools/src/registry.rs]
+
+  - id: MCP-002
+    name: Discover tools with detail level
+    criticality: high
+    given:
+      - Tools registered
+      - DetailLevel specified
+    when: discover_tools() called
+    then:
+      - NameOnly returns just names
+      - NameAndDescription adds descriptions
+      - FullSchema includes all parameters
+      - Progressive disclosure supported
+    refs: [crates/arkavo-mcp-tools/src/registry.rs]
+
+  - id: MCP-003
+    name: Execute tool with parameters
+    criticality: critical
+    given:
+      - Tool registered
+      - Valid parameters provided
+    when: Tool::execute() called
+    then:
+      - Parameters validated against schema
+      - Tool executes in sandbox
+      - Result returned as JSON
+      - Errors captured and returned
+    refs: [crates/arkavo-mcp-tools/src/server.rs]
+
+  - id: MCP-004
+    name: Filesystem tool operations
+    criticality: high
+    given:
+      - FileSystemKit available
+      - Path provided
+    when: Filesystem operations executed
+    then:
+      - Read operations return content
+      - Write operations persist data
+      - List operations enumerate files
+      - Errors handled gracefully
+    refs: [crates/arkavo-mcp-tools/src/filesystem.rs]
+
+  - id: MCP-005
+    name: Git tool operations
+    criticality: medium
+    given:
+      - Git repository initialized
+      - Git tool selected
+    when: Git commands executed
+    then:
+      - Status shows working tree
+      - Diff shows changes
+      - Log shows history
+      - Branch operations work
+    refs: [crates/arkavo-mcp-tools/src/git.rs]
+
+  - id: MCP-006
+    name: GitHub API tool operations
+    criticality: medium
+    given:
+      - GitHub token configured
+      - Repository accessible
+    when: GitHub tools called
+    then:
+      - Issues listed/created
+      - PRs managed
+      - Releases created
+      - Rate limits respected
+    refs: [crates/arkavo-mcp-tools/src/github_api.rs]
+
+  - id: MCP-007
+    name: Code analysis with Semgrep
+    criticality: medium
+    given:
+      - Semgrep installed
+      - Code files present
+    when: SemgrepTool runs
+    then:
+      - Patterns matched
+      - Findings reported
+      - Severity categorized
+      - JSON output returned
+    refs: [crates/arkavo-mcp-tools/src/semgrep.rs]
+
+  - id: MCP-008
+    name: Shell execution with safety
+    criticality: high
+    given:
+      - ShellExecTool enabled
+      - Command provided
+    when: Shell command executed
+    then:
+      - Command validated
+      - Timeout enforced
+      - Output captured
+      - Exit code returned
+    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs]
+
+  - id: MCP-009
+    name: Web search tool
+    criticality: low
+    given:
+      - Search API configured
+      - Query provided
+    when: WebSearchTool called
+    then:
+      - Query sent to search API
+      - Results formatted
+      - Snippets extracted
+      - URLs included
+    refs: [crates/arkavo-mcp-tools/src/web_search.rs]
+
+  - id: MCP-010
+    name: TDF encryption tool
+    criticality: high
+    given:
+      - TDF toolkit initialized
+      - Data and policy provided
+    when: TdfEncryptTool called
+    then:
+      - Data encrypted
+      - Manifest generated
+      - Payload staged
+      - Reference returned
+    refs: [crates/arkavo-mcp-tools/src/tdf.rs]
+    edge_cases:
+      - condition: Invalid tool parameters
+        expected: Returns ToolError::InvalidParams
+      - condition: Tool execution timeout
+        expected: Returns ToolError::Execution with timeout message
+      - condition: Tool not found in registry
+        expected: Returns error with available tools list
+    changed: "2025-01-31"

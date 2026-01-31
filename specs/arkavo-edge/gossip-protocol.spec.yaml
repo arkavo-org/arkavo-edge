@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Gossip Protocol for Decentralized Propagation
+module: arkavo_gossip
+version: 0.57.2
+
+invariants:
+  - All messages must have valid Ed25519 signatures
+  - Quorum threshold defaults to 2/3 of validators
+  - Fanout defaults to 3 peers per gossip round
+  - Anti-entropy sync runs every 60 seconds
+  - Content hashes are SHA-256 of canonical message representation
+
+scenarios:
+  - id: GOSSIP-001
+    name: Epidemic broadcast to fanout peers
+    criticality: high
+    given:
+      - GossipProtocol initialized with fanout=3
+      - Multiple connected peers
+    when: broadcast() called with new message
+    then:
+      - Message sent to exactly fanout random peers
+      - Each peer propagates to their fanout
+      - Message reaches all peers within O(log n) hops
+    refs: [crates/arkavo-gossip/src/protocol.rs]
+
+  - id: GOSSIP-002
+    name: Verify message signature before processing
+    criticality: critical
+    given:
+      - Incoming GossipMessage received
+      - KeyRegistry has sender's public key
+    when: message passes through verification
+    then:
+      - Ed25519 signature is verified
+      - Content hash matches payload
+      - Reject and drop if verification fails
+    refs: [crates/arkavo-gossip/src/verification.rs]
+
+  - id: GOSSIP-003
+    name: Deduplicate messages by content hash
+    criticality: high
+    given:
+      - Message with hash H has been seen
+    when: Same message hash H received again
+    then:
+      - Message is dropped immediately
+      - No further propagation
+      - Seen-set prevents loops
+    refs: [crates/arkavo-gossip/src/lib.rs:10]
+
+  - id: GOSSIP-004
+    name: Achieve quorum consensus on patch
+    criticality: high
+    given:
+      - PatchAnnouncement received from peer
+      - Multiple validators in network
+    when: Validators cast PatchVote
+    then:
+      - Votes tallied by patch hash
+      - Consensus reached at 2/3 threshold
+      - Status transitions Pending → Approved/Rejected
+    refs: [crates/arkavo-gossip/src/consensus.rs]
+
+  - id: GOSSIP-005
+    name: Anti-entropy synchronization
+    criticality: medium
+    given:
+      - AntiEntropyDigest from remote peer
+      - Local digest differs
+    when: sync interval triggers (60s default)
+    then:
+      - Compare digests for missing messages
+      - Request specific messages by hash
+      - Merge into local state
+    refs: [crates/arkavo-gossip/src/lib.rs:11,crates/arkavo-gossip/src/protocol.rs]
+
+  - id: GOSSIP-006
+    name: Lesson consensus across swarms
+    criticality: high
+    given:
+      - LessonAnnouncement for cross-swarm learning
+      - Evidence from multiple sources
+    when: LessonVote cast by validators
+    then:
+      - Evidence verified per LocalEvidence
+      - Quorum determines lesson validity
+      - Approved lessons propagate to all swarms
+    refs: [crates/arkavo-gossip/src/lesson_consensus.rs]
+
+  - id: GOSSIP-007
+    name: Handle malformed gossip message
+    criticality: high
+    given:
+      - Incoming message fails schema validation
+    when: Message received on gossip channel
+    then:
+      - Message rejected before signature check
+      - Peer reputation decremented
+      - No propagation occurs
+      - Error logged for monitoring
+    refs: [crates/arkavo-gossip/src/error.rs]
+
+  - id: GOSSIP-008
+    name: Vote timeout handling
+    criticality: medium
+    given:
+      - Consensus vote in progress
+      - DEFAULT_VOTE_TIMEOUT elapsed (configurable)
+    when: Timer expires before quorum
+    then:
+      - Consensus marked as TimedOut
+      - Pending votes cleared
+      - Patch/lesson may be retried
+    refs: [crates/arkavo-gossip/src/consensus.rs]
+    edge_cases:
+      - condition: Network partition during consensus
+        expected: Partitioned nodes may reach different consensus; resolved on reconnection via anti-entropy
+      - condition: Validator set changes during vote
+        expected: Quorum threshold calculated at vote start; changes don't affect in-progress votes
+      - condition: Clock skew between peers
+        expected: Timestamps used for ordering only; consensus based on votes not time

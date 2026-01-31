@@ -1,0 +1,191 @@
+feature: Issue Orchestration and Cognitive Engine
+module: arkavo_orchestrator
+version: 0.57.2
+
+invariants:
+  - Orchestrator manages issue lifecycle from GitHub to resolution
+  - CognitiveEngine plans and executes complex tasks
+  - IssueAnalyzer determines complexity and type
+  - IssueRouter selects execution strategy
+  - TaskExecutor handles collaborative planning
+
+scenarios:
+  - id: ORCH-001
+    name: Initialize orchestrator
+    criticality: critical
+    given:
+      - Configuration loaded
+      - GitHub integration ready
+    when: Orchestrator::new called
+    then:
+      - CognitiveEngine created
+      - IssueRouter initialized
+      - TaskExecutor ready
+    refs: [crates/arkavo-orchestrator/src/orchestrator.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: ORCH-002
+    name: Analyze GitHub issue
+    criticality: critical
+    given:
+      - Issue received
+      - IssueAnalyzer ready
+    when: IssueAnalyzer::analyze called
+    then:
+      - Title/body parsed
+      - Complexity assessed
+      - IssueType classified
+      - Analysis returned
+    refs: [crates/arkavo-orchestrator/src/issue_analyzer.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Issue body empty
+        expected: Low complexity default
+      - condition: Multiple concerns
+        expected: Composite type
+
+  - id: ORCH-003
+    name: Route issue to execution strategy
+    criticality: critical
+    given:
+      - Issue analysis complete
+      - Router configured
+    when: IssueRouter::route called
+    then:
+      - Strategy selected (Local/Mesh/Collaborative)
+      - Priority assigned
+      - RoutingDecision returned
+    refs: [crates/arkavo-orchestrator/src/issue_router.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: High complexity
+        expected: Collaborative strategy
+      - condition: Security issue
+        expected: Elevated priority
+
+  - id: ORCH-004
+    name: Create execution plan with cognitive engine
+    criticality: critical
+    given:
+      - Issue analyzed
+      - Context available
+    when: CognitiveEngine::plan called
+    then:
+      - Problem decomposed
+      - Steps generated
+      - ExecutionPlan created
+    refs: [crates/arkavo-orchestrator/src/cognitive_engine.rs:1-60, crates/arkavo-orchestrator/src/cognitive_engine_planning.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: ORCH-005
+    name: Execute plan with verification
+    criticality: critical
+    given:
+      - ExecutionPlan ready
+      - Resources available
+    when: CognitiveEngine::execute called
+    then:
+      - Steps executed sequentially
+      - Verification after each
+      - ExecutionResult returned
+    refs: [crates/arkavo-orchestrator/src/cognitive_engine.rs:60-120, crates/arkavo-orchestrator/src/cognitive_engine_verification.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Step fails
+        expected: Retry or abort
+      - condition: Verification fails
+        expected: Rollback attempted
+
+  - id: ORCH-006
+    name: Assign agents to tasks
+    criticality: high
+    given:
+      - Tasks decomposed
+      - Agent pool available
+    when: AgentAssigner::assign called
+    then:
+      - Capabilities matched
+      - Load balanced
+      - AgentAssignment returned
+    refs: [crates/arkavo-orchestrator/src/agent_assignment.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: ORCH-007
+    name: Process code chunks
+    criticality: high
+    given:
+      - Large codebase
+      - ChunkProcessor configured
+    when: ChunkProcessor::process called
+    then:
+      - Code split into chunks
+      - Batches formed
+      - Agents process in parallel
+      - Results aggregated
+    refs: [crates/arkavo-orchestrator/src/chunk_processor.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Chunk too large
+        expected: Further split
+      - condition: Processing fails
+        expected: Retry with backoff
+
+  - id: ORCH-008
+    name: Solve code problems
+    criticality: high
+    given:
+      - Problem statement
+      - Code context
+    when: CodeSolver::solve called
+    then:
+      - Solution generated
+      - Metrics tracked
+      - SolverResult returned
+    refs: [crates/arkavo-orchestrator/src/code_solver.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: ORCH-009
+    name: Create collaborative task plan
+    criticality: high
+    given:
+      - Complex issue
+      - Multiple agents available
+    when: CollaborativePlanner::plan called
+    then:
+      - Subtasks defined
+      - Dependencies mapped
+      - TaskPlan created
+    refs: [crates/arkavo-orchestrator/src/task_executor.rs:1-80]
+    changed: "2025-01-31"
+
+  - id: ORCH-010
+    name: Handle GitHub webhook
+    criticality: critical
+    given:
+      - WebhookServer running
+      - GitHub event received
+    when: WebhookServer::handle called
+    then:
+      - Event parsed
+      - Type determined (Issue/PR)
+      - Orchestration triggered
+    refs: [crates/arkavo-orchestrator/src/webhook.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid signature
+        expected: Security rejection
+      - condition: Unknown event type
+        expected: Logged, ignored
+
+  - id: ORCH-011
+    name: Handle orchestrator errors
+    criticality: high
+    given:
+      - Orchestration fails
+    when: Error propagates
+    then:
+      - Error created
+      - Context captured
+      - Recovery attempted
+    refs: [crates/arkavo-orchestrator/src/error.rs:1-40]
+    changed: "2025-01-31"

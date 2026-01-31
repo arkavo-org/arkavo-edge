@@ -1254,10 +1254,191 @@ jobs:
           echo "✅ No OpenSSL or native-tls dependencies found in musl build (features: $MUSL_FEATURES)"
           set -e  # Re-enable exit on error
 
+  # Behavior spec validation
+  validate-specs:
+    name: Validate Behavior Specs
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: |
+          cd /tmp
+          npm init -y
+          npm install ajv ajv-formats js-yaml
+      
+      - name: Validate spec schema
+        run: |
+          node << 'NODE_SCRIPT'
+          const Ajv = require('/tmp/node_modules/ajv');
+          const addFormats = require('/tmp/node_modules/ajv-formats');
+          const fs = require('fs');
+          const yaml = require('/tmp/node_modules/js-yaml');
+          
+          const ajv = new Ajv({strict: false});
+          addFormats(ajv);
+          
+          const schema = JSON.parse(fs.readFileSync('specs/schema.json'));
+          const validate = ajv.compile(schema);
+          
+          let failed = false;
+          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          
+          if (files.length === 0) {
+            console.error('❌ No spec files found in specs/arkavo-edge/');
+            process.exit(1);
+          }
+          
+          for (const file of files) {
+            const content = fs.readFileSync('specs/arkavo-edge/' + file, 'utf8');
+            const spec = yaml.load(content);
+            
+            if (!validate(spec)) {
+              console.error('❌ ' + file + ':');
+              validate.errors.forEach(e => console.error('  - ' + e.instancePath + ': ' + e.message));
+              failed = true;
+            } else {
+              console.log('✅ ' + file);
+            }
+          }
+          
+          process.exit(failed ? 1 : 0);
+          NODE_SCRIPT
+      
+      - name: Check required fields
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('/tmp/node_modules/js-yaml');
+          const path = require('path');
+          
+          const specsDir = 'specs/arkavo-edge';
+          const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.spec.yaml'));
+          
+          if (files.length === 0) {
+            console.error('❌ No spec files found in ' + specsDir);
+            process.exit(1);
+          }
+          
+          let errors = [];
+          let totalScenarios = 0;
+          
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(specsDir, file), 'utf8');
+            const spec = yaml.load(content);
+            
+            if (!spec.feature) errors.push(file + ': Missing feature');
+            if (!spec.module) errors.push(file + ': Missing module');
+            if (!spec.version) errors.push(file + ': Missing version');
+            if (!spec.invariants) errors.push(file + ': Missing invariants');
+            if (!spec.scenarios) errors.push(file + ': Missing scenarios');
+            
+            totalScenarios += spec.scenarios?.length || 0;
+            
+            for (const s of spec.scenarios || []) {
+              if (!s.id) errors.push(file + ': Scenario missing id');
+              if (!s.name) errors.push(file + ': Scenario missing name');
+              if (!s.criticality) errors.push(file + ': ' + s.id + ' missing criticality');
+              if (!['critical','high','medium','low'].includes(s.criticality)) {
+                errors.push(file + ': ' + s.id + ' invalid criticality');
+              }
+              if (!s.given) errors.push(file + ': ' + s.id + ' missing given');
+              if (!s.when) errors.push(file + ': ' + s.id + ' missing when');
+              if (!s.then) errors.push(file + ': ' + s.id + ' missing then');
+              if (s.id && !/^[A-Z]+-\d+$/.test(s.id)) {
+                errors.push(file + ': ' + s.id + ' invalid id format');
+              }
+            }
+          }
+          
+          if (totalScenarios === 0) {
+            console.error('❌ No scenarios found across all spec files');
+            process.exit(1);
+          }
+          
+          if (errors.length) {
+            console.error('❌ Errors:');
+            errors.forEach(e => console.error('  - ' + e));
+            process.exit(1);
+          }
+          console.log('✅ All required fields present (' + totalScenarios + ' scenarios)');
+          NODE_SCRIPT
+      
+      - name: Check index sync
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('/tmp/node_modules/js-yaml');
+          
+          const index = yaml.load(fs.readFileSync('specs/arkavo-edge/index.yaml', 'utf8'));
+          
+          if (!index.components || index.components.length === 0) {
+            console.error('❌ No components found in index.yaml');
+            process.exit(1);
+          }
+          
+          for (const comp of index.components || []) {
+            if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
+              console.error('❌ Missing file: ' + comp.file);
+              process.exit(1);
+            }
+            
+            const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
+            const actualCount = spec.scenarios?.length || 0;
+            if (comp.scenario_count !== actualCount) {
+              console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
+              process.exit(1);
+            }
+          }
+          
+          console.log('✅ Index synchronized');
+          NODE_SCRIPT
+      
+      - name: Generate stats
+        run: |
+          node << 'NODE_SCRIPT'
+          const fs = require('fs');
+          const yaml = require('/tmp/node_modules/js-yaml');
+          const path = require('path');
+          
+          const files = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          
+          if (files.length === 0) {
+            console.error('❌ No spec files found');
+            process.exit(1);
+          }
+          
+          let total = 0, critical = 0, high = 0;
+          
+          console.log('\n📊 Spec Statistics');
+          console.log('==================');
+          
+          for (const file of files) {
+            const spec = yaml.load(fs.readFileSync(path.join('specs/arkavo-edge', file), 'utf8'));
+            const count = spec.scenarios?.length || 0;
+            const crit = spec.scenarios?.filter(s => s.criticality === 'critical').length || 0;
+            const h = spec.scenarios?.filter(s => s.criticality === 'high').length || 0;
+            total += count; critical += crit; high += h;
+            console.log((file + ':').padEnd(35) + count + ' (C:' + crit + ' H:' + h + ')');
+          }
+          
+          console.log('─────────────────────────────────────');
+          console.log(('Total:').padEnd(35) + total + ' (C:' + critical + ' H:' + high + ')');
+          
+          if (total === 0) {
+            console.error('❌ No scenarios found');
+            process.exit(1);
+          }
+          NODE_SCRIPT
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check, validate-specs]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1275,7 +1456,8 @@ jobs:
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \
                 "${{ needs.zero-config-check.result }}" != "success" || \
                 "${{ needs.validate-xtask-schema.result }}" != "success" || \
-                "${{ needs.no-openssl-check.result }}" != "success" ]]; then
+                "${{ needs.no-openssl-check.result }}" != "success" || \
+                "${{ needs.validate-specs.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

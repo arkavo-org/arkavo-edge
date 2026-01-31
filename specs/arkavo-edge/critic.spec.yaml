@@ -1,0 +1,127 @@
+feature: LLM Response Critic and Verification
+module: arkavo_critic
+version: 0.57.2
+
+invariants:
+  - Verification pipeline with priority-ordered checks
+  - Fast checks first (Circuit <1μs, Schema <1ms)
+  - Pluggable check architecture
+  - Evidence collection for audits
+
+scenarios:
+  - id: CRIT-001
+    name: Create default verification pipeline
+    criticality: critical
+    given:
+      - Default configuration
+    when: default_pipeline called
+    then:
+      - CircuitCheck added (priority 5)
+      - SchemaCheck added (priority 10)
+      - PolicyCheck added (priority 15)
+      - Pipeline ready
+    refs: [crates/arkavo-critic/src/lib.rs:54-65]
+    changed: "2025-01-31"
+
+  - id: CRIT-002
+    name: Add custom check to pipeline
+    criticality: high
+    given:
+      - Pipeline exists
+      - Check implementation provided
+    when: add_check called
+    then:
+      - Check added
+      - Priority respected
+      - Pipeline updated
+    refs: [crates/arkavo-critic/src/pipeline.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: CRIT-003
+    name: Run circuit check
+    criticality: critical
+    given:
+      - TØR-G circuit loaded
+      - Input provided
+    when: CircuitCheck::verify called
+    then:
+      - Circuit evaluated (<1μs)
+      - Pass/fail determined
+      - Result returned
+    refs: [crates/arkavo-critic/src/checks.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Circuit violation
+        expected: Fail with details
+
+  - id: CRIT-004
+    name: Run schema validation check
+    criticality: high
+    given:
+      - Tool call candidate
+      - Schema defined
+    when: SchemaCheck::verify called
+    then:
+      - Parameters validated
+      - Types checked
+      - Result returned (<1ms)
+    refs: [crates/arkavo-critic/src/checks.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Missing required field
+        expected: Validation error
+      - condition: Type mismatch
+        expected: Type error
+
+  - id: CRIT-005
+    name: Run semantic coherence check
+    criticality: medium
+    given:
+      - Local LLM available
+      - Response to verify
+    when: SemanticCheck::verify called
+    then:
+      - Coherence analyzed (<50ms)
+      - Score computed
+      - Result returned
+    refs: [crates/arkavo-critic/src/checks.rs:100-150]
+    changed: "2025-01-31"
+
+  - id: CRIT-006
+    name: Collect verification evidence
+    criticality: high
+    given:
+      - Checks executed
+    when: evidence collected
+    then:
+      - All check results stored
+      - Severity assessed
+      - Status determined
+    refs: [crates/arkavo-critic/src/evidence.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: CRIT-007
+    name: Judge response quality
+    criticality: medium
+    given:
+      - Evidence collected
+    when: ResponseJudge::judge called
+    then:
+      - Issues identified
+      - Judgment rendered
+      - Improvement suggestions
+    refs: [crates/arkavo-critic/src/judge.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: CRIT-008
+    name: Configure critic behavior
+    criticality: medium
+    given:
+      - Config options provided
+    when: CriticConfig::apply called
+    then:
+      - Thresholds set
+      - Enabled checks configured
+      - Timeouts defined
+    refs: [crates/arkavo-critic/src/config.rs:1-50]
+    changed: "2025-01-31"

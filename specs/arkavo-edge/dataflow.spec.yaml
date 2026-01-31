@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Dataflow Engine and Pipelines
+module: arkavo_dataflow
+version: 0.57.2
+
+invariants:
+  - All pipelines have unique UUID v4 identifiers
+  - Blueprint validation required before pipeline creation
+  - Sandboxed execution for untrusted code
+  - Natural language parsing produces valid blueprints
+  - Pipeline state transitions are atomic
+
+scenarios:
+  - id: DATA-001
+    name: Create pipeline from blueprint
+    criticality: high
+    given:
+      - DataflowEngine initialized
+      - Valid blueprint provided
+    when: create_pipeline_from_blueprint() called
+    then:
+      - Blueprint validated against schema
+      - Pipeline created with unique ID
+      - Pipeline stored in engine
+      - ID returned to caller
+    refs: [crates/arkavo-dataflow/src/lib.rs:102-107]
+
+  - id: DATA-002
+    name: Create pipeline from natural language
+    criticality: high
+    given:
+      - NL feature enabled
+      - Natural language query provided
+    when: create_pipeline_from_nl() called
+    then:
+      - NL parser interprets query
+      - Blueprint generated
+      - Pipeline created from blueprint
+      - Pipeline ID returned
+    refs: [crates/arkavo-dataflow/src/lib.rs:95-100]
+
+  - id: DATA-003
+    name: Start pipeline execution
+    criticality: high
+    given:
+      - Pipeline created and stored
+      - Pipeline in ready state
+    when: start_pipeline() called
+    then:
+      - Pipeline state transitions to running
+      - Nodes initialized
+      - Dataflow begins processing
+      - Error if pipeline not found
+    refs: [crates/arkavo-dataflow/src/lib.rs:113-119]
+
+  - id: DATA-004
+    name: Stop pipeline gracefully
+    criticality: high
+    given:
+      - Pipeline running
+      - Stop requested
+    when: stop_pipeline() called
+    then:
+      - Pipeline state transitions to stopping
+      - In-flight data processed
+      - Resources released
+      - Final state stored
+    refs: [crates/arkavo-dataflow/src/lib.rs:121-127]
+
+  - id: DATA-005
+    name: Export blueprint to JSON
+    criticality: medium
+    given:
+      - Pipeline exists
+      - Export requested
+    when: export_blueprint() called
+    then:
+      - Pipeline serialized to blueprint
+      - JSON generated with formatting
+      - String returned
+    refs: [crates/arkavo-dataflow/src/lib.rs:136-145]
+
+  - id: DATA-006
+    name: Import blueprint from JSON
+    criticality: medium
+    given:
+      - Valid JSON blueprint
+      - Import requested
+    when: import_blueprint() called
+    then:
+      - JSON parsed to blueprint
+      - Blueprint validated
+      - Pipeline created
+      - Pipeline ID returned
+    refs: [crates/arkavo-dataflow/src/lib.rs:158-163]
+    edge_cases:
+      - condition: Invalid blueprint schema
+        expected: Returns validation error with details
+      - condition: NL parsing fails
+        expected: Returns parse error with suggestions
+      - condition: Pipeline ID not found
+        expected: Returns "Pipeline not found" error
+    changed: "2025-01-31"

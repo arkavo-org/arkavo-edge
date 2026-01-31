@@ -1,0 +1,112 @@
+feature: Titan Monitor - Runtime Anomaly Detection
+module: arkavo_titan
+version: 0.57.2
+
+invariants:
+  - Zero-copy inspection engine
+  - Less than 5μs overhead (p99)
+  - Three-level surprise detection
+  - Non-blocking PainChannel for anomalies
+
+scenarios:
+  - id: TITAN-001
+    name: Create Titan monitor
+    criticality: critical
+    given:
+      - Configuration provided
+    when: TitanMonitor::new called
+    then:
+      - Monitor initialized
+      - Channel created
+      - Detectors ready
+    refs: [crates/arkavo-titan/src/monitor.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: TITAN-002
+    name: Evaluate with anomaly detection
+    criticality: critical
+    given:
+      - Monitor active
+      - Graph and inputs provided
+    when: TitanMonitor::evaluate called
+    then:
+      - Graph evaluated
+      - Detectors invoked
+      - Result returned (<5μs overhead)
+    refs: [crates/arkavo-titan/src/monitor.rs:60-100]
+    changed: "2025-01-31"
+
+  - id: TITAN-003
+    name: Detect hard failures
+    criticality: high
+    given:
+      - Evaluation occurs
+      - Runtime error/panic happens
+    when: HardFailureDetector invoked
+    then:
+      - Error caught
+      - Level 1 anomaly flagged
+      - Evidence sent to PainChannel
+    refs: [crates/arkavo-titan/src/detector.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: TITAN-004
+    name: Detect boundary violations
+    criticality: high
+    given:
+      - Evaluation occurs
+      - Input outside known good region
+    when: BoundaryDetector invoked
+    then:
+      - Boundary checked
+      - Level 2 anomaly flagged
+      - Evidence sent to PainChannel
+    refs: [crates/arkavo-titan/src/detector.rs:50-100]
+    changed: "2025-01-31"
+
+  - id: TITAN-005
+    name: Detect statistical drift
+    criticality: medium
+    given:
+      - Multiple evaluations over time
+      - Pattern entropy changes
+    when: DriftDetector invoked
+    then:
+      - EMA accumulator updated
+      - Drift measured
+      - Level 3 anomaly flagged if threshold exceeded
+    refs: [crates/arkavo-titan/src/detector.rs:100-150, crates/arkavo-titan/src/accumulator.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: TITAN-006
+    name: Receive anomaly evidence
+    criticality: high
+    given:
+      - Monitor running
+      - Anomaly detected
+    when: Evidence sent to PainChannel
+    then:
+      - Evidence queued (non-blocking)
+      - Consumer can receive
+      - Details include level and context
+    refs: [crates/arkavo-titan/src/evidence.rs:1-60, crates/arkavo-titan/src/monitor.rs:100-140]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Channel full
+        expected: Drop oldest (circular)
+      - condition: No consumer
+        expected: Buffer until read
+
+  - id: TITAN-007
+    name: Update EMA accumulator
+    criticality: medium
+    given:
+      - Accumulator initialized
+      - New value observed
+    when: EmaAccumulator::update called
+    then:
+      - Exponential moving average computed
+      - Variance tracked
+      - Ready for drift detection
+    refs: [crates/arkavo-titan/src/accumulator.rs:50-100]
+    changed: "2025-01-31"

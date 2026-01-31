@@ -1,0 +1,111 @@
+feature: Context Management and Compression
+module: arkavo_context
+version: 0.57.2
+
+invariants:
+  - Context size managed via compression and chunking
+  - Semantic chunking preserves meaning
+  - Deduplication removes redundant content
+  - Compression pipeline configurable
+
+scenarios:
+  - id: CTX-001
+    name: Create semantic chunker
+    criticality: high
+    given:
+      - Chunk size configured
+      - Overlap specified
+    when: SemanticChunker::new called
+    then:
+      - Chunker initialized
+      - Ready for document processing
+    refs: [crates/arkavo-context/src/chunker.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: CTX-002
+    name: Chunk document semantically
+    criticality: critical
+    given:
+      - Chunker ready
+      - Document text provided
+    when: chunk_document called
+    then:
+      - Text split at boundaries
+      - Chunks respect size limits
+      - Overlap maintained
+      - Chunks returned with metadata
+    refs: [crates/arkavo-context/src/chunker.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Document smaller than chunk size
+        expected: Single chunk returned
+      - condition: No natural boundaries
+        expected: Hard split at limit
+
+  - id: CTX-003
+    name: Deduplicate chunks
+    criticality: high
+    given:
+      - Multiple chunks generated
+      - Similarity threshold set
+    when: Deduplicator::deduplicate called
+    then:
+      - Similar chunks identified
+      - Duplicates removed
+      - Unique chunks returned
+    refs: [crates/arkavo-context/src/deduplicator.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Near-duplicate threshold
+        expected: Configurable strictness
+      - condition: All chunks unique
+        expected: All retained
+
+  - id: CTX-004
+    name: Compress context with summarization
+    criticality: high
+    given:
+      - Context compressor ready
+      - Large context provided
+      - Target size specified
+    when: ContextCompressor::compress called
+    then:
+      - Content analyzed
+      - Key information preserved
+      - Summary generated
+      - Compression ratio tracked
+    refs: [crates/arkavo-context/src/compressor.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Context already small
+        expected: Minimal compression
+      - condition: Critical detail at risk
+        expected: Preserve with flag
+
+  - id: CTX-005
+    name: Build compression pipeline
+    criticality: medium
+    given:
+      - Multiple processors configured
+    when: CompressionPipeline::new called
+    then:
+      - Pipeline assembled
+      - Stages ordered
+      - Ready for execution
+    refs: [crates/arkavo-context/src/pipeline.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: CTX-006
+    name: Enrich prompt with context
+    criticality: high
+    given:
+      - PromptEnricher ready
+      - Code context available
+      - Problem statement defined
+    when: enrich called
+    then:
+      - Template populated
+      - Context inserted
+      - Final prompt returned
+    refs: [crates/arkavo-context/src/prompt_enricher.rs:1-60]
+    changed: "2025-01-31"

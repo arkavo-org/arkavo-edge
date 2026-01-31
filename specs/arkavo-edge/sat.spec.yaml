@@ -1,0 +1,134 @@
+feature: SAT Solver Integration for TØRG Analysis
+module: arkavo_sat
+version: 0.57.2
+
+invariants:
+  - CNF extraction preserves graph semantics via Tseitin
+  - Boundary probes identify satisfiable near-boundary inputs
+  - Stress tests find policy holes within resource limits
+  - Cache entries respect TTL for probe results
+
+scenarios:
+  - id: SAT-001
+    name: Extract CNF from TØRG policy graph
+    criticality: critical
+    given:
+      - Valid TØRG graph exists
+      - Graph contains boolean logic
+    when: extract_cnf is called
+    then:
+      - Graph traversed for logic nodes
+      - Tseitin transformation applied
+      - CnfFormula produced with clauses
+      - Variable mapping preserved
+    refs: [crates/arkavo-sat/src/cnf.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Graph contains non-boolean nodes
+        expected: Error or node conversion attempted
+      - condition: Empty graph
+        expected: Empty CNF formula
+
+  - id: SAT-002
+    name: Find boundary probes for output
+    criticality: high
+    given:
+      - CNF formula extracted
+      - Target output specified
+      - Epsilon distance configured
+    when: probe_boundary is called
+    then:
+      - SAT solver invoked (varisat)
+      - Satisfying assignments found
+      - Epsilon boundary inputs identified
+      - BoundaryProbe results returned
+    refs: [crates/arkavo-sat/src/boundary.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Output is tautology
+        expected: All inputs satisfy
+      - condition: Output is contradiction
+        expected: No probes found
+      - condition: Solver timeout
+        expected: Partial results with timeout flag
+
+  - id: SAT-003
+    name: Stress test policy for holes
+    criticality: high
+    given:
+      - Policy graph loaded
+      - Stress test configuration provided
+    when: stress_test is called
+    then:
+      - Random inputs generated
+      - Policy evaluated on inputs
+      - Coverage tracked
+      - PolicyHole instances identified
+      - CoverageStats returned
+    refs: [crates/arkavo-sat/src/stress.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Exhaustive search space
+        expected: Sampling with coverage estimation
+      - condition: No holes found
+        expected: High coverage report
+
+  - id: SAT-004
+    name: Cache boundary probe results
+    criticality: medium
+    given:
+      - ProbeCache is initialized
+      - Graph hash computed
+      - Probe executed
+    when: find_epsilon_boundary_cached is called
+    then:
+      - Cache key computed from graph hash
+      - Cache checked for existing result
+      - "On miss: probe executed and cached"
+      - "On hit: cached result returned"
+      - TTL enforced for entries
+    refs: [crates/arkavo-sat/src/cache.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Cache full
+        expected: LRU eviction
+      - condition: TTL expired
+        expected: Cache miss, re-probe
+
+  - id: SAT-005
+    name: Schedule probe tasks with CPU budget
+    criticality: medium
+    given:
+      - Multiple probe tasks queued
+      - CPU budget configured
+      - SchedulerConfig provided
+    when: ProbeScheduler runs
+    then:
+      - Tasks prioritized by importance
+      - Batch size respected
+      - CPU budget not exceeded
+      - Minimum interval enforced
+      - Results streamed as available
+    refs: [crates/arkavo-sat/src/scheduler.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Budget exhausted
+        expected: Tasks deferred to next cycle
+      - condition: Priority ties
+        expected: FIFO within priority
+
+  - id: SAT-006
+    name: Prioritize anomalies for probing
+    criticality: medium
+    given:
+      - NodeHistory tracked
+      - Anomalies detected
+      - PriorityWeights configured
+    when: AnomalyPrioritizer scores nodes
+    then:
+      - Recent anomalies weighted higher
+      - Frequency affects priority
+      - Impact magnitude considered
+      - ScoredNode list returned
+    refs: [crates/arkavo-sat/src/prioritizer.rs:1-50]
+    changed: "2025-01-31"

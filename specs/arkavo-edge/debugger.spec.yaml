@@ -1,0 +1,98 @@
+feature: Session Debugger and Diagnostics
+module: arkavo_debugger
+version: 0.57.2
+
+invariants:
+  - Session recording for replay
+  - Error pattern detection
+  - Health monitoring and reporting
+  - Session management
+
+scenarios:
+  - id: DBG-001
+    name: Start session recording
+    criticality: high
+    given:
+      - Session initialized
+    when: SessionManager::start_recording called
+    then:
+      - Recording started
+      - Events captured
+      - Storage allocated
+    refs: [crates/arkavo-debugger/src/session_manager.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: DBG-002
+    name: Replay recorded session
+    criticality: high
+    given:
+      - Recording exists
+    when: SessionReplay::replay called
+    then:
+      - Events loaded
+      - Execution reproduced
+      - State reconstructed
+    refs: [crates/arkavo-debugger/src/replay.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Recording corrupted
+        expected: Replay error
+      - condition: Version mismatch
+        expected: Compatibility warning
+
+  - id: DBG-003
+    name: Analyze error patterns
+    criticality: medium
+    given:
+      - Error data collected
+    when: Diagnostics::analyze called
+    then:
+      - Patterns identified
+      - Root causes suggested
+      - Fixes recommended
+    refs: [crates/arkavo-debugger/src/diagnostics.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: DBG-004
+    name: Generate health report
+    criticality: medium
+    given:
+      - Health data available
+    when: HealthReport::generate called
+    then:
+      - Metrics aggregated
+      - Status computed
+      - Report formatted
+    refs: [crates/arkavo-debugger/src/health.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: DBG-005
+    name: Check system health
+    criticality: high
+    given:
+      - Subsystems running
+    when: health status checked
+    then:
+      - Each subsystem evaluated
+      - Overall status computed
+      - HealthStatus returned
+    refs: [crates/arkavo-debugger/src/health.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Subsystem unresponsive
+        expected: Degraded status
+      - condition: Critical failure
+        expected: Failed status
+
+  - id: DBG-006
+    name: Handle debugger errors
+    criticality: medium
+    given:
+      - Debug operation fails
+    when: Error propagates
+    then:
+      - DebuggerError created
+      - Context captured
+      - Recovery attempted
+    refs: [crates/arkavo-debugger/src/error.rs:1-40]
+    changed: "2025-01-31"

@@ -1,0 +1,131 @@
+feature: MCP Tools for Agent Mesh Orchestration
+module: arkavo_mcp_mesh
+version: 0.57.2
+
+invariants:
+  - Agent discovery via mDNS
+  - Task delegation to specialist agents
+  - A2A protocol for mesh communication
+  - Tool-based mesh operations
+
+scenarios:
+  - id: MESH-001
+    name: Create mesh tools state
+    criticality: high
+    given:
+      - AgentRegistry available
+    when: MeshToolsState::new called
+    then:
+      - Registry initialized
+      - Address cache created
+      - State ready
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:47-68]
+    changed: "2025-01-31"
+
+  - id: MESH-002
+    name: Register mesh tools
+    criticality: high
+    given:
+      - ToolRegistry available
+      - MeshToolsState initialized
+    when: register_tools called
+    then:
+      - ListAgentsTool registered
+      - AgentQueryTool registered
+      - SendTaskTool registered
+      - GetTaskStatusTool registered
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:15-25]
+    changed: "2025-01-31"
+
+  - id: MESH-003
+    name: List discovered agents
+    criticality: high
+    given:
+      - Agents discovered via mDNS
+      - MeshToolsState has registry
+    when: ListAgentsTool executed
+    then:
+      - Registry queried
+      - Agent list returned
+      - Capabilities included
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:70-120]
+    changed: "2025-01-31"
+
+  - id: MESH-004
+    name: Query agents by capability
+    criticality: high
+    given:
+      - Registry populated
+      - Capability filter provided
+    when: AgentQueryTool executed
+    then:
+      - Registry filtered
+      - Matching agents returned
+      - Sorted by relevance
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:120-180]
+    changed: "2025-01-31"
+
+  - id: MESH-005
+    name: Delegate task to agent
+    criticality: critical
+    given:
+      - Target agent known
+      - Task details provided
+      - A2A transport ready
+    when: SendTaskTool executed
+    then:
+      - Task serialized
+      - A2A message sent
+      - Task ID returned
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:180-250]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Agent unreachable
+        expected: Transport error
+      - condition: Task rejected
+        expected: Rejection with reason
+
+  - id: MESH-006
+    name: Get delegated task status
+    criticality: high
+    given:
+      - Task ID known
+      - Agent available
+    when: GetTaskStatusTool executed
+    then:
+      - Status query sent
+      - Current status returned
+      - Result if complete
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:250-320]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Task not found
+        expected: Not found error
+      - condition: Agent timeout
+        expected: Timeout status
+
+  - id: MESH-007
+    name: Cache discovered agent addresses
+    criticality: medium
+    given:
+      - mDNS discovery complete
+    when: Address cached
+    then:
+      - Map updated
+      - RwLock for thread safety
+      - Expiration policy applied
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:48-62]
+    changed: "2025-01-31"
+
+  - id: MESH-008
+    name: Handle mesh tool errors
+    criticality: high
+    given:
+      - Mesh operation fails
+    when: Error propagates
+    then:
+      - MeshToolError created
+      - Transport errors wrapped
+      - Context preserved
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:44-46]
+    changed: "2025-01-31"

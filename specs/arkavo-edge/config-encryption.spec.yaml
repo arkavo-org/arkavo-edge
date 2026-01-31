@@ -1,0 +1,97 @@
+feature: Configuration Bundle Encryption
+module: arkavo_config_encryption
+version: 0.57.2
+
+invariants:
+  - Bundles encrypted with OpenTDF policy
+  - KAS (Key Access Server) required for decryption
+  - Policy attributes control access
+  - Encrypted bundles are tamper-evident
+
+scenarios:
+  - id: CFGE-001
+    name: Create encryptor with KAS URL
+    criticality: high
+    given:
+      - KAS endpoint known
+    when: ConfigBundleEncryptor::new called
+    then:
+      - KAS URL stored
+      - Encryptor ready
+    refs: [crates/arkavo-config-encryption/src/lib.rs:35-42]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid KAS URL
+        expected: Validation on first use
+
+  - id: CFGE-002
+    name: Encrypt configuration bundle
+    criticality: critical
+    given:
+      - Encryptor initialized
+      - Valid bundle provided
+      - Policy defined
+    when: encrypt_bundle called
+    then:
+      - Bundle serialized to JSON
+      - TDF policy applied
+      - Data encrypted
+      - EncryptedBundle returned
+    refs: [crates/arkavo-config-encryption/src/lib.rs:44-65]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Bundle validation fails
+        expected: Error before encryption
+      - condition: KAS unreachable
+        expected: Network error, retry
+      - condition: Policy too restrictive
+        expected: Warning logged
+
+  - id: CFGE-003
+    name: Decrypt encrypted bundle
+    criticality: critical
+    given:
+      - EncryptedBundle available
+      - Decryption credentials valid
+      - KAS accessible
+    when: decrypt_bundle called
+    then:
+      - KAS contacted for rewrap
+      - Policy verified
+      - Data decrypted
+      - Original bundle restored
+    refs: [crates/arkavo-config-encryption/src/lib.rs:65-80]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Policy violation
+        expected: Access denied error
+      - condition: Tampering detected
+        expected: Integrity error
+      - condition: Expired policy
+        expected: Policy expired error
+
+  - id: CFGE-004
+    name: Create policy with attributes
+    criticality: high
+    given:
+      - Attribute names/values known
+    when: Policy created
+    then:
+      - Attributes formatted as FQN
+      - Dissemination list set
+      - KAS URL configured
+    refs: [crates/arkavo-config-encryption/src/policy.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: CFGE-005
+    name: Generate ephemeral keypair
+    criticality: medium
+    given:
+      - Key generation requested
+    when: KeyPair::generate called
+    then:
+      - Private key created
+      - Public key derived
+      - Keys usable for encryption
+    refs: [crates/arkavo-config-encryption/src/keys.rs:1-50]
+    changed: "2025-01-31"

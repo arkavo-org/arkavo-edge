@@ -1,0 +1,131 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Event System and Audit Logging
+module: arkavo_events
+version: 0.57.2
+
+invariants:
+  - All events have unique UUID v4 identifiers
+  - Events are immutable once created
+  - Schema version tracked for compatibility
+  - Event writer persists to configured sink
+  - Correlation IDs link related events
+
+scenarios:
+  - id: EVENT-001
+    name: Create event with payload
+    criticality: high
+    given:
+      - Session active
+      - Event payload ready
+    when: Event::new() called
+    then:
+      - UUID v4 generated for event ID
+      - Timestamp set to UTC now
+      - Sequence number incremented
+      - Schema version attached
+    refs: [crates/arkavo-events/src/event.rs]
+
+  - id: EVENT-002
+    name: Event types match payloads
+    criticality: medium
+    given:
+      - Event created
+      - Payload type known
+    when: event_type() called
+    then:
+      - PromptSent returns "prompt_sent"
+      - ModelResponse returns "model_response"
+      - ToolCall returns "tool_call"
+      - Error returns "error"
+    refs: [crates/arkavo-events/src/event.rs]
+
+  - id: EVENT-003
+    name: Parent-child event relationships
+    criticality: medium
+    given:
+      - Parent event exists
+      - Child event created
+    when: with_parent() called
+    then:
+      - Parent ID stored in metadata
+      - Hierarchy established
+      - Traceability maintained
+    refs: [crates/arkavo-events/src/event.rs]
+
+  - id: EVENT-004
+    name: Correlation across services
+    criticality: high
+    given:
+      - Distributed operation in progress
+      - Correlation ID available
+    when: with_correlation() called
+    then:
+      - Correlation ID attached
+      - Cross-service tracing enabled
+      - Request flow tracked
+    refs: [crates/arkavo-events/src/event.rs]
+
+  - id: EVENT-005
+    name: Event writer persists events
+    criticality: critical
+    given:
+      - EventWriter configured
+      - Events generated
+    when: EventWriter::write() called
+    then:
+      - Events serialized
+      - Written to configured sink
+      - Errors handled
+      - Batch writes supported
+    refs: [crates/arkavo-events/src/writer.rs]
+
+  - id: EVENT-006
+    name: Payload serialization
+    criticality: high
+    given:
+      - EventPayload variants
+      - Serialization requested
+    when: Payload serialized to JSON
+    then:
+      - All variants serialize correctly
+      - Nested structures preserved
+      - Schema version maintained
+      - Backward compatibility
+    refs: [crates/arkavo-events/src/payload.rs]
+
+  - id: EVENT-007
+    name: Session lifecycle events
+    criticality: medium
+    given:
+      - Session started or ended
+      - EventWriter active
+    when: Lifecycle events generated
+    then:
+      - SessionStarted on begin
+      - SessionEnded on terminate
+      - Duration tracked
+      - Metadata captured
+    refs: [crates/arkavo-events/src/payload.rs]
+
+  - id: EVENT-008
+    name: Tool call and result events
+    criticality: high
+    given:
+      - Tool executed
+      - Results available
+    when: Tool events generated
+    then:
+      - ToolCall on invocation
+      - ToolResult on completion
+      - Parameters captured
+      - Results recorded
+    refs: [crates/arkavo-events/src/payload.rs]
+    edge_cases:
+      - condition: Event sink unavailable
+        expected: Events queued, alert sent
+      - condition: Payload too large
+        expected: Truncated or rejected with error
+      - condition: Schema version mismatch
+        expected: Compatibility layer applied
+    changed: "2025-01-31"

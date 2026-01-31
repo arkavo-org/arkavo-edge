@@ -1,0 +1,159 @@
+feature: Qwen AI Provider
+module: crate::qwen
+version: 0.57.2
+
+invariants:
+  - Qwen region (China or International) determines endpoint
+  - Multi-modal content must use compatible model
+  - Stream responses maintain message ordering
+  - Tool calls are validated against schema
+
+scenarios:
+  - id: QWE-001
+    name: Initialize Qwen client with region
+    criticality: critical
+    given:
+      - Qwen API key is available
+      - Region is specified (CN or International)
+    when: QwenClient is created with QwenConfig
+    then:
+      - Endpoint URL matches region
+      - API key is stored for requests
+      - Default model is set
+    refs: [crates/arkavo-qwen/src/client.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid region
+        expected: Defaults to International endpoint
+      - condition: API key missing
+        expected: Client creation fails with error
+
+  - id: QWE-002
+    name: Execute chat completion
+    criticality: high
+    given:
+      - Client is initialized
+      - Messages list contains conversation history
+    when: Chat completion endpoint is called
+    then:
+      - Request includes all messages
+      - Response contains assistant message
+      - Usage statistics are returned
+      - Response time is logged
+    refs: [crates/arkavo-qwen/src/client.rs:50-100, crates/arkavo-qwen/src/provider.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: QWE-003
+    name: Stream chat completion responses
+    criticality: high
+    given:
+      - Client is initialized
+      - Stream flag is enabled
+    when: Stream endpoint is called
+    then:
+      - Response is chunked
+      - Each chunk contains content delta
+      - Stream ends with finish signal
+      - No intermediate buffering
+    refs: [crates/arkavo-qwen/src/stream.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Network timeout
+        expected: Error propagated, partial content preserved
+      - condition: Model overloaded
+        expected: Retry with exponential backoff
+
+  - id: QWE-004
+    name: Process vision input with image
+    criticality: medium
+    given:
+      - Vision-capable model is selected
+      - Image file is available
+    when: Image is encoded and sent with message
+    then:
+      - Image is base64 encoded
+      - Format is preserved (PNG/JPEG)
+      - Model processes visual content
+      - Response references image
+    refs: [crates/arkavo-qwen/src/vision.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Unsupported image format
+        expected: Error with supported formats list
+      - condition: Image too large
+        expected: Automatic resizing or clear error
+
+  - id: QWE-005
+    name: Execute tool calls in conversation
+    criticality: high
+    given:
+      - Tools are defined
+      - User message implies tool need
+    when: Chat completion with tools is called
+    then:
+      - Response contains tool_calls array
+      - Each tool call has id, type, function
+      - Arguments are valid JSON
+      - Tool is executed and result returned
+    refs: [crates/arkavo-qwen/src/types.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: QWE-006
+    name: Switch between Qwen models
+    criticality: medium
+    given:
+      - Multiple models available (turbo, plus, max)
+    when: Model is changed in config
+    then:
+      - New model is used for subsequent requests
+      - Capabilities are validated
+      - Pricing tier is updated
+    refs: [crates/arkavo-qwen/src/models.rs:1-40]
+    changed: "2025-01-31"
+
+  - id: QWE-007
+    name: Handle Qwen API errors
+    criticality: high
+    given:
+      - API request is in progress
+    when: Error response is received
+    then:
+      - HTTP status is checked
+      - Error body is parsed
+      - QwenError variant is returned
+      - Retry guidance is included
+    refs: [crates/arkavo-qwen/src/error.rs:1-40]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Content policy violation
+        expected: ContentFiltered error with explanation
+      - condition: Context length exceeded
+        expected: ContextLengthExceeded error with token count
+
+  - id: QWE-008
+    name: Create image URL from file path
+    criticality: low
+    given:
+      - Local image file exists
+    when: create_image_url_from_file is called
+    then:
+      - File is read as bytes
+      - Base64 data URL is created
+      - Format is detected from extension
+      - URL is ready for API request
+    refs: [crates/arkavo-qwen/src/vision.rs:50-80]
+    changed: "2025-01-31"
+
+  - id: QWE-009
+    name: Format messages for provider
+    criticality: medium
+    given:
+      - Conversation contains multiple roles
+    when: Messages are formatted
+    then:
+      - System messages are included
+      - User/assistant alternation is valid
+      - Tool messages follow tool calls
+      - Content is properly escaped
+    refs: [crates/arkavo-qwen/src/provider.rs:50-100]
+    changed: "2025-01-31"

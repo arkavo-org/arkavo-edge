@@ -1,0 +1,126 @@
+feature: Arkavo GUI Application Gateway
+module: arkavo_agui
+version: 0.57.2
+
+invariants:
+  - AgUiGateway manages agent connections
+  - mDNS discovery for peer agents
+  - Health monitoring and ROI metrics
+  - Timeout analysis and handling
+
+scenarios:
+  - id: AGUI-001
+    name: Initialize AGUI gateway
+    criticality: critical
+    given:
+      - Network available
+      - Configuration loaded
+    when: AgUiGateway::new called
+    then:
+      - Gateway initialized
+      - mDNS responder started
+      - Ready for connections
+    refs: [crates/arkavo-agui/src/gateway.rs:1-60, crates/arkavo-agui/src/gateway_mdns.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: AGUI-002
+    name: Discover agents via mDNS
+    criticality: high
+    given:
+      - Gateway running
+      - Agents on network
+    when: mDNS browse executed
+    then:
+      - Agents discovered
+      - Service info extracted
+      - Registry updated
+    refs: [crates/arkavo-agui/src/mdns_impl.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: No agents found
+        expected: Empty list
+      - condition: mDNS failure
+        expected: Error, retry
+
+  - id: AGUI-003
+    name: Establish agent connection
+    criticality: high
+    given:
+      - Agent discovered
+      - Connection parameters known
+    when: connect_agent called
+    then:
+      - Connection established
+      - Handshake completed
+      - Channel ready
+    refs: [crates/arkavo-agui/src/agent_connection.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: AGUI-004
+    name: Collect command health data
+    criticality: medium
+    given:
+      - Commands executed
+      - Health collector active
+    when: health data collected
+    then:
+      - Success/failure tracked
+      - Latency measured
+      - Timeout patterns analyzed
+    refs: [crates/arkavo-agui/src/command_health_collector.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: AGUI-005
+    name: Analyze timeout patterns
+    criticality: medium
+    given:
+      - Timeout data collected
+    when: TimeoutAnalyzer::analyze called
+    then:
+      - Patterns identified
+      - Root causes suggested
+      - Recommendations provided
+    refs: [crates/arkavo-agui/src/command_health_collector.rs:60-100]
+    changed: "2025-01-31"
+
+  - id: AGUI-006
+    name: Calculate ROI metrics
+    criticality: low
+    given:
+      - Task completion data
+      - Cost information
+    when: ROI calculated
+    then:
+      - Cost/benefit analyzed
+      - Metrics computed
+      - Report generated
+    refs: [crates/arkavo-agui/src/roi_metrics.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: AGUI-007
+    name: Handle UI events
+    criticality: high
+    given:
+      - UI active
+      - User interaction occurs
+    when: UiHandler processes event
+    then:
+      - Event routed
+      - Handler invoked
+      - Response rendered
+    refs: [crates/arkavo-agui/src/ui_handler.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: AGUI-008
+    name: Stream dataflow updates
+    criticality: medium
+    given:
+      - Dataflow active
+      - Client subscribed
+    when: streaming::send_update called
+    then:
+      - Update serialized
+      - Streamed to client
+      - Backpressure handled
+    refs: [crates/arkavo-agui/src/streaming.rs:1-50]
+    changed: "2025-01-31"

@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Authorization and Access Control
+module: arkavo_authorization
+version: 0.57.2
+
+invariants:
+  - All access decisions require explicit authorization check
+  - Decision cache respects TTL for performance
+  - Bulk decisions optimize multiple resource checks
+  - Authorization errors are distinguishable from other errors
+
+scenarios:
+  - id: AUTHZ-001
+    name: Get decision for single resource access
+    criticality: critical
+    given:
+      - AuthorizationClient configured
+      - Entity authenticated
+      - Resource specified
+    when: get_decision() called
+    then:
+      - Request sent to authorization service
+      - Decision returned (Allow/Deny)
+      - Decision cached with TTL
+      - Error if service unavailable
+    refs: [crates/arkavo-authorization/src/client.rs]
+
+  - id: AUTHZ-002
+    name: Check bulk resource permissions
+    criticality: high
+    given:
+      - Multiple resources to check
+      - Same entity for all
+    when: get_decision_bulk() called
+    then:
+      - Batch request sent
+      - Decisions returned for all resources
+      - More efficient than individual calls
+    refs: [crates/arkavo-authorization/src/client.rs]
+
+  - id: AUTHZ-003
+    name: Multi-resource authorization request
+    criticality: high
+    given:
+      - Single resource with multiple actions
+      - Entity needs multiple permissions
+    when: get_decision_multi_resource() called
+    then:
+      - All actions checked
+      - Partial permissions handled
+      - Detailed response per action
+    refs: [crates/arkavo-authorization/src/client.rs]
+
+  - id: AUTHZ-004
+    name: Decision caching improves performance
+    criticality: medium
+    given:
+      - AuthorizationCache initialized
+      - Previous decision cached
+    when: get_decision() called again
+    then:
+      - Cache checked first
+      - Cached decision returned if valid
+      - Cache bypassed if expired
+      - Reduces service calls
+    refs: [crates/arkavo-authorization/src/cache.rs]
+
+  - id: AUTHZ-005
+    name: Entity identification from JWT
+    criticality: high
+    given:
+      - Valid JWT token
+      - Claims contain user info
+    when: EntityIdentifier extracted
+    then:
+      - User ID parsed from subject
+      - Groups extracted from claims
+      - Roles identified
+      - Entity constructed
+    refs: [crates/arkavo-authorization/src/types.rs]
+
+  - id: AUTHZ-006
+    name: Resource specification with attributes
+    criticality: medium
+    given:
+      - Resource identified
+      - Attributes available
+    when: Resource created
+    then:
+      - Resource type specified
+      - ID included
+      - Attributes attached
+      - Used in decision request
+    refs: [crates/arkavo-authorization/src/types.rs]
+    edge_cases:
+      - condition: Authorization service unavailable
+        expected: Returns AuthorizationError::ServiceUnavailable
+      - condition: Cache corruption
+        expected: Bypasses cache, logs error
+      - condition: Invalid JWT format
+        expected: Returns AuthorizationError::InvalidToken
+    changed: "2025-01-31"

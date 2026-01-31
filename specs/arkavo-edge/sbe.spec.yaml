@@ -1,0 +1,131 @@
+feature: Symbolic Boundary Evolution - Hierarchical Policy Layers
+module: arkavo_sbe
+version: 0.57.2
+
+invariants:
+  - Layer isolation enforced (Invariant > Policy > Adaptive)
+  - Patchlets cannot modify higher layers
+  - Invariant violations immediately reject patchlets
+  - Adaptive changes rollbackable within timeout (default 100ms)
+
+scenarios:
+  - id: SBE-001
+    name: Create hierarchical graph with layers
+    criticality: critical
+    given:
+      - InvariantLayer with contracts defined
+      - PolicyLayer with decision graph
+    when: HierarchicalGraph is constructed
+    then:
+      - Invariant layer stored as foundation
+      - Policy layer attached
+      - Adaptive layer initialized
+      - Node layer registry empty
+    refs: [crates/arkavo-sbe/src/hierarchical.rs:1-60]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invariant contract invalid
+        expected: SbeError at construction
+      - condition: Policy violates invariant
+        expected: Validation error with details
+
+  - id: SBE-002
+    name: Register nodes to specific layers
+    criticality: high
+    given:
+      - HierarchicalGraph initialized
+      - Node IDs are valid
+    when: register_node is called
+    then:
+      - Node assigned to specified layer
+      - Layer constraint recorded
+      - Subsequent patchlets respect layer
+    refs: [crates/arkavo-sbe/src/layer.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Node already registered
+        expected: Update or error based on policy
+      - condition: Invalid node ID
+        expected: NotFound error
+
+  - id: SBE-003
+    name: Apply adaptive patchlet
+    criticality: critical
+    given:
+      - Graph has adaptive nodes
+      - Patchlet targets registered node
+      - Patch operation is valid
+    when: apply_patchlet is called
+    then:
+      - Patchlet validated against layer
+      - Invariants checked
+      - Change applied atomically
+      - RollbackHandle returned
+    refs: [crates/arkavo-sbe/src/patchlet.rs:1-60, crates/arkavo-sbe/src/adaptive.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Patchlet targets wrong layer
+        expected: LayerViolation error
+      - condition: Invariant would be violated
+        expected: InvariantViolation with contract details
+      - condition: Timeout exceeded
+        expected: Rollback automatically triggered
+
+  - id: SBE-004
+    name: Rollback adaptive changes
+    criticality: high
+    given:
+      - Patchlet was applied successfully
+      - RollbackHandle is valid
+      - Within rollback timeout
+    when: rollback_patchlet is called
+    then:
+      - Change reverted atomically
+      - Graph state restored
+      - Handle invalidated
+    refs: [crates/arkavo-sbe/src/adaptive.rs:50-100]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Timeout exceeded
+        expected: RollbackError, state permanent
+      - condition: Handle expired
+        expected: NotFound error
+
+  - id: SBE-005
+    name: Evaluate hierarchical graph
+    criticality: critical
+    given:
+      - Graph fully configured
+      - Inputs provided
+    when: evaluate is called
+    then:
+      - Invariant layer evaluated first
+      - If invariants pass, policy evaluated
+      - Adaptive modifications applied
+      - Outputs returned
+    refs: [crates/arkavo-sbe/src/hierarchical.rs:60-120]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invariant violated by input
+        expected: Evaluation blocked, error returned
+      - condition: Circular dependency
+        expected: Detection and error
+
+  - id: SBE-006
+    name: Define invariant contract
+    criticality: high
+    given:
+      - Safety constraints identified
+      - Human approval obtained
+    when: InvariantContract is created
+    then:
+      - Contract cryptographically signed
+      - Formal verification constraints included
+      - Stored in InvariantLayer
+    refs: [crates/arkavo-sbe/src/invariant.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Invalid signature
+        expected: Contract rejected
+      - condition: Verification fails
+        expected: Contract creation blocked

@@ -1,0 +1,127 @@
+feature: Terminal UI Application
+module: arkavo_terminal
+version: 0.57.2
+
+invariants:
+  - Terminal UI with async event loop
+  - LLM integration via channels
+  - Multi-terminal management
+  - Vim and Helix editor support
+
+scenarios:
+  - id: TERM-001
+    name: Run terminal UI application
+    criticality: critical
+    given:
+      - Terminal available
+      - Async runtime ready
+    when: run called
+    then:
+      - Channels created
+      - Event loop started
+      - UI rendered
+    refs: [crates/arkavo-terminal/src/lib.rs:63-100]
+    changed: "2025-01-31"
+
+  - id: TERM-002
+    name: Handle application events
+    criticality: high
+    given:
+      - App running
+      - Event occurs
+    when: EventHandler::handle called
+    then:
+      - Event processed
+      - State updated
+      - UI refreshed
+    refs: [crates/arkavo-terminal/src/event.rs:1-60, crates/arkavo-terminal/src/app.rs:1-80]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Unknown event
+        expected: Logged, ignored
+      - condition: Critical error
+        expected: Graceful shutdown
+
+  - id: TERM-003
+    name: Send LLM request
+    criticality: high
+    given:
+      - User input submitted
+      - LLM channel ready
+    when: LlmRequest sent
+    then:
+      - Request queued
+      - Task ID assigned
+      - Model specified
+    refs: [crates/arkavo-terminal/src/lib.rs:30-50]
+    changed: "2025-01-31"
+
+  - id: TERM-004
+    name: Receive LLM response
+    criticality: high
+    given:
+      - Request sent
+      - Response available
+    when: LlmResponse received
+    then:
+      - Content displayed
+      - Streaming handled
+      - Completion signaled
+    refs: [crates/arkavo-terminal/src/lib.rs:40-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Error in response
+        expected: Error displayed
+      - condition: MCP status update
+        expected: Status indicator updated
+
+  - id: TERM-005
+    name: Spawn multiple terminals
+    criticality: medium
+    given:
+      - MultiTerminalManager ready
+      - Config provided
+    when: spawn_terminal called
+    then:
+      - Terminal spawned
+      - Task type set
+      - Managed by pool
+    refs: [crates/arkavo-terminal/src/multi_terminal.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: TERM-006
+    name: Render diff view
+    criticality: medium
+    given:
+      - Code changes available
+    when: DiffRenderer::render called
+    then:
+      - Changes highlighted
+      - Side-by-side or unified
+      - Metrics displayed
+    refs: [crates/arkavo-terminal/src/renderer.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: TERM-007
+    name: Integrate Vim editor
+    criticality: low
+    given:
+      - Vim feature enabled
+    when: Vim mode activated
+    then:
+      - Key bindings loaded
+      - Modal editing active
+    refs: [crates/arkavo-terminal/src/vim.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: TERM-008
+    name: Integrate Helix editor
+    criticality: low
+    given:
+      - Helix feature enabled
+    when: Helix mode activated
+    then:
+      - Tree-sitter highlighting
+      - Selection model active
+    refs: [crates/arkavo-terminal/src/helix.rs:1-50]
+    changed: "2025-01-31"

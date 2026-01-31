@@ -1,0 +1,161 @@
+feature: MCP Claude Code Integration
+module: crate::mcp_claude
+version: 0.57.2
+
+invariants:
+  - Anthropic API key or OAuth token required for operation
+  - Tool permissions must be explicitly granted
+  - Policy violations are blocked before execution
+  - Budget tracking prevents cost overruns
+
+scenarios:
+  - id: MCPC-001
+    name: Check authentication availability
+    criticality: critical
+    given:
+      - System environment is accessible
+    when: is_auth_available is called
+    then:
+      - Returns true if ANTHROPIC_API_KEY set
+      - Returns true if OAuth token cached
+      - Returns false if neither available
+    refs: [crates/arkavo-mcp-claude/src/lib.rs:12-25]
+    changed: "2025-01-31"
+
+  - id: MCPC-002
+    name: Initialize Claude Code capability
+    criticality: critical
+    given:
+      - Authentication is available
+      - Configuration is provided
+    when: ClaudeCodeCapability is created
+    then:
+      - SDK client is initialized
+      - Tool permissions are loaded
+      - Budget is configured
+      - Capability is ready
+    refs: [crates/arkavo-mcp-claude/src/capability.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: No authentication
+        expected: Auth error with OAuth flow instructions
+      - condition: Invalid config
+        expected: Configuration error with schema
+
+  - id: MCPC-003
+    name: Register Claude Code tools
+    criticality: high
+    given:
+      - Tool registry is available
+      - Capability is initialized
+    when: register_tools is called
+    then:
+      - All Claude Code tools added
+      - Tool schemas are validated
+      - Permissions are checked
+      - Tools are ready for invocation
+    refs: [crates/arkavo-mcp-claude/src/tools.rs:1-60]
+    changed: "2025-01-31"
+
+  - id: MCPC-004
+    name: Configure tool permissions
+    criticality: high
+    given:
+      - ToolPermissions struct is created
+    when: Permissions are validated
+    then:
+      - Allowed tools list enforced
+      - Denied tools blocked
+      - Wildcard patterns supported
+      - Default deny for unspecified
+    refs: [crates/arkavo-mcp-claude/src/config.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Tool not in allowed list
+        expected: Permission denied error
+      - condition: Pattern matches multiple tools
+        expected: All matching tools affected
+
+  - id: MCPC-005
+    name: Bridge SDK to MCP protocol
+    criticality: high
+    given:
+      - SDK client provides response
+      - MCP expects formatted output
+    when: Response is bridged
+    then:
+      - Content is extracted
+      - Tool calls are formatted
+      - Usage is captured
+      - Stop reason is preserved
+    refs: [crates/arkavo-mcp-claude/src/sdk_bridge.rs:1-50]
+    changed: "2025-01-31"
+
+  - id: MCPC-006
+    name: Map events to Claude format
+    criticality: medium
+    given:
+      - Internal event occurs
+      - Event mapper is configured
+    when: Event is mapped
+    then:
+      - Event type is translated
+      - Payload is reformatted
+      - Timestamps converted
+      - Metadata preserved
+    refs: [crates/arkavo-mcp-claude/src/event_mapper.rs:1-40]
+    changed: "2025-01-31"
+
+  - id: MCPC-007
+    name: Enforce policy on requests
+    criticality: critical
+    given:
+      - Policy bridge is active
+      - Request is being made
+    when: Policy check is triggered
+    then:
+      - Request is validated
+      - Violations are detected
+      - Blocked requests return error
+      - Audit log is written
+    refs: [crates/arkavo-mcp-claude/src/policy_bridge.rs:1-50]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Request violates content policy
+        expected: PolicyViolation error with explanation
+      - condition: Budget exceeded
+        expected: BudgetExceeded error with current/limit
+
+  - id: MCPC-008
+    name: Handle Claude SDK errors
+    criticality: high
+    given:
+      - SDK operation fails
+    when: Error is propagated
+    then:
+      - Error type is classified
+      - User message is extracted
+      - Retryable status determined
+      - ClaudeCodeError returned
+    refs: [crates/arkavo-mcp-claude/src/lib.rs:27-56]
+    changed: "2025-01-31"
+    edge_cases:
+      - condition: Rate limit from Anthropic
+        expected: Retry guidance included
+      - condition: Invalid JSON from SDK
+        expected: Json error variant
+
+  - id: MCPC-009
+    name: Load configuration from file
+    criticality: medium
+    given:
+      - Config file exists
+      - Valid TOML/JSON format
+    when: ClaudeCodeConfig is loaded
+    then:
+      - File is parsed
+      - Defaults applied for missing fields
+      - Validation errors reported
+      - Config struct returned
+    refs: [crates/arkavo-mcp-claude/src/config.rs:50-100]
+    changed: "2025-01-31"
