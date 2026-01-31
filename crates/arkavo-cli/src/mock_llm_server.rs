@@ -16,17 +16,34 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-/// Mock LLM server configuration
-#[derive(Debug, Clone)]
-pub struct MockLlmServerConfig {
-    /// Port to listen on
-    pub port: u16,
+/// Detection flags for security features
+#[derive(Debug, Clone, Copy)]
+pub struct DetectionFlags {
     /// Whether to detect PII in requests
     pub detect_pii: bool,
     /// Whether to detect DLP violations
     pub detect_dlp: bool,
     /// Whether to block requests with sensitive data
     pub block_sensitive_requests: bool,
+}
+
+impl Default for DetectionFlags {
+    fn default() -> Self {
+        Self {
+            detect_pii: true,
+            detect_dlp: true,
+            block_sensitive_requests: true,
+        }
+    }
+}
+
+/// Mock LLM server configuration
+#[derive(Debug, Clone)]
+pub struct MockLlmServerConfig {
+    /// Port to listen on
+    pub port: u16,
+    /// Detection flags for security features
+    pub detection: DetectionFlags,
     /// Simulated API key validation
     pub validate_api_key: bool,
     /// Expected API key
@@ -37,9 +54,7 @@ impl Default for MockLlmServerConfig {
     fn default() -> Self {
         Self {
             port: 9999,
-            detect_pii: true,
-            detect_dlp: true,
-            block_sensitive_requests: true,
+            detection: DetectionFlags::default(),
             validate_api_key: true,
             expected_api_key: "test-api-key".to_string(),
         }
@@ -72,6 +87,12 @@ pub struct MockLlmServer {
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
     responses: Arc<Mutex<Vec<RecordedResponse>>>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Default for MockLlmServer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockLlmServer {
@@ -174,22 +195,34 @@ impl MockLlmServer {
     }
 
     /// Get recorded requests
+    ///
+    /// # Panics
+    /// Panics if the internal request mutex is poisoned
     pub fn get_requests(&self) -> Vec<RecordedRequest> {
         self.requests.lock().unwrap().clone()
     }
 
     /// Get recorded responses
+    ///
+    /// # Panics
+    /// Panics if the internal response mutex is poisoned
     pub fn get_responses(&self) -> Vec<RecordedResponse> {
         self.responses.lock().unwrap().clone()
     }
 
     /// Clear logs
+    ///
+    /// # Panics
+    /// Panics if the internal request or response mutex is poisoned
     pub fn clear_logs(&self) {
         self.requests.lock().unwrap().clear();
         self.responses.lock().unwrap().clear();
     }
 
     /// Check if sensitive data was detected in any request
+    ///
+    /// # Panics
+    /// Panics if the internal request mutex is poisoned
     pub fn has_sensitive_data(&self) -> bool {
         self.requests.lock().unwrap().iter().any(|r| r.blocked)
     }
@@ -235,7 +268,7 @@ async fn handle_chat_completion(
     }
 
     // Check for PII/DLP in request body
-    let (blocked, block_reason) = if state.config.detect_pii || state.config.detect_dlp {
+    let (blocked, block_reason) = if state.config.detection.detect_pii || state.config.detection.detect_dlp {
         check_sensitive_data(&body, &state.config)
     } else {
         (false, None)
@@ -254,7 +287,7 @@ async fn handle_chat_completion(
     state.requests.lock().unwrap().push(request);
 
     // If blocked, return error
-    if blocked && state.config.block_sensitive_requests {
+    if blocked && state.config.detection.block_sensitive_requests {
         let response_body = json!({
             "error": {
                 "message": block_reason.unwrap_or_else(|| "Request blocked by security policy".to_string()),
@@ -359,7 +392,7 @@ async fn handle_anthropic_messages(
     // Check for PII/DLP
     let (blocked, block_reason) = check_sensitive_data(&body, &state.config);
 
-    if blocked && state.config.block_sensitive_requests {
+    if blocked && state.config.detection.block_sensitive_requests {
         return axum::response::Response::builder()
             .status(400)
             .body(
@@ -422,7 +455,7 @@ fn check_sensitive_data(body: &str, config: &MockLlmServerConfig) -> (bool, Opti
     let mut findings = Vec::new();
 
     // Check for PII patterns
-    if config.detect_pii {
+    if config.detection.detect_pii {
         // Email
         if let Ok(re) = regex::Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
             && re.is_match(body)
@@ -450,7 +483,7 @@ fn check_sensitive_data(body: &str, config: &MockLlmServerConfig) -> (bool, Opti
     }
 
     // Check for DLP patterns
-    if config.detect_dlp {
+    if config.detection.detect_dlp {
         // AWS credentials
         if body.to_lowercase().contains("aws_secret_access_key") {
             findings.push("AWS credentials");
@@ -567,5 +600,13 @@ mod tests {
         let (blocked, reason) = check_sensitive_data("What is the weather today?", &config);
         assert!(!blocked);
         assert!(reason.is_none());
+    }
+
+    #[test]
+    fn test_detection_flags_default() {
+        let flags = DetectionFlags::default();
+        assert!(flags.detect_pii);
+        assert!(flags.detect_dlp);
+        assert!(flags.block_sensitive_requests);
     }
 }

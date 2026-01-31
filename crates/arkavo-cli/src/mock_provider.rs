@@ -174,6 +174,12 @@ pub struct MockResponse {
     pub findings: Vec<SensitiveDataFinding>,
 }
 
+impl Default for MockProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockProvider {
     /// Create a new mock provider with default config
     pub fn new() -> Self {
@@ -197,6 +203,9 @@ impl MockProvider {
     }
 
     /// Send a chat completion request (mock)
+    ///
+    /// # Panics
+    /// Panics if the internal request or response mutex is poisoned
     pub async fn chat_completion(
         &self,
         api_key: &str,
@@ -378,16 +387,25 @@ impl MockProvider {
     }
 
     /// Get request log
+    ///
+    /// # Panics
+    /// Panics if the internal request mutex is poisoned
     pub fn get_request_log(&self) -> Vec<MockRequest> {
         self.request_log.lock().unwrap().clone()
     }
 
     /// Get response log
+    ///
+    /// # Panics
+    /// Panics if the internal response mutex is poisoned
     pub fn get_response_log(&self) -> Vec<MockResponse> {
         self.response_log.lock().unwrap().clone()
     }
 
     /// Clear logs
+    ///
+    /// # Panics
+    /// Panics if the internal request or response mutex is poisoned
     pub fn clear_logs(&self) {
         self.request_log.lock().unwrap().clear();
         self.response_log.lock().unwrap().clear();
