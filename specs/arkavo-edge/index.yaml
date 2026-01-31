@@ -650,7 +650,7 @@ components:
     module: arkavo_edge::security::network
     description: Network security and secure defaults
     criticality: critical
-    scenario_count: 15
+    scenario_count: 17
     invariants:
       - Localhost binding by default
       - Authentication always required
@@ -672,8 +672,8 @@ components:
 
 stats:
   total_specs: 60
-  total_scenarios: 448
-  critical_scenarios: 215
+  total_scenarios: 450
+  critical_scenarios: 201
   coverage_areas:
     - authentication
     - authorization
@@ -963,12 +963,12 @@ integration_points:
 
   - name: TDF Security → Config Encryption
     description: Control plane uses TDF encryption
-    specs: [TDF-SEC-002, CFGE-002]
+    specs: [TDFS-002, CFGE-002]
 
   - name: TDF Security → TDF
     description: TDF security extends base TDF functionality
-    specs: [TDF-SEC-001, TDF-001]
+    specs: [TDFS-001, TDF-001]
 
   - name: TDF Security → Authorization
     description: ABAC policy enforcement
-    specs: [TDF-SEC-004, AUTHZ-001]
+    specs: [TDFS-004, AUTHZ-001]

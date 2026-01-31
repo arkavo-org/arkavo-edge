@@ -10,8 +10,11 @@ pub mod mcp_integration;
 pub mod mcp_spawner;
 #[cfg(all(unix, feature = "mcp-tools"))]
 pub mod memory_integration;
+pub mod mock_llm_server;
+pub mod mock_provider;
 pub mod peer_manager;
 pub mod prompt_loader;
+pub mod secure_http;
 pub mod tool_integration;
 pub mod welcome;
 
@@ -36,6 +39,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         // Load API keys from .arkavo/AGENTS.md if present
         arkavo_router::model_discovery::load_api_keys_from_config();
+
+        // Initialize security controls
+        // SECURITY: Egress filter prevents SSRF attacks
+        secure_http::init_egress_filter();
     });
 
     // Check for verbose flag

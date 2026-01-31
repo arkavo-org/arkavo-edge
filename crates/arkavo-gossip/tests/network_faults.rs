@@ -66,7 +66,7 @@ fn test_message_deduplication() {
     mesh.set_packet_loss(0.0, 0.5); // 0% loss, 50% duplication
 
     let msg = mesh.node(0).broadcast("unique-message");
-    
+
     // Wait for delivery with multiple rounds
     for _ in 0..5 {
         mesh.wait_for_convergence(Duration::from_millis(100));
@@ -77,7 +77,8 @@ fn test_message_deduplication() {
     for i in 1..3 {
         assert!(
             mesh.node(i).received(&msg),
-            "Node {} should receive message", i
+            "Node {} should receive message",
+            i
         );
     }
 }
@@ -144,7 +145,8 @@ fn test_byzantine_node_isolation() {
     // Byzantine node sends conflicting messages
     let honest_msg = mesh.node(0).broadcast("honest-data");
     mesh.wait_for_convergence(Duration::from_millis(100));
-    mesh.node(4).broadcast_conflicting(&honest_msg, "malicious-data");
+    mesh.node(4)
+        .broadcast_conflicting(&honest_msg, "malicious-data");
 
     // Wait for propagation
     mesh.wait_for_convergence(Duration::from_millis(300));
@@ -287,7 +289,8 @@ impl TestNode {
             sender: self.id,
         };
         // Store in our own received messages so it can be gossiped
-        self.received_messages.insert(msg.id.clone(), msg.data.clone());
+        self.received_messages
+            .insert(msg.id.clone(), msg.data.clone());
         self.receive_counts.insert(msg.id.clone(), 1);
         msg
     }
@@ -405,11 +408,7 @@ impl TestMesh {
         // Simple gossip simulation
         let node_count = self.nodes.len();
         for i in 0..node_count {
-            let msg_ids: Vec<String> = self.nodes[i]
-                .received_messages
-                .keys()
-                .cloned()
-                .collect();
+            let msg_ids: Vec<String> = self.nodes[i].received_messages.keys().cloned().collect();
 
             for msg_id in msg_ids {
                 for j in 0..node_count {
@@ -420,7 +419,8 @@ impl TestMesh {
                     // Check partition
                     let mut blocked = false;
                     for (a, b) in &self.partitions {
-                        if (a.contains(&i) && b.contains(&j)) || (b.contains(&i) && a.contains(&j)) {
+                        if (a.contains(&i) && b.contains(&j)) || (b.contains(&i) && a.contains(&j))
+                        {
                             blocked = true;
                             break;
                         }

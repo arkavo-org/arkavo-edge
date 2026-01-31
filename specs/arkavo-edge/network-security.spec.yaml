@@ -205,6 +205,46 @@ scenarios:
     refs: [crates/arkavo-dataflow/src/dns_validator.rs]
 
   - id: NET-015
+    name: Prompt injection attack prevention
+    criticality: critical
+    given:
+      - User provides a prompt to the agent
+      - Prompt contains injection attack patterns
+    when: Input is processed
+    then:
+      - Prompt is sanitized before processing
+      - System instructions cannot be overridden
+      - Injection patterns are detected and neutralized
+      - Attack attempt is logged for security audit
+    refs: [crates/arkavo-cli/src/prompt_validation.rs]
+    edge_cases:
+      - condition: Multi-turn injection attack
+        expected: Context reset or session termination
+      - condition: Unicode obfuscation in injection
+        expected: Normalization and detection
+      - condition: Indirect injection via file content
+        expected: File content sandboxing
+
+  - id: NET-016
+    name: Command injection via LLM output is prevented
+    criticality: critical
+    given:
+      - LLM generates response to user query
+      - Response may contain shell commands or code
+    when: Response is processed
+    then:
+      - Commands are not auto-executed
+      - User confirmation required before execution
+      - Dangerous commands are flagged
+      - Execution is sandboxed
+    refs: [crates/arkavo-cli/src/command_guard.rs]
+    edge_cases:
+      - condition: LLM suggests "rm -rf /"
+        expected: Blocked with warning, requires explicit confirmation
+      - condition: LLM generates download script
+        expected: Scanned for malicious content before execution
+
+  - id: NET-017
     name: Egress audit logging
     criticality: high
     given:

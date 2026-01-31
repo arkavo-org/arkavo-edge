@@ -32,6 +32,42 @@
   - Test: `cargo nextest run` (preferred) or `cargo test`.
   - Lint: `cargo clippy -- -D warnings`.
 
+## Pre-Push Checklist
+Before pushing to remote, run these checks:
+
+```bash
+# 1. Format check
+cargo fmt -- --check
+
+# 2. Build check (catches compilation errors)
+cargo build -q
+
+# 3. Lint check (catches style issues)
+cargo clippy -- -D warnings
+
+# 4. Security vulnerability tests
+## Unit tests for security fixes
+cargo test -p arkavo-protocol --test security_vulnerabilities
+
+## Mock provider unit tests
+cargo test -p arkavo-cli mock_provider
+
+## E2E DLP/PII leak detection tests
+./tests/e2e_security_test.sh
+
+## CLI security tests with local models
+./tests/security_cli_test.sh
+
+## DLP/PII policy tests
+./tests/dlp_pii_security_test.sh
+```
+
+**Security Test Failure Protocol**:
+- If `e2e_security_test.sh` shows PII leaks, DLP scrubbing is not working
+- If `security_vulnerabilities` tests fail, security fixes are broken
+- If `mock_provider` tests fail, PII detection patterns need updating
+- **Never push with security test failures**
+
 ## Architecture & Tech Stack
 - **Cross-Platform**: macOS (arm64), Linux (x64/aarch64), Windows (x86_64).
 - **Security**:

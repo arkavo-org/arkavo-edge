@@ -103,19 +103,9 @@ impl AuthBackend for JwtAuthBackend {
     }
 }
 
-pub struct NoOpAuthBackend;
-
-#[async_trait]
-impl AuthBackend for NoOpAuthBackend {
-    async fn validate_token(&self, _token: &str) -> Result<SessionAuth> {
-        Ok(SessionAuth {
-            sub: "anonymous".to_string(),
-            scopes: vec!["public".to_string()],
-            exp: None,
-            metadata: None,
-        })
-    }
-}
+// SECURITY: NoOpAuthBackend removed (CRI-001)
+// Authentication bypass vulnerability - never use in production
+// All requests must provide valid authentication credentials
 
 #[derive(Default)]
 pub struct MultiAuthBackend {
@@ -183,16 +173,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_noop_auth_backend() {
-        let backend = NoOpAuthBackend;
-        let auth = backend.validate_token("any_token").await.unwrap();
-        assert_eq!(auth.sub, "anonymous");
-        assert_eq!(auth.scopes, vec!["public"]);
-    }
-
-    #[tokio::test]
     async fn test_validate_scopes() {
-        let backend = NoOpAuthBackend;
+        // Create a mock backend for testing
+        struct MockAuthBackend;
+
+        #[async_trait]
+        impl AuthBackend for MockAuthBackend {
+            async fn validate_token(&self, _token: &str) -> Result<SessionAuth> {
+                Ok(SessionAuth {
+                    sub: "user".to_string(),
+                    scopes: vec!["read".to_string(), "write".to_string()],
+                    exp: None,
+                    metadata: None,
+                })
+            }
+        }
+
+        let backend = MockAuthBackend;
         let auth = SessionAuth {
             sub: "user".to_string(),
             scopes: vec!["read".to_string(), "write".to_string()],

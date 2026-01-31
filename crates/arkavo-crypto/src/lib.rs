@@ -21,7 +21,13 @@ pub struct AgentKeypair {
 
 impl AgentKeypair {
     pub fn generate() -> Self {
-        let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        // SECURITY FIX (HIGH-001): Use cryptographically secure RNG
+        use rand::RngCore;
+        use rand::rngs::OsRng;
+
+        let mut key_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut key_bytes);
+        let signing_key = SigningKey::from_bytes(&key_bytes);
         Self { signing_key }
     }
 
@@ -112,6 +118,7 @@ impl AgentPublicKey {
     /// Expects format: `did:key:z{base58btc(0xed01 || public_key_bytes)}`
     pub fn from_did_key(did: &str) -> Result<Self, CryptoError> {
         const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
+        const EXPECTED_LEN: usize = 34; // 2 bytes prefix + 32 bytes key
 
         // Validate prefix
         let encoded = did
@@ -123,17 +130,23 @@ impl AgentPublicKey {
             .into_vec()
             .map_err(|e| CryptoError::InvalidKeyFormat(format!("Base58 decode error: {}", e)))?;
 
+        // SECURITY FIX (HIGH-002): Validate exact length
+        if decoded.len() != EXPECTED_LEN {
+            return Err(CryptoError::InvalidKeyFormat(format!(
+                "Invalid DID:key length: expected {}, got {}",
+                EXPECTED_LEN,
+                decoded.len()
+            )));
+        }
+
         // Check multicodec prefix
-        if decoded.len() < 2
-            || decoded[0] != ED25519_MULTICODEC[0]
-            || decoded[1] != ED25519_MULTICODEC[1]
-        {
+        if decoded[0] != ED25519_MULTICODEC[0] || decoded[1] != ED25519_MULTICODEC[1] {
             return Err(CryptoError::InvalidKeyFormat(
                 "Invalid Ed25519 multicodec prefix".to_string(),
             ));
         }
 
-        // Extract public key bytes
+        // Extract public key bytes (safe due to length check above)
         let pk_bytes = &decoded[2..];
         Self::from_bytes(pk_bytes)
     }

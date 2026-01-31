@@ -138,10 +138,7 @@ fn contract_agent_card_required_fields() {
         parsed.get("name").is_some(),
         "AgentCard must have name field"
     );
-    assert!(
-        parsed.get("url").is_some(),
-        "AgentCard must have url field"
-    );
+    assert!(parsed.get("url").is_some(), "AgentCard must have url field");
     assert!(
         parsed.get("version").is_some(),
         "AgentCard must have version field"

@@ -65,7 +65,9 @@ impl ChatSessionState {
 
         // CHAT-INV-002: State must be valid (Active, Closing, or Zombie)
         match self.state {
-            SessionState::Active | SessionState::Closing | SessionState::Zombie => Ok::<(), String>(()),
+            SessionState::Active | SessionState::Closing | SessionState::Zombie => {
+                Ok::<(), String>(())
+            }
         }?;
 
         // CHAT-INV-003: last_acked_seq must not exceed inflight sequence (when applicable)
@@ -185,7 +187,9 @@ impl ChatSessionManager {
 
         // CHAT-INV-002: Verify invariants after state creation
         #[cfg(test)]
-        session_state.check_invariants().expect("Session state invariants violated on creation");
+        session_state
+            .check_invariants()
+            .expect("Session state invariants violated on creation");
 
         self.sessions
             .write()
@@ -370,7 +374,9 @@ impl ChatSessionManager {
                 session_state.state = SessionState::Closing;
                 // CHAT-INV-002: Verify invariants after state mutation
                 #[cfg(test)]
-                session_state.check_invariants().expect("Session state invariants violated on close");
+                session_state
+                    .check_invariants()
+                    .expect("Session state invariants violated on close");
                 info!("Session state changed to Closing");
             } else {
                 return Err(A2aError::SessionNotFound(session_id.to_string()));
@@ -1165,22 +1171,25 @@ mod tests {
     }
 
     // INVARIANT TESTS - Verifies CHAT-INV-001, CHAT-INV-002, CHAT-INV-003
-    
+
     #[test]
     fn test_invariant_backpressure_threshold() {
         // CHAT-INV-001: inflight_deltas must not exceed 100
         use std::sync::atomic::AtomicU64;
-        
+
         let inflight = Arc::new(AtomicU64::new(50));
         let last_acked = Arc::new(AtomicU64::new(0));
-        
+
         // Simulate 100 in-flight deltas
         inflight.store(100, Ordering::SeqCst);
         assert_eq!(inflight.load(Ordering::SeqCst), 100);
-        
+
         // Exceeding 100 should trigger back-pressure (checked in handler)
         inflight.store(101, Ordering::SeqCst);
-        assert!(inflight.load(Ordering::SeqCst) > 100, "Should exceed threshold");
+        assert!(
+            inflight.load(Ordering::SeqCst) > 100,
+            "Should exceed threshold"
+        );
     }
 
     #[test]
@@ -1191,7 +1200,7 @@ mod tests {
             SessionState::Closing,
             SessionState::Zombie,
         ];
-        
+
         for state in states {
             match state {
                 SessionState::Active | SessionState::Closing | SessionState::Zombie => {
@@ -1205,13 +1214,19 @@ mod tests {
     fn test_invariant_sequence_monotonicity() {
         // CHAT-INV-003: Delta sequences must be monotonically increasing
         let mut sequences: Vec<u64> = vec![1, 2, 3, 4, 5];
-        
+
         // Check monotonicity
-        assert!(sequences.windows(2).all(|w| w[0] < w[1]), "Sequences should be monotonic");
-        
+        assert!(
+            sequences.windows(2).all(|w| w[0] < w[1]),
+            "Sequences should be monotonic"
+        );
+
         // Non-monotonic should fail
         sequences = vec![1, 3, 2, 4];
-        assert!(!sequences.windows(2).all(|w| w[0] < w[1]), "Non-monotonic should be detected");
+        assert!(
+            !sequences.windows(2).all(|w| w[0] < w[1]),
+            "Non-monotonic should be detected"
+        );
     }
 
     #[tokio::test]
@@ -1223,7 +1238,7 @@ mod tests {
 
         // Verify session exists and is active
         assert!(manager.session_exists(&session_id).await);
-        
+
         // Get session state and check invariants
         let sessions = manager.sessions.read().await;
         if let Some(state) = sessions.get(&session_id) {

@@ -26,11 +26,14 @@ pub(super) fn parse_repo(repo: &str) -> Result<(String, String)> {
 }
 
 fn create_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| anyhow!("Failed to create HTTP client: {e}"))
+    // SECURITY: Use secure HTTP client with egress filtering
+    Ok(crate::secure_http::create_secure_client_with_config(
+        |builder| {
+            builder
+                .user_agent(USER_AGENT)
+                .timeout(Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
+        },
+    ))
 }
 
 pub(super) async fn fetch_issue(repo: &str, token: &str, issue_number: u64) -> Result<GitHubIssue> {

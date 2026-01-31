@@ -13,7 +13,7 @@ invariants:
   - Attribute-based access control (ABAC) evaluated before key release
 
 scenarios:
-  - id: TDF-SEC-001
+  - id: TDFS-001
     name: Control plane commands encrypted with TDF
     criticality: critical
     given:
@@ -27,7 +27,7 @@ scenarios:
       - Unauthorized decryption attempts logged and rejected
     refs: [crates/arkavo-tdf/src/control_plane.rs]
 
-  - id: TDF-SEC-002
+  - id: TDFS-002
     name: Configuration bundle TDF encryption
     criticality: critical
     given:
@@ -41,7 +41,7 @@ scenarios:
       - Bundle integrity protected by policy binding
     refs: [crates/arkavo-config-bundle/src/encryption.rs]
 
-  - id: TDF-SEC-003
+  - id: TDFS-003
     name: TDF-JSON format for API compatibility
     criticality: high
     given:
@@ -55,7 +55,7 @@ scenarios:
       - Same security properties as binary TDF
     refs: [crates/arkavo-tdf/src/formats/json.rs]
 
-  - id: TDF-SEC-004
+  - id: TDFS-004
     name: TDF-CBOR format for efficiency
     criticality: high
     given:
@@ -69,7 +69,7 @@ scenarios:
       - Parsing more efficient than JSON for large manifests
     refs: [crates/arkavo-tdf/src/formats/cbor.rs]
 
-  - id: TDF-SEC-005
+  - id: TDFS-005
     name: Format negotiation between agents
     criticality: medium
     given:
@@ -83,7 +83,7 @@ scenarios:
       - Format choice logged for audit
     refs: [crates/arkavo-tdf/src/formats/negotiation.rs]
 
-  - id: TDF-SEC-006
+  - id: TDFS-006
     name: Policy binding prevents policy tampering
     criticality: critical
     given:
@@ -97,7 +97,7 @@ scenarios:
       - Tampering attempt logged with forensic details
     refs: [crates/arkavo-tdf/src/policy_binding.rs]
 
-  - id: TDF-SEC-007
+  - id: TDFS-007
     name: Key escrow for data recovery
     criticality: high
     given:
@@ -111,7 +111,7 @@ scenarios:
       - Escrow key access triggers alerts
     refs: [crates/arkavo-tdf/src/escrow.rs]
 
-  - id: TDF-SEC-008
+  - id: TDFS-008
     name: Attribute authority verification
     criticality: critical
     given:
@@ -125,7 +125,7 @@ scenarios:
       - Attribute provenance logged
     refs: [crates/arkavo-tdf/src/attribute_authority.rs]
 
-  - id: TDF-SEC-009
+  - id: TDFS-009
     name: Time-based policy enforcement
     criticality: high
     given:
@@ -139,7 +139,7 @@ scenarios:
       - Policy engine uses tamper-evident time source
     refs: [crates/arkavo-tdf/src/temporal_policy.rs]
 
-  - id: TDF-SEC-010
+  - id: TDFS-010
     name: Data residency enforcement
     criticality: high
     given:
@@ -153,7 +153,7 @@ scenarios:
       - Residency violation logged
     refs: [crates/arkavo-tdf/src/residency.rs]
 
-  - id: TDF-SEC-011
+  - id: TDFS-011
     name: Secure key hierarchy
     criticality: critical
     given:
@@ -167,7 +167,7 @@ scenarios:
       - Key derivation uses approved algorithms
     refs: [crates/arkavo-tdf/src/key_hierarchy.rs]
 
-  - id: TDF-SEC-012
+  - id: TDFS-012
     name: Offline policy evaluation
     criticality: medium
     given:
@@ -181,7 +181,7 @@ scenarios:
       - Offline access logged for later audit
     refs: [crates/arkavo-tdf/src/offline_policy.rs]
 
-  - id: TDF-SEC-013
+  - id: TDFS-013
     name: Forward secrecy for key agreement
     criticality: critical
     given:
@@ -195,7 +195,7 @@ scenarios:
       - Ephemeral keys destroyed after use
     refs: [crates/arkavo-tdf/src/forward_secrecy.rs]
 
-  - id: TDF-SEC-014
+  - id: TDFS-014
     name: Policy update propagation
     criticality: high
     given:
@@ -209,7 +209,7 @@ scenarios:
       - Policy update cryptographically linked to previous
     refs: [crates/arkavo-tdf/src/policy_update.rs]
 
-  - id: TDF-SEC-015
+  - id: TDFS-015
     name: TDF payload obfuscation
     criticality: medium
     given:
