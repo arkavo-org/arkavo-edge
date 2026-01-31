@@ -16,10 +16,15 @@ specs/
     ├── gossip-protocol.spec.yaml  # 8 scenarios
     ├── router.spec.yaml           # 10 scenarios
     ├── tdf.spec.yaml              # 9 scenarios
-    └── autolearn.spec.yaml        # 8 scenarios
+    ├── autolearn.spec.yaml        # 8 scenarios
+    ├── memory.spec.yaml           # 7 scenarios
+    ├── budget.spec.yaml           # 7 scenarios
+    ├── authorization.spec.yaml    # 6 scenarios
+    ├── device-identity.spec.yaml  # 6 scenarios
+    └── observability.spec.yaml    # 8 scenarios
 ```
 
-**Total: 71 scenarios across 7 components**
+**Total: 105 scenarios across 12 components**
 
 ## Specification Format
 

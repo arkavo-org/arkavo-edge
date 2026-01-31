@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Observability and Metrics
+module: arkavo_observability
+version: 0.57.1
+
+invariants:
+  - All metrics include timestamps
+  - Session metrics track lifecycle events
+  - Health reports aggregate component status
+  - Task tracker monitors async operation progress
+  - OTLP export is optional and auto-detected
+
+scenarios:
+  - id: OBS-001
+    name: Initialize observability with config
+    criticality: high
+    given:
+      - ObservabilityConfig provided
+      - Log level specified
+    when: init_observability() called
+    then:
+      - Console logging configured
+      - EnvFilter applied
+      - OTLP layer added if enabled
+      - Global subscriber set
+    refs: [crates/arkavo-observability/src/lib.rs]
+
+  - id: OBS-002
+    name: Session metrics track active sessions
+    criticality: high
+    given:
+      - SessionMetrics initialized
+      - Session events occurring
+    when: Metrics updated
+    then:
+      - Messages sent/received counted
+      - Deltas tracked by type
+      - Errors recorded with context
+      - State transitions logged
+    refs: [crates/arkavo-observability/src/session.rs]
+
+  - id: OBS-003
+    name: Metrics collector aggregates globally
+    criticality: medium
+    given:
+      - MetricsCollector active
+      - Multiple sessions reporting
+    when: Metrics recorded
+    then:
+      - Global counters incremented
+      - Per-session metrics aggregated
+      - Snapshots available on demand
+    refs: [crates/arkavo-observability/src/metrics.rs]
+
+  - id: OBS-004
+    name: Health reporter checks components
+    criticality: high
+    given:
+      - HealthReporter initialized
+      - Components registered
+    when: health_check() called
+    then:
+      - Each component status checked
+      - Overall health determined
+      - Degraded components identified
+      - Report generated
+    refs: [crates/arkavo-observability/src/health_reporter.rs]
+
+  - id: OBS-005
+    name: Task tracker monitors async operations
+    criticality: medium
+    given:
+      - ObservableTaskTracker active
+      - Tasks spawned
+    when: Task status changes
+    then:
+      - Task lifecycle tracked
+      - Completion/failure recorded
+      - Active task count maintained
+      - Named tasks identifiable
+    refs: [crates/arkavo-observability/src/task_tracker.rs]
+
+  - id: OBS-006
+    name: Agent detection identifies AI agents
+    criticality: low
+    given:
+      - Request headers available
+      - Agent detection enabled
+    when: detect_agent() called
+    then:
+      - User-Agent analyzed
+      - Known agents identified
+      - Agent metadata extracted
+    refs: [crates/arkavo-observability/src/agent_detection.rs]
+
+  - id: OBS-007
+    name: OTLP export when collector available
+    criticality: medium
+    given:
+      - OTLP endpoint configured
+      - Collector reachable
+    when: Metrics/traces generated
+    then:
+      - Data batched for export
+      - GRPC export attempted
+      - Fallback on failure
+    refs: [crates/arkavo-observability/src/lib.rs]
+
+  - id: OBS-008
+    name: Metrics snapshot captures current state
+    criticality: medium
+    given:
+      - Metrics collected over time
+      - Snapshot requested
+    when: snapshot() called
+    then:
+      - Current counters captured
+      - Rates calculated
+      - State serialized
+    refs: [crates/arkavo-observability/src/metrics_snapshot.rs]
+    edge_cases:
+      - condition: OTLP collector unreachable
+        expected: Logs warning, continues with console logging
+      - condition: Metrics buffer full
+        expected: Drops oldest metrics, logs warning
+      - condition: Health check times out
+        expected: Marks component as unhealthy
+    changed: "2025-01-31"

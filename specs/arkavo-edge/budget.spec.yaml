@@ -1,0 +1,117 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Budget and Cost Management
+module: arkavo_budget
+version: 0.57.1
+
+invariants:
+  - All LLM calls track token usage and cost
+  - Budget limits enforced before expensive operations
+  - Cost middleware intercepts all provider calls
+  - Budget alerts trigger at configurable thresholds
+  - Model selection policy prefers cheaper models when sufficient
+
+scenarios:
+  - id: BUDGET-001
+    name: Track token cost for LLM call
+    criticality: critical
+    given:
+      - BudgetTracker initialized
+      - LLM call completed
+    when: track_usage() called with token counts
+    then:
+      - Input tokens counted
+      - Output tokens counted
+      - Cost calculated from provider rates
+      - Running total updated
+    refs: [crates/arkavo-budget/src/tracker.rs]
+
+  - id: BUDGET-002
+    name: Enforce budget limit before call
+    criticality: critical
+    given:
+      - Budget limit configured
+      - Current spend near limit
+    when: BudgetMiddleware intercepts request
+    then:
+      - Current spend checked
+      - Request blocked if over budget
+      - BudgetExceeded error returned
+      - No provider call made
+    refs: [crates/arkavo-budget/src/middleware.rs]
+
+  - id: BUDGET-003
+    name: Model selection based on cost policy
+    criticality: high
+    given:
+      - Multiple models available
+      - Task complexity assessed
+      - Budget constraints active
+    when: ModelSelectionPolicy selects model
+    then:
+      - Cheapest sufficient model chosen
+      - Complex tasks may use expensive models
+      - Budget runway considered
+    refs: [crates/arkavo-budget/src/policy.rs]
+
+  - id: BUDGET-004
+    name: Alert when threshold exceeded
+    criticality: high
+    given:
+      - Alert threshold configured (e.g., 80%)
+      - Budget spend crosses threshold
+    when: BudgetTracker checks limits
+    then:
+      - Alert triggered
+      - Notification sent
+      - Logs warning
+      - Continues operating
+    refs: [crates/arkavo-budget/src/tracker.rs]
+
+  - id: BUDGET-005
+    name: Provider cost configuration
+    criticality: medium
+    given:
+      - Provider costs configured
+      - Model rates specified
+    when: Cost calculated
+    then:
+      - Per-provider rates applied
+      - Per-model rates override defaults
+      - Currency normalized
+    refs: [crates/arkavo-budget/src/provider_costs.rs]
+
+  - id: BUDGET-006
+    name: Budget status with projections
+    criticality: medium
+    given:
+      - BudgetTracker has history
+      - Usage trends analyzed
+    when: get_status() called
+    then:
+      - Current spend returned
+      - Remaining budget calculated
+      - Runway projection provided
+      - Recommendations included
+    refs: [crates/arkavo-budget/src/tracker.rs]
+
+  - id: BUDGET-007
+    name: Architect savings report
+    criticality: low
+    given:
+      - ArchitectPlanner used
+      - Multiple routing decisions made
+    when: generate_savings_report() called
+    then:
+      - Cost vs direct routing calculated
+      - Savings percentage computed
+      - Usage summary by model
+    refs: [crates/arkavo-budget/src/tracker.rs]
+    edge_cases:
+      - condition: Budget limit is zero
+        expected: All requests blocked immediately
+      - condition: Provider rate missing
+        expected: Uses default rate, logs warning
+      - condition: Spend tracking fails
+        expected: Continues with warning, alerts operator
+    changed: "2025-01-31"

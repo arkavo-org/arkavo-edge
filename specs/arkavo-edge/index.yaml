@@ -81,18 +81,78 @@ components:
       - Exponential decay on signals
       - Network consensus for cross-swarm patchlets
 
+  - name: memory
+    file: memory.spec.yaml
+    module: arkavo_memory
+    description: Context memory, embeddings, and ledger storage
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - Memories scoped to agent domain
+      - Context ledger append-only
+      - Embeddings normalized
+
+  - name: budget
+    file: budget.spec.yaml
+    module: arkavo_budget
+    description: Budget tracking, cost management, and policy
+    criticality: critical
+    scenario_count: 7
+    invariants:
+      - All LLM calls track cost
+      - Budget limits enforced
+      - Middleware intercepts all calls
+
+  - name: authorization
+    file: authorization.spec.yaml
+    module: arkavo_authorization
+    description: Access control and authorization decisions
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - All access requires explicit check
+      - Decision cache with TTL
+      - Bulk decisions optimize checks
+
+  - name: device-identity
+    file: device-identity.spec.yaml
+    module: arkavo_device_identity
+    description: Device ID management and secure storage
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Device ID unique per installation
+      - Persists across restarts
+      - Platform-appropriate storage
+
+  - name: observability
+    file: observability.spec.yaml
+    module: arkavo_observability
+    description: Metrics, health checks, and monitoring
+    criticality: medium
+    scenario_count: 8
+    invariants:
+      - Metrics include timestamps
+      - Session lifecycle tracked
+      - Health reports aggregate status
+
 stats:
-  total_specs: 7
-  total_scenarios: 71
-  critical_scenarios: 36
+  total_specs: 12
+  total_scenarios: 105
+  critical_scenarios: 52
   coverage_areas:
     - authentication
+    - authorization
     - cryptography
     - session_management
     - distributed_consensus
     - routing
     - data_protection
     - machine_learning
+    - memory_management
+    - cost_management
+    - identity_management
+    - observability
     - error_handling
     - fault_tolerance
 
@@ -117,3 +177,19 @@ integration_points:
   - name: Autolearn → Gossip
     description: Patchlets propagate via gossip protocol
     specs: [AUTO-005, GOSSIP-006]
+
+  - name: Memory → Router
+    description: Router uses memory for context retrieval
+    specs: [MEM-004, ROUTER-010]
+
+  - name: Budget → Router
+    description: Router considers budget in model selection
+    specs: [BUDGET-003, ROUTER-001]
+
+  - name: Device Identity → Registration
+    description: Registration uses device identity for onboarding
+    specs: [DEVICE-004, REG-001]
+
+  - name: Authorization → TDF
+    description: TDF uses authorization for access decisions
+    specs: [AUTHZ-001, TDF-004]

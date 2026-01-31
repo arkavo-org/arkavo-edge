@@ -1,0 +1,116 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Context Memory and Ledger
+module: arkavo_memory
+version: 0.57.1
+
+invariants:
+  - All memories are scoped to an agent domain
+  - Context ledger maintains append-only history
+  - Embeddings are normalized before storage
+  - Vector search returns top-K most similar results
+  - Memory storage persists across restarts
+
+scenarios:
+  - id: MEM-001
+    name: Store memory with embedding
+    criticality: high
+    given:
+      - MemoryStorage initialized with HNSW index
+      - Embedding model available
+      - Agent domain specified
+    when: store() called with memory content
+    then:
+      - Content converted to embedding vector
+      - Vector normalized to unit length
+      - Memory stored with domain scoping
+      - Index updated for similarity search
+    refs: [crates/arkavo-memory/src/storage.rs]
+
+  - id: MEM-002
+    name: Search memories by semantic similarity
+    criticality: high
+    given:
+      - Memories stored with embeddings
+      - Query text provided
+    when: search() called with query
+    then:
+      - Query converted to embedding
+      - HNSW index searched for neighbors
+      - Top-K results returned by similarity
+      - Results filtered by agent domain
+    refs: [crates/arkavo-memory/src/storage.rs]
+
+  - id: MEM-003
+    name: Context ledger appends conversation turns
+    criticality: high
+    given:
+      - ContextLedger initialized
+      - Conversation active
+    when: append_turn() called with message
+    then:
+      - Message appended to ledger
+      - Timestamp recorded
+      - Ledger persists to storage
+      - Previous context preserved
+    refs: [crates/arkavo-memory/src/ledger.rs]
+
+  - id: MEM-004
+    name: Retrieve conversation context
+    criticality: high
+    given:
+      - ContextLedger has history
+      - Query for recent context
+    when: get_context() called with limit
+    then:
+      - Returns N most recent turns
+      - Maintains chronological order
+      - Handles empty ledger gracefully
+    refs: [crates/arkavo-memory/src/ledger.rs]
+
+  - id: MEM-005
+    name: Plan state persistence across restarts
+    criticality: medium
+    given:
+      - PlanStateStore initialized
+      - Plan execution in progress
+    when: persist_plan() called
+    then:
+      - Plan serialized to storage
+      - Status saved (Pending/Running/Completed)
+      - Recoverable after process restart
+    refs: [crates/arkavo-memory/src/plan_state.rs]
+
+  - id: MEM-006
+    name: Orchestrator state tracks issue processing
+    criticality: medium
+    given:
+      - OrchestratorStateStore initialized
+      - Issue received for processing
+    when: track_issue() called
+    then:
+      - Issue status recorded
+      - Processing history maintained
+      - Org stats aggregated
+    refs: [crates/arkavo-memory/src/orchestrator_state.rs]
+
+  - id: MEM-007
+    name: Workspace config per organization
+    criticality: medium
+    given:
+      - WorkspaceConfig loaded
+      - Organization ID specified
+    when: Config accessed
+    then:
+      - Returns org-specific settings
+      - Merges with defaults
+      - Persists changes
+    refs: [crates/arkavo-memory/src/workspace_config.rs]
+    edge_cases:
+      - condition: Embedding model unavailable
+        expected: Returns MemoryError::EmbeddingFailed
+      - condition: Search with empty index
+        expected: Returns empty results
+      - condition: Ledger exceeds max size
+        expected: Truncates oldest entries
+    changed: "2025-01-31"
