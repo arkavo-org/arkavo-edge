@@ -92,11 +92,12 @@ fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
             }
         }
 
-        // Warn about commit drift
+        // Fail on commit drift to ensure patches are verified against correct version
         if let (Some(ref base), Some(ref current)) = (&meta.base_commit, &current_commit) {
             if !current.starts_with(base) && !base.starts_with(current) {
-                eprintln!(
-                    "Warning: Patch {} was created for commit {}, but vendor is at {}",
+                panic!(
+                    "Patch {} was created for commit {}, but vendor is at {}. \
+                     Update BASE_COMMIT in patch metadata or verify patch still applies.",
                     patch_name, base, current
                 );
             }

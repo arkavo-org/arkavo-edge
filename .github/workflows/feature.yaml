@@ -180,8 +180,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
+          # Using commit with Metal shutdown assertion patch applied
+          git checkout c3b87cebf
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -371,8 +371,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
+          # Using commit with Metal shutdown assertion patch applied
+          git checkout c3b87cebf
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -505,8 +505,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
+          # Using commit with Metal shutdown assertion patch applied
+          git checkout c3b87cebf
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -615,8 +615,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
+          # Using commit with Metal shutdown assertion patch applied
+          git checkout c3b87cebf
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -1126,8 +1126,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # GLM-4.7 MoE gating fix + Ministral3 arch (94242a62c Jan 21 2025)
-          git checkout 94242a62c
+          # Using commit with Metal shutdown assertion patch applied
+          git checkout c3b87cebf
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |

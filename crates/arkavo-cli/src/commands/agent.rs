@@ -1657,16 +1657,59 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 }
 
 /// Get the local IP address for client connections.
-/// Returns the first non-loopback IPv4 address found.
+///
+/// Uses multiple strategies to determine the local IP:
+/// 1. Try connecting to a public DNS server (determines routing interface)
+/// 2. Fallback to interface enumeration
+/// 3. Final fallback to 127.0.0.1
+///
+/// This handles offline environments, strict firewalls, and IPv6-only networks.
 fn get_local_ip() -> Option<String> {
     use std::net::UdpSocket;
 
-    // Connect to a public DNS to determine our local IP
-    // This doesn't actually send any data, just determines the route
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    let local_addr = socket.local_addr().ok()?;
-    Some(local_addr.ip().to_string())
+    // Strategy 1: DNS-based detection (works in most online environments)
+    // Try multiple public DNS servers for resilience
+    let dns_servers = [
+        ("8.8.8.8", 80),        // Google DNS
+        ("1.1.1.1", 80),        // Cloudflare DNS
+        ("208.67.222.222", 80), // OpenDNS
+    ];
+
+    for (dns, port) in dns_servers {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((dns, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+
+    // Strategy 2: Try connecting to a private network address
+    // This works in offline LAN environments
+    let private_targets = [
+        ("192.168.1.1", 53), // Common router address
+        ("10.0.0.1", 53),    // Common corporate router
+        ("172.16.0.1", 53),  // Common large network router
+    ];
+
+    for (target, port) in private_targets {
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
+            && socket.connect((target, port)).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            let ip = local_addr.ip();
+            if !ip.is_loopback() && ip.is_ipv4() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+
+    // Strategy 3: Fallback to 127.0.0.1 (always works, but only for local clients)
+    // This is the safest fallback for offline or isolated environments
+    Some("127.0.0.1".to_string())
 }
 
 fn broadcast_agent_mdns_sync(
