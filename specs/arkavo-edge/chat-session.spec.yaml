@@ -191,16 +191,14 @@ scenarios:
         expected: Rejected, stream continues
       - condition: Missing required fields
         expected: Rejected with validation error
+      - condition: send_message to non-existent session
+        expected: Returns A2aError::SessionNotFound
+      - condition: No LLM adapter or router configured
+        expected: Returns A2aError::NoLlmAdapter
+      - condition: Message channel closed during send
+        expected: Returns A2aError::MessageSendFailed
+      - condition: Aggregated streaming mode
+        expected: Accumulates full response before sending single delta
+      - condition: Router succeeds but tool registry missing
+        expected: Tool calls logged but not executed, response still delivered
     changed: 2025-01-31
-
-  edge_cases:
-    - condition: send_message to non-existent session
-      expected: Returns A2aError::SessionNotFound
-    - condition: No LLM adapter or router configured
-      expected: Returns A2aError::NoLlmAdapter
-    - condition: Message channel closed during send
-      expected: Returns A2aError::MessageSendFailed
-    - condition: Aggregated streaming mode
-      expected: Accumulates full response before sending single delta
-    - condition: Router succeeds but tool registry missing
-      expected: Tool calls logged but not executed, response still delivered

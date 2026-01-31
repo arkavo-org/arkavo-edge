@@ -169,14 +169,13 @@ scenarios:
       - Verification not acknowledged to client
       - Registration remains unverified (consistent state)
     refs: [crates/arkavo-protocol/src/registration/mod.rs:146-154]
+    edge_cases:
+      - condition: System time before UNIX_EPOCH
+        expected: create_challenge panics (documented)
+      - condition: Base64 decode failure on public_key
+        expected: Returns InvalidRequest with decode error details
+      - condition: Non-existent challenge_id
+        expected: Returns InvalidRequest("Challenge not found")
+      - condition: Concurrent verify calls with same challenge
+        expected: First succeeds, subsequent return "Challenge not found"
     changed: 2025-01-31
-
-  edge_cases:
-    - condition: System time before UNIX_EPOCH
-      expected: create_challenge panics (documented)
-    - condition: Base64 decode failure on public_key
-      expected: Returns InvalidRequest with decode error details
-    - condition: Non-existent challenge_id
-      expected: Returns InvalidRequest("Challenge not found")
-    - condition: Concurrent verify calls with same challenge
-      expected: First succeeds, subsequent return "Challenge not found"
