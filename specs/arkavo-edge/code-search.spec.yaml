@@ -1,6 +1,6 @@
 feature: Code Search and Refactoring Tools
 module: arkavo_code_search
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - All tools implement arkavo_mcp::Tool trait

@@ -1,6 +1,6 @@
 feature: MCP Claude Code Integration
 module: crate::mcp_claude
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Anthropic API key or OAuth token required for operation

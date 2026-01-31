@@ -2,7 +2,7 @@
 
 feature: Authorization and Access Control
 module: arkavo_authorization
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - All access decisions require explicit authorization check

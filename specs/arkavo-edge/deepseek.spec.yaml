@@ -2,7 +2,7 @@
 
 feature: DeepSeek LLM Provider
 module: arkavo_deepseek
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - API key required for all requests

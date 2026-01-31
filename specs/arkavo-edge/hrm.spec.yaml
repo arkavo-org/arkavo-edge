@@ -1,6 +1,6 @@
 feature: Hierarchical Reasoning Model Orchestration
 module: arkavo_hrm
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Conductor manages GlobalTaskState for complex tasks

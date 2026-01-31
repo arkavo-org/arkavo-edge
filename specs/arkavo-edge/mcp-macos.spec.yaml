@@ -1,6 +1,6 @@
 feature: MCP macOS Test Harness
 module: crate::mcp_macos
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Only functional on macOS targets

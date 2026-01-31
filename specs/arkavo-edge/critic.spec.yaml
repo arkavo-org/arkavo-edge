@@ -1,6 +1,6 @@
 feature: LLM Response Critic and Verification
 module: arkavo_critic
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Verification pipeline with priority-ordered checks

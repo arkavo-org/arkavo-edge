@@ -2,7 +2,7 @@
 
 feature: Chat Session Management
 module: arkavo_protocol::chat_session
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Each session has a unique UUID v4 identifier

@@ -1,6 +1,6 @@
 feature: Qwen AI Provider
 module: crate::qwen
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Qwen region (China or International) determines endpoint

@@ -1,6 +1,6 @@
 feature: Arkavo GUI Application Gateway
 module: arkavo_agui
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - AgUiGateway manages agent connections

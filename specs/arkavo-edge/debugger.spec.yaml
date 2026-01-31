@@ -1,6 +1,6 @@
 feature: Session Debugger and Diagnostics
 module: arkavo_debugger
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Session recording for replay

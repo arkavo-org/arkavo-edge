@@ -2,7 +2,7 @@
 
 feature: Device Identity Management
 module: arkavo_device_identity
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Device ID is unique per installation

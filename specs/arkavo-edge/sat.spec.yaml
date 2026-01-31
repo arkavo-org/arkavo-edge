@@ -1,6 +1,6 @@
 feature: SAT Solver Integration for TØRG Analysis
 module: arkavo_sat
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - CNF extraction preserves graph semantics via Tseitin

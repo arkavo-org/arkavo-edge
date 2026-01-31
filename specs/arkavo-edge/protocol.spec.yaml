@@ -1,6 +1,6 @@
 feature: A2A Protocol and Agent Communication
 module: arkavo_protocol
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - A2A protocol enables agent-to-agent communication

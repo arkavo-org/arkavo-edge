@@ -1,6 +1,6 @@
 feature: TDF Iroh P2P Transport
 module: crate::tdf_iroh
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Transport handles raw bytes only, no encryption

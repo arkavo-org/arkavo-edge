@@ -2,7 +2,7 @@
 
 feature: Kimi (Moonshot) LLM Provider
 module: arkavo_kimi
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Native Kimi API (not OpenAI-compatible)

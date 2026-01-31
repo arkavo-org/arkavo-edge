@@ -1,6 +1,6 @@
 feature: MCP Runtime Implementation
 module: arkavo_mcp_runtime
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Server handles JSON-RPC 2.0 protocol

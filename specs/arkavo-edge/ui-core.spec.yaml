@@ -1,6 +1,6 @@
 feature: UI Core Library
 module: arkavo_ui_core
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - UIContent defines renderable content

@@ -1,6 +1,6 @@
 feature: Terminal UI Application
 module: arkavo_terminal
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Terminal UI with async event loop

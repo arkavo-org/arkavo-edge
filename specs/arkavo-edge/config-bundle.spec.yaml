@@ -1,6 +1,6 @@
 feature: Configuration Bundle Management
 module: arkavo_config_bundle
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Bundle IDs are UUID v4

@@ -2,7 +2,7 @@
 
 feature: Device and Agent Registration
 module: arkavo_protocol::registration
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Challenge IDs are cryptographically unique (SHA-256 of random 32 bytes)

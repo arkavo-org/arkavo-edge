@@ -2,7 +2,7 @@
 
 feature: Context Memory and Ledger
 module: arkavo_memory
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - All memories are scoped to an agent domain

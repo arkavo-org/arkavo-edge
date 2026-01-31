@@ -1,6 +1,6 @@
 feature: Browser Automation and Live Injection
 module: arkavo_browser
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - BrowserTool provides MCP-compatible browser automation

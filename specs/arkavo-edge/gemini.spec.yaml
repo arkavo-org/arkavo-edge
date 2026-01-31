@@ -1,6 +1,6 @@
 feature: Gemini AI Provider
 module: crate::gemini
-version: 0.57.1
+version: 0.57.2
 
 invariants:
   - Gemini API version must be valid and supported
