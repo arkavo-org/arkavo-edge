@@ -1,13 +1,13 @@
 [package]
-name = "arkavo-protocol"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-description = "Protocol adapters for the Arkavo agentic CLI tool - MCP & A2A client implementations"
+name = "arkavo-server"
+version = "0.58.1"
+edition = "2024"
+authors = ["Arkavo Contributors"]
+license = "Apache-2.0"
+description = "A2A server implementation for the Arkavo agentic CLI tool"
 repository = "https://github.com/arkavo-com/arkavo-edge"
-keywords = ["protocol", "mcp", "a2a", "adapter", "client"]
-categories = ["network-programming", "api-bindings"]
+keywords = ["server", "a2a", "json-rpc", "agent", "protocol"]
+categories = ["network-programming", "web-programming"]
 
 [dependencies]
 # Core async runtime
@@ -18,10 +18,13 @@ futures = { workspace = true }
 # JSON-RPC implementation
 jsonrpsee = { workspace = true }
 
-# Networking with rustls
-reqwest = { workspace = true, features = ["stream"] }
+# HTTP server
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["cors"] }
 
-# WebSocket with TLS support
+# Networking
+reqwest = { workspace = true, features = ["stream"] }
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
 rustls-pemfile = { workspace = true }
@@ -32,13 +35,10 @@ governor = { workspace = true, features = ["std", "jitter"] }
 dashmap = { workspace = true }
 crossbeam-queue = { workspace = true }
 
-# HTTP server for well-known endpoints
-axum = { workspace = true }
-tower = { workspace = true }
-
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = { workspace = true }
@@ -48,101 +48,66 @@ urlencoding = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
-# Security dependencies
-lru = { workspace = true }
-ipnet = "2.9"
-lazy_static = "1.4"
-bs58 = "0.5"
-
 # Logging
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 # Utilities
 uuid = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }
 notify = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+lru = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
 
-# MCP support
-arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
-arkavo-memory = { path = "../arkavo-memory" }
-
-# LLM support for chat
-arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
-
-# Router for intelligent model selection
-arkavo-router = { path = "../arkavo-router" }
-
-# Observability
-arkavo-observability = { path = "../arkavo-observability" }
-
-# Events for debugging
-arkavo-events = { path = "../arkavo-events" }
-
-# Crypto for registration
-arkavo-crypto = { path = "../arkavo-crypto" }
-
-# HRM for task orchestration
-arkavo-hrm = { path = "../arkavo-hrm" }
-
-# Gossip protocol for learning propagation
-arkavo-gossip = { path = "../arkavo-gossip" }
-
-# TDF support for KAS capability (optional)
-arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
-
-# Additional utilities for registration
-rand = { workspace = true }
-base64 = { workspace = true }
-hex = { workspace = true }
-
 # Schema generation
 schemars = { workspace = true }
 
-# Demo dependencies
-clap = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true, optional = true }
-
 # mDNS dependencies
 gethostname = { workspace = true, optional = true }
-
-# Network interface detection
 if-addrs = { workspace = true, optional = true }
 
 # Metrics dependencies
 metrics = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 
+# Arkavo internal dependencies
+arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-agent = { path = "../arkavo-agent" }
+arkavo-security = { path = "../arkavo-security" }
+arkavo-tasks = { path = "../arkavo-tasks" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
+arkavo-router = { path = "../arkavo-router" }
+arkavo-observability = { path = "../arkavo-observability" }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-hrm = { path = "../arkavo-hrm" }
+arkavo-gossip = { path = "../arkavo-gossip" }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
+
+# Demo dependencies
+clap = { workspace = true, optional = true }
+
 [features]
+default = []
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["gethostname", "if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
-kas = ["dep:arkavo-tdf"]  # KAS A2A capability for TDF key operations
+kas = ["dep:arkavo-tdf"]
 
 [dev-dependencies]
-# For integration tests
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
-# For examples
-tracing-subscriber = { workspace = true }
-# For tests
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
-arkavo-crypto = { path = "../arkavo-crypto" }
-arkavo-server = { path = "../arkavo-server" }
-
-[[bin]]
-name = "export-schema"
-path = "src/bin/export-schema.rs"
-required-features = ["demo"]
-
-[[bin]]
-name = "validate-schema"
-path = "src/bin/validate-schema.rs"
-required-features = ["demo"]
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

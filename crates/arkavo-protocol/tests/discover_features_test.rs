@@ -3,7 +3,8 @@
 
 #[cfg(test)]
 mod discover_features_tests {
-    use arkavo_protocol::{A2aServer, config::ServerConfig};
+    use arkavo_protocol::config::ServerConfig;
+    use arkavo_server::A2aServer;
     use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClientBuilder};
     use serde_json::json;
 

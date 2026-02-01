@@ -1,0 +1,68 @@
+[package]
+name = "arkavo-security"
+version = "0.58.1"
+edition = "2024"
+authors = ["Arkavo Contributors"]
+license = "Apache-2.0"
+description = "Security consolidation crate for the Arkavo agentic CLI - auth, OAuth2, rate limiting, JWT, and data classification"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["security", "auth", "oauth2", "jwt", "rate-limiting"]
+categories = ["authentication", "web-programming"]
+
+[dependencies]
+# Core async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# JWT authentication
+jsonwebtoken = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Caching and rate limiting
+lru = { workspace = true }
+dashmap = { workspace = true }
+governor = { workspace = true, features = ["std", "jitter"] }
+
+# HTTP client for OAuth2
+reqwest = { workspace = true, features = ["json"] }
+
+# URL handling
+url = { workspace = true }
+urlencoding = "2"
+
+# Time handling
+chrono = { workspace = true }
+
+# Cryptographic utilities
+sha2 = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+
+# For security_fixes.rs
+ipnet = "2"
+bs58 = "0.5"
+crossbeam-queue = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

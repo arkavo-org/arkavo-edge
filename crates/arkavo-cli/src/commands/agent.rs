@@ -1041,10 +1041,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
     use arkavo_gossip::GossipConfig;
-    use arkavo_protocol::server::{
-        LearningBus, start_anti_entropy_loop, start_lesson_propagation_loop,
-    };
-    use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
+    use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig};
+    use arkavo_server::A2aServer;
+    use arkavo_server::{LearningBus, start_anti_entropy_loop, start_lesson_propagation_loop};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
@@ -1409,8 +1408,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         let learning_bus_apply = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             if let Some(rx) = learning_bus_apply.subscribe_lesson_approvals().await {
-                arkavo_protocol::server::start_lesson_application_loop(learning_bus_apply, rx)
-                    .await;
+                arkavo_server::start_lesson_application_loop(learning_bus_apply, rx).await;
             } else {
                 tracing::warn!("Lesson application loop: could not subscribe to approvals");
             }
@@ -1420,7 +1418,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         let learning_bus_events = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             if let Some(rx) = learning_bus_events.take_event_receiver().await {
-                arkavo_protocol::server::start_event_processing_loop(learning_bus_events, rx).await;
+                arkavo_server::start_event_processing_loop(learning_bus_events, rx).await;
             } else {
                 tracing::warn!("Event processing loop: event receiver already taken");
             }

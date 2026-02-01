@@ -3,9 +3,9 @@ use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, LlmConfig, Message, encode_image_file};
 use arkavo_memory::{ContextLedger, storage::MemoryStorage};
-#[cfg(not(all(unix, feature = "mcp-tools")))]
-use arkavo_protocol::server::{RlmBridge, estimate_tokens, model_context_size};
 use arkavo_repo::repository_context::RepositoryContextManager;
+#[cfg(not(all(unix, feature = "mcp-tools")))]
+use arkavo_server::{RlmBridge, estimate_tokens, model_context_size};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;

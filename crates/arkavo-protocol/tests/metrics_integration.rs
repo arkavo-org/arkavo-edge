@@ -2,7 +2,9 @@
 
 #[cfg(feature = "metrics")]
 use arkavo_protocol::{MetricsCollector, RpcTimer};
+#[cfg(feature = "metrics")]
 use std::sync::Arc;
+#[cfg(feature = "metrics")]
 use std::time::Duration;
 
 #[tokio::test]

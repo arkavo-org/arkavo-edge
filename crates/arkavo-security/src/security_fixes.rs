@@ -1,4 +1,6 @@
 //! Security Fixes for Identified Vulnerabilities
+
+#![allow(clippy::significant_drop_tightening)]
 //!
 //! This module implements fixes for:
 //! - CRI-001: Authentication bypass (NoOpAuthBackend removed)
@@ -104,10 +106,14 @@ impl TokenStore {
     }
 }
 
+/// Token errors
 #[derive(Debug, Clone, Copy)]
 pub enum TokenError {
+    /// Token has already been used
     AlreadyUsed,
+    /// Token has been revoked
     Revoked,
+    /// Invalid token
     Invalid,
 }
 
@@ -144,6 +150,7 @@ impl Default for EgressFilter {
 }
 
 impl EgressFilter {
+    /// Create a new egress filter
     pub fn new() -> Self {
         let mut filter = Self {
             blocked_ips: HashSet::new(),
@@ -229,10 +236,14 @@ impl EgressFilter {
     }
 }
 
+/// Egress errors
 #[derive(Debug, Clone)]
 pub enum EgressError {
+    /// Invalid URL
     InvalidUrl,
+    /// Blocked IP
     BlockedIp(IpAddr),
+    /// Blocked domain
     BlockedDomain(String),
 }
 
@@ -280,6 +291,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Create a new rate limiter
     pub fn new(max_requests: u32, window: Duration) -> Self {
         Self {
             max_requests,
@@ -324,8 +336,10 @@ impl RateLimiter {
     }
 }
 
+/// Rate limit errors
 #[derive(Debug, Clone, Copy)]
 pub enum RateLimitError {
+    /// Rate limit exceeded
     LimitExceeded,
 }
 
@@ -355,6 +369,7 @@ impl Default for HostValidator {
 }
 
 impl HostValidator {
+    /// Create a new host validator
     pub fn new() -> Self {
         let mut validator = Self {
             allowed_hosts: HashSet::new(),
@@ -419,8 +434,10 @@ impl HostValidator {
     }
 }
 
+/// Host validation errors
 #[derive(Debug, Clone)]
 pub enum HostValidationError {
+    /// Host not allowed
     HostNotAllowed(String),
 }
 
@@ -475,11 +492,21 @@ pub fn parse_did_key_fixed(did: &str) -> Result<Vec<u8>, DidKeyError> {
     Ok(decoded[2..].to_vec())
 }
 
+/// DID key errors
 #[derive(Debug, Clone)]
 pub enum DidKeyError {
+    /// Invalid prefix
     InvalidPrefix,
+    /// Invalid encoding
     InvalidEncoding,
-    InvalidLength { expected: usize, actual: usize },
+    /// Invalid length
+    InvalidLength {
+        /// Expected length
+        expected: usize,
+        /// Actual length
+        actual: usize,
+    },
+    /// Invalid multicodec
     InvalidMulticodec,
 }
 

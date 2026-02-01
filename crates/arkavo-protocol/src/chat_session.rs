@@ -1178,7 +1178,7 @@ mod tests {
         use std::sync::atomic::AtomicU64;
 
         let inflight = Arc::new(AtomicU64::new(50));
-        let last_acked = Arc::new(AtomicU64::new(0));
+        let _last_acked = Arc::new(AtomicU64::new(0));
 
         // Simulate 100 in-flight deltas
         inflight.store(100, Ordering::SeqCst);
