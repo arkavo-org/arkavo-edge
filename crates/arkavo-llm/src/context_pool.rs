@@ -102,6 +102,8 @@ pub struct PooledContext {
     pub model_name: String,
     pub created_at: std::time::Instant,
     pub use_count: usize,
+    /// Current token position in KV cache (for resuming generation)
+    pub token_position: i32,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -112,6 +114,7 @@ impl PooledContext {
             model_name,
             created_at: std::time::Instant::now(),
             use_count: 0,
+            token_position: 0,
         }
     }
 
@@ -120,6 +123,17 @@ impl PooledContext {
         if let Ok(ctx) = self.context.lock() {
             ctx.clear_kv_cache();
         }
+        // Note: caller should reset token_position after this
+    }
+
+    /// Get the current token position
+    pub fn get_token_position(&self) -> i32 {
+        self.token_position
+    }
+
+    /// Set the token position (after generation)
+    pub fn set_token_position(&mut self, pos: i32) {
+        self.token_position = pos;
     }
 
     fn mark_used(&mut self) {
@@ -147,10 +161,23 @@ impl ModelContextPool {
         }
     }
 
+    /// Acquire a context, preserving KV cache (for multi-turn conversations)
     fn acquire(&mut self) -> Result<PooledContext> {
+        self.acquire_internal(false)
+    }
+
+    /// Acquire a fresh context with cleared KV cache (for new conversations)
+    fn acquire_fresh(&mut self) -> Result<PooledContext> {
+        self.acquire_internal(true)
+    }
+
+    fn acquire_internal(&mut self, clear_cache: bool) -> Result<PooledContext> {
         // Try to get an available context
         if let Some(mut context) = self.available.pop_front() {
-            context.clear_kv_cache();
+            if clear_cache {
+                context.clear_kv_cache();
+                context.token_position = 0;
+            }
             context.mark_used();
             self.in_use += 1;
             return Ok(context);
@@ -165,7 +192,7 @@ impl ModelContextPool {
             )));
         }
 
-        // Create new context
+        // Create new context (always starts fresh)
         let context = LlamaContext::new(&self.model)
             .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
 
@@ -173,11 +200,15 @@ impl ModelContextPool {
         Ok(PooledContext::new(context, self.model_name()))
     }
 
-    fn release(&mut self, context: PooledContext) {
+    /// Release a context back to the pool
+    fn release(&mut self, mut context: PooledContext, clear_cache: bool) {
         if self.in_use > 0 {
             self.in_use -= 1;
         }
-        context.clear_kv_cache();
+        if clear_cache {
+            context.clear_kv_cache();
+            context.token_position = 0;
+        }
         self.available.push_back(context);
     }
 
@@ -226,6 +257,7 @@ impl ContextPool {
         Ok(())
     }
 
+    /// Acquire a context preserving KV cache (for multi-turn conversations)
     #[allow(clippy::significant_drop_tightening)]
     pub fn acquire(&self, model_name: &str) -> Result<PooledContext> {
         self.pools
@@ -236,8 +268,30 @@ impl ContextPool {
             .and_then(|pool| pool.acquire())
     }
 
+    /// Acquire a fresh context with cleared KV cache (for new conversations)
     #[allow(clippy::significant_drop_tightening)]
-    pub fn release(&self, model_name: &str, context: PooledContext) -> Result<()> {
+    pub fn acquire_fresh(&self, model_name: &str) -> Result<PooledContext> {
+        self.pools
+            .write()
+            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
+            .get_mut(model_name)
+            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
+            .and_then(|pool| pool.acquire_fresh())
+    }
+
+    /// Release a context back to the pool
+    ///
+    /// # Arguments
+    /// * `model_name` - Name of the model this context belongs to
+    /// * `context` - The context to release
+    /// * `clear_cache` - If true, clears KV cache before returning to pool
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn release(
+        &self,
+        model_name: &str,
+        context: PooledContext,
+        clear_cache: bool,
+    ) -> Result<()> {
         let mut pools = self
             .pools
             .write()
@@ -245,7 +299,7 @@ impl ContextPool {
 
         pools
             .get_mut(model_name)
-            .map(|pool| pool.release(context))
+            .map(|pool| pool.release(context, clear_cache))
             .ok_or_else(|| Error::Config(format!("Model '{model_name}' not found")))
     }
 

@@ -47,6 +47,9 @@ impl Default for SamplingConfig {
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::ModelRegistry;
 
+/// Type alias for conversation identifiers
+type ConversationId = String;
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct LlamaCppProvider {
     /// Model reference - either owned directly or accessed via registry
@@ -57,6 +60,8 @@ pub struct LlamaCppProvider {
     name: String,
     config: SamplingConfig,
     mtmd_ctx: Option<Arc<MtmdContext>>,
+    /// Optional conversation ID for context reuse
+    conversation_id: Option<ConversationId>,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -121,6 +126,7 @@ impl LlamaCppProvider {
             name: model_name,
             config,
             mtmd_ctx,
+            conversation_id: None,
         })
     }
 
@@ -148,7 +154,45 @@ impl LlamaCppProvider {
             name: model_name,
             config,
             mtmd_ctx: None,
+            conversation_id: None,
         })
+    }
+
+    /// Create a provider with conversation context for multi-turn caching
+    ///
+    /// When a conversation_id is set, the provider will attempt to reuse
+    /// the KV cache across turns for improved performance.
+    pub fn new_with_conversation(
+        registry: Arc<ModelRegistry>,
+        model_name: String,
+        conversation_id: ConversationId,
+        config: SamplingConfig,
+    ) -> Result<Self> {
+        if !registry.is_loaded(&model_name) {
+            return Err(Error::Config(format!(
+                "Model '{model_name}' not found in registry"
+            )));
+        }
+
+        Ok(Self {
+            model: None,
+            registry: Some(registry),
+            name: model_name,
+            config,
+            mtmd_ctx: None,
+            conversation_id: Some(conversation_id),
+        })
+    }
+
+    /// Set the conversation ID for context reuse
+    pub fn with_conversation(mut self, conversation_id: ConversationId) -> Self {
+        self.conversation_id = Some(conversation_id);
+        self
+    }
+
+    /// Get the current conversation ID
+    pub fn conversation_id(&self) -> Option<&str> {
+        self.conversation_id.as_deref()
     }
 
     /// Get the model reference, either from owned or registry
@@ -354,6 +398,7 @@ impl Provider for LlamaCppProvider {
                 name: self.name.clone(),
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
+                conversation_id: self.conversation_id.clone(),
             };
             &custom_provider
         } else {
@@ -465,6 +510,7 @@ impl Provider for LlamaCppProvider {
                 name: self.name.clone(),
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
+                conversation_id: self.conversation_id.clone(),
             };
             custom_provider
                 .complete_with_options(modified_messages, max_tokens)

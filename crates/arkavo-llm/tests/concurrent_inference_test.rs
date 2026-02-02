@@ -68,10 +68,10 @@ fn test_model_registry_send_sync() {
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[test]
-fn test_context_guard_send() {
+fn test_pooled_context_send() {
     fn assert_send<T: Send>() {}
-    use arkavo_llm::ContextGuard;
-    assert_send::<ContextGuard>();
+    use arkavo_llm::PooledContext;
+    assert_send::<PooledContext>();
 }
 
 /// Test that ModelInfo can be cloned and sent across threads

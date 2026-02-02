@@ -4,6 +4,7 @@ pub mod client;
 pub mod common;
 pub mod config;
 pub mod context_pool;
+pub mod conversation_context;
 pub mod error;
 pub mod image;
 pub mod mcp_converter;
@@ -61,10 +62,14 @@ mod llamacpp_streaming;
 pub use context_pool::{ContextPool, PoolStats};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use context_pool::{ContextPool, PoolStats, PooledContext};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use conversation_context::{
+    ConversationContext, ConversationContextManager, ConversationContextRef, ConversationId,
+};
 #[cfg(feature = "llama-cpp")]
 pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-pub use model_registry::{ContextGuard, ModelInfo, ModelRegistry};
+pub use model_registry::{ModelInfo, ModelRegistry};
 #[cfg(all(feature = "llama-cpp", target_env = "musl"))]
 pub use model_registry::{ModelInfo, ModelRegistry};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

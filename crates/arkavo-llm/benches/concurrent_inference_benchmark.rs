@@ -115,6 +115,7 @@ fn benchmark_multi_model(c: &mut Criterion) {
 }
 
 /// Benchmark: ModelRegistry concurrent access patterns
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn benchmark_registry_contention(c: &mut Criterion) {
     use arkavo_llm::ModelRegistry;
 
@@ -262,6 +263,8 @@ fn benchmark_latency_distribution(c: &mut Criterion) {
     group.finish();
 }
 
+// On llama-cpp feature, include registry contention benchmark
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 criterion_group!(
     benches,
     benchmark_single_model,
@@ -270,4 +273,15 @@ criterion_group!(
     benchmark_max_throughput,
     benchmark_latency_distribution
 );
+
+// Without llama-cpp feature, exclude registry contention benchmark
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+criterion_group!(
+    benches,
+    benchmark_single_model,
+    benchmark_multi_model,
+    benchmark_max_throughput,
+    benchmark_latency_distribution
+);
+
 criterion_main!(benches);

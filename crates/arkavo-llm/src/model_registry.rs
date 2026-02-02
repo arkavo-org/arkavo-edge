@@ -5,59 +5,51 @@
 //!
 //! Architecture:
 //! - Each model is stored as Arc<LlamaModel> for thread-safe shared access
-//! - Each model gets its own Mutex<LlamaContext> because llama_decode() is not reentrant
-//! - Concurrent requests to the same model queue on the mutex
-//! - Requests to different models run truly in parallel
+//! - Models use ContextPool for multiple concurrent contexts per model
+//! - True concurrent inference: different contexts = parallel execution
+//! - KV cache isolation: each context has its own cache for conversations
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llama_cpp::{LlamaContext, LlamaModel};
+use arkavo_llama_cpp::LlamaModel;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::collections::HashMap;
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 use std::collections::HashSet;
-use std::sync::RwLock;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::RwLock;
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use crate::context_pool::{ContextPool, PooledContext};
 use crate::{Error, Result};
 
-/// Guard for exclusive access to a model's context
+/// Registry for managing multiple loaded models with pooled contexts
 ///
-/// When dropped, the context is returned to the pool for other requests.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-pub struct ContextGuard {
-    pub context: Arc<Mutex<LlamaContext>>,
-}
-
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-impl ContextGuard {
-    fn new(context: Arc<Mutex<LlamaContext>>) -> Self {
-        Self { context }
-    }
-}
-
-/// Registry for managing multiple loaded models
-///
-/// The registry stores loaded models and their associated contexts,
-/// allowing concurrent access to different models while ensuring
-/// thread-safe access to individual models.
+/// The registry stores loaded models and uses a ContextPool for managing
+/// multiple contexts per model, enabling true concurrent inference.
 pub struct ModelRegistry {
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     models: RwLock<HashMap<String, Arc<LlamaModel>>>,
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    contexts: RwLock<HashMap<String, Arc<Mutex<LlamaContext>>>>,
+    context_pool: ContextPool,
     // Stub fields for non-llama-cpp builds to maintain struct size consistency
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     models: RwLock<HashSet<String>>,
 }
 
 impl ModelRegistry {
-    /// Create a new empty model registry
+    /// Create a new empty model registry with default pool settings
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn new() -> Self {
+        Self::with_max_contexts(4)
+    }
+
+    /// Create a new model registry with custom max contexts per model
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn with_max_contexts(max_contexts: usize) -> Self {
         Self {
             models: RwLock::new(HashMap::new()),
-            contexts: RwLock::new(HashMap::new()),
+            context_pool: ContextPool::with_max_contexts(max_contexts),
         }
     }
 
@@ -82,23 +74,17 @@ impl ModelRegistry {
         let model = LlamaModel::from_file(path)
             .map_err(|e| Error::Config(format!("Failed to load model from {path}: {e}")))?;
 
-        let context = LlamaContext::new(&model)
-            .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
+        let model_arc = Arc::new(model);
+
+        // Register with context pool for concurrent context management
+        self.context_pool.register_model(name, model_arc.clone())?;
 
         {
             let mut models = self
                 .models
                 .write()
                 .map_err(|_| Error::Internal("Lock poisoned".to_string()))?;
-            models.insert(name.to_string(), Arc::new(model));
-        }
-
-        {
-            let mut contexts = self
-                .contexts
-                .write()
-                .map_err(|_| Error::Internal("Lock poisoned".to_string()))?;
-            contexts.insert(name.to_string(), Arc::new(Mutex::new(context)));
+            models.insert(name.to_string(), model_arc);
         }
 
         Ok(())
@@ -129,22 +115,41 @@ impl ModelRegistry {
         None
     }
 
-    /// Acquire exclusive access to a model's context
+    /// Acquire a context from the pool for the given model
     ///
-    /// This blocks until the context is available. Multiple requests to the
-    /// same model will be serialized; requests to different models run in parallel.
+    /// Returns a PooledContext that can be used for inference. The context
+    /// preserves its KV cache for multi-turn conversations.
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    #[allow(clippy::significant_drop_tightening)]
-    pub fn acquire_context(&self, name: &str) -> Result<ContextGuard> {
-        let context = self
-            .contexts
-            .read()
-            .map_err(|_| Error::Internal("Lock poisoned".to_string()))?
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Error::Config(format!("Model '{name}' not found in registry")))?;
+    pub fn acquire_context(&self, name: &str) -> Result<PooledContext> {
+        self.context_pool.acquire(name)
+    }
 
-        Ok(ContextGuard::new(context))
+    /// Acquire a fresh context with cleared KV cache (for new conversations)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn acquire_fresh_context(&self, name: &str) -> Result<PooledContext> {
+        self.context_pool.acquire_fresh(name)
+    }
+
+    /// Release a context back to the pool
+    ///
+    /// # Arguments
+    /// * `name` - Model name
+    /// * `context` - The context to release
+    /// * `clear_cache` - If true, clears KV cache before returning to pool
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn release_context(
+        &self,
+        name: &str,
+        context: PooledContext,
+        clear_cache: bool,
+    ) -> Result<()> {
+        self.context_pool.release(name, context, clear_cache)
+    }
+
+    /// Get the context pool (for advanced use cases like ConversationContextManager)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn context_pool(&self) -> &ContextPool {
+        &self.context_pool
     }
 
     /// Stub for non-llama-cpp builds
@@ -161,16 +166,12 @@ impl ModelRegistry {
     pub fn unload_model(&self, name: &str) -> bool {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
-            let removed = self
-                .models
+            // Remove from models map (contexts will be cleaned up when pool is dropped)
+            self.models
                 .write()
                 .ok()
                 .and_then(|mut models| models.remove(name))
-                .is_some();
-            if let Ok(mut contexts) = self.contexts.write() {
-                contexts.remove(name);
-            }
-            removed
+                .is_some()
         }
         #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {

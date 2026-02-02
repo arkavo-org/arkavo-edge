@@ -16,6 +16,9 @@ use crate::{
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
 
+/// Type alias for conversation identifiers
+pub(crate) type ConversationId = String;
+
 /// Stub type for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 pub struct ModelRegistry;
@@ -39,6 +42,8 @@ pub struct MultiModelProvider {
     config: SamplingConfig,
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     _config: SamplingConfig,
+    /// Optional conversation ID for context reuse across turns
+    conversation_id: Option<ConversationId>,
 }
 
 impl MultiModelProvider {
@@ -49,6 +54,7 @@ impl MultiModelProvider {
             registry,
             default_model: default_model.to_string(),
             config,
+            conversation_id: None,
         }
     }
 
@@ -63,7 +69,27 @@ impl MultiModelProvider {
             _registry: Arc::new(ModelRegistry),
             default_model: default_model.to_string(),
             _config: SamplingConfig,
+            conversation_id: None,
         }
+    }
+
+    /// Set a conversation ID for multi-turn context reuse
+    ///
+    /// When a conversation ID is set, the provider will attempt to
+    /// preserve KV cache across turns for improved performance.
+    pub fn with_conversation(mut self, conversation_id: ConversationId) -> Self {
+        self.conversation_id = Some(conversation_id);
+        self
+    }
+
+    /// Set the conversation ID
+    pub fn set_conversation_id(&mut self, conversation_id: Option<ConversationId>) {
+        self.conversation_id = conversation_id;
+    }
+
+    /// Get the current conversation ID
+    pub fn conversation_id(&self) -> Option<&str> {
+        self.conversation_id.as_deref()
     }
 
     /// Set the default model to use when none is specified
@@ -110,12 +136,8 @@ impl Provider for MultiModelProvider {
         messages: Vec<Message>,
         max_tokens: Option<usize>,
     ) -> Result<String> {
-        // Create a LlamaCppProvider using the registry for the default model
-        let provider = crate::LlamaCppProvider::new_with_registry(
-            self.registry.clone(),
-            self.default_model.clone(),
-            self.config.clone(),
-        )?;
+        // Create a LlamaCppProvider, optionally with conversation ID for context reuse
+        let provider = self.create_provider()?;
         provider.complete_with_options(messages, max_tokens).await
     }
 
@@ -123,11 +145,7 @@ impl Provider for MultiModelProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<Box<dyn tokio_stream::Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        let provider = crate::LlamaCppProvider::new_with_registry(
-            self.registry.clone(),
-            self.default_model.clone(),
-            self.config.clone(),
-        )?;
+        let provider = self.create_provider()?;
         provider.stream(messages).await
     }
 
@@ -145,14 +163,31 @@ impl Provider for MultiModelProvider {
         tools: Option<Value>,
         max_tokens: Option<usize>,
     ) -> Result<ProviderResponse> {
-        let provider = crate::LlamaCppProvider::new_with_registry(
-            self.registry.clone(),
-            self.default_model.clone(),
-            self.config.clone(),
-        )?;
+        let provider = self.create_provider()?;
         provider
             .complete_with_tools(messages, tools, max_tokens)
             .await
+    }
+}
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+impl MultiModelProvider {
+    /// Create a LlamaCppProvider, optionally with conversation ID
+    fn create_provider(&self) -> Result<crate::LlamaCppProvider> {
+        if let Some(ref conv_id) = self.conversation_id {
+            crate::LlamaCppProvider::new_with_conversation(
+                self.registry.clone(),
+                self.default_model.clone(),
+                conv_id.clone(),
+                self.config.clone(),
+            )
+        } else {
+            crate::LlamaCppProvider::new_with_registry(
+                self.registry.clone(),
+                self.default_model.clone(),
+                self.config.clone(),
+            )
+        }
     }
 }
 
@@ -204,9 +239,23 @@ impl Provider for MultiModelProvider {
 mod tests {
     use super::*;
 
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    use crate::ModelRegistry as RealModelRegistry;
+
+    fn create_test_registry() -> Arc<ModelRegistry> {
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        {
+            Arc::new(RealModelRegistry::new())
+        }
+        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+        {
+            Arc::new(ModelRegistry)
+        }
+    }
+
     #[tokio::test]
     async fn test_multi_model_provider_creation() {
-        let registry = Arc::new(ModelRegistry);
+        let registry = create_test_registry();
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
         assert_eq!(provider.name(), "default");
@@ -215,7 +264,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_set_default() {
-        let registry = Arc::new(ModelRegistry);
+        let registry = create_test_registry();
         let mut provider = MultiModelProvider::new(registry, "model-a", SamplingConfig::default());
 
         assert_eq!(provider.default_model(), "model-a");
@@ -227,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_has_model() {
-        let registry = Arc::new(ModelRegistry);
+        let registry = create_test_registry();
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
         assert!(!provider.has_model("any-model"));
@@ -235,7 +284,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_available_models() {
-        let registry = Arc::new(ModelRegistry);
+        let registry = create_test_registry();
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
         let models = provider.available_models();
@@ -247,5 +296,14 @@ mod tests {
     fn test_multi_model_provider_thread_safety() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<MultiModelProvider>();
+    }
+
+    #[tokio::test]
+    async fn test_multi_model_provider_with_conversation() {
+        let registry = create_test_registry();
+        let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default())
+            .with_conversation("conv-123".to_string());
+
+        assert_eq!(provider.conversation_id(), Some("conv-123"));
     }
 }
