@@ -5,29 +5,14 @@
 //! - Requests to different models run in parallel
 //! - Thread safety of the ModelRegistry
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llm::ModelRegistry;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 
-/// Test helper to check if llama-cpp feature is available
-fn llama_cpp_available() -> bool {
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    {
-        true
-    }
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-    {
-        false
-    }
-}
-
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[tokio::test]
 async fn test_concurrent_model_access() {
-    if !llama_cpp_available() {
-        eprintln!("Skipping test: llama-cpp feature not available");
-        return;
-    }
-
-    use arkavo_llm::ModelRegistry;
-
     let registry = Arc::new(ModelRegistry::new());
 
     // Spawn multiple tasks that access the registry concurrently
@@ -50,15 +35,9 @@ async fn test_concurrent_model_access() {
     }
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[tokio::test]
 async fn test_model_registry_thread_safety_stress() {
-    if !llama_cpp_available() {
-        eprintln!("Skipping test: llama-cpp feature not available");
-        return;
-    }
-
-    use arkavo_llm::ModelRegistry;
-
     let registry = Arc::new(ModelRegistry::new());
     let mut handles = vec![];
 
@@ -80,48 +59,35 @@ async fn test_model_registry_thread_safety_stress() {
     }
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[test]
 fn test_model_registry_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
-
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    {
-        use arkavo_llm::ModelRegistry;
-        assert_send_sync::<ModelRegistry>();
-    }
+    assert_send_sync::<ModelRegistry>();
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[test]
 fn test_context_guard_send() {
     fn assert_send<T: Send>() {}
-
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    {
-        use arkavo_llm::ContextGuard;
-        assert_send::<ContextGuard>();
-    }
+    use arkavo_llm::ContextGuard;
+    assert_send::<ContextGuard>();
 }
 
 /// Test that ModelInfo can be cloned and sent across threads
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[test]
 fn test_model_info_clone_send() {
     fn assert_clone_send<T: Clone + Send>() {}
-
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    {
-        use arkavo_llm::ModelInfo;
-        assert_clone_send::<ModelInfo>();
-    }
+    use arkavo_llm::ModelInfo;
+    assert_clone_send::<ModelInfo>();
 }
 
 /// Test multi-model provider thread safety
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[test]
 fn test_multi_model_provider_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
-
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    {
-        use arkavo_llm::MultiModelProvider;
-        assert_send_sync::<MultiModelProvider>();
-    }
+    use arkavo_llm::MultiModelProvider;
+    assert_send_sync::<MultiModelProvider>();
 }

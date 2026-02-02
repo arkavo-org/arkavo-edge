@@ -178,13 +178,14 @@ fn test_implementation_recommendations() {
     println!();
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[tokio::test]
 async fn test_architecture_correctness_validation() {
+    use arkavo_llm::ModelRegistry;
+
     println!("\n========================================");
     println!("Architecture Validation");
     println!("========================================\n");
-
-    use arkavo_llm::ModelRegistry;
 
     let _registry = ModelRegistry::new();
 

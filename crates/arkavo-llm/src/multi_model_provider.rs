@@ -6,16 +6,11 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llama_cpp::multimodal::MtmdContext;
-
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::{
-    Error, Message, ModelRegistry, Provider, ProviderResponse, Result, SamplingConfig,
-    StreamResponse,
+    Message, ModelRegistry, Provider, ProviderResponse, Result, SamplingConfig, StreamResponse,
 };
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -23,7 +18,6 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
 
 /// Stub type for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-#[allow(dead_code)]
 struct ModelRegistry;
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -39,14 +33,12 @@ impl ModelRegistry {
 /// Stub type for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 #[derive(Clone, Default)]
-#[allow(dead_code)]
 struct SamplingConfig;
 
 /// Provider that can route requests to multiple loaded models
 ///
 /// Uses a ModelRegistry to access different models and can select
 /// which model to use based on request parameters or routing logic.
-#[allow(dead_code)]
 pub struct MultiModelProvider {
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     registry: Arc<ModelRegistry>,
@@ -57,8 +49,6 @@ pub struct MultiModelProvider {
     config: SamplingConfig,
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     _config: SamplingConfig,
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    mtmd_contexts: HashMap<String, Arc<MtmdContext>>,
 }
 
 impl MultiModelProvider {
@@ -69,13 +59,16 @@ impl MultiModelProvider {
             registry,
             default_model: default_model.to_string(),
             config,
-            mtmd_contexts: HashMap::new(),
         }
     }
 
     /// Stub for non-llama-cpp builds
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-    pub fn new(_registry: Arc<ModelRegistry>, default_model: &str, _config: SamplingConfig) -> Self {
+    pub fn new(
+        _registry: Arc<ModelRegistry>,
+        default_model: &str,
+        _config: SamplingConfig,
+    ) -> Self {
         Self {
             _registry: Arc::new(ModelRegistry),
             default_model: default_model.to_string(),
@@ -118,6 +111,63 @@ impl MultiModelProvider {
     }
 }
 
+/// Provider implementation for llama-cpp builds - delegates to LlamaCppProvider
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[async_trait]
+impl Provider for MultiModelProvider {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<String> {
+        // Create a LlamaCppProvider using the registry for the default model
+        let provider = crate::LlamaCppProvider::new_with_registry(
+            self.registry.clone(),
+            self.default_model.clone(),
+            self.config.clone(),
+        )?;
+        provider.complete_with_options(messages, max_tokens).await
+    }
+
+    async fn stream(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<Box<dyn tokio_stream::Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let provider = crate::LlamaCppProvider::new_with_registry(
+            self.registry.clone(),
+            self.default_model.clone(),
+            self.config.clone(),
+        )?;
+        provider.stream(messages).await
+    }
+
+    fn name(&self) -> &str {
+        &self.default_model
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        let provider = crate::LlamaCppProvider::new_with_registry(
+            self.registry.clone(),
+            self.default_model.clone(),
+            self.config.clone(),
+        )?;
+        provider
+            .complete_with_tools(messages, tools, max_tokens)
+            .await
+    }
+}
+
+/// Stub Provider implementation for non-llama-cpp builds
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 #[async_trait]
 impl Provider for MultiModelProvider {
     async fn complete_with_options(

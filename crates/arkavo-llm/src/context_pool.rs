@@ -34,10 +34,9 @@ impl PoolStats {
 
 /// Stub implementation for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-#[allow(dead_code)]
 pub struct ContextPool {
-    pools: RwLock<HashMap<String, ()>>,
-    default_max_contexts: usize,
+    _pools: RwLock<HashMap<String, ()>>,
+    _default_max_contexts: usize,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -48,8 +47,8 @@ impl ContextPool {
 
     pub fn with_max_contexts(max_contexts: usize) -> Self {
         Self {
-            pools: RwLock::new(HashMap::new()),
-            default_max_contexts: max_contexts,
+            _pools: RwLock::new(HashMap::new()),
+            _default_max_contexts: max_contexts,
         }
     }
 
