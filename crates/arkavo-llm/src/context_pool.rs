@@ -34,6 +34,7 @@ impl PoolStats {
 
 /// Stub implementation for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[allow(dead_code)]
 pub struct ContextPool {
     pools: RwLock<HashMap<String, ()>>,
     default_max_contexts: usize,

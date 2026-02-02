@@ -57,13 +57,17 @@ pub use gemini_adapter::GeminiProvider;
 mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use context_pool::{ContextPool, PoolStats, PooledContext};
+#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
+pub use context_pool::{ContextPool, PoolStats};
 #[cfg(feature = "llama-cpp")]
 pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use model_registry::{ContextGuard, ModelInfo, ModelRegistry};
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
+pub use model_registry::{ModelInfo, ModelRegistry};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use multi_model_provider::MultiModelProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{

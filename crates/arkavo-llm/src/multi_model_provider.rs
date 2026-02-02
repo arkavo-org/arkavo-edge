@@ -12,10 +12,35 @@ use std::sync::Arc;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::MtmdContext;
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::{
     Error, Message, ModelRegistry, Provider, ProviderResponse, Result, SamplingConfig,
     StreamResponse,
 };
+
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
+
+/// Stub type for non-llama-cpp builds
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[allow(dead_code)]
+struct ModelRegistry;
+
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+impl ModelRegistry {
+    fn is_loaded(&self, _name: &str) -> bool {
+        false
+    }
+    fn model_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// Stub type for non-llama-cpp builds
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[derive(Clone, Default)]
+#[allow(dead_code)]
+struct SamplingConfig;
 
 /// Provider that can route requests to multiple loaded models
 ///
@@ -23,27 +48,38 @@ use crate::{
 /// which model to use based on request parameters or routing logic.
 #[allow(dead_code)]
 pub struct MultiModelProvider {
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     registry: Arc<ModelRegistry>,
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    _registry: Arc<ModelRegistry>,
     default_model: String,
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     config: SamplingConfig,
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    _config: SamplingConfig,
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     mtmd_contexts: HashMap<String, Arc<MtmdContext>>,
 }
 
 impl MultiModelProvider {
     /// Create a new multi-model provider
-    ///
-    /// # Arguments
-    /// * `registry` - The model registry containing loaded models
-    /// * `default_model` - Default model name to use when none specified
-    /// * `config` - Sampling configuration for generation
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn new(registry: Arc<ModelRegistry>, default_model: &str, config: SamplingConfig) -> Self {
         Self {
             registry,
             default_model: default_model.to_string(),
             config,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             mtmd_contexts: HashMap::new(),
+        }
+    }
+
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn new(_registry: Arc<ModelRegistry>, default_model: &str, _config: SamplingConfig) -> Self {
+        Self {
+            _registry: Arc::new(ModelRegistry),
+            default_model: default_model.to_string(),
+            _config: SamplingConfig::default(),
         }
     }
 
@@ -58,13 +94,27 @@ impl MultiModelProvider {
     }
 
     /// Check if a model is available in the registry
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn has_model(&self, name: &str) -> bool {
         self.registry.is_loaded(name)
     }
 
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn has_model(&self, _name: &str) -> bool {
+        false
+    }
+
     /// Get list of available models
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn available_models(&self) -> Vec<String> {
         self.registry.model_names()
+    }
+
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn available_models(&self) -> Vec<String> {
+        Vec::new()
     }
 }
 
@@ -75,61 +125,18 @@ impl Provider for MultiModelProvider {
         _messages: Vec<Message>,
         _max_tokens: Option<usize>,
     ) -> Result<String> {
-        // For now, delegate to the default model
-        // This is a placeholder - full implementation would:
-        // 1. Determine which model to use (from request context or routing)
-        // 2. Acquire context from registry
-        // 3. Run inference
-        // 4. Return result
-
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-        {
-            // Ensure the default model is available
-            if !self.registry.is_loaded(&self.default_model) {
-                return Err(Error::Config(format!(
-                    "Default model '{}' not found in registry",
-                    self.default_model
-                )));
-            }
-
-            // Placeholder implementation
-            Err(Error::NotImplemented(
-                "MultiModelProvider.complete_with_options not yet fully implemented".to_string(),
-            ))
-        }
-
-        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-        {
-            Err(Error::Config(
-                "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
-            ))
-        }
+        Err(Error::Config(
+            "MultiModelProvider requires llama-cpp feature".to_string(),
+        ))
     }
 
     async fn stream(
         &self,
         _messages: Vec<Message>,
     ) -> Result<Box<dyn tokio_stream::Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-        {
-            if !self.registry.is_loaded(&self.default_model) {
-                return Err(Error::Config(format!(
-                    "Default model '{}' not found in registry",
-                    self.default_model
-                )));
-            }
-
-            Err(Error::NotImplemented(
-                "MultiModelProvider.stream not yet fully implemented".to_string(),
-            ))
-        }
-
-        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-        {
-            Err(Error::Config(
-                "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
-            ))
-        }
+        Err(Error::Config(
+            "MultiModelProvider requires llama-cpp feature".to_string(),
+        ))
     }
 
     fn name(&self) -> &str {
@@ -146,26 +153,9 @@ impl Provider for MultiModelProvider {
         _tools: Option<Value>,
         _max_tokens: Option<usize>,
     ) -> Result<ProviderResponse> {
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-        {
-            if !self.registry.is_loaded(&self.default_model) {
-                return Err(Error::Config(format!(
-                    "Default model '{}' not found in registry",
-                    self.default_model
-                )));
-            }
-
-            Err(Error::NotImplemented(
-                "MultiModelProvider.complete_with_tools not yet fully implemented".to_string(),
-            ))
-        }
-
-        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-        {
-            Err(Error::Config(
-                "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
-            ))
-        }
+        Err(Error::Config(
+            "MultiModelProvider requires llama-cpp feature".to_string(),
+        ))
     }
 }
 
@@ -176,7 +166,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_creation() {
-        let registry = Arc::new(ModelRegistry::new());
+        let registry = Arc::new(ModelRegistry);
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
         assert_eq!(provider.name(), "default");
@@ -185,7 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_set_default() {
-        let registry = Arc::new(ModelRegistry::new());
+        let registry = Arc::new(ModelRegistry);
         let mut provider = MultiModelProvider::new(registry, "model-a", SamplingConfig::default());
 
         assert_eq!(provider.default_model(), "model-a");
@@ -197,19 +187,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_model_provider_has_model() {
-        let registry = Arc::new(ModelRegistry::new());
+        let registry = Arc::new(ModelRegistry);
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
-        // Empty registry should have no models
         assert!(!provider.has_model("any-model"));
     }
 
     #[tokio::test]
     async fn test_multi_model_provider_available_models() {
-        let registry = Arc::new(ModelRegistry::new());
+        let registry = Arc::new(ModelRegistry);
         let provider = MultiModelProvider::new(registry, "default", SamplingConfig::default());
 
-        // Empty registry should have no models
         let models = provider.available_models();
         assert!(models.is_empty());
     }
