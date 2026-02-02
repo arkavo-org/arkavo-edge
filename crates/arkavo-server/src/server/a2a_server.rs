@@ -4,6 +4,8 @@ use tracing::{debug, error, info, warn};
 
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
+#[cfg(feature = "llama-cpp")]
+use arkavo_llm::ModelRegistry;
 use arkavo_llm::{LlmClient, LlmClientAdapter, LlmConfig};
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
@@ -34,6 +36,9 @@ pub struct A2aServer {
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
+    /// Model registry for multi-model inference support
+    #[cfg(feature = "llama-cpp")]
+    model_registry: Arc<tokio::sync::RwLock<Option<Arc<ModelRegistry>>>>,
     router: Arc<tokio::sync::RwLock<Option<Arc<arkavo_router::Router>>>>,
     tool_registry: Arc<tokio::sync::RwLock<Option<Arc<arkavo_mcp_tools::ToolRegistry>>>>,
     event_writer: Arc<tokio::sync::RwLock<Option<Arc<EventWriter>>>>,
@@ -67,6 +72,8 @@ impl A2aServer {
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
+            #[cfg(feature = "llama-cpp")]
+            model_registry: Arc::new(tokio::sync::RwLock::new(None)),
             router: Arc::new(tokio::sync::RwLock::new(None)),
             tool_registry: Arc::new(tokio::sync::RwLock::new(None)),
             event_writer: Arc::new(tokio::sync::RwLock::new(None)),
@@ -108,6 +115,58 @@ impl A2aServer {
     /// Get the learning bus reference
     pub async fn learning_bus(&self) -> Option<Arc<LearningBus>> {
         self.learning_bus.read().await.clone()
+    }
+
+    /// Initialize the model registry for multi-model support
+    #[cfg(feature = "llama-cpp")]
+    pub async fn initialize_model_registry(&self) -> Arc<ModelRegistry> {
+        let registry = Arc::new(ModelRegistry::new());
+        *self.model_registry.write().await = Some(registry.clone());
+        info!("Model registry initialized for multi-model support");
+        registry
+    }
+
+    /// Get the model registry if initialized
+    #[cfg(feature = "llama-cpp")]
+    pub async fn model_registry(&self) -> Option<Arc<ModelRegistry>> {
+        self.model_registry.read().await.clone()
+    }
+
+    /// Load a model into the registry
+    #[cfg(feature = "llama-cpp")]
+    pub async fn load_model(&self, name: &str, path: &str) -> Result<()> {
+        let registry = self.model_registry.read().await.clone();
+        let registry = registry
+            .ok_or_else(|| A2aError::Configuration("Model registry not initialized".to_string()))?;
+
+        registry
+            .load(name, path)
+            .map_err(|e| A2aError::Configuration(format!("Failed to load model: {e}")))?;
+
+        info!("Model '{}' loaded from '{}' into registry", name, path);
+        Ok(())
+    }
+
+    /// Unload a model from the registry
+    #[cfg(feature = "llama-cpp")]
+    pub async fn unload_model(&self, name: &str) -> bool {
+        let registry = self.model_registry.read().await.clone();
+        if let Some(registry) = registry {
+            let removed = registry.unload_model(name);
+            if removed {
+                info!("Model '{}' unloaded from registry", name);
+            }
+            removed
+        } else {
+            false
+        }
+    }
+
+    /// Get list of loaded models
+    #[cfg(feature = "llama-cpp")]
+    pub async fn list_loaded_models(&self) -> Vec<String> {
+        let registry = self.model_registry.read().await.clone();
+        registry.map(|r| r.model_names()).unwrap_or_default()
     }
 
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {

@@ -45,8 +45,15 @@ impl Default for SamplingConfig {
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use crate::ModelRegistry;
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct LlamaCppProvider {
-    model: Arc<LlamaModel>,
+    /// Model reference - either owned directly or accessed via registry
+    model: Option<Arc<LlamaModel>>,
+    /// Model registry for multi-model mode
+    registry: Option<Arc<ModelRegistry>>,
+    /// Model name (key in registry for multi-model mode)
     name: String,
     config: SamplingConfig,
     mtmd_ctx: Option<Arc<MtmdContext>>,
@@ -109,11 +116,52 @@ impl LlamaCppProvider {
         };
 
         Ok(Self {
-            model: Arc::new(model),
+            model: Some(Arc::new(model)),
+            registry: None,
             name: model_name,
             config,
             mtmd_ctx,
         })
+    }
+
+    /// Create a new provider that uses a ModelRegistry for multi-model support
+    ///
+    /// # Arguments
+    /// * `registry` - The model registry containing loaded models
+    /// * `model_name` - Name of the model to use from the registry
+    /// * `config` - Sampling configuration
+    pub fn new_with_registry(
+        registry: Arc<ModelRegistry>,
+        model_name: String,
+        config: SamplingConfig,
+    ) -> Result<Self> {
+        // Verify the model exists in registry
+        if !registry.is_loaded(&model_name) {
+            return Err(Error::Config(format!(
+                "Model '{model_name}' not found in registry"
+            )));
+        }
+
+        Ok(Self {
+            model: None,
+            registry: Some(registry),
+            name: model_name,
+            config,
+            mtmd_ctx: None,
+        })
+    }
+
+    /// Get the model reference, either from owned or registry
+    fn get_model(&self) -> Result<Arc<LlamaModel>> {
+        if let Some(ref model) = self.model {
+            Ok(model.clone())
+        } else if let Some(ref registry) = self.registry {
+            registry.get(&self.name).ok_or_else(|| {
+                Error::Config(format!("Model '{}' not found in registry", self.name))
+            })
+        } else {
+            Err(Error::Internal("Provider has no model source".to_string()))
+        }
     }
 }
 
@@ -198,7 +246,7 @@ impl LlamaCppProvider {
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let model = self.model.clone();
+        let model = self.get_model()?;
 
         // Dry sampling for GLM - disabled due to crash issues
         // TODO: Investigate dry sampling crash with GLM model
@@ -227,7 +275,7 @@ impl LlamaCppProvider {
         use crate::llamacpp_streaming::generate_tokens_with_vision;
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let model = self.model.clone();
+        let model = self.get_model()?;
         let mtmd_ctx = self
             .mtmd_ctx
             .clone()
@@ -302,6 +350,7 @@ impl Provider for LlamaCppProvider {
             config.max_tokens = max as u32;
             custom_provider = Self {
                 model: self.model.clone(),
+                registry: self.registry.clone(),
                 name: self.name.clone(),
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
@@ -412,6 +461,7 @@ impl Provider for LlamaCppProvider {
             config.temperature = 0.15;
             let custom_provider = Self {
                 model: self.model.clone(),
+                registry: self.registry.clone(),
                 name: self.name.clone(),
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),

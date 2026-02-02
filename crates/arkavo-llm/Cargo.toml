@@ -65,5 +65,10 @@ arkavo-snpe = { path = "../arkavo-snpe", optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 serial_test = "3"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "concurrent_inference_benchmark"
+harness = false
 [lints]
 workspace = true

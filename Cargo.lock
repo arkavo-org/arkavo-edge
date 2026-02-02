@@ -1129,6 +1129,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "criterion",
  "futures",
  "log",
  "rand 0.8.5",
