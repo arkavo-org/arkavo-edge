@@ -6,7 +6,11 @@
 //! - Efficient context reuse (pool returns cleared caches)
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+use std::collections::HashSet;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::{Error, Result};
 
@@ -35,7 +39,7 @@ impl PoolStats {
 /// Stub implementation for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 pub struct ContextPool {
-    _pools: RwLock<HashMap<String, ()>>,
+    _pools: RwLock<HashSet<String>>,
     _default_max_contexts: usize,
 }
 
@@ -47,7 +51,7 @@ impl ContextPool {
 
     pub fn with_max_contexts(max_contexts: usize) -> Self {
         Self {
-            _pools: RwLock::new(HashMap::new()),
+            _pools: RwLock::new(HashSet::new()),
             _default_max_contexts: max_contexts,
         }
     }

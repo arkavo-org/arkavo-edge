@@ -18,22 +18,12 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
 
 /// Stub type for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-struct ModelRegistry;
-
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-impl ModelRegistry {
-    fn is_loaded(&self, _name: &str) -> bool {
-        false
-    }
-    fn model_names(&self) -> Vec<String> {
-        Vec::new()
-    }
-}
+pub struct ModelRegistry;
 
 /// Stub type for non-llama-cpp builds
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 #[derive(Clone, Default)]
-struct SamplingConfig;
+pub struct SamplingConfig;
 
 /// Provider that can route requests to multiple loaded models
 ///
@@ -72,7 +62,7 @@ impl MultiModelProvider {
         Self {
             _registry: Arc::new(ModelRegistry),
             default_model: default_model.to_string(),
-            _config: SamplingConfig::default(),
+            _config: SamplingConfig,
         }
     }
 

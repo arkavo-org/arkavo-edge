@@ -11,10 +11,13 @@
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{LlamaContext, LlamaModel};
-use std::collections::HashMap;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use std::sync::Mutex;
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+use std::collections::HashSet;
+use std::sync::RwLock;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use std::sync::{Arc, Mutex};
 
 use crate::{Error, Result};
 
@@ -45,16 +48,24 @@ pub struct ModelRegistry {
     contexts: RwLock<HashMap<String, Arc<Mutex<LlamaContext>>>>,
     // Stub fields for non-llama-cpp builds to maintain struct size consistency
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
-    models: RwLock<HashMap<String, ()>>,
+    models: RwLock<HashSet<String>>,
 }
 
 impl ModelRegistry {
     /// Create a new empty model registry
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn new() -> Self {
         Self {
             models: RwLock::new(HashMap::new()),
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             contexts: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Create a new empty model registry (stub for non-llama-cpp builds)
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn new() -> Self {
+        Self {
+            models: RwLock::new(HashSet::new()),
         }
     }
 
@@ -163,11 +174,13 @@ impl ModelRegistry {
         }
         #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {
+            let _ = name;
             false
         }
     }
 
     /// Check if a model is currently loaded in the registry
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn is_loaded(&self, name: &str) -> bool {
         self.models
             .read()
@@ -176,12 +189,33 @@ impl ModelRegistry {
             .unwrap_or(false)
     }
 
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn is_loaded(&self, name: &str) -> bool {
+        self.models
+            .read()
+            .ok()
+            .map(|models| models.contains(name))
+            .unwrap_or(false)
+    }
+
     /// Get a list of all loaded model names
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn model_names(&self) -> Vec<String> {
         self.models
             .read()
             .ok()
             .map(|models| models.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn model_names(&self) -> Vec<String> {
+        self.models
+            .read()
+            .ok()
+            .map(|models| models.iter().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -200,6 +234,7 @@ impl ModelRegistry {
     }
 
     /// List all models with their information
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn list_models(&self) -> Vec<ModelInfo> {
         self.models
             .read()
@@ -207,6 +242,24 @@ impl ModelRegistry {
             .map(|models| {
                 models
                     .keys()
+                    .map(|name| ModelInfo {
+                        name: name.clone(),
+                        loaded: true,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn list_models(&self) -> Vec<ModelInfo> {
+        self.models
+            .read()
+            .ok()
+            .map(|models| {
+                models
+                    .iter()
                     .map(|name| ModelInfo {
                         name: name.clone(),
                         loaded: true,
