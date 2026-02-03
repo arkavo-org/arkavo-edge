@@ -5,10 +5,12 @@ use crate::model_discovery;
 
 /// Provider availability status
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ProviderAvailability {
     pub gemini: bool,
     pub anthropic: bool,
     pub deepseek: bool,
+    pub kimi: bool,
 }
 
 impl ProviderAvailability {
@@ -18,12 +20,13 @@ impl ProviderAvailability {
             gemini: std::env::var("GEMINI_API_KEY").is_ok(),
             anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
             deepseek: std::env::var("DEEPSEEK_API_KEY").is_ok(),
+            kimi: std::env::var("MOONSHOT_API_KEY").is_ok(),
         }
     }
 
     /// Check if any cloud provider is available
     pub fn has_cloud(&self) -> bool {
-        self.gemini || self.anthropic || self.deepseek
+        self.gemini || self.anthropic || self.deepseek || self.kimi
     }
 }
 
@@ -103,15 +106,15 @@ impl ModelSelector {
             return ModelChoice::LocalQwen3;
         }
 
-        // GPU available - use existing logic (prefer larger when requested)
+        // GPU available - prefer Ministral-8B for faster responses with good tool calling
         if prefer_larger {
-            // Try GLM first (30B MoE, requires 32GB+ RAM), then fall back
-            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+            // Prefer Ministral-8B (faster) over GLM-4.7-Flash (slower but higher quality)
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+                ModelChoice::LocalMinistral8B
+            } else if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram_for_glm()
             {
                 ModelChoice::LocalGlm47Flash
-            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
-                ModelChoice::LocalMinistral8B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 ModelChoice::LocalMinistral3B
             } else {
@@ -227,13 +230,11 @@ impl ModelSelector {
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
-            // General tasks with high confidence use larger local model for better reasoning
-            TaskCategory::General if classification.confidence > 0.7 => {
-                self.best_available_local_model(true)
-            }
+            // General tasks use larger local model for better tool calling and reasoning
+            TaskCategory::General => self.best_available_local_model(true),
 
-            // Low confidence general tasks use fast model
-            _ => ModelChoice::LocalQwen3,
+            // Other tasks: prefer larger models when GPU available for better tool calling
+            _ => self.best_available_local_model(self.gpu_available),
         }
     }
 
@@ -295,6 +296,7 @@ impl ModelSelector {
             }
             ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
+            ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
         };
 
         format!(
@@ -444,6 +446,7 @@ mod tests {
             gemini: true,
             anthropic: false,
             deepseek: false,
+            kimi: false,
         }
     }
 
@@ -452,6 +455,7 @@ mod tests {
             gemini: false,
             anthropic: true,
             deepseek: false,
+            kimi: false,
         }
     }
 
@@ -460,6 +464,7 @@ mod tests {
             gemini: false,
             anthropic: false,
             deepseek: true,
+            kimi: false,
         }
     }
 

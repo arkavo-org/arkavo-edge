@@ -290,6 +290,7 @@ impl ArchitectExecutor {
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
+            ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
         }
     }
 
