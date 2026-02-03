@@ -3,10 +3,14 @@ pub mod client;
 #[cfg(feature = "llm-remote")]
 pub mod common;
 pub mod config;
+pub mod context_pool;
+pub mod conversation_context;
 pub mod error;
 pub mod image;
 pub mod mcp_converter;
 pub mod message;
+pub mod model_registry;
+pub mod multi_model_provider;
 #[cfg(feature = "llm-remote")]
 pub mod ollama;
 pub mod provider;
@@ -54,8 +58,22 @@ pub use gemini_adapter::GeminiProvider;
 mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
+#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
+pub use context_pool::{ContextPool, PoolStats};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use context_pool::{ContextPool, PoolStats, PooledContext};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use conversation_context::{
+    ConversationContext, ConversationContextManager, ConversationContextRef, ConversationId,
+};
 #[cfg(feature = "llama-cpp")]
 pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use model_registry::{ModelInfo, ModelRegistry};
+#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
+pub use model_registry::{ModelInfo, ModelRegistry};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use multi_model_provider::MultiModelProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
     DeltaStream, DeltaType, EndReason, StreamControl, StreamDelta, StreamError, StreamId,

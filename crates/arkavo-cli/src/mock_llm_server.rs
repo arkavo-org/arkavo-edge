@@ -175,7 +175,7 @@ impl MockLlmServer {
             .route("/v1/messages", post(handle_anthropic_messages))
             // Gemini-compatible endpoints
             .route(
-                "/v1beta/models/*model:generateContent",
+                "/v1beta/models/{model}:generateContent",
                 post(handle_gemini_generate),
             )
             // Health check

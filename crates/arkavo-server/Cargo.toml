@@ -103,6 +103,7 @@ stub_handlers = []
 mdns = ["gethostname", "if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf"]
+llama-cpp = ["arkavo-llm/llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

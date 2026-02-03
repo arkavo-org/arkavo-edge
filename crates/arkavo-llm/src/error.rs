@@ -32,6 +32,12 @@ pub enum Error {
 
     #[error("Inference error: {0}")]
     Inference(String),
+
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

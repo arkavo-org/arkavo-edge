@@ -102,12 +102,42 @@ pub(crate) struct StreamingConfig {
     pub use_dry_sampling: bool,
 }
 
+/// Options for context reuse in multi-turn conversations
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ContextReuseOptions {
+    /// Starting position in KV cache (for resuming generation)
+    /// If Some, skips processing tokens before this position
+    pub start_position: Option<i32>,
+    /// Whether to clear KV cache before generation
+    pub clear_cache: bool,
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub(crate) async fn generate_tokens(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
+) {
+    generate_tokens_with_context(
+        model,
+        prompt_bytes,
+        config,
+        tx,
+        ContextReuseOptions::default(),
+    )
+    .await;
+}
+
+/// Generate tokens with optional context reuse for multi-turn conversations
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub(crate) async fn generate_tokens_with_context(
+    model: Arc<LlamaModel>,
+    prompt_bytes: Vec<u8>,
+    config: StreamingConfig,
+    tx: UnboundedSender<Result<StreamResponse>>,
+    context_options: ContextReuseOptions,
 ) {
     let start_time = Instant::now();
     let mut first_token_time: Option<Instant> = None;
@@ -117,6 +147,11 @@ pub(crate) async fn generate_tokens(
     let result = async {
         let ctx = LlamaContext::new(&model)
             .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
+
+        // Clear KV cache if requested (for new conversations)
+        if context_options.clear_cache {
+            ctx.clear_kv_cache();
+        }
 
         let vocab = model.get_vocab();
         let input_tokens = tokenize_with_model(vocab, &prompt_bytes)
@@ -157,10 +192,16 @@ pub(crate) async fn generate_tokens(
             eprintln!("EOS token from model: {eos_token}");
         }
 
-        process_input_tokens(&ctx, &input_tokens)?;
+        // If we have a start position, we're resuming - skip input processing
+        let initial_pos = if let Some(start_pos) = context_options.start_position {
+            start_pos
+        } else {
+            process_input_tokens(&ctx, &input_tokens)?;
+            i32::try_from(input_tokens.len()).unwrap_or(0)
+        };
 
         let max_generation = std::cmp::min(config.max_tokens, 30000);
-        let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0);
+        let mut pos = initial_pos;
 
         if is_debug() {
             eprintln!(
