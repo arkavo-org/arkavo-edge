@@ -15,7 +15,7 @@ use tracing::{debug, info};
 pub struct KimiConfig {
     /// API key for authentication
     pub api_key: String,
-    /// Base URL (default: https://api.moonshot.ai/v1)
+    /// Base URL (default: https://api.kimi.com/coding/v1 for Kimi For Coding)
     pub base_url: String,
     /// Model to use
     pub model: Model,
@@ -25,6 +25,8 @@ pub struct KimiConfig {
     pub retry_config: RetryConfig,
     /// Buffer size for SSE streaming (default: 1024)
     pub buffer_size: usize,
+    /// User-Agent identifier for coding agent (required for Kimi For Coding)
+    pub user_agent: String,
 }
 
 impl Default for KimiConfig {
@@ -32,16 +34,23 @@ impl Default for KimiConfig {
         Self {
             api_key: String::new(),
             base_url: "https://api.moonshot.ai/v1".to_string(),
-            model: Model::MoonshotV1_8k,
+            model: Model::KimiK2_5, // Default to K2.5
             timeout: Duration::from_secs(60),
             retry_config: RetryConfig::default(),
             buffer_size: 1024,
+            user_agent: "arkavo-edge/0.58".to_string(),
         }
     }
 }
 
 impl KimiConfig {
     /// Create config from environment variables
+    ///
+    /// Environment variables:
+    /// - `MOONSHOT_API_KEY` - API key (required)
+    /// - `KIMI_API_BASE` - Base URL (default: `https://api.kimi.com/coding/v1` for Kimi For Coding)
+    /// - `KIMI_MODEL` - Model name (default: `kimi-k2.5`)
+    /// - `KIMI_USER_AGENT` - User-Agent identifier (default: `arkavo-edge/0.58`)
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("MOONSHOT_API_KEY")
             .map_err(|_| KimiError::Config("MOONSHOT_API_KEY not set".to_string()))?;
@@ -56,6 +65,9 @@ impl KimiConfig {
             ));
         }
 
+        // Always use Moonshot AI endpoint (OpenAI-compatible)
+        // For Anthropic-compatible access, use the Anthropic provider with
+        // base_url: https://api.moonshot.ai/anthropic/
         let base_url = std::env::var("KIMI_API_BASE")
             .unwrap_or_else(|_| "https://api.moonshot.ai/v1".to_string());
 
@@ -65,14 +77,24 @@ impl KimiConfig {
                 "moonshot-v1-8k" => Some(Model::MoonshotV1_8k),
                 "moonshot-v1-32k" => Some(Model::MoonshotV1_32k),
                 "moonshot-v1-128k" => Some(Model::MoonshotV1_128k),
+                // K2.5 series models
+                "kimi-k2.5" => Some(Model::KimiK2_5),
+                "kimi-k2-0905-preview" => Some(Model::KimiK20905Preview),
+                "kimi-k2-turbo-preview" => Some(Model::KimiK2TurboPreview),
+                "kimi-k2-thinking" => Some(Model::KimiK2Thinking),
+                "kimi-k2-thinking-turbo" => Some(Model::KimiK2ThinkingTurbo),
                 _ => None,
             })
-            .unwrap_or(Model::MoonshotV1_8k);
+            .unwrap_or(Model::KimiK2_5);
+
+        let user_agent =
+            std::env::var("KIMI_USER_AGENT").unwrap_or_else(|_| "arkavo-edge/0.58".to_string());
 
         Ok(Self {
             api_key,
             base_url,
             model,
+            user_agent,
             ..Default::default()
         })
     }
@@ -96,6 +118,7 @@ impl KimiClient {
     pub fn new(config: KimiConfig) -> Result<Self> {
         let http_client = Client::builder()
             .timeout(config.timeout)
+            .user_agent(&config.user_agent)
             .build()
             .map_err(|e| KimiError::Config(format!("Failed to build HTTP client: {e}")))?;
 
@@ -139,6 +162,27 @@ impl KimiClient {
         temperature: Option<f32>,
         top_p: Option<f32>,
     ) -> Result<String> {
+        self.create_chat_completion_with_thinking(
+            messages,
+            tools,
+            tool_choice,
+            temperature,
+            top_p,
+            None,
+        )
+        .await
+    }
+
+    /// Create a chat completion request with thinking mode
+    pub async fn create_chat_completion_with_thinking(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<Tool>>,
+        tool_choice: Option<ToolChoice>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        thinking: Option<crate::types::ThinkingConfig>,
+    ) -> Result<String> {
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: self.convert_messages(messages),
@@ -152,6 +196,7 @@ impl KimiClient {
             frequency_penalty: None,
             n: None,
             stop: None,
+            thinking,
         };
 
         let url = format!("{}/chat/completions", self.config.base_url);
@@ -170,6 +215,8 @@ impl KimiClient {
                         .post(&url)
                         .header("Authorization", format!("Bearer {api_key}"))
                         .header("Content-Type", "application/json")
+                        .header("X-Traffic-Source", "arkavo-edge")
+                        .header("X-Source", "coding-agent")
                         .json(&request)
                         .send()
                         .await?;
@@ -224,6 +271,27 @@ impl KimiClient {
         temperature: Option<f32>,
         top_p: Option<f32>,
     ) -> Result<SseParser> {
+        self.create_chat_completion_stream_with_thinking(
+            messages,
+            tools,
+            tool_choice,
+            temperature,
+            top_p,
+            None,
+        )
+        .await
+    }
+
+    /// Create a streaming chat completion with thinking mode
+    pub async fn create_chat_completion_stream_with_thinking(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<Tool>>,
+        tool_choice: Option<ToolChoice>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        thinking: Option<crate::types::ThinkingConfig>,
+    ) -> Result<SseParser> {
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: self.convert_messages(messages),
@@ -237,6 +305,7 @@ impl KimiClient {
             frequency_penalty: None,
             n: None,
             stop: None,
+            thinking,
         };
 
         let url = format!("{}/chat/completions", self.config.base_url);
@@ -248,6 +317,8 @@ impl KimiClient {
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
+            .header("X-Traffic-Source", "arkavo-edge")
+            .header("X-Source", "coding-agent")
             .json(&request)
             .send()
             .await?;

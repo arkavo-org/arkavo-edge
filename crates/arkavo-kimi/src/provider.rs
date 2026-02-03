@@ -28,6 +28,8 @@ pub struct Message {
 pub struct StreamResponse {
     pub content: String,
     pub done: bool,
+    /// Reasoning content from thinking mode (K2.5 series)
+    pub reasoning_content: Option<String>,
 }
 
 pub type LlmResult<T> = Result<T, LlmError>;
@@ -44,6 +46,8 @@ pub struct KimiProvider {
     client: KimiClient,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    /// Thinking mode configuration (K2.5 series)
+    thinking: Option<crate::types::ThinkingConfig>,
 }
 
 impl KimiProvider {
@@ -55,6 +59,7 @@ impl KimiProvider {
             client,
             temperature: Some(0.7),
             top_p: None,
+            thinking: None,
         })
     }
 
@@ -79,6 +84,22 @@ impl KimiProvider {
     pub fn client(&self) -> &KimiClient {
         &self.client
     }
+
+    /// Set thinking mode (for K2.5 series models)
+    pub fn with_thinking(mut self, enabled: bool) -> Self {
+        self.thinking = Some(crate::types::ThinkingConfig::new(enabled));
+        self
+    }
+
+    /// Get the model being used
+    pub fn model(&self) -> &crate::types::Model {
+        &self.client.config().model
+    }
+
+    /// Check if the current model supports thinking mode
+    pub fn supports_thinking(&self) -> bool {
+        self.client.config().model.supports_thinking()
+    }
 }
 
 // This trait will be implemented when used through arkavo-llm
@@ -96,15 +117,20 @@ pub trait Provider: Send + Sync {
 #[async_trait]
 impl Provider for KimiProvider {
     async fn complete(&self, messages: Vec<Message>) -> LlmResult<String> {
-        debug!("Kimi provider completing with {} messages", messages.len());
+        debug!(
+            "Kimi provider completing with {} messages using model {:?}",
+            messages.len(),
+            self.client.config().model
+        );
 
         self.client
-            .create_chat_completion(
+            .create_chat_completion_with_thinking(
                 messages,
                 None, // No tools for simple completion
                 None, // No tool choice
                 self.temperature,
                 self.top_p,
+                self.thinking.clone(),
             )
             .await
             .map_err(|e| match e {
@@ -126,16 +152,21 @@ impl Provider for KimiProvider {
         &self,
         messages: Vec<Message>,
     ) -> LlmResult<Box<dyn Stream<Item = LlmResult<StreamResponse>> + Send + Unpin>> {
-        debug!("Kimi provider streaming with {} messages", messages.len());
+        debug!(
+            "Kimi provider streaming with {} messages using model {:?}",
+            messages.len(),
+            self.client.config().model
+        );
 
         let stream = self
             .client
-            .create_chat_completion_stream(
+            .create_chat_completion_stream_with_thinking(
                 messages,
                 None, // No tools for simple streaming
                 None, // No tool choice
                 self.temperature,
                 self.top_p,
+                self.thinking.clone(),
             )
             .await
             .map_err(|e| match e {

@@ -49,6 +49,7 @@ impl SseParser {
                                         .send(Ok(StreamResponse {
                                             content: String::new(),
                                             done: true,
+                                            reasoning_content: None,
                                         }))
                                         .await;
                                     return;
@@ -61,13 +62,28 @@ impl SseParser {
                                             let delta = &choice.delta;
 
                                             // Handle content delta
-                                            if let Some(content) = &delta.content
-                                                && !content.is_empty()
-                                            {
+                                            let has_content = delta
+                                                .content
+                                                .as_ref()
+                                                .map(|c| !c.is_empty())
+                                                .unwrap_or(false);
+                                            let has_reasoning = delta
+                                                .reasoning_content
+                                                .as_ref()
+                                                .map(|c| !c.is_empty())
+                                                .unwrap_or(false);
+
+                                            if has_content || has_reasoning {
                                                 let _ = tx
                                                     .send(Ok(StreamResponse {
-                                                        content: content.clone(),
+                                                        content: delta
+                                                            .content
+                                                            .clone()
+                                                            .unwrap_or_default(),
                                                         done: false,
+                                                        reasoning_content: delta
+                                                            .reasoning_content
+                                                            .clone(),
                                                     }))
                                                     .await;
                                             }
@@ -110,6 +126,7 @@ impl SseParser {
                                                     .send(Ok(StreamResponse {
                                                         content: String::new(),
                                                         done: true,
+                                                        reasoning_content: None,
                                                     }))
                                                     .await;
                                             }
