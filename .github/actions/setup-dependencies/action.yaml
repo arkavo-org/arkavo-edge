@@ -1,0 +1,77 @@
+name: 'Setup Build Dependencies'
+description: 'Setup common build dependencies with caching for Linux builds'
+
+inputs:
+  target:
+    description: 'Build target (e.g., x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl)'
+    required: false
+    default: 'x86_64-unknown-linux-gnu'
+  device:
+    description: 'Target device (e.g., rpi5, uno-q) for ARM64 builds'
+    required: false
+    default: ''
+  install-musl:
+    description: 'Whether to install musl tools'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Cache apt packages
+      uses: actions/cache@v4
+      id: apt-cache
+      with:
+        path: |
+          ~/apt-cache
+        key: apt-${{ runner.os }}-${{ runner.arch }}-v2-${{ inputs.target }}-${{ inputs.device }}
+        restore-keys: |
+          apt-${{ runner.os }}-${{ runner.arch }}-v2-
+
+    - name: Configure apt and install dependencies
+      shell: bash
+      run: |
+        # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+        sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+        
+        # Only run update if needed (cache miss or first run)
+        if [ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]; then
+          echo "Cache miss - running apt-get update"
+          sudo apt-get update
+        else
+          echo "Cache hit - skipping apt-get update"
+          # Still need to update if lists are empty
+          if [ -z "$(ls -A /var/lib/apt/lists 2>/dev/null)" ]; then
+            sudo apt-get update
+          fi
+        fi
+        
+        # Determine which packages to install based on target/device
+        PACKAGES="cmake clang libclang-dev"
+        
+        if [ "${{ inputs.device }}" = "uno-q" ] || [ "${{ inputs.device }}" = "rpi5" ]; then
+          echo "Installing dependencies for ARM64 device: ${{ inputs.device }}"
+          PACKAGES="$PACKAGES build-essential libgomp1"
+        elif [ "${{ inputs.target }}" = "x86_64-unknown-linux-musl" ]; then
+          echo "Installing dependencies for musl target"
+          PACKAGES="$PACKAGES libgomp1 gcc-multilib g++-multilib"
+        else
+          echo "Installing dependencies for x86_64 glibc target"
+          PACKAGES="$PACKAGES libgomp1 gcc-multilib g++-multilib mold"
+        fi
+        
+        # Install packages
+        sudo apt-get install -y $PACKAGES
+        
+        # Install musl tools if requested
+        if [ "${{ inputs.install-musl }}" = "true" ]; then
+          echo "Installing musl tools"
+          sudo apt-get install -y musl-tools musl-dev
+        fi
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        echo "✅ Dependencies installed successfully"
+        cmake --version | head -1
+        clang --version | head -1

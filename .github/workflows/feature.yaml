@@ -17,8 +17,40 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
+  # Enable sccache for all jobs
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  # Detect what changed to enable conditional builds
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-22.04
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'vendor/**'
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+            workflows:
+              - '.github/**'
+            rust:
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+
   # Version check from PR
   version-check:
     name: Verify Version Increment
@@ -160,6 +192,8 @@ jobs:
   # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
   test-and-lint:
     name: Test & Lint (${{ matrix.group }})
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false  # Run all groups even if one fails
@@ -175,21 +209,11 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
-      - name: Install CMake, mold linker, and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -200,13 +224,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-lint-${{ matrix.group }}"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || matrix.group == 'core' }}
 
       # Step 1: Run tests first (produces full codegen artifacts)
       - name: Run tests with mold linker
         env:
-          SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
@@ -236,7 +259,6 @@ jobs:
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
       - name: Run clippy on lib and bins
         env:
-          SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
           if [ "${{ matrix.group }}" = "core" ]; then
@@ -262,27 +284,23 @@ jobs:
 
   test-kimi-feature:
     name: Test Kimi Feature
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-kimi"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: false
       
       - name: Test arkavo-kimi crate
         run: |
@@ -337,6 +355,11 @@ jobs:
 
   build-linux:
     name: Build Linux (${{ matrix.target || matrix.device }})
+    needs: [changes, test-and-lint]
+    if: |
+      always() && 
+      (needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true') &&
+      (needs.test-and-lint.result == 'success' || needs.test-and-lint.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -350,77 +373,37 @@ jobs:
             os: ubuntu-22.04
             features: memory,mdns,mcp-tools
             artifact_name: arkavo-x86_64-linux-musl
-          # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
+          # ARM64 native builds - consolidated to single build with multiple packages
           - os: ubuntu-24.04-arm
             features: memory,mdns,llm-remote,mcp-tools,gemini,web-ui
-            artifact_name: arkavo-aarch64-linux-rpi5
-            device: rpi5
-          # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
-          # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
-          # See: docs/uno-q-hardware-acceleration-blockers.md for details
-          - os: ubuntu-24.04-arm
-            features: llama-cpp,snpe,memory,mdns,gemini,mcp-tools
-            artifact_name: arkavo-aarch64-linux-uno-q
-            device: uno-q
+            artifact_name: arkavo-aarch64-linux
+            device: arm64
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
 
-          echo "DEBUG: matrix.device = '${{ matrix.device }}'"
-          echo "DEBUG: matrix.target = '${{ matrix.target }}'"
-          echo "DEBUG: matrix.features = '${{ matrix.feature }}'"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
-          if [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Installing dependencies for Arduino UNO Q (llama.cpp CPU-only)"
-            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
-          elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Installing dependencies for Raspberry Pi 5 (llama.cpp with CPU backend)"
-            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
-          else
-            echo "Installing dependencies for x86_64 builds"
-            sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-          fi
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          target: ${{ matrix.target || '' }}
+          device: ${{ matrix.device || '' }}
+          install-musl: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
 
-      # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
-      # The Qualcomm Neural Processing SDK enables hardware-accelerated inference
-      # on Arduino UNO Q (QRB2210) with GPU/DSP support.
-      #
-      # Runtime detection: Binary searches /opt/snpe, $SNPE_ROOT, $LD_LIBRARY_PATH
-      # Download SDK from: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
-      # License: Proprietary (cannot redistribute - users install separately)
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target || '' }}
+
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-${{ matrix.device || matrix.target }}"
-
-      - name: Install build tools
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
-            # Install musl tools for static build
-            # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-            sudo apt-get update
-            sudo apt-get install -y musl-tools musl-dev
-          fi
+          shared-key: "v2-${{ runner.os }}-${{ runner.arch }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         env:
@@ -431,20 +414,11 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
-          SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          if [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76, CPU-only)
-            echo "Building for Raspberry Pi 5 (native ARM64, CPU-only)"
-            export ARKAVO_TARGET_DEVICE=rpi5
-            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
-          elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build (Cortex-A53 with llama.cpp)
-            # Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)
-            # See docs/uno-q-hardware-acceleration-blockers.md for investigation details
-            echo "Building for Arduino UNO Q (Cortex-A53 with llama.cpp CPU backend)"
-            export ARKAVO_TARGET_DEVICE=uno-q
+          if [ "${{ matrix.device }}" = "arm64" ]; then
+            # Consolidated ARM64 build for both RPi5 and UNO-Q
+            echo "Building for ARM64 (native build)"
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support (x86_64)
@@ -460,22 +434,18 @@ jobs:
           # For native ARM64 builds, binary is in target/release; for others, target/<triple>/release
           if [ -n "${{ matrix.device }}" ]; then
             cp target/release/arkavo release-package/${{ matrix.artifact_name }}
+            # Create additional copies for device-specific naming
+            cp target/release/arkavo release-package/arkavo-aarch64-linux-rpi5
+            cp target/release/arkavo release-package/arkavo-aarch64-linux-uno-q
           else
             cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
           fi
-          chmod +x release-package/${{ matrix.artifact_name }}
+          chmod +x release-package/*
 
           # Create feature manifest
-          if [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
-          elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
-            echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable" >> release-package/features.txt
-            echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
-            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
+          if [ "${{ matrix.device }}" = "arm64" ]; then
+            echo "ARM64 build (native, CPU-only)" > release-package/features.txt
+            echo "Compatible with: Raspberry Pi 5, Arduino UNO Q, and other ARM64 devices" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             echo "Full featured build (x86_64)" > release-package/features.txt
@@ -494,29 +464,33 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
+    needs: [changes, test-and-lint, build-linux]
+    # Only run if code changed AND tests passed AND Linux builds succeeded
+    if: |
+      always() &&
+      (needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true') &&
+      (needs.test-and-lint.result == 'success' || needs.test-and-lint.result == 'skipped') &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-aarch64"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Regression test for Issue #114 - Run before full build to catch issues early
       - name: Test Issue #114 - No Xcode Prompts
@@ -566,7 +540,6 @@ jobs:
 
       - name: Build
         env:
-          SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: cargo build --release --target aarch64-apple-darwin
 
@@ -602,22 +575,21 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
+    needs: [changes, test-and-lint, build-linux]
+    # Only run if code changed AND tests passed AND Linux builds succeeded
+    if: |
+      always() &&
+      (needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true') &&
+      (needs.test-and-lint.result == 'success' || needs.test-and-lint.result == 'skipped') &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped')
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        shell: bash
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
       # Install C++ build tools for future llama.cpp support
       # Note: Currently building with windows-default (no C++ deps), but this
@@ -641,12 +613,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-windows"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build Windows binary
         env:
-          SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
           cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
@@ -679,6 +650,7 @@ jobs:
   performance-check:
     name: Performance Check
     needs: build-linux
+    if: always() && needs.build-linux.result == 'success'
     runs-on: ubuntu-22.04
     steps:
       - name: Download release artifact
@@ -701,6 +673,7 @@ jobs:
   smoke-test-linux:
     name: Smoke Test Linux (${{ matrix.container }})
     needs: build-linux
+    if: always() && needs.build-linux.result == 'success'
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -731,6 +704,7 @@ jobs:
   smoke-test-macos:
     name: Smoke Test macOS
     needs: build-macos
+    if: always() && needs.build-macos.result == 'success'
     runs-on: macos-latest
     steps:
       - name: Download binary
@@ -747,6 +721,7 @@ jobs:
   smoke-test-windows:
     name: Smoke Test Windows
     needs: build-windows
+    if: always() && needs.build-windows.result == 'success'
     runs-on: windows-2022
     steps:
       - name: Download binary
@@ -764,6 +739,7 @@ jobs:
   binary-smoke-test:
     name: Binary Smoke Test
     needs: [build-linux]
+    if: always() && needs.build-linux.result == 'success'
     runs-on: ubuntu-22.04
     steps:
       - name: Download Linux binary
@@ -878,6 +854,8 @@ jobs:
   # Schema validation jobs
   validate-openrpc:
     name: Validate OpenRPC Schema
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -885,27 +863,18 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "schema"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: false
 
       - name: Install validation tools
         run: |
           # Install jq for JSON validation
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
           sudo apt-get install -y jq
 
           # Install oasdiff for breaking change detection (Go binary, no npm)
@@ -990,35 +959,26 @@ jobs:
 
   check-schema-backwards-compatibility:
     name: Check Schema Backwards Compatibility
+    needs: [changes]
     runs-on: ubuntu-22.04
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true')
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "schema-compat"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: false
 
       - name: Install jq for JSON comparison
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y jq
+        run: sudo apt-get install -y jq
 
       - name: Check for breaking changes
         run: |
@@ -1054,9 +1014,9 @@ jobs:
               for method in $BASE_METHODS; do
                 if echo "$CURRENT_METHODS" | grep -q "^$method$"; then
                   # Get required params from base
-                  BASE_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-base.json 2>/dev/null | sort || true)
+                  BASE_REQUIRED=$(jq -r ".methods[] | select(.name == &quot;$method&quot;) | .params[] | select(.required == true) | .name" schema-base.json 2>/dev/null | sort || true)
                   # Get required params from current
-                  CURRENT_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-current.json 2>/dev/null | sort || true)
+                  CURRENT_REQUIRED=$(jq -r ".methods[] | select(.name == &quot;$method&quot;) | .params[] | select(.required == true) | .name" schema-current.json 2>/dev/null | sort || true)
 
                   # Check for removed required params (breaking change)
                   if [ -n "$BASE_REQUIRED" ]; then
@@ -1080,19 +1040,17 @@ jobs:
 
   validate-doc-snippets:
     name: Validate Documentation Code Snippets
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Test documentation examples
@@ -1116,32 +1074,26 @@ jobs:
 
   validate-xtask-schema:
     name: Validate Schemas with xtask
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
+
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "xtask"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: false
+
       - name: Run schema validation
         run: cargo run -p xtask -- schema-gen --check
 
@@ -1188,24 +1140,26 @@ jobs:
   # Verify no OpenSSL dependency for musl builds
   no-openssl-check:
     name: Verify No OpenSSL Dependency
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          target: x86_64-unknown-linux-musl
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "no-openssl"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: false
 
       - name: Check for OpenSSL in musl dependency tree
         run: |
@@ -1246,7 +1200,7 @@ jobs:
 
           if echo "$NATIVE_TLS_CHECK" | grep -q "native-tls v" ; then
             echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
-            echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
+            echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [&quot;rustls-tls&quot;]"
             echo "$NATIVE_TLS_CHECK"
             exit 1
           fi
@@ -1444,21 +1398,43 @@ jobs:
     steps:
       - name: Check job results
         run: |
-          if [[ "${{ needs.version-check.result }}" != "success" || \
-                "${{ needs.format.result }}" != "success" || \
-                "${{ needs.test-and-lint.result }}" != "success" || \
-                "${{ needs.cargo-deny.result }}" != "success" || \
-                "${{ needs.smoke-test-linux.result }}" != "success" || \
-                "${{ needs.smoke-test-macos.result }}" != "success" || \
-                "${{ needs.binary-smoke-test.result }}" != "success" || \
-                "${{ needs.performance-check.result }}" != "success" || \
-                "${{ needs.validate-openrpc.result }}" != "success" || \
-                "${{ needs.validate-doc-snippets.result }}" != "success" || \
-                "${{ needs.zero-config-check.result }}" != "success" || \
-                "${{ needs.validate-xtask-schema.result }}" != "success" || \
-                "${{ needs.no-openssl-check.result }}" != "success" || \
-                "${{ needs.validate-specs.result }}" != "success" ]]; then
-            echo "One or more required checks failed"
+          echo "Checking job results..."
+          
+          # Helper function to check job result
+          check_job() {
+            local job_name=$1
+            local result=$2
+            if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+              echo "✅ $job_name: $result"
+              return 0
+            else
+              echo "❌ $job_name: $result"
+              return 1
+            fi
+          }
+          
+          FAILED=0
+          
+          check_job "version-check" "${{ needs.version-check.result }}" || FAILED=1
+          check_job "format" "${{ needs.format.result }}" || FAILED=1
+          check_job "test-and-lint" "${{ needs.test-and-lint.result }}" || FAILED=1
+          check_job "cargo-deny" "${{ needs.cargo-deny.result }}" || FAILED=1
+          check_job "smoke-test-linux" "${{ needs.smoke-test-linux.result }}" || FAILED=1
+          check_job "smoke-test-macos" "${{ needs.smoke-test-macos.result }}" || FAILED=1
+          check_job "binary-smoke-test" "${{ needs.binary-smoke-test.result }}" || FAILED=1
+          check_job "performance-check" "${{ needs.performance-check.result }}" || FAILED=1
+          check_job "validate-openrpc" "${{ needs.validate-openrpc.result }}" || FAILED=1
+          check_job "validate-doc-snippets" "${{ needs.validate-doc-snippets.result }}" || FAILED=1
+          check_job "zero-config-check" "${{ needs.zero-config-check.result }}" || FAILED=1
+          check_job "validate-xtask-schema" "${{ needs.validate-xtask-schema.result }}" || FAILED=1
+          check_job "no-openssl-check" "${{ needs.no-openssl-check.result }}" || FAILED=1
+          check_job "validate-specs" "${{ needs.validate-specs.result }}" || FAILED=1
+          
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "❌ One or more required checks failed"
             exit 1
           fi
-          echo "All checks passed! This PR is ready for merge."
+          
+          echo ""
+          echo "✅ All checks passed! This PR is ready for merge."

@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  # Enable sccache for all jobs
+  SCCACHE_GHA_ENABLED: "true"
+
 jobs:
   release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -16,17 +20,13 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Extract version
         id: version
@@ -104,45 +104,31 @@ jobs:
             needs_musl: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
+
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          target: ${{ matrix.target }}
+          install-musl: ${{ matrix.needs_musl }}
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          profile: minimal
-          override: true
+          targets: ${{ matrix.target }}
 
-      - name: Install CMake and build dependencies
-        run: |
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Install dependencies for glibc build
-        if: matrix.needs_musl == false
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
-
-      - name: Install musl tools and dependencies
-        if: matrix.needs_musl == true
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         env:
@@ -151,6 +137,7 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
+          RUSTC_WRAPPER: sccache
         run: |
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             cargo build --release --target ${{ matrix.target }}
@@ -218,31 +205,32 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: aarch64-unknown-linux-gnu
-          profile: minimal
-          override: true
+      - name: Setup build dependencies
+        uses: ./.github/actions/setup-dependencies
 
       - name: Install ARM64 cross-compilation toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v2-${{ runner.os }}-arm64"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         env:
@@ -250,6 +238,7 @@ jobs:
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          RUSTC_WRAPPER: sccache
         run: |
           cargo build --release --target aarch64-unknown-linux-gnu
 
@@ -286,29 +275,28 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
       - name: Install CMake
         run: brew install cmake
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: aarch64-apple-darwin
-          profile: minimal
-          override: true
+          targets: aarch64-apple-darwin
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Decode and import signing certificate
         timeout-minutes: 5
@@ -326,10 +314,9 @@ jobs:
           security find-identity -v -p codesigning build.keychain
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target aarch64-apple-darwin
+        env:
+          RUSTC_WRAPPER: sccache
+        run: cargo build --release --target aarch64-apple-darwin
           # Note: This builds with default features (web-ui) for Homebrew/CLI distribution
           # For .pkg distribution with native CEF renderer, use: --features cef-ui
 
@@ -410,23 +397,20 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-pkg"
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Import signing certificates
         env:
@@ -490,6 +474,8 @@ jobs:
           ls -lh vendor/cef/ || echo "CEF cache verification failed"
 
       - name: Build ARM64 binary with CEF
+        env:
+          RUSTC_WRAPPER: sccache
         run: cargo build --release --target aarch64-apple-darwin --features cef-ui
 
       - name: Check binary size
@@ -763,15 +749,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        shell: bash
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+      - name: Setup llama.cpp
+        uses: ./.github/actions/setup-llama-cpp
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -794,7 +773,17 @@ jobs:
           Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           refreshenv
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v2-${{ runner.os }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Build Windows binary
+        env:
+          RUSTC_WRAPPER: sccache
         run: |
           cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
 
@@ -883,7 +872,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -898,7 +887,7 @@ jobs:
               -H "Authorization: token ${{ secrets.HOMEBREW_UPDATE_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/arkavo-org/homebrew-arkavo/dispatches \
-              -d "{\"event_type\": \"update-formula\", \"client_payload\": {\"version\": \"${VERSION}\"}}"
+              -d "{&quot;event_type&quot;: &quot;update-formula&quot;, &quot;client_payload&quot;: {&quot;version&quot;: &quot;${VERSION}&quot;}}"
           else
             echo "⚠️ HOMEBREW_UPDATE_TOKEN not configured. Please manually trigger the Homebrew formula update."
             echo "To fix: Add a Personal Access Token with 'repo' scope as HOMEBREW_UPDATE_TOKEN secret"

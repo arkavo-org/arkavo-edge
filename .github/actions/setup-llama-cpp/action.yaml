@@ -1,0 +1,60 @@
+name: 'Setup llama.cpp'
+description: 'Clone and cache llama.cpp at the required commit'
+
+inputs:
+  commit:
+    description: 'The llama.cpp commit to checkout'
+    required: false
+    default: 'c3b87cebf'
+
+outputs:
+  cache-hit:
+    description: 'Whether the cache was hit'
+    value: ${{ steps.cache-llama.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Cache llama.cpp
+      id: cache-llama
+      uses: actions/cache@v4
+      with:
+        path: vendor/llama.cpp
+        key: llama-cpp-${{ inputs.commit }}-${{ runner.os }}-${{ runner.arch }}-v1
+        restore-keys: |
+          llama-cpp-${{ inputs.commit }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Clone llama.cpp
+      if: steps.cache-llama.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "Cloning llama.cpp for local inference support"
+        # Remove existing directory if it exists but is incomplete
+        rm -rf vendor/llama.cpp
+        
+        # Clone with minimal depth for faster checkout
+        git clone --depth 1 https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+        cd vendor/llama.cpp
+        
+        # Fetch the specific commit
+        git fetch --depth=1 origin ${{ inputs.commit }}
+        git checkout ${{ inputs.commit }}
+        
+        echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+
+    - name: Verify llama.cpp
+      shell: bash
+      run: |
+        if [ -d "vendor/llama.cpp" ]; then
+          cd vendor/llama.cpp
+          CURRENT_COMMIT=$(git rev-parse --short HEAD)
+          echo "✅ llama.cpp ready at commit $CURRENT_COMMIT"
+          
+          # Verify we're at the expected commit
+          if [[ "$CURRENT_COMMIT" != "${{ inputs.commit }}"* ]]; then
+            echo "⚠️ Warning: Expected commit ${{ inputs.commit }}, got $CURRENT_COMMIT"
+          fi
+        else
+          echo "❌ llama.cpp directory not found"
+          exit 1
+        fi
