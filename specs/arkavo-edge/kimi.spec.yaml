@@ -111,7 +111,7 @@ scenarios:
       - Thinking mode enabled
     when: chat_completion() called
     then:
-      - thinking: {type: enabled} sent in request
+      - "thinking: {type: enabled} sent in request"
       - reasoning_content returned in response
       - Compatible with tool calling
     refs: [crates/arkavo-kimi/src/client.rs]
@@ -129,7 +129,7 @@ scenarios:
       - Thinking mode explicitly disabled
     when: chat_completion() called
     then:
-      - thinking: {type: disabled} sent in request
+      - "thinking: {type: disabled} sent in request"
       - No reasoning_content in response
       - Compatible with $web_search tool
     refs: [crates/arkavo-kimi/src/client.rs]
