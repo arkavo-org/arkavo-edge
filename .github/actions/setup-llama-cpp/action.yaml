@@ -5,7 +5,7 @@ inputs:
   commit:
     description: 'The llama.cpp commit to checkout'
     required: false
-    default: 'c3b87cebf'
+    default: 'c3b87cebff7dfdd73b850b8a194cd0a0c6bfcf49'
 
 outputs:
   cache-hit:
