@@ -49,7 +49,7 @@ runs:
         # Determine which packages to install based on target/device
         PACKAGES="cmake clang libclang-dev"
         
-        if [ "${{ inputs.device }}" = "uno-q" ] || [ "${{ inputs.device }}" = "rpi5" ]; then
+        if [ "${{ inputs.device }}" = "uno-q" ] || [ "${{ inputs.device }}" = "rpi5" ] || [ "${{ inputs.device }}" = "arm64" ]; then
           echo "Installing dependencies for ARM64 device: ${{ inputs.device }}"
           PACKAGES="$PACKAGES build-essential libgomp1"
         elif [ "${{ inputs.target }}" = "x86_64-unknown-linux-musl" ]; then
