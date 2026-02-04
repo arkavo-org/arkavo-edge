@@ -1290,9 +1290,8 @@ impl Router {
                 // Use Anthropic provider with Moonshot's Anthropic-compatible endpoint
                 use arkavo_llm::providers::anthropic::{AnthropicConfig, AnthropicProvider};
 
-                let api_key = std::env::var("MOONSHOT_API_KEY").map_err(|_| {
-                    Error::ModelExecution("MOONSHOT_API_KEY not set".to_string())
-                })?;
+                let api_key = std::env::var("MOONSHOT_API_KEY")
+                    .map_err(|_| Error::ModelExecution("MOONSHOT_API_KEY not set".to_string()))?;
 
                 let config = AnthropicConfig {
                     api_key,
