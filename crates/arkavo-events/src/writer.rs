@@ -179,6 +179,20 @@ mod tests {
     use crate::EventPayload;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn make_event(seq: u64) -> Event {
+        Event::new(
+            "test-session".to_string(),
+            seq,
+            "test-agent".to_string(),
+            EventPayload::ReasoningStep {
+                step_type: "test".to_string(),
+                description: format!("Step {seq}"),
+                metadata: None,
+            },
+        )
+    }
+
+    // Covers EVENT-005: "Events serialized, written to configured sink"
     #[tokio::test]
     async fn test_event_writer_basic() {
         let counter = Arc::new(AtomicUsize::new(0));
@@ -195,24 +209,63 @@ mod tests {
             })
             .build();
 
-        // Write some events
         for i in 0..25 {
-            let event = Event::new(
-                "test-session".to_string(),
-                i,
-                "test-agent".to_string(),
-                EventPayload::ReasoningStep {
-                    step_type: "test".to_string(),
-                    description: format!("Step {i}"),
-                    metadata: None,
-                },
-            );
-            writer.write(event).await.unwrap();
+            writer.write(make_event(i)).await.unwrap();
         }
 
-        // Wait for flush
         tokio::time::sleep(Duration::from_millis(150)).await;
-
         assert_eq!(counter.load(Ordering::SeqCst), 25);
+    }
+
+    // Covers EVENT-005: "Batch writes supported" — flush triggers at batch_size
+    #[tokio::test]
+    async fn test_batch_flush_triggers_at_batch_size() {
+        let flush_count = Arc::new(AtomicUsize::new(0));
+        let flush_count_clone = flush_count.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_secs(60), // Long interval so only batch triggers
+                batch_size: 5,
+            })
+            .add_handler(move |_events| {
+                flush_count_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .build();
+
+        // Write exactly batch_size events
+        for i in 0..5 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Should have flushed once when batch_size reached
+        assert!(flush_count.load(Ordering::SeqCst) >= 1);
+    }
+
+    // Covers EVENT-005: Multiple batches accumulate correctly
+    #[tokio::test]
+    async fn test_multiple_batches_all_delivered() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let total_clone = total.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_millis(20),
+                batch_size: 10,
+            })
+            .add_handler(move |events| {
+                total_clone.fetch_add(events.len(), Ordering::SeqCst);
+            })
+            .build();
+
+        for i in 0..50 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(total.load(Ordering::SeqCst), 50);
     }
 }

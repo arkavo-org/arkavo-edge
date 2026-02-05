@@ -745,4 +745,46 @@ mod tests {
         let result = protocol.vote(Uuid::new_v4(), true).await;
         assert!(matches!(result, Err(GossipError::PatchNotFound(_))));
     }
+
+    // Covers GOSSIP-002: Unsigned announcement rejected by protocol
+    #[tokio::test]
+    async fn test_unsigned_announcement_rejected() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Create announcement WITHOUT signing it (empty signature)
+        let announcement =
+            PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "unknown-agent".into(), vec![]);
+
+        let result = protocol
+            .handle_message(GossipMessage::PatchAnnounce(announcement))
+            .await;
+        // Should fail — no key registered for "unknown-agent"
+        assert!(result.is_err());
+    }
+
+    // Covers GOSSIP-001: Fanout selects correct number of peers, excluding sender
+    #[tokio::test]
+    async fn test_fanout_respects_limit_and_exclusion() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Add 20 peers
+        for i in 0..20 {
+            protocol.add_peer(format!("peer-{i}")).await;
+        }
+
+        // Without exclusion: exactly DEFAULT_FANOUT peers
+        let peers = protocol.select_propagation_peers(None).await;
+        assert_eq!(peers.len(), DEFAULT_FANOUT);
+
+        // With exclusion: still DEFAULT_FANOUT, but excludes specified peer
+        let peers = protocol.select_propagation_peers(Some("peer-5")).await;
+        assert_eq!(peers.len(), DEFAULT_FANOUT);
+        assert!(!peers.contains(&"peer-5".to_string()));
+
+        // Fewer peers than fanout: returns all available
+        let small_protocol = create_test_protocol("agent-2");
+        small_protocol.add_peer("only-peer".into()).await;
+        let peers = small_protocol.select_propagation_peers(None).await;
+        assert_eq!(peers.len(), 1);
+    }
 }
