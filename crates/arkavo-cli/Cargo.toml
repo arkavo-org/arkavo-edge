@@ -96,12 +96,12 @@ reqwest = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }
 
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
-
-# Cross-platform MCP tools (optional, enabled via mcp-tools feature)
+# Cross-platform MCP tools (always available)
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
