@@ -132,24 +132,17 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
-    }
-
-    #[test]
-    fn roundtrip_prompt_sent_no_params() {
-        let payload = EventPayload::PromptSent {
-            prompt: "hi".to_string(),
-            model: "m".to_string(),
+        // Also verify None parameters survive roundtrip
+        let no_params = EventPayload::PromptSent {
+            prompt: "hi".into(),
+            model: "m".into(),
             parameters: None,
         };
-        let restored = roundtrip(&payload);
-        match restored {
-            EventPayload::PromptSent { parameters, .. } => {
-                assert!(parameters.is_none());
-            }
+        match roundtrip(&no_params) {
+            EventPayload::PromptSent { parameters, .. } => assert!(parameters.is_none()),
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn roundtrip_model_response() {
         let payload = EventPayload::ModelResponse {
@@ -174,6 +167,8 @@ mod tests {
                 assert_eq!(response, "answer");
                 assert_eq!(duration_ms, 500);
                 let u = usage.expect("usage present");
+                assert_eq!(u.prompt_tokens, 10);
+                assert_eq!(u.completion_tokens, 20);
                 assert_eq!(u.total_tokens, 30);
             }
             _ => panic!("wrong variant"),
@@ -206,20 +201,26 @@ mod tests {
     fn roundtrip_tool_result() {
         let payload = EventPayload::ToolResult {
             tool_name: "read_file".to_string(),
-            tool_call_id: None,
+            tool_call_id: Some("tc-42".to_string()),
             success: true,
-            result: serde_json::json!("file contents"),
+            result: serde_json::json!({"content": "file contents", "lines": 10}),
             duration_ms: 12,
         };
         let restored = roundtrip(&payload);
         match restored {
             EventPayload::ToolResult {
+                tool_name,
+                tool_call_id,
                 success,
+                result,
                 duration_ms,
-                ..
             } => {
+                assert_eq!(tool_name, "read_file");
+                assert_eq!(tool_call_id, Some("tc-42".to_string()));
                 assert!(success);
                 assert_eq!(duration_ms, 12);
+                assert_eq!(result["content"], "file contents");
+                assert_eq!(result["lines"], 10);
             }
             _ => panic!("wrong variant"),
         }

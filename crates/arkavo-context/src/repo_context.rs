@@ -105,7 +105,7 @@ fn should_attach_auto(prompt: &str) -> bool {
         "compile",
         "cargo",
         "rust",
-        "error:",
+        "error",
         "panic",
         ".rs",
         ".gd",
@@ -117,10 +117,12 @@ fn should_attach_auto(prompt: &str) -> bool {
         "api",
         "design",
         "function",
+        "class",
         "struct",
         "impl",
         "trait",
         "module",
+        "import",
         "test",
         "debug",
         "fix",
@@ -134,6 +136,8 @@ fn should_attach_auto(prompt: &str) -> bool {
         "repository",
         "project",
         "crate",
+        "deploy",
+        "refactor",
     ];
 
     if code_keywords.iter().any(|k| lower.contains(k)) {
@@ -275,5 +279,55 @@ mod tests {
         assert!(is_debug());
         set_debug(false);
         assert!(!is_debug());
+    }
+
+    /// CTX-015: Verify compressed output has the expected header and footer
+    #[test]
+    fn test_compress_output_format() {
+        // Build content large enough to trigger compression (>1000 tokens ~ >4000 chars)
+        let large_content = "Some code line\n".repeat(500);
+        let compressed = compress_repo_context(&large_content, 200);
+        assert!(
+            compressed.contains("[PROJECT CONTEXT DIGEST"),
+            "Compressed output must contain the digest header"
+        );
+        assert!(
+            compressed.contains("(Use 'show docs' for more details)"),
+            "Compressed output must contain the footer hint"
+        );
+    }
+
+    /// CTX-015: Compression preserves section headers from input
+    #[test]
+    fn test_compress_preserves_headers() {
+        let input = "# Authentication\ncode here\n# Database\nmore code\n";
+        // Use large repetition to force compression path
+        let large_input = format!("{}{}", input, "filler line\n".repeat(500));
+        let compressed = compress_repo_context(&large_input, 200);
+        assert!(
+            compressed.contains("# Authentication"),
+            "Compressed output must preserve '# Authentication' header"
+        );
+        assert!(
+            compressed.contains("# Database"),
+            "Compressed output must preserve '# Database' header"
+        );
+    }
+
+    /// CTX-014: Auto mode detects all expected code-related keywords
+    #[test]
+    fn test_auto_detects_code_keywords_comprehensive() {
+        let keywords = [
+            "function", "class", "module", "import", "error", "compile", "build", "test", "deploy",
+            "refactor",
+        ];
+        for keyword in &keywords {
+            let prompt = format!("Tell me about {} handling", keyword);
+            assert!(
+                should_attach_repo_context(&prompt, RepoContextMode::Auto),
+                "Auto mode should attach context for keyword '{}'",
+                keyword
+            );
+        }
     }
 }

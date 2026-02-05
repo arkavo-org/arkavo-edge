@@ -160,4 +160,51 @@ mod tests {
         set_debug(false);
         assert!(!is_debug());
     }
+
+    /// CTX-007: Verify RLM activates at exactly the 70% boundary
+    #[test]
+    fn test_rlm_exact_70_percent_boundary() {
+        // Model "270M" has context_size = 2048
+        // Threshold = (2048 * 0.70) as usize = 1433
+        // Activation fires when input_tokens > 1433 (i.e., >= 1434)
+        // estimate_tokens = content.len() / 4, so 1434 tokens = 5736 chars
+        let at_70_percent = "x".repeat(5736);
+        let activation = check_rlm_activation(&at_70_percent, Some("270M"), false);
+        assert!(
+            activation.is_some(),
+            "RLM should activate at 70% boundary (1434 tokens > 1433 threshold)"
+        );
+
+        // 69% of 2048 = 1413.12 -> 1413 tokens = 5652 chars, well below threshold
+        let at_69_percent = "x".repeat(5652);
+        let activation = check_rlm_activation(&at_69_percent, Some("270M"), false);
+        assert!(
+            activation.is_none(),
+            "RLM should not activate at 69% (1413 tokens <= 1433 threshold)"
+        );
+    }
+
+    /// CTX-007: Empty content should never trigger RLM activation
+    #[test]
+    fn test_rlm_empty_content() {
+        let activation = check_rlm_activation("", None, false);
+        assert!(activation.is_none(), "Empty content must not trigger RLM");
+
+        let usage = context_usage_percentage("", None, false);
+        assert!(
+            (usage - 0.0).abs() < f64::EPSILON,
+            "Empty content usage percentage should be exactly 0.0, got {}",
+            usage
+        );
+    }
+
+    /// CTX-007: Unknown model names should fall back to the default context size
+    #[test]
+    fn test_rlm_unknown_model_defaults() {
+        let size = model_context_size(Some("totally-unknown-model-xyz"), false);
+        assert_eq!(
+            size, 4096,
+            "Unknown model should default to 4096 context size"
+        );
+    }
 }
