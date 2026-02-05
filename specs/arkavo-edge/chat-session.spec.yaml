@@ -374,7 +374,7 @@ scenarios:
     then:
       - Unbalanced triple backticks closed
       - Trailing "Assistant:" artifacts removed
-      - "code:" patterns padded to prevent fence generation
+      - '"code:" patterns padded to prevent fence generation'
       - Sanitized content returned
     refs: [crates/arkavo-session/src/conversation.rs:60-89]
     changed: "2025-02-05"

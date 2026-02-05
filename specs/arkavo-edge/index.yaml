@@ -692,8 +692,8 @@ components:
 
 stats:
   total_specs: 60
-  total_scenarios: 499
-  critical_scenarios: 224
+  total_scenarios: 510
+  critical_scenarios: 115
   coverage_areas:
     - authentication
     - authorization

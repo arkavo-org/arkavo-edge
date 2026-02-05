@@ -166,7 +166,7 @@ scenarios:
       - Oldest messages selected for offloading
       - N recent turns preserved based on model
       - Messages archived to ContextLedger
-      - [ARCHIVED: summary] pointers inserted
+      - "[ARCHIVED: summary] pointers inserted"
       - Compressed context returned
     refs: [crates/arkavo-context/src/ledger_chat.rs:71-120]
     changed: "2025-02-05"

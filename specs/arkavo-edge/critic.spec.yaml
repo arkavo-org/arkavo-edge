@@ -272,11 +272,11 @@ scenarios:
       - Model name string provided
     when: detect_model_family called
     then:
-      - "glm" returned for GLM models
-      - "gemma" returned for Gemma models
-      - "qwen" returned for Qwen models
-      - "mistral" returned for Mistral/Ministral models
-      - "deepseek" returned for DeepSeek models
-      - "unknown" returned for unrecognized models
+      - '"glm" returned for GLM models'
+      - '"gemma" returned for Gemma models'
+      - '"qwen" returned for Qwen models'
+      - '"mistral" returned for Mistral/Ministral models'
+      - '"deepseek" returned for DeepSeek models'
+      - '"unknown" returned for unrecognized models'
     refs: [crates/arkavo-critic/src/response_analyzer.rs:328-344]
     changed: "2025-02-05"

@@ -275,8 +275,8 @@ scenarios:
     when: model_context_size called
     then:
       - Context size returned for model family
-      - 270M: 2048, 1B: 4096, 7B: 8192, etc.
-      - Cloud models: 128K-1M tokens
+      - "270M: 2048, 1B: 4096, 7B: 8192, etc."
+      - "Cloud models: 128K-1M tokens"
       - Default for unknown models
     refs: [crates/arkavo-router/src/token_estimation.rs:41-80]
     changed: "2025-02-05"

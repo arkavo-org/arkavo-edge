@@ -346,7 +346,10 @@ impl ConversationManager {
     }
 
     /// Get context messages with optional limits
-    #[allow(clippy::literal_string_with_formatting_args, clippy::missing_panics_doc)]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        clippy::missing_panics_doc
+    )]
     pub async fn get_context_messages_with_limits(
         &self,
         system_message: Option<Message>,

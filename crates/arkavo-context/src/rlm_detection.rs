@@ -41,10 +41,7 @@ pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
                 2048
             } else if lower.contains("1b") {
                 4096
-            } else if lower.contains("3b")
-                || lower.contains("7b")
-                || lower.contains("8b")
-            {
+            } else if lower.contains("3b") || lower.contains("7b") || lower.contains("8b") {
                 8192
             } else if lower.contains("13b") || lower.contains("14b") {
                 16384
