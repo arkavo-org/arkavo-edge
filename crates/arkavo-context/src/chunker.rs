@@ -94,4 +94,36 @@ mod tests {
         let chunks = chunker.chunk(text);
         assert!(chunks.len() >= 2);
     }
+
+    #[test]
+    fn test_empty_text() {
+        let chunker = SemanticChunker::new(1000, 100);
+        let chunks = chunker.chunk("");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_default_impl() {
+        let chunker = SemanticChunker::default();
+        assert_eq!(chunker.max_chunk_size, 4000);
+        assert_eq!(chunker.overlap_size, 200);
+    }
+
+    #[test]
+    fn test_exact_boundary() {
+        let chunker = SemanticChunker::new(32, 5);
+        let text = "a]bcdefghijklmnopqrstuvwxyz012345"; // exactly 32 bytes
+        let chunks = chunker.chunk(text);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], text);
+    }
+
+    #[test]
+    fn test_single_paragraph() {
+        let chunker = SemanticChunker::new(1000, 100);
+        let text = "This is a single paragraph with no double newlines at all.";
+        let chunks = chunker.chunk(text);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], text);
+    }
 }

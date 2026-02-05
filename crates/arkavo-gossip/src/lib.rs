@@ -12,6 +12,7 @@
 //! - **Cross-Swarm Learning**: Lesson propagation and consensus
 
 mod consensus;
+pub mod context_message;
 mod error;
 pub mod learning_message;
 mod lesson_consensus;

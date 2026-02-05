@@ -76,3 +76,104 @@ impl Default for CompressionStats {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compression_metrics_50_percent_reduction() {
+        let m = CompressionMetrics::new(1000, 500, 10);
+        assert_eq!(m.original_tokens, 1000);
+        assert_eq!(m.compressed_tokens, 500);
+        assert!((m.reduction_percent - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_metrics_zero_original() {
+        let m = CompressionMetrics::new(0, 0, 5);
+        assert!((m.reduction_percent - 0.0).abs() < f64::EPSILON);
+        assert!((m.cost_saved - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_metrics_cost_savings() {
+        let m = CompressionMetrics::new(1_000_000, 500_000, 20);
+        let expected_cost = (500_000.0 / 1_000_000.0) * 0.30;
+        assert!((m.cost_saved - expected_cost).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_compression_metrics_with_quality() {
+        let m = CompressionMetrics::new(100, 50, 1).with_quality(0.85);
+        assert!((m.information_retention - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_metrics_default_retention() {
+        let m = CompressionMetrics::new(100, 50, 1);
+        assert!((m.information_retention - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_stats_new_all_zeros() {
+        let s = CompressionStats::new();
+        assert_eq!(s.total_compressions, 0);
+        assert_eq!(s.total_tokens_saved, 0);
+        assert!((s.total_cost_saved - 0.0).abs() < f64::EPSILON);
+        assert!((s.average_reduction - 0.0).abs() < f64::EPSILON);
+        assert!((s.average_quality - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_stats_default_same_as_new() {
+        let new_stats = CompressionStats::new();
+        let default_stats = CompressionStats::default();
+        assert_eq!(
+            new_stats.total_compressions,
+            default_stats.total_compressions
+        );
+        assert_eq!(
+            new_stats.total_tokens_saved,
+            default_stats.total_tokens_saved
+        );
+        assert!((new_stats.total_cost_saved - default_stats.total_cost_saved).abs() < f64::EPSILON);
+        assert!(
+            (new_stats.average_reduction - default_stats.average_reduction).abs() < f64::EPSILON
+        );
+        assert!((new_stats.average_quality - default_stats.average_quality).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_stats_record_single() {
+        let mut s = CompressionStats::new();
+        let m = CompressionMetrics::new(1000, 500, 10);
+        s.record(&m);
+        assert_eq!(s.total_compressions, 1);
+        assert_eq!(s.total_tokens_saved, 500);
+        assert!((s.average_reduction - 50.0).abs() < f64::EPSILON);
+        assert!((s.average_quality - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_stats_record_two_moving_average() {
+        let mut s = CompressionStats::new();
+        let m1 = CompressionMetrics::new(1000, 500, 10); // 50% reduction
+        let m2 = CompressionMetrics::new(1000, 0, 10); // 100% reduction
+        s.record(&m1);
+        s.record(&m2);
+        assert_eq!(s.total_compressions, 2);
+        assert!((s.average_reduction - 75.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compression_stats_cumulative_cost() {
+        let mut s = CompressionStats::new();
+        let m1 = CompressionMetrics::new(1_000_000, 500_000, 10);
+        let m2 = CompressionMetrics::new(1_000_000, 500_000, 10);
+        s.record(&m1);
+        s.record(&m2);
+        let expected_total = m1.cost_saved + m2.cost_saved;
+        assert!((s.total_cost_saved - expected_total).abs() < 1e-9);
+    }
+}

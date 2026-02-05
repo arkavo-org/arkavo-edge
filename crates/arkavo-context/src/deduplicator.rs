@@ -112,4 +112,54 @@ mod tests {
         let result = dedup.deduplicate(chunks);
         assert_eq!(result.len(), 3);
     }
+
+    #[test]
+    fn test_empty_chunks() {
+        let dedup = Deduplicator::default();
+        let result = dedup.deduplicate(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_single_chunk() {
+        let dedup = Deduplicator::default();
+        let chunks = vec!["only one".to_string()];
+        let result = dedup.deduplicate(chunks);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "only one");
+    }
+
+    #[test]
+    fn test_order_preservation() {
+        let dedup = Deduplicator::default();
+        let chunks = vec![
+            "alpha beta gamma".to_string(),
+            "delta epsilon zeta".to_string(),
+            "alpha beta gamma".to_string(),
+        ];
+        let result = dedup.deduplicate(chunks);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "alpha beta gamma");
+        assert_eq!(result[1], "delta epsilon zeta");
+    }
+
+    #[test]
+    fn test_default_impl() {
+        let dedup = Deduplicator::default();
+        assert!((dedup.similarity_threshold - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_all_identical() {
+        let dedup = Deduplicator::default();
+        let chunks = vec![
+            "same content here".to_string(),
+            "same content here".to_string(),
+            "same content here".to_string(),
+            "same content here".to_string(),
+        ];
+        let result = dedup.deduplicate(chunks);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "same content here");
+    }
 }

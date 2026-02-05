@@ -248,8 +248,66 @@ mod tests {
     #[test]
     fn test_similarity_function() {
         assert!(similarity("fix the bug", "fix the bug") > 0.99);
-        // "fix the authentication bug" vs "fix authentication bug" - Jaccard = 3/4 = 0.75
         assert!(similarity("fix the authentication bug", "fix authentication bug") > 0.7);
         assert!(similarity("fix the bug", "refactor the database") < 0.5);
+    }
+
+    #[test]
+    fn test_normalize_description() {
+        assert_eq!(normalize_description("  Fix  The  BUG  "), "fix the bug");
+        assert_eq!(normalize_description("hello"), "hello");
+        assert_eq!(normalize_description(""), "");
+    }
+
+    #[test]
+    fn test_similarity_identical() {
+        assert!((similarity("hello world", "hello world") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_similarity_empty() {
+        assert_eq!(similarity("", ""), 0.0);
+        assert_eq!(similarity("hello", ""), 0.0);
+        assert_eq!(similarity("", "world"), 0.0);
+    }
+
+    #[test]
+    fn test_similarity_disjoint() {
+        assert_eq!(similarity("alpha beta", "gamma delta"), 0.0);
+    }
+
+    #[test]
+    fn test_hash_deterministic() {
+        let h1 = LoopDetector::get_hash("test description");
+        let h2 = LoopDetector::get_hash("test description");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hash_different_inputs() {
+        let h1 = LoopDetector::get_hash("fix the bug");
+        let h2 = LoopDetector::get_hash("refactor the code");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_failure_count_tracking() {
+        let mut d = LoopDetector::new();
+        assert_eq!(d.failure_count("task A"), 0);
+        d.record_failure("task A");
+        assert_eq!(d.failure_count("task A"), 1);
+        d.record_failure("task A");
+        assert_eq!(d.failure_count("task A"), 2);
+    }
+
+    #[test]
+    fn test_clear_resets_all() {
+        let mut d = LoopDetector::new();
+        d.record_failure("task A");
+        d.record_failure("task A");
+        assert!(d.would_thrash("task A"));
+        d.clear();
+        assert_eq!(d.failure_count("task A"), 0);
+        assert!(!d.would_thrash("task A"));
     }
 }

@@ -300,4 +300,92 @@ mod tests {
         assert!(ContextStrategy::Full.estimated_overhead_tokens() > 1000);
         assert!(ContextStrategy::ArtifactReference.estimated_overhead_tokens() < 200);
     }
+
+    #[test]
+    fn test_burst_state_is_terminal() {
+        assert!(!BurstState::Active.is_terminal());
+        assert!(BurstState::Completed.is_terminal());
+        assert!(BurstState::Exhausted.is_terminal());
+        assert!(BurstState::Expired.is_terminal());
+        assert!(BurstState::Cancelled.is_terminal());
+    }
+
+    #[test]
+    fn test_burst_state_can_continue() {
+        assert!(BurstState::Active.can_continue());
+        assert!(!BurstState::Completed.can_continue());
+        assert!(!BurstState::Exhausted.can_continue());
+        assert!(!BurstState::Expired.can_continue());
+        assert!(!BurstState::Cancelled.can_continue());
+    }
+
+    #[test]
+    fn test_burst_state_default() {
+        assert_eq!(BurstState::default(), BurstState::Active);
+    }
+
+    #[test]
+    fn test_context_strategy_all_variants() {
+        assert_eq!(ContextStrategy::Full.estimated_overhead_tokens(), 5000);
+        assert_eq!(
+            ContextStrategy::SummaryOnly.estimated_overhead_tokens(),
+            500
+        );
+        assert_eq!(
+            ContextStrategy::LastNMessages(5).estimated_overhead_tokens(),
+            1000
+        );
+        assert_eq!(
+            ContextStrategy::ArtifactReference.estimated_overhead_tokens(),
+            100
+        );
+        assert_eq!(ContextStrategy::Ledger.estimated_overhead_tokens(), 300);
+    }
+
+    #[test]
+    fn test_context_strategy_default() {
+        assert!(matches!(
+            ContextStrategy::default(),
+            ContextStrategy::ArtifactReference
+        ));
+    }
+
+    #[test]
+    fn test_contract_state_transitions() {
+        let mut c = BurstContract::new(Uuid::new_v4());
+        assert_eq!(c.state, BurstState::Active);
+        c.complete();
+        assert_eq!(c.state, BurstState::Completed);
+
+        let mut c2 = BurstContract::new(Uuid::new_v4());
+        c2.exhaust();
+        assert_eq!(c2.state, BurstState::Exhausted);
+
+        let mut c3 = BurstContract::new(Uuid::new_v4());
+        c3.expire();
+        assert_eq!(c3.state, BurstState::Expired);
+
+        let mut c4 = BurstContract::new(Uuid::new_v4());
+        c4.cancel();
+        assert_eq!(c4.state, BurstState::Cancelled);
+    }
+
+    #[test]
+    fn test_extension_budget_halved() {
+        let contract = BurstContract::new(Uuid::new_v4());
+        let original_tokens = contract.max_tokens;
+        let original_cost = contract.max_cost_usd;
+        let ext = contract.extend(2, Duration::from_secs(30)).unwrap();
+        assert_eq!(ext.max_tokens, original_tokens / 2);
+        assert!((ext.max_cost_usd - original_cost / 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_max_extensions_limit() {
+        let contract = BurstContract::new(Uuid::new_v4());
+        let ext1 = contract.extend(1, Duration::from_secs(10)).unwrap();
+        let ext2 = ext1.extend(1, Duration::from_secs(10)).unwrap();
+        assert!(!ext2.can_extend());
+        assert!(ext2.extend(1, Duration::from_secs(10)).is_none());
+    }
 }
