@@ -251,6 +251,7 @@ jobs:
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-workspace --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-session --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
