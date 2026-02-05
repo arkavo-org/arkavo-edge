@@ -158,9 +158,9 @@ scenarios:
     when: Command parsed and executed
     then:
       - Repo context mode updated
-      - "auto": context attached based on keywords
-      - "on": context always attached
-      - "off": context never attached
+      - '"auto": context attached based on keywords'
+      - '"on": context always attached'
+      - '"off": context never attached'
       - Current mode displayed
     refs: [crates/arkavo-cli/src/commands/chat.rs:186-210]
     changed: "2025-02-05"
@@ -232,7 +232,7 @@ scenarios:
       - User types "/list [path]"
     when: Command parsed and executed
     then:
-      - Directory listed (default: current)
+      - "Directory listed (default: current)"
       - Files and subdirectories shown
       - Formatted for readability
     refs: [crates/arkavo-cli/src/commands/chat.rs:291-310]

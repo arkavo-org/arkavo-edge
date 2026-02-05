@@ -145,12 +145,12 @@ scenarios:
       - Is cloud provider flag set
     when: Context ledger thresholds determined
     then:
-      - 270M: 2KB threshold, 2 turns preserved
-      - 1B: 4KB threshold, 4 turns preserved
-      - 2B: 8KB threshold, 4 turns preserved
-      - 7B: 16KB threshold, 6 turns preserved
-      - Large local: 32KB threshold, 8 turns preserved
-      - Cloud (Gemini/Claude/GPT): 256KB threshold, 20 turns preserved
+      - "270M: 2KB threshold, 2 turns preserved"
+      - "1B: 4KB threshold, 4 turns preserved"
+      - "2B: 8KB threshold, 4 turns preserved"
+      - "7B: 16KB threshold, 6 turns preserved"
+      - "Large local: 32KB threshold, 8 turns preserved"
+      - "Cloud (Gemini/Claude/GPT): 256KB threshold, 20 turns preserved"
     refs: [crates/arkavo-context/src/ledger_chat.rs:30-70]
     changed: "2025-02-05"
 
@@ -194,9 +194,9 @@ scenarios:
       - Optional summary provided or auto-generate
     when: ContextSummarizer::summarize called
     then:
-      - If summary provided: used directly
-      - If no summary: local LLM generates 10-20 word description
-      - Summary embedded in [ARCHIVED: ...] pointer
+      - "If summary provided: used directly"
+      - "If no summary: local LLM generates 10-20 word description"
+      - "Summary embedded in [ARCHIVED: ...] pointer"
       - Meaningful context preserved
     refs: [crates/arkavo-context/src/summarizer.rs:1-80]
     changed: "2025-02-05"
@@ -235,9 +235,9 @@ scenarios:
       - Repo context mode set (auto/on/off)
     when: should_attach_repo_context called
     then:
-      - Mode "off": always false
-      - Mode "on": always true
-      - Mode "auto": keyword detection
+      - 'Mode "off": always false'
+      - 'Mode "on": always true'
+      - 'Mode "auto": keyword detection'
       - Code keywords trigger true (readme, cargo, error, etc.)
       - Greetings/math return false
     refs: [crates/arkavo-context/src/repo_context.rs:20-90]

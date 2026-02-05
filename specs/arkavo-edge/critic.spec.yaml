@@ -231,8 +231,8 @@ scenarios:
       - is_math_query flag set
     when: extract_first_answer called
     then:
-      - For math: First line with number extracted
-      - For non-math: Content before repetition returned
+      - "For math: First line with number extracted"
+      - "For non-math: Content before repetition returned"
       - Clean answer without loop artifacts
     refs: [crates/arkavo-critic/src/response_analyzer.rs:265-315]
     changed: "2025-02-05"
@@ -260,7 +260,7 @@ scenarios:
     when: get_model_issue_counts called
     then:
       - Returns counts for each issue category
-      - Categories: loop, code_fence, timeout, wrong_expert, hallucinated_tool
+      - "Categories: loop, code_fence, timeout, wrong_expert, hallucinated_tool"
       - Empty categories omitted from results
     refs: [crates/arkavo-critic/src/response_analyzer.rs:449-476]
     changed: "2025-02-05"
