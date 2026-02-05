@@ -142,7 +142,7 @@ scenarios:
       - Issue detected as UnwantedCodeFence
       - Feedback created with model_family and issue type
       - Prompt keywords extracted for pattern matching
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:60-100]
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:59-101]
     changed: "2025-02-05"
     edge_cases:
       - condition: Complex coding query with code fences
@@ -161,7 +161,7 @@ scenarios:
       - Repetition pattern detected
       - OutputLoop issue identified
       - Feedback created with loop metadata
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:100-130]
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:134-184]
     changed: "2025-02-05"
     edge_cases:
       - condition: Repeated consecutive lines (3+ times)
@@ -184,7 +184,7 @@ scenarios:
       - Category formatted as "model:{family}:{issue}"
       - Episode stored in LearningStore
       - Issue type returned for caller handling
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:346-406]
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:82-169]
     changed: "2025-02-05"
 
   - id: CRIT-012
@@ -200,7 +200,7 @@ scenarios:
       - Loop episode count checked for model family
       - PatternAdjustment returned if threshold met
       - Suggested max_tokens reduced for loopy models
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:488-536]
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:252-299]
     changed: "2025-02-05"
     edge_cases:
       - condition: No loop history for model
@@ -220,7 +220,7 @@ scenarios:
       - WrongExpert issue detected
       - Expected "conversation" expert noted
       - Feedback created for routing improvement
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:120-130]
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:92-98]
     changed: "2025-02-05"
 
   - id: CRIT-014
@@ -234,7 +234,7 @@ scenarios:
       - "For math: First line with number extracted"
       - "For non-math: Content before repetition returned"
       - Clean answer without loop artifacts
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:265-315]
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:231-275]
     changed: "2025-02-05"
 
   - id: CRIT-015
@@ -248,7 +248,7 @@ scenarios:
       - Timeout episode created
       - Category set as "model:{family}:timeout"
       - Episode stored in LearningStore
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:408-446]
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:172-210]
     changed: "2025-02-05"
 
   - id: CRIT-016
@@ -262,7 +262,7 @@ scenarios:
       - Returns counts for each issue category
       - "Categories: loop, code_fence, timeout, wrong_expert, hallucinated_tool"
       - Empty categories omitted from results
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:449-476]
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:213-240]
     changed: "2025-02-05"
 
   - id: CRIT-017
@@ -278,5 +278,5 @@ scenarios:
       - '"mistral" returned for Mistral/Ministral models'
       - '"deepseek" returned for DeepSeek models'
       - '"unknown" returned for unrecognized models'
-    refs: [crates/arkavo-critic/src/response_analyzer.rs:328-344]
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:212-227]
     changed: "2025-02-05"
