@@ -108,7 +108,7 @@ impl ConversationManager {
 
         // Count and balance triple backticks
         let fence_count = sanitized.matches("```").count();
-        if fence_count % 2 != 0 {
+        if !fence_count.is_multiple_of(2) {
             // Odd number of fences - close the last one
             sanitized.push_str("\n```\n");
         }
@@ -217,66 +217,65 @@ impl ConversationManager {
             .search("conversation_session", 10, Some("conversation"))
             .await?;
 
-        if let Some(latest_session) = sessions.first() {
-            if let Ok(session) =
+        if let Some(latest_session) = sessions.first()
+            && let Ok(session) =
                 serde_json::from_str::<ConversationSession>(&latest_session.memory.content)
+        {
+            // Check compatibility if metadata provided
+            let mut compatible = true;
+            let mut incompatibility_reason = String::new();
+
+            // Check template hash compatibility
+            if let (Some(current_tmpl), Some(session_tmpl_hash)) =
+                (current_template, &session.chat_template_hash)
             {
-                // Check compatibility if metadata provided
-                let mut compatible = true;
-                let mut incompatibility_reason = String::new();
-
-                // Check template hash compatibility
-                if let (Some(current_tmpl), Some(session_tmpl_hash)) =
-                    (current_template, &session.chat_template_hash)
-                {
-                    let current_hash = Self::calculate_hash(current_tmpl);
-                    if current_hash != *session_tmpl_hash {
-                        compatible = false;
-                        incompatibility_reason.push_str("template mismatch, ");
-                    }
+                let current_hash = Self::calculate_hash(current_tmpl);
+                if current_hash != *session_tmpl_hash {
+                    compatible = false;
+                    incompatibility_reason.push_str("template mismatch, ");
                 }
-
-                // Check system prompt compatibility
-                if let (Some(current_sys), Some(session_sys_hash)) =
-                    (current_prompt, &session.system_prompt_hash)
-                {
-                    let current_hash = Self::calculate_hash(current_sys);
-                    if current_hash != *session_sys_hash {
-                        compatible = false;
-                        incompatibility_reason.push_str("system prompt mismatch, ");
-                    }
-                }
-
-                // Check model compatibility
-                if let Some(current_mdl) = current_model {
-                    let current_base = current_mdl.split('-').take(2).collect::<Vec<_>>().join("-");
-                    let session_base = session
-                        .model
-                        .split('-')
-                        .take(2)
-                        .collect::<Vec<_>>()
-                        .join("-");
-                    if current_base != session_base {
-                        compatible = false;
-                        incompatibility_reason.push_str("model mismatch, ");
-                    }
-                }
-
-                if compatible {
-                    self.current_session_id = Some(session.id);
-                    progress.finish_with_message(format!(
-                        "Restored session from {}",
-                        session.created_at.format("%Y-%m-%d %H:%M")
-                    ));
-                    return Ok(Some(session.id));
-                }
-
-                incompatibility_reason = incompatibility_reason.trim_end_matches(", ").to_string();
-                progress.finish_with_message(format!(
-                    "Session skipped: {incompatibility_reason} (starting fresh)"
-                ));
-                return Ok(None);
             }
+
+            // Check system prompt compatibility
+            if let (Some(current_sys), Some(session_sys_hash)) =
+                (current_prompt, &session.system_prompt_hash)
+            {
+                let current_hash = Self::calculate_hash(current_sys);
+                if current_hash != *session_sys_hash {
+                    compatible = false;
+                    incompatibility_reason.push_str("system prompt mismatch, ");
+                }
+            }
+
+            // Check model compatibility
+            if let Some(current_mdl) = current_model {
+                let current_base = current_mdl.split('-').take(2).collect::<Vec<_>>().join("-");
+                let session_base = session
+                    .model
+                    .split('-')
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join("-");
+                if current_base != session_base {
+                    compatible = false;
+                    incompatibility_reason.push_str("model mismatch, ");
+                }
+            }
+
+            if compatible {
+                self.current_session_id = Some(session.id);
+                progress.finish_with_message(format!(
+                    "Restored session from {}",
+                    session.created_at.format("%Y-%m-%d %H:%M")
+                ));
+                return Ok(Some(session.id));
+            }
+
+            incompatibility_reason = incompatibility_reason.trim_end_matches(", ").to_string();
+            progress.finish_with_message(format!(
+                "Session skipped: {incompatibility_reason} (starting fresh)"
+            ));
+            return Ok(None);
         }
 
         progress.finish_and_clear();
@@ -328,7 +327,7 @@ impl ConversationManager {
             "user" => Message::user(content),
             "assistant" => Message::assistant(content),
             "system" => Message::system(content),
-            _ => return Err(anyhow::anyhow!("Invalid role: {}", role)),
+            _ => return Err(anyhow::anyhow!("Invalid role: {role}")),
         };
         self.add_message(&message).await
     }
@@ -347,7 +346,7 @@ impl ConversationManager {
     }
 
     /// Get context messages with optional limits
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[allow(clippy::literal_string_with_formatting_args, clippy::missing_panics_doc)]
     pub async fn get_context_messages_with_limits(
         &self,
         system_message: Option<Message>,
@@ -399,12 +398,11 @@ impl ConversationManager {
                 .search(&summary_query, 5, Some("conversation"))
                 .await?;
 
-            if let Some(latest_summary) = summaries.first() {
-                if let Ok(summary_msg) =
+            if let Some(latest_summary) = summaries.first()
+                && let Ok(summary_msg) =
                     serde_json::from_str::<ConversationMessage>(&latest_summary.memory.content)
-                {
-                    context_messages.push(Message::assistant(&summary_msg.content));
-                }
+            {
+                context_messages.push(Message::assistant(&summary_msg.content));
             }
         }
 
