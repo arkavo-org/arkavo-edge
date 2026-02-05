@@ -22,8 +22,7 @@ jobs:
   # Version check from PR
   version-check:
     name: Verify Version Increment
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -98,8 +97,7 @@ jobs:
   # Quick checks that can run in parallel
   format:
     name: Format Check
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -111,8 +109,7 @@ jobs:
 
   hardcoded-paths:
     name: No Hardcoded Paths
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Check for hardcoded user paths
@@ -163,8 +160,7 @@ jobs:
   # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
   test-and-lint:
     name: Test & Lint (${{ matrix.group }})
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false  # Run all groups even if one fails
       matrix:
@@ -266,8 +262,7 @@ jobs:
 
   test-kimi-feature:
     name: Test Kimi Feature
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -324,8 +319,7 @@ jobs:
   # Uses EmbarkStudios action with matrix strategy for optimal CI behavior
   cargo-deny:
     name: Dependency Audit (${{ matrix.checks }})
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -343,7 +337,6 @@ jobs:
 
   build-linux:
     name: Build Linux (${{ matrix.target || matrix.device }})
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -501,9 +494,8 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
-    runs-on: self-hosted
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -610,7 +602,6 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
     runs-on: windows-2022
     steps:
@@ -687,9 +678,8 @@ jobs:
   # Performance check can run independently
   performance-check:
     name: Performance Check
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: build-linux
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - name: Download release artifact
         uses: actions/download-artifact@v4
@@ -710,7 +700,6 @@ jobs:
   # Smoke tests depend on builds
   smoke-test-linux:
     name: Smoke Test Linux (${{ matrix.container }})
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: build-linux
     runs-on: ubuntu-22.04
     strategy:
@@ -741,9 +730,8 @@ jobs:
 
   smoke-test-macos:
     name: Smoke Test macOS
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: build-macos
-    runs-on: self-hosted
+    runs-on: macos-latest
     steps:
       - name: Download binary
         uses: actions/download-artifact@v4
@@ -758,7 +746,6 @@ jobs:
 
   smoke-test-windows:
     name: Smoke Test Windows
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: build-windows
     runs-on: windows-2022
     steps:
@@ -776,9 +763,8 @@ jobs:
   # Binary functionality smoke test
   binary-smoke-test:
     name: Binary Smoke Test
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     needs: [build-linux]
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - name: Download Linux binary
         uses: actions/download-artifact@v4
@@ -892,8 +878,7 @@ jobs:
   # Schema validation jobs
   validate-openrpc:
     name: Validate OpenRPC Schema
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1005,8 +990,8 @@ jobs:
 
   check-schema-backwards-compatibility:
     name: Check Schema Backwards Compatibility
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1095,8 +1080,7 @@ jobs:
 
   validate-doc-snippets:
     name: Validate Documentation Code Snippets
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1132,8 +1116,7 @@ jobs:
 
   validate-xtask-schema:
     name: Validate Schemas with xtask
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1165,8 +1148,7 @@ jobs:
   # Zero-config and portability verification
   zero-config-check:
     name: Zero Configuration Check
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1206,8 +1188,7 @@ jobs:
   # Verify no OpenSSL dependency for musl builds
   no-openssl-check:
     name: Verify No OpenSSL Dependency
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1276,8 +1257,7 @@ jobs:
   # Behavior spec validation
   validate-specs:
     name: Validate Behavior Specs
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       
@@ -1459,8 +1439,8 @@ jobs:
   release-readiness:
     name: Release Readiness
     needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check, validate-specs]
-    if: always() && (github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request')
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
+    if: always()
     steps:
       - name: Check job results
         run: |
