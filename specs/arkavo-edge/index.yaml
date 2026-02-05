@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.58.0
-last_updated: 2025-01-31
+last_updated: 2025-02-05
 
 components:
   - name: registration
@@ -29,13 +29,17 @@ components:
   - name: chat-session
     file: chat-session.spec.yaml
     module: arkavo_protocol::chat_session
-    description: LLM chat session lifecycle management
+    description: LLM chat session lifecycle management with conversation persistence
     criticality: high
-    scenario_count: 13
+    scenario_count: 24
     invariants:
       - UUID v4 session IDs
       - State machine: Active → Closing → Closed
       - 100-delta back-pressure threshold
+      - Conversation manager persists to MemoryStorage
+      - Context messages respect token budgets
+      - Session restoration with compatibility checking
+      - Message sanitization for small models
 
   - name: gossip-protocol
     file: gossip-protocol.spec.yaml
@@ -51,13 +55,16 @@ components:
   - name: router
     file: router.spec.yaml
     module: arkavo_router
-    description: LLM routing with quality gates and cost optimization
+    description: LLM routing with quality gates, response processing, and sampling parameters
     criticality: critical
-    scenario_count: 10
+    scenario_count: 17
     invariants:
       - Preflight moderation before model selection
       - Max 3 quality gate retries with escalation
       - Streaming bounded channels (100 chunks)
+      - Response processing strips think/tool blocks
+      - Sampling parameters configurable per request
+      - Token estimation for context management
 
   - name: tdf
     file: tdf.spec.yaml
@@ -414,13 +421,16 @@ components:
   - name: cli
     file: cli.spec.yaml
     module: arkavo_cli
-    description: Arkavo Edge CLI interface
+    description: Arkavo Edge CLI interface with interactive REPL commands
     criticality: high
-    scenario_count: 7
+    scenario_count: 17
     invariants:
       - Tracing initialized once
       - First-run checks models
       - Commands dispatch to handlers
+      - Interactive REPL commands start with "/"
+      - Session commands persist to MemoryStorage
+      - Model parameters passed to LLM client
 
   - name: mcp-runtime
     file: mcp-runtime.spec.yaml
@@ -491,13 +501,17 @@ components:
   - name: context
     file: context.spec.yaml
     module: arkavo_context
-    description: Context management and compression
+    description: Context management, compression, RLM activation, and context ledger
     criticality: high
-    scenario_count: 6
+    scenario_count: 15
     invariants:
       - Semantic chunking
       - Deduplication
       - Compression pipeline
+      - RLM activation at 70% context threshold
+      - Context ledger auto-offloads old messages
+      - Model-aware offload thresholds
+      - Repository context awareness
 
   - name: attestation
     file: attestation.spec.yaml
@@ -579,13 +593,16 @@ components:
   - name: critic
     file: critic.spec.yaml
     module: arkavo_critic
-    description: LLM response critic and verification
+    description: LLM response critic, verification, and feedback analysis
     criticality: critical
-    scenario_count: 8
+    scenario_count: 17
     invariants:
       - Verification pipeline with priority checks
       - Fast checks first (Circuit <1μs)
       - Evidence collection
+      - Response analysis detects code fences, loops, wrong expert
+      - Feedback episodes stored for persistent learning
+      - Pattern adjustments based on model history
 
   - name: ucp
     file: ucp.spec.yaml
@@ -624,14 +641,17 @@ components:
   - name: protocol
     file: protocol.spec.yaml
     module: arkavo_protocol
-    description: A2A protocol and agent communication
+    description: A2A protocol, agent communication, and peer management
     criticality: critical
-    scenario_count: 10
+    scenario_count: 19
     invariants:
       - A2A enables agent-to-agent communication
       - WebSocket and HTTP transports
       - Registration with challenge-response
       - Task execution with persistence
+      - Peer manager handles multiple concurrent connections
+      - Transport auto-upgrade for streaming methods
+      - Broadcast to all connected peers supported
 
   - name: orchestrator
     file: orchestrator.spec.yaml
@@ -672,8 +692,8 @@ components:
 
 stats:
   total_specs: 60
-  total_scenarios: 450
-  critical_scenarios: 201
+  total_scenarios: 499
+  critical_scenarios: 224
   coverage_areas:
     - authentication
     - authorization
@@ -718,6 +738,15 @@ stats:
     - issue_orchestration
     - network_security
     - tdf_security
+    - response_analysis
+    - feedback_learning
+    - peer_management
+    - conversation_management
+    - interactive_commands
+    - context_ledger
+    - rlm_activation
+    - response_processing
+    - sampling_parameters
 
 # Cross-component behaviors
 integration_points:
@@ -972,3 +1001,39 @@ integration_points:
   - name: TDF Security → Authorization
     description: ABAC policy enforcement
     specs: [TDFS-004, AUTHZ-001]
+
+  - name: Critic → Router
+    description: Critic provides feedback analysis for router responses
+    specs: [CRIT-009, CRIT-010, ROUTER-011]
+
+  - name: Context → Chat Session
+    description: Context ledger manages conversation offloading
+    specs: [CTX-008, CTX-009, CHAT-018]
+
+  - name: Protocol → Chat Session
+    description: Peer manager enables multi-agent chat sessions
+    specs: [PROTO-011, PROTO-015, CHAT-014]
+
+  - name: CLI → Chat Session
+    description: CLI interactive commands use conversation manager
+    specs: [CLI-008, CLI-009, CLI-012, CHAT-015]
+
+  - name: Context → Router
+    description: RLM detection informs routing decisions
+    specs: [CTX-007, ROUTER-016, ROUTER-017]
+
+  - name: Repo → Context
+    description: Repository context informs context decisions
+    specs: [REPO-005, CTX-014, CTX-015]
+
+  - name: Critic → Chat Session
+    description: Response analysis improves conversation quality
+    specs: [CRIT-011, CRIT-012, CHAT-017]
+
+  - name: Memory → Context
+    description: Context ledger uses memory storage
+    specs: [MEM-003, MEM-004, CTX-009, CTX-010]
+
+  - name: Router → Chat Session
+    description: Response processing sanitizes chat output
+    specs: [ROUTER-011, ROUTER-012, ROUTER-013, CHAT-024]

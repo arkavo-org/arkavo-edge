@@ -722,6 +722,7 @@ dependencies = [
  "arkavo-repo",
  "arkavo-router",
  "arkavo-server",
+ "arkavo-session",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
  "arkavo-terminal",
@@ -1644,6 +1645,8 @@ name = "arkavo-session"
 version = "0.58.1"
 dependencies = [
  "anyhow",
+ "arkavo-llm",
+ "arkavo-memory",
  "arkavo-protocol",
  "async-trait",
  "axum",
@@ -1651,6 +1654,7 @@ dependencies = [
  "dashmap",
  "futures",
  "http",
+ "indicatif 0.18.3",
  "reqwest",
  "rustls 0.23.36",
  "rustls-pemfile",
@@ -1658,6 +1662,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
+ "tiktoken-rs",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",

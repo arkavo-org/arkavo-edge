@@ -48,8 +48,20 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 dashmap = { workspace = true }
 
+# Token counting
+tiktoken-rs = { workspace = true }
+
+# Progress indicators
+indicatif = { workspace = true }
+
 # Protocol types (core dependency)
 arkavo-protocol = { path = "../arkavo-protocol" }
+
+# LLM interface for summarization
+arkavo-llm = { path = "../arkavo-llm" }
+
+# Memory storage
+arkavo-memory = { path = "../arkavo-memory" }
 
 [lints]
 workspace = true

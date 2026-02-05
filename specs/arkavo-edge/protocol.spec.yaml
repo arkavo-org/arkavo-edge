@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: A2A Protocol and Agent Communication
 module: arkavo_protocol
 version: 0.57.2
@@ -8,6 +10,8 @@ invariants:
   - Registration with challenge-response authentication
   - Task execution with persistence
   - mDNS discovery for local agents
+  - Peer manager handles multiple concurrent peer connections
+  - Transport auto-upgrade for streaming methods
 
 scenarios:
   - id: PROTO-001
@@ -169,3 +173,140 @@ scenarios:
       - Context preserved
     refs: [crates/arkavo-protocol/src/error.rs:1-40]
     changed: "2025-01-31"
+
+  - id: PROTO-011
+    name: Create peer manager with configuration
+    criticality: high
+    given:
+      - Agent ID provided
+      - PeerManagerConfig optional
+    when: PeerManager::new or PeerManager::with_config called
+    then:
+      - PeerManager initialized
+      - Empty peer map created
+      - Configuration applied
+      - Ready for peer connections
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:72-85]
+    changed: "2025-02-05"
+
+  - id: PROTO-012
+    name: Connect to peer with HTTP transport
+    criticality: high
+    given:
+      - PeerManager initialized
+      - Peer URL provided (http:// or https://)
+      - TransportType::Http specified
+    when: connect_to_peer_with_transport called
+    then:
+      - URL normalized to HTTP format
+      - HttpTransport created
+      - Connection established
+      - Peer added to peer map
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:116-172]
+    changed: "2025-02-05"
+
+  - id: PROTO-013
+    name: Connect to peer with WebSocket transport
+    criticality: high
+    given:
+      - PeerManager initialized
+      - Peer URL provided
+      - TransportType::WebSocket specified
+    when: connect_to_peer_with_transport called
+    then:
+      - URL normalized to WebSocket format (ws:// or wss://)
+      - WebSocketTransport created
+      - Connection established
+      - Peer added to peer map with WebSocket transport
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:116-198]
+    changed: "2025-02-05"
+
+  - id: PROTO-014
+    name: Auto-upgrade transport for streaming methods
+    criticality: high
+    given:
+      - Peer connected with HTTP transport
+      - Method ends with "_stream" or contains "/stream"
+      - auto_upgrade_streaming enabled in config
+    when: select_transport_for_method called
+    then:
+      - TransportType::WebSocket selected
+      - ensure_transport upgrades peer to WebSocket
+      - Streaming-capable transport ready
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:87-100,207-234]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: auto_upgrade_streaming disabled
+        expected: Default transport used
+      - condition: Non-streaming method
+        expected: Default transport used
+
+  - id: PROTO-015
+    name: Broadcast message to all connected peers
+    criticality: high
+    given:
+      - PeerManager has connected peers
+      - Method and params provided
+    when: PeerManager::broadcast called
+    then:
+      - Transport type selected per method
+      - Message sent to each peer
+      - Results collected from all peers
+      - Returns vector of Ok/Err results
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:236-288]
+    changed: "2025-02-05"
+
+  - id: PROTO-016
+    name: Send request to specific peer
+    criticality: high
+    given:
+      - Peer connected
+      - Target peer URL known
+      - Method and params provided
+    when: PeerManager::send_to called
+    then:
+      - Transport ensured for method type
+      - Request created and sent
+      - Response awaited and returned
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:290-327]
+    changed: "2025-02-05"
+
+  - id: PROTO-017
+    name: Get connected peer information
+    criticality: medium
+    given:
+      - PeerManager has peers
+    when: connected_peers or connected_peers_with_transport called
+    then:
+      - Returns list of peer URLs
+      - Optionally includes transport types
+      - Read lock held briefly
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:329-342]
+    changed: "2025-02-05"
+
+  - id: PROTO-018
+    name: Check peer connection status
+    criticality: medium
+    given:
+      - PeerManager initialized
+    when: has_peers or peer_count called
+    then:
+      - has_peers returns true if any peers connected
+      - peer_count returns number of connected peers
+      - Read lock held briefly
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:344-354]
+    changed: "2025-02-05"
+
+  - id: PROTO-019
+    name: Connect to multiple peers at once
+    criticality: medium
+    given:
+      - PeerManager initialized
+      - List of peer URLs provided
+    when: connect_to_peers called
+    then:
+      - Each peer connection attempted
+      - Failed connections logged but don't stop others
+      - Returns Ok even if some fail
+    refs: [crates/arkavo-protocol/src/peer_manager.rs:102-113]
+    changed: "2025-02-05"

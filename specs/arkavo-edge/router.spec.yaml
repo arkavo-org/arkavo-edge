@@ -10,6 +10,8 @@ invariants:
   - Offline mode restricts routing to local models only
   - Streaming responses maintain backpressure via bounded channels
   - Router metrics are updated atomically for consistency
+  - Response processing strips internal tags and artifacts
+  - Sampling parameters configurable per request
 
 scenarios:
   - id: ROUTER-001
@@ -153,3 +155,128 @@ scenarios:
       - condition: Streaming consumer dropped
         expected: Stream aborts, resources cleaned
     changed: "2025-01-31"
+
+  - id: ROUTER-011
+    name: Strip think blocks from response
+    criticality: high
+    given:
+      - Response content contains <think>...</think> blocks
+      - SHOW_DEBUG flag may be set
+    when: strip_think_blocks called
+    then:
+      - Think block content extracted
+      - Content displayed to stderr if SHOW_DEBUG set
+      - Think tags and content removed from output
+      - Remaining content returned
+    refs: [crates/arkavo-router/src/response/processing.rs:10-50]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Unclosed think block
+        expected: Removes from <think> to end
+      - condition: No think blocks
+        expected: Content unchanged
+      - condition: Nested think blocks
+        expected: All blocks stripped
+
+  - id: ROUTER-012
+    name: Strip tool blocks from response
+    criticality: high
+    given:
+      - Response content contains <tool>...</tool> blocks
+    when: strip_tool_blocks called
+    then:
+      - Tool tags and content removed
+      - Already-executed tool calls hidden
+      - Clean response returned
+    refs: [crates/arkavo-router/src/response/processing.rs:51-70]
+    changed: "2025-02-05"
+
+  - id: ROUTER-013
+    name: Sanitize response output
+    criticality: high
+    given:
+      - Raw LLM response
+      - May contain artifacts
+    when: sanitize_response called
+    then:
+      - Think blocks stripped
+      - Tool blocks stripped
+      - Conversation prefixes removed ("Human:", "Assistant:")
+      - Clean output ready for display
+    refs: [crates/arkavo-router/src/response/processing.rs:71-90]
+    changed: "2025-02-05"
+
+  - id: ROUTER-014
+    name: Apply sampling parameters
+    criticality: high
+    given:
+      - SamplingParameters provided
+      - LLM request being built
+    when: Parameters applied to request
+    then:
+      - temperature controls randomness (default 0.7)
+      - top_p controls nucleus sampling (default 0.9)
+      - top_k controls vocabulary cutoff (default 40)
+      - max_tokens limits response length (default 4096)
+      - seed ensures reproducibility when set
+    refs: [crates/arkavo-router/src/config/sampling.rs:1-60]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: temperature=0
+        expected: Greedy decoding, deterministic
+      - condition: max_tokens exceeded
+        expected: Response truncated
+      - condition: Invalid parameter values
+        expected: Clamped to valid range
+
+  - id: ROUTER-015
+    name: Handle vision queries with image input
+    criticality: medium
+    given:
+      - Vision-capable model selected
+      - Image file path provided
+      - Image encoding available
+    when: Vision request constructed
+    then:
+      - Image file loaded and validated
+      - Image encoded to base64 or embeddings
+      - Multi-modal prompt constructed
+      - Model processes text + image
+    refs: [crates/arkavo-router/src/vision.rs:1-80]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Image file not found
+        expected: Error returned before model call
+      - condition: Image too large
+        expected: Resized or rejected
+      - condition: Non-vision model selected
+        expected: Error or text-only fallback
+
+  - id: ROUTER-016
+    name: Estimate token count for context
+    criticality: medium
+    given:
+      - Text content provided
+      - Tokenizer available
+    when: estimate_tokens called
+    then:
+      - Approximate token count returned
+      - Used for RLM activation check
+      - Used for context budget management
+    refs: [crates/arkavo-router/src/token_estimation.rs:1-40]
+    changed: "2025-02-05"
+
+  - id: ROUTER-017
+    name: Get model context size
+    criticality: medium
+    given:
+      - Model hint or provider name
+      - Cloud vs local flag
+    when: model_context_size called
+    then:
+      - Context size returned for model family
+      - 270M: 2048, 1B: 4096, 7B: 8192, etc.
+      - Cloud models: 128K-1M tokens
+      - Default for unknown models
+    refs: [crates/arkavo-router/src/token_estimation.rs:41-80]
+    changed: "2025-02-05"
