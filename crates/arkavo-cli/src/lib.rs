@@ -72,9 +72,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "ui" => commands::ui::execute(&args[1..]),
         // Hidden commands (still accessible, just not in main help)
         "terminal" => commands::terminal::execute(&args[1..]),
-        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),
-        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
         "test" => {
             eprintln!("Test command is not available on this platform");
             Err("Test command requires macOS with mcp-tools feature (uses iOS simulator)".into())
@@ -175,13 +175,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "serve" | "mcp" => {
             // Always create a new runtime for the MCP server
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { commands::mcp::run().await })
         }
-        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
         "serve" | "mcp" => {
             eprintln!("MCP server is not available on this platform");
             Err("MCP server requires macOS with mcp-tools feature (uses iOS simulator)".into())

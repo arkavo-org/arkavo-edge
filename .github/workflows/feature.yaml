@@ -578,7 +578,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
-        run: cargo build --profile ci --target aarch64-apple-darwin -p arkavo
+        run: cargo build --profile ci --target aarch64-apple-darwin --features mcp-macos -p arkavo
 
       - name: Check binary size
         run: |

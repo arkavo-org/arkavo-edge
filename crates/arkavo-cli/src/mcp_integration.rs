@@ -2,7 +2,7 @@ use crate::mcp_client::{JsonRpcNotification, McpClient};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-#[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+#[cfg(all(target_os = "macos", feature = "mcp-macos"))]
 use {
     crate::memory_integration::MemoryIntegration, arkavo_mcp_macos::mcp::mcp_connection as base,
     tokio::runtime::Handle,
@@ -16,7 +16,7 @@ pub use crate::mcp_client::Tool;
 
 #[derive(Debug, Clone)]
 pub enum McpConnection {
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     InProcess(base::McpConnection),
     #[cfg(all(unix, feature = "mcp-tools"))]
     CrossPlatform(tools::McpConnection),
@@ -24,7 +24,7 @@ pub enum McpConnection {
 }
 
 impl McpConnection {
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     #[allow(clippy::disallowed_methods)]
     pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
         // Check if we're in a runtime to determine how to initialize memory
@@ -50,7 +50,7 @@ impl McpConnection {
         Ok(Self::InProcess(base_connection))
     }
 
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     pub async fn new_in_process_async() -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize memory asynchronously
         let memory_integration = MemoryIntegration::new().await?;
@@ -83,7 +83,7 @@ impl McpConnection {
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         match self {
-            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             Self::InProcess(base_conn) => {
                 let tool_names = base_conn.list_tools();
                 let tools = tool_names
@@ -132,7 +132,7 @@ impl McpConnection {
         llm_origin: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
-            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             Self::InProcess(base_conn) => base_conn
                 .call_tool(tool_name, args, llm_origin)
                 .map_err(|e| e.into()),
@@ -149,7 +149,7 @@ impl McpConnection {
     pub fn subscribe_notifications(&self) -> Option<broadcast::Receiver<JsonRpcNotification>> {
         match self {
             Self::External(client) => Some(client.subscribe_notifications()),
-            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             Self::InProcess(_) => None,
             #[cfg(all(unix, feature = "mcp-tools"))]
             Self::CrossPlatform(_) => None,

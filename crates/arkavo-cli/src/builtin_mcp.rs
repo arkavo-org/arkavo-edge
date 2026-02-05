@@ -3,14 +3,14 @@ use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-#[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+#[cfg(all(target_os = "macos", feature = "mcp-macos"))]
 use tracing::{error, info};
 
 /// Built-in MCP connection that provides default tools
 pub struct BuiltinMcpConnection {
     tools: HashMap<String, Arc<dyn Tool>>,
     // Optional delegate for test tools
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     test_connection: Option<crate::mcp_integration::McpConnection>,
 }
 
@@ -32,12 +32,12 @@ impl BuiltinMcpConnection {
         // They will be initialized lazily when needed
         Self {
             tools,
-            #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+            #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             test_connection: None,
         }
     }
 
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     pub async fn new_with_test_tools() -> Self {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
@@ -67,7 +67,7 @@ impl BuiltinMcpConnection {
         }
     }
 
-    #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
+    #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
     pub fn new_with_test_tools() -> Self {
         // When test harness is not available, just use the regular new() method
         Self::new()
@@ -95,7 +95,7 @@ impl McpClient for BuiltinMcpConnection {
         }
 
         // Add test tools if available
-        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         if let Some(ref test_conn) = self.test_connection {
             match test_conn.list_tools() {
                 Ok(test_tools) => {
@@ -137,7 +137,7 @@ impl McpClient for BuiltinMcpConnection {
         }
 
         // Then check test tools if available
-        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         {
             if let Some(ref test_conn) = self.test_connection {
                 return test_conn
