@@ -12,13 +12,16 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-# Full defaults with all providers
+# Full defaults with all providers (cross-platform)
 default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
 windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
-mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
+# MCP mesh networking and router integration
+mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
+# macOS-specific MCP integration (auto-enabled on macOS when mcp-tools is enabled)
+mcp-macos = ["dep:arkavo-mcp-macos"]
 # Claude Agent SDK integration (requires non-musl target for OAuth)
 claude-agent = ["dep:arkavo-mcp-claude"]
 memory = []
@@ -93,12 +96,12 @@ reqwest = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }
 
+# Cross-platform MCP tools (always available)
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
+
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
-
-# Cross-platform MCP tools (optional, enabled via mcp-tools feature)
-arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
-arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }

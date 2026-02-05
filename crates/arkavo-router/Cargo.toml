@@ -45,15 +45,16 @@ arkavo-critic = { path = "../arkavo-critic", optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
-default = ["llama-cpp", "gemini", "deepseek"]
+default = ["llama-cpp", "gemini", "deepseek", "kimi"]
 critic = ["arkavo-critic"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
+kimi = ["arkavo-llm/kimi"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
-windows = ["gemini", "llm-remote", "deepseek"]
+windows = ["gemini", "llm-remote", "deepseek", "kimi"]
 
 [dev-dependencies]
 criterion = { workspace = true }

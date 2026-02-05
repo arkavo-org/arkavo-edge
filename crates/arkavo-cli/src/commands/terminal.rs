@@ -48,7 +48,7 @@ fn box_error<E: std::error::Error + Send + Sync + 'static>(
 
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     // Try in-process MCP first on macOS with mcp-tools feature
-    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
     {
         let result = McpConnection::new_in_process();
         match result {

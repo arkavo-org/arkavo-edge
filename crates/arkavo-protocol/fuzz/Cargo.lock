@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "bincode",
  "chrono",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "bytes",
  "dashmap",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "git2",
  "tempfile",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -400,14 +400,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-llama-cpp-sys",
 ]
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "bindgen",
  "cmake",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -540,14 +540,18 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bs58",
  "chrono",
  "crossbeam-queue",
  "dashmap",
  "futures",
  "governor",
  "hex",
+ "ipnet",
  "jsonrpsee",
  "jsonwebtoken",
+ "lazy_static",
+ "lru",
  "notify",
  "rand 0.8.5",
  "reqwest",
@@ -570,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -607,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -625,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.57.2"
+version = "0.58.3"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -946,9 +950,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cc"
@@ -1693,6 +1697,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1886,9 +1896,9 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "git2"
-version = "0.20.3"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2b37e2f62729cdada11f0e6b3b6fe383c69c29fc619e391223e12856af308c"
+checksum = "7b88256088d75a56f8ecfa070513a775dd9107f6530ef14919dac831af9cfe2b"
 dependencies = [
  "bitflags 2.9.1",
  "libc",
@@ -2013,7 +2023,7 @@ checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
 ]
 
 [[package]]
@@ -2021,6 +2031,11 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -2946,6 +2961,15 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lru"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
+dependencies = [
+ "hashbrown 0.16.1",
+]
 
 [[package]]
 name = "lru-slab"

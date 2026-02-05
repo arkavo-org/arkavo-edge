@@ -240,7 +240,7 @@ components:
     module: arkavo_kimi
     description: Kimi (Moonshot) LLM provider
     criticality: critical
-    scenario_count: 5
+    scenario_count: 10
     invariants:
       - Native Kimi API
       - Token usage tracked

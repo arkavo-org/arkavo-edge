@@ -302,6 +302,11 @@ impl Router {
         std::env::var("ANTHROPIC_API_KEY").is_ok()
     }
 
+    /// Check if Kimi API is available
+    pub fn is_kimi_available(&self) -> bool {
+        std::env::var("MOONSHOT_API_KEY").is_ok()
+    }
+
     /// Get Anthropic provider if configured
     pub fn get_anthropic_provider(
         &self,
@@ -332,6 +337,17 @@ impl Router {
             llms.push(LlmInfo {
                 name: "Gemini".to_string(),
                 provider: "Google".to_string(),
+                model,
+                available: true,
+            });
+        }
+
+        // Check for Kimi
+        if self.is_kimi_available() {
+            let model = std::env::var("KIMI_MODEL").unwrap_or_else(|_| "kimi-k2.5".to_string());
+            llms.push(LlmInfo {
+                name: "Kimi".to_string(),
+                provider: "Moonshot".to_string(),
                 model,
                 available: true,
             });
@@ -993,6 +1009,7 @@ impl Router {
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
+            ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
         };
 
         // Check if the candidate model is available before upgrading
@@ -1017,6 +1034,7 @@ impl Router {
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
+            ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
             // Local models - check if cached
             ModelChoice::LocalQwen3 => {
                 model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
@@ -1267,6 +1285,26 @@ impl Router {
                 tracing::info!("GLM-4.7-Flash provider ready");
                 Ok(Box::new(provider))
             }
+            #[cfg(feature = "kimi")]
+            ModelChoice::KimiK2 => {
+                // Use Anthropic provider with Moonshot's Anthropic-compatible endpoint
+                use arkavo_llm::providers::anthropic::{AnthropicConfig, AnthropicProvider};
+
+                let api_key = std::env::var("MOONSHOT_API_KEY")
+                    .map_err(|_| Error::ModelExecution("MOONSHOT_API_KEY not set".to_string()))?;
+
+                let config = AnthropicConfig {
+                    api_key,
+                    base_url: "https://api.moonshot.ai/anthropic".to_string(),
+                    model: "kimi-k2.5".to_string(),
+                    api_version: "2023-06-01".to_string(),
+                };
+
+                let provider = AnthropicProvider::new(config).map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create Kimi provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::ModelExecution(format!(
                 "Model {model:?} not available (feature not enabled)"
@@ -1315,7 +1353,8 @@ impl Router {
             | ModelChoice::ClaudeSonnet
             | ModelChoice::ClaudeOpus
             | ModelChoice::DeepSeekV32
-            | ModelChoice::DeepSeekV32Speciale => arkavo_mcp_tools::DetailLevel::FullSchema,
+            | ModelChoice::DeepSeekV32Speciale
+            | ModelChoice::KimiK2 => arkavo_mcp_tools::DetailLevel::FullSchema,
         }
     }
 

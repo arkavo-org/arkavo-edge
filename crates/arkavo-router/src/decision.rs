@@ -38,6 +38,8 @@ pub enum ModelChoice {
     DeepSeekV32,
     /// DeepSeek V3.2-Speciale - planning/reasoning only (no tools)
     DeepSeekV32Speciale,
+    /// Kimi K2.5 - 256K context, thinking mode support
+    KimiK2,
 }
 
 impl ModelChoice {
@@ -56,6 +58,7 @@ impl ModelChoice {
             Self::LocalGemma12B => "gemma-3-12b-it",
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
+            Self::KimiK2 => "kimi-k2.5",
         }
     }
 
@@ -92,6 +95,10 @@ impl ModelChoice {
         )
     }
 
+    pub fn is_kimi(&self) -> bool {
+        matches!(self, Self::KimiK2)
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash | Self::GeminiPro => "google",
@@ -102,6 +109,7 @@ impl ModelChoice {
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
+            Self::KimiK2 => "kimi",
         }
     }
 
@@ -122,7 +130,8 @@ impl ModelChoice {
             | Self::ClaudeSonnet
             | Self::ClaudeOpus
             | Self::DeepSeekV32
-            | Self::DeepSeekV32Speciale => PlannerTier::Large,
+            | Self::DeepSeekV32Speciale
+            | Self::KimiK2 => PlannerTier::Large,
         }
     }
 }
@@ -273,6 +282,12 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 1.10;
                 input_cost + output_cost
             }
+            ModelChoice::KimiK2 => {
+                // Kimi K2.5: $0.55/1M input, $2.20/1M output
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.55;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
+                input_cost + output_cost
+            }
             // All local models are free
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -300,6 +315,7 @@ impl RoutingDecision {
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
+            ModelChoice::KimiK2 => Duration::from_secs(5),
         }
     }
 }

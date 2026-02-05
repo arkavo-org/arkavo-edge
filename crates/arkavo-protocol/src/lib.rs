@@ -50,6 +50,7 @@ pub mod types;
 pub mod websocket;
 
 // Re-export commonly used types from core modules
+pub use a2a::{A2aClient, A2aClientError};
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 pub use auth::{AuthBackend, JwtAuthBackend, MultiAuthBackend, SessionAuth};
 pub use chat_session::ChatSessionManager;

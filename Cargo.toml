@@ -124,7 +124,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.58.2"
+version = "0.58.3"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -274,6 +274,21 @@ incremental = true     # Enable incremental compilation for local dev
 debug-assertions = true  # Keep safety checks enabled for tests
 overflow-checks = true   # Keep safety checks enabled for tests
 
+# CI profile - fast builds for PR validation
+# Use with: cargo build --profile ci
+[profile.ci]
+inherits = "release"
+lto = "thin"              # ~70% of fat LTO benefit at ~30% link time
+codegen-units = 8         # Allow parallel codegen (vs 1 for release)
+opt-level = 2             # Slightly faster compile than opt-level=3
+strip = true
+panic = "abort"
+debug = false
+incremental = false
+
+[profile.ci.build-override]
+opt-level = 2
+codegen-units = 16
 
 [workspace.lints.rust]
 unreachable_pub = "warn"

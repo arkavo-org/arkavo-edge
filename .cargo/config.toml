@@ -9,3 +9,8 @@ pipelining = true
 # Reduce terminal noise during builds
 verbose = false
 quiet = false
+
+# Note: Faster linkers are configured via RUSTFLAGS in CI workflows
+# macOS CI uses: RUSTFLAGS="-C link-arg=-fuse-ld=lld" (when lld is available)
+# Windows CI uses rust-lld via the linker config below (only in CI)
+# These are not enabled locally as lld may not be installed

@@ -16,7 +16,7 @@ default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows
-windows-default = ["memory", "mdns", "llm-remote", "web-ui"]
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]
@@ -27,6 +27,7 @@ gemini = ["arkavo-cli/gemini"]
 llama-cpp = ["arkavo-cli/llama-cpp"]
 snpe = ["arkavo-cli/snpe"]
 mcp-tools = ["arkavo-cli/mcp-tools"]
+mcp-macos = ["arkavo-cli/mcp-macos"]
 kas = ["arkavo-cli/kas"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]

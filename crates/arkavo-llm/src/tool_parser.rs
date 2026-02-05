@@ -313,6 +313,23 @@ impl ToolParser {
             }
         }
 
+        // No-argument pattern: ```tool_name``` (no newline, no content)
+        // Some models output just the tool name for tools with no required parameters
+        if calls.is_empty() {
+            let no_arg_pattern = Regex::new(r"```([a-z][a-z0-9_\-:]*)```")
+                .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
+
+            for cap in no_arg_pattern.captures_iter(text) {
+                if let Some(name) = cap.get(1) {
+                    calls.push(ParsedToolCall {
+                        tool_name: name.as_str().to_string(),
+                        arguments: Value::Object(Map::new()),
+                        call_id: None,
+                    });
+                }
+            }
+        }
+
         if calls.is_empty() {
             return Err(ToolParseError::NoToolCalls);
         }
@@ -648,6 +665,32 @@ location: New York
         let calls = ToolParser::parse_fence(text).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "get_weather");
+    }
+
+    #[test]
+    fn test_parse_fence_no_arguments() {
+        // Model output for tools with no required parameters
+        // Common with time/clock tools: ```get_agent_time```
+        let text = r#"```get_agent_time```"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_agent_time");
+        assert!(calls[0].arguments.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_fence_no_arguments_with_surrounding_text() {
+        // Model output with no-arg tool in context
+        let text = r#"Let me check the time for you.
+
+```get_agent_time```
+
+I'll get that now."#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_agent_time");
     }
 
     #[test]

@@ -932,28 +932,180 @@ impl ChatSessionManager {
                             }
                         }
                         Err(e) => {
-                            final_response = String::new();
-                            error!(error = %e, "Failed to route message with quality gate");
+                            let error_msg = e.to_string();
 
-                            // Record error metrics
-                            if let Some(metrics) = session_metrics.read().await.get(&session_id) {
-                                metrics.record_error("router", &e.to_string());
+                            // Check if Judge detected missing tool usage
+                            if error_msg.contains("MISSING_TOOL_USE:") {
+                                if let Some(ref registry) = tool_registry {
+                                    // Extract keywords from error message
+                                    let keywords_str = error_msg
+                                        .strip_prefix("Model execution failed: MISSING_TOOL_USE:")
+                                        .unwrap_or("");
+                                    let keywords: Vec<String> = keywords_str
+                                        .trim_matches(|c| c == '[' || c == ']' || c == '"')
+                                        .split(',')
+                                        .map(|s| s.trim().trim_matches('"').to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+
+                                    info!("Judge detected missing tool usage, searching for: {:?}", keywords);
+
+                                    // Search for tools matching the judge's suggested keywords
+                                    let mut tools_found = Vec::new();
+                                    for keyword in &keywords {
+                                        let found = registry.search_tools(
+                                            keyword,
+                                            arkavo_mcp_tools::DetailLevel::FullSchema,
+                                        );
+                                        tools_found.extend(found);
+                                    }
+
+                                    if !tools_found.is_empty() {
+                                        // Create tool hints message
+                                        let tool_hints: Vec<String> = tools_found
+                                            .iter()
+                                            .map(|t| format!("- {}: {}", t.name, t.description.as_deref().unwrap_or("No description")))
+                                            .collect();
+                                        let tool_msg = format!(
+                                            "Available tools for this query:\n{}\n\nPlease use the appropriate tool to answer.",
+                                            tool_hints.join("\n")
+                                        );
+
+                                        // Add tool hints to conversation
+                                        conversation_context.push(Message {
+                                            role: Role::User,
+                                            content: tool_msg,
+                                            images: None,
+                                        });
+
+                                        // Retry with tool hints
+                                        #[allow(deprecated)]
+                                        match router
+                                            .route_with_quality_gate(
+                                                &user_message.content,
+                                                conversation_context.clone(),
+                                                tool_registry.as_deref(),
+                                                3,
+                                            )
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                final_response = response.content.clone();
+
+                                                // Send text delta
+                                                let text_delta = MessageDelta {
+                                                    session_id: session_id.clone(),
+                                                    message_id: message_id.clone(),
+                                                    sequence: 0,
+                                                    delta: MessageDeltaContent::Text {
+                                                        text: response.content.clone(),
+                                                    },
+                                                    timestamp: chrono::Utc::now(),
+                                                };
+                                                let _ = delta_tx.send(text_delta);
+
+                                                // Handle tool calls if present
+                                                if !response.tool_calls.is_empty() {
+                                                    let executor = ToolExecutor::with_registry(registry.clone());
+                                                    let tool_results = executor.execute_batch(&response.tool_calls).await;
+
+                                                    // Send tool result deltas
+                                                    for (idx, result) in tool_results.iter().enumerate() {
+                                                        let result_delta = MessageDelta {
+                                                            session_id: session_id.clone(),
+                                                            message_id: message_id.clone(),
+                                                            sequence: (idx + 1) as u64,
+                                                            delta: MessageDeltaContent::ToolResult {
+                                                                tool_call_id: result.call_id.clone().unwrap_or_else(|| format!("call_{idx}")),
+                                                                content: serde_json::to_string(&result.result).unwrap_or_default(),
+                                                                is_error: !result.success,
+                                                            },
+                                                            timestamp: chrono::Utc::now(),
+                                                        };
+                                                        let _ = delta_tx.send(result_delta);
+                                                    }
+                                                }
+
+                                                // Add response to context
+                                                conversation_context.push(Message {
+                                                    role: Role::Assistant,
+                                                    content: response.content,
+                                                    images: None,
+                                                });
+                                            }
+                                            Err(retry_err) => {
+                                                final_response = String::new();
+                                                error!(error = %retry_err, "Retry after tool discovery also failed");
+
+                                                let error_delta = MessageDelta {
+                                                    session_id: session_id.clone(),
+                                                    message_id: message_id.clone(),
+                                                    sequence: 0,
+                                                    delta: MessageDeltaContent::Error {
+                                                        code: "ROUTER_ERROR".to_string(),
+                                                        message: format!("Failed after tool discovery: {retry_err}"),
+                                                    },
+                                                    timestamp: chrono::Utc::now(),
+                                                };
+                                                let _ = delta_tx.send(error_delta);
+                                            }
+                                        }
+                                    } else {
+                                        final_response = String::new();
+                                        warn!("No tools found for keywords: {:?}", keywords);
+
+                                        let error_delta = MessageDelta {
+                                            session_id: session_id.clone(),
+                                            message_id: message_id.clone(),
+                                            sequence: 0,
+                                            delta: MessageDeltaContent::Error {
+                                                code: "NO_TOOLS".to_string(),
+                                                message: format!("No tools available for: {}", keywords.join(", ")),
+                                            },
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = delta_tx.send(error_delta);
+                                    }
+                                } else {
+                                    final_response = String::new();
+                                    error!(error = %e, "Missing tool use but no registry available");
+
+                                    let error_delta = MessageDelta {
+                                        session_id: session_id.clone(),
+                                        message_id: message_id.clone(),
+                                        sequence: 0,
+                                        delta: MessageDeltaContent::Error {
+                                            code: "ROUTER_ERROR".to_string(),
+                                            message: format!("Failed to route message: {e}"),
+                                        },
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    let _ = delta_tx.send(error_delta);
+                                }
+                            } else {
+                                final_response = String::new();
+                                error!(error = %e, "Failed to route message with quality gate");
+
+                                // Record error metrics
+                                if let Some(metrics) = session_metrics.read().await.get(&session_id) {
+                                    metrics.record_error("router", &e.to_string());
+                                }
+                                metrics_collector.record_error("router");
+                                session_observability::log_session_error(&session_id, &e.to_string(), Some("ROUTER_ERROR"));
+
+                                // Send error delta
+                                let error_delta = MessageDelta {
+                                    session_id: session_id.clone(),
+                                    message_id: message_id.clone(),
+                                    sequence: 0,
+                                    delta: MessageDeltaContent::Error {
+                                        code: "ROUTER_ERROR".to_string(),
+                                        message: format!("Failed to route message: {e}"),
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = delta_tx.send(error_delta);
                             }
-                            metrics_collector.record_error("router");
-                            session_observability::log_session_error(&session_id, &e.to_string(), Some("ROUTER_ERROR"));
-
-                            // Send error delta
-                            let error_delta = MessageDelta {
-                                session_id: session_id.clone(),
-                                message_id: message_id.clone(),
-                                sequence: 0,
-                                delta: MessageDeltaContent::Error {
-                                    code: "ROUTER_ERROR".to_string(),
-                                    message: format!("Failed to route message: {e}"),
-                                },
-                                timestamp: chrono::Utc::now(),
-                            };
-                            let _ = delta_tx.send(error_delta);
                         }
                     }
 

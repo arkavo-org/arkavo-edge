@@ -2,13 +2,15 @@
 
 feature: Kimi (Moonshot) LLM Provider
 module: arkavo_kimi
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Native Kimi API (not OpenAI-compatible)
   - Token usage tracked per request
   - Context length respected per model
   - Retry with exponential backoff
+  - Kimi K2.5 series models with 256K context
+  - Thinking mode support for K2.5 models
 
 scenarios:
   - id: KIMI-001
@@ -87,3 +89,74 @@ scenarios:
       - condition: Request timeout
         expected: Returns KimiError::Timeout, triggers retry
     changed: "2025-01-31"
+
+  - id: KIMI-006
+    name: Use Kimi K2.5 series models
+    criticality: critical
+    given:
+      - K2.5 model selected
+      - API key valid
+    when: chat_completion() called
+    then:
+      - 256K context window available
+      - Model name correctly formatted
+      - Response parsed correctly
+    refs: [crates/arkavo-kimi/src/types.rs]
+
+  - id: KIMI-007
+    name: Enable thinking mode on K2.5
+    criticality: medium
+    given:
+      - K2.5 model selected
+      - Thinking mode enabled
+    when: chat_completion() called
+    then:
+      - "thinking: {type: enabled} sent in request"
+      - reasoning_content returned in response
+      - Compatible with tool calling
+    refs: [crates/arkavo-kimi/src/client.rs]
+    edge_cases:
+      - condition: Thinking enabled with tool_choice other than auto/none
+        expected: API returns error
+      - condition: reasoning_content not preserved in context
+        expected: API returns error in multi-step tool calls
+
+  - id: KIMI-008
+    name: Disable thinking mode on K2.5
+    criticality: medium
+    given:
+      - K2.5 model selected
+      - Thinking mode explicitly disabled
+    when: chat_completion() called
+    then:
+      - "thinking: {type: disabled} sent in request"
+      - No reasoning_content in response
+      - Compatible with $web_search tool
+    refs: [crates/arkavo-kimi/src/client.rs]
+
+  - id: KIMI-009
+    name: Stream with reasoning content
+    criticality: medium
+    given:
+      - Streaming enabled
+      - K2.5 model with thinking mode
+    when: stream_chat() called
+    then:
+      - reasoning_content streamed in deltas
+      - Regular content streamed separately
+      - Both merged correctly in response
+    refs: [crates/arkavo-kimi/src/stream.rs]
+
+  - id: KIMI-010
+    name: Select appropriate model variant
+    criticality: medium
+    given:
+      - Different use cases need different models
+    when: Model selected
+    then:
+      - kimi-k2.5 for general use
+      - kimi-k2-thinking for reasoning tasks
+      - kimi-k2-turbo-preview for faster responses
+      - Legacy models still supported
+    refs: [crates/arkavo-kimi/src/types.rs]
+    changed: "2026-02-02"

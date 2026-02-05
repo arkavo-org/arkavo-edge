@@ -1020,31 +1020,12 @@ async fn create_client_from_routing(
                 }
             }
 
-            // Fall back to llama.cpp - use same logic as chat command
-            #[cfg(feature = "llama-cpp")]
-            {
-                println!("Ollama not available, using embedded llama.cpp...");
-
-                let model_name = decision.recommended_model.name();
-
-                // Use chat command's initialization logic by calling with default params
-                super::chat::initialize_llm_for_ui(model_name)
-                    .await
-                    .map_err(|e| {
-                        eprintln!("\nError loading local model: {e}");
-                        eprintln!(
-                            "Please run 'arkavo chat --prompt hi' first to download a model.\n"
-                        );
-                        e
-                    })
-            }
-            #[cfg(not(feature = "llama-cpp"))]
-            {
-                Err(
-                    "No local LLM available. Please install Ollama or enable llama-cpp feature."
-                        .into(),
-                )
-            }
+            // Ollama is required for local models in UI mode
+            // The chat command uses the router which handles llama.cpp internally
+            Err(
+                "No local LLM available. Please install and start Ollama (https://ollama.ai)."
+                    .into(),
+            )
         }
         ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
             #[cfg(feature = "deepseek")]
@@ -1056,6 +1037,18 @@ async fn create_client_from_routing(
             #[cfg(not(feature = "deepseek"))]
             {
                 Err("DeepSeek support requires deepseek feature".into())
+            }
+        }
+        ModelChoice::KimiK2 => {
+            #[cfg(feature = "kimi")]
+            {
+                use arkavo_llm::KimiProvider;
+                let provider = Box::new(KimiProvider::from_env()?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "kimi"))]
+            {
+                Err("Kimi support requires kimi feature".into())
             }
         }
     }

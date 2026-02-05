@@ -73,6 +73,21 @@ impl LlmIntegration {
                     anyhow::bail!("DeepSeek feature not enabled")
                 }
             }
+            ModelChoice::KimiK2 => {
+                #[cfg(feature = "kimi")]
+                {
+                    use arkavo_llm::KimiProvider;
+                    if let Ok(provider) = KimiProvider::from_env() {
+                        Ok(LlmClient::new(Box::new(provider)))
+                    } else {
+                        anyhow::bail!("MOONSHOT_API_KEY not set")
+                    }
+                }
+                #[cfg(not(feature = "kimi"))]
+                {
+                    anyhow::bail!("Kimi feature not enabled")
+                }
+            }
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B

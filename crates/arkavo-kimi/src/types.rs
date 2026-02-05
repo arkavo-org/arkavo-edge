@@ -1,6 +1,51 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Thinking mode configuration for K2.5 series models
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    /// Thinking mode enabled (default for thinking models)
+    #[default]
+    Enabled,
+    /// Thinking mode disabled
+    Disabled,
+}
+
+/// Thinking configuration for K2.5 series models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub thinking_type: ThinkingMode,
+}
+
+impl ThinkingConfig {
+    /// Create a new thinking configuration
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            thinking_type: if enabled {
+                ThinkingMode::Enabled
+            } else {
+                ThinkingMode::Disabled
+            },
+        }
+    }
+
+    /// Enable thinking mode
+    pub fn enabled() -> Self {
+        Self {
+            thinking_type: ThinkingMode::Enabled,
+        }
+    }
+
+    /// Disable thinking mode
+    pub fn disabled() -> Self {
+        Self {
+            thinking_type: ThinkingMode::Disabled,
+        }
+    }
+}
+
 /// Message role in a conversation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -14,12 +59,24 @@ pub enum ChatRole {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Model {
+    // Legacy V1 models (Moonshot AI API)
     #[serde(rename = "moonshot-v1-8k")]
     MoonshotV1_8k,
     #[serde(rename = "moonshot-v1-32k")]
     MoonshotV1_32k,
     #[serde(rename = "moonshot-v1-128k")]
     MoonshotV1_128k,
+    // K2.5 series models (256K context, Moonshot AI API)
+    #[serde(rename = "kimi-k2.5")]
+    KimiK2_5,
+    #[serde(rename = "kimi-k2-0905-preview")]
+    KimiK20905Preview,
+    #[serde(rename = "kimi-k2-turbo-preview")]
+    KimiK2TurboPreview,
+    #[serde(rename = "kimi-k2-thinking")]
+    KimiK2Thinking,
+    #[serde(rename = "kimi-k2-thinking-turbo")]
+    KimiK2ThinkingTurbo,
 }
 
 impl Model {
@@ -28,7 +85,47 @@ impl Model {
             Model::MoonshotV1_8k => "moonshot-v1-8k",
             Model::MoonshotV1_32k => "moonshot-v1-32k",
             Model::MoonshotV1_128k => "moonshot-v1-128k",
+            Model::KimiK2_5 => "kimi-k2.5",
+            Model::KimiK20905Preview => "kimi-k2-0905-preview",
+            Model::KimiK2TurboPreview => "kimi-k2-turbo-preview",
+            Model::KimiK2Thinking => "kimi-k2-thinking",
+            Model::KimiK2ThinkingTurbo => "kimi-k2-thinking-turbo",
         }
+    }
+
+    /// Get the context length for this model
+    pub fn context_length(&self) -> u32 {
+        match self {
+            Model::MoonshotV1_8k => 8_192,
+            Model::MoonshotV1_32k => 32_768,
+            Model::MoonshotV1_128k => 131_072,
+            // K2.5 series all have 256K context
+            Model::KimiK2_5
+            | Model::KimiK20905Preview
+            | Model::KimiK2TurboPreview
+            | Model::KimiK2Thinking
+            | Model::KimiK2ThinkingTurbo => 262_144,
+        }
+    }
+
+    /// Check if this model supports thinking mode
+    pub fn supports_thinking(&self) -> bool {
+        matches!(
+            self,
+            Model::KimiK2_5
+                | Model::KimiK20905Preview
+                | Model::KimiK2TurboPreview
+                | Model::KimiK2Thinking
+                | Model::KimiK2ThinkingTurbo
+        )
+    }
+
+    /// Check if this is a legacy V1 model
+    pub fn is_legacy_v1(&self) -> bool {
+        matches!(
+            self,
+            Model::MoonshotV1_8k | Model::MoonshotV1_32k | Model::MoonshotV1_128k
+        )
     }
 }
 
@@ -130,6 +227,9 @@ pub struct ChatCompletionRequest {
     pub n: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
+    /// Thinking mode configuration (K2.5 series only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 /// Chat completion response
@@ -148,6 +248,9 @@ pub struct Choice {
     pub index: u32,
     pub message: ChatMessage,
     pub finish_reason: Option<String>,
+    /// Reasoning content from thinking mode (K2.5 series)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,6 +285,9 @@ pub struct Delta {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<DeltaToolCall>>,
+    /// Reasoning content from thinking mode (K2.5 series)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,5 +374,146 @@ mod tests {
         let deserialized: ChatMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.role, ChatRole::User);
         assert_eq!(deserialized.content, "Hello");
+    }
+
+    // K2.5 Model Tests
+    #[test]
+    fn test_k2_5_model_serialization() {
+        // Test K2.5 model serialization
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK2_5).unwrap(),
+            "\"kimi-k2.5\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK20905Preview).unwrap(),
+            "\"kimi-k2-0905-preview\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK2TurboPreview).unwrap(),
+            "\"kimi-k2-turbo-preview\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK2Thinking).unwrap(),
+            "\"kimi-k2-thinking\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK2ThinkingTurbo).unwrap(),
+            "\"kimi-k2-thinking-turbo\""
+        );
+    }
+
+    #[test]
+    fn test_model_as_str() {
+        assert_eq!(Model::MoonshotV1_8k.as_str(), "moonshot-v1-8k");
+        assert_eq!(Model::MoonshotV1_32k.as_str(), "moonshot-v1-32k");
+        assert_eq!(Model::MoonshotV1_128k.as_str(), "moonshot-v1-128k");
+        assert_eq!(Model::KimiK2_5.as_str(), "kimi-k2.5");
+        assert_eq!(Model::KimiK20905Preview.as_str(), "kimi-k2-0905-preview");
+        assert_eq!(Model::KimiK2TurboPreview.as_str(), "kimi-k2-turbo-preview");
+        assert_eq!(Model::KimiK2Thinking.as_str(), "kimi-k2-thinking");
+        assert_eq!(
+            Model::KimiK2ThinkingTurbo.as_str(),
+            "kimi-k2-thinking-turbo"
+        );
+    }
+
+    #[test]
+    fn test_model_context_length() {
+        // Legacy V1 models
+        assert_eq!(Model::MoonshotV1_8k.context_length(), 8_192);
+        assert_eq!(Model::MoonshotV1_32k.context_length(), 32_768);
+        assert_eq!(Model::MoonshotV1_128k.context_length(), 131_072);
+
+        // K2.5 series - all have 256K context
+        assert_eq!(Model::KimiK2_5.context_length(), 262_144);
+        assert_eq!(Model::KimiK20905Preview.context_length(), 262_144);
+        assert_eq!(Model::KimiK2TurboPreview.context_length(), 262_144);
+        assert_eq!(Model::KimiK2Thinking.context_length(), 262_144);
+        assert_eq!(Model::KimiK2ThinkingTurbo.context_length(), 262_144);
+    }
+
+    #[test]
+    fn test_model_supports_thinking() {
+        // Legacy models don't support thinking
+        assert!(!Model::MoonshotV1_8k.supports_thinking());
+        assert!(!Model::MoonshotV1_32k.supports_thinking());
+        assert!(!Model::MoonshotV1_128k.supports_thinking());
+
+        // K2.5 series supports thinking
+        assert!(Model::KimiK2_5.supports_thinking());
+        assert!(Model::KimiK20905Preview.supports_thinking());
+        assert!(Model::KimiK2TurboPreview.supports_thinking());
+        assert!(Model::KimiK2Thinking.supports_thinking());
+        assert!(Model::KimiK2ThinkingTurbo.supports_thinking());
+    }
+
+    #[test]
+    fn test_model_is_legacy_v1() {
+        assert!(Model::MoonshotV1_8k.is_legacy_v1());
+        assert!(Model::MoonshotV1_32k.is_legacy_v1());
+        assert!(Model::MoonshotV1_128k.is_legacy_v1());
+
+        assert!(!Model::KimiK2_5.is_legacy_v1());
+        assert!(!Model::KimiK20905Preview.is_legacy_v1());
+        assert!(!Model::KimiK2TurboPreview.is_legacy_v1());
+        assert!(!Model::KimiK2Thinking.is_legacy_v1());
+        assert!(!Model::KimiK2ThinkingTurbo.is_legacy_v1());
+    }
+
+    // Thinking Mode Tests
+    #[test]
+    fn test_thinking_config_serialization() {
+        let enabled = ThinkingConfig::enabled();
+        let json = serde_json::to_string(&enabled).unwrap();
+        assert!(json.contains("enabled"));
+
+        let disabled = ThinkingConfig::disabled();
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert!(json.contains("disabled"));
+    }
+
+    #[test]
+    fn test_thinking_config_new() {
+        let enabled = ThinkingConfig::new(true);
+        assert!(matches!(enabled.thinking_type, ThinkingMode::Enabled));
+
+        let disabled = ThinkingConfig::new(false);
+        assert!(matches!(disabled.thinking_type, ThinkingMode::Disabled));
+    }
+
+    #[test]
+    fn test_thinking_mode_default() {
+        let default: ThinkingMode = Default::default();
+        assert!(matches!(default, ThinkingMode::Enabled));
+    }
+
+    #[test]
+    fn test_chat_completion_request_with_thinking() {
+        let request = ChatCompletionRequest {
+            model: "kimi-k2.5".to_string(),
+            messages: vec![ChatMessage {
+                role: ChatRole::User,
+                content: "Hello".to_string(),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            tools: None,
+            tool_choice: None,
+            temperature: Some(0.7),
+            top_p: None,
+            max_tokens: None,
+            stream: Some(false),
+            presence_penalty: None,
+            frequency_penalty: None,
+            n: None,
+            stop: None,
+            thinking: Some(ThinkingConfig::enabled()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"thinking\""));
+        assert!(json.contains("enabled"));
+        assert!(json.contains("kimi-k2.5"));
     }
 }

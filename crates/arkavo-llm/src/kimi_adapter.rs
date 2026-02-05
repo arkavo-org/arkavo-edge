@@ -53,7 +53,13 @@ impl KimiProvider {
                 "moonshot-v1-8k" => arkavo_kimi::Model::MoonshotV1_8k,
                 "moonshot-v1-32k" => arkavo_kimi::Model::MoonshotV1_32k,
                 "moonshot-v1-128k" => arkavo_kimi::Model::MoonshotV1_128k,
-                _ => arkavo_kimi::Model::MoonshotV1_8k,
+                // K2.5 series models
+                "kimi-k2.5" => arkavo_kimi::Model::KimiK2_5,
+                "kimi-k2-0905-preview" => arkavo_kimi::Model::KimiK20905Preview,
+                "kimi-k2-turbo-preview" => arkavo_kimi::Model::KimiK2TurboPreview,
+                "kimi-k2-thinking" => arkavo_kimi::Model::KimiK2Thinking,
+                "kimi-k2-thinking-turbo" => arkavo_kimi::Model::KimiK2ThinkingTurbo,
+                _ => arkavo_kimi::Model::KimiK2_5, // Default to K2.5
             };
         }
 
@@ -93,7 +99,7 @@ fn convert_messages_to_kimi(messages: Vec<Message>) -> Vec<arkavo_kimi::Message>
 fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse {
     StreamResponse {
         content: resp.content,
-        reasoning_content: None,
+        reasoning_content: resp.reasoning_content,
         done: resp.done,
     }
 }

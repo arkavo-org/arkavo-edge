@@ -14,6 +14,7 @@ web-ui = ["arkavo-agui/web-ui"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini"]
 deepseek = ["arkavo-llm/deepseek"]
+kimi = ["arkavo-llm/kimi"]
 
 [dependencies]
 # Core async runtime
