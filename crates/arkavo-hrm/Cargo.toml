@@ -41,12 +41,9 @@ tracing = { workspace = true }
 # Hashing for loop detection
 sha2 = { workspace = true }
 
-# SQLite for persistent storage
-sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"], optional = true }
-
 [features]
 default = []
-file-store = ["dep:sqlx"]
+file-store = []
 llama-cpp = ["arkavo-context/llama-cpp", "dep:arkavo-context"]
 
 [dev-dependencies]

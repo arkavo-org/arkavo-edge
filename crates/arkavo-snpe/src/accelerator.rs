@@ -113,12 +113,12 @@ impl RuntimeCapabilities {
 
         for target in &fallback_order {
             if self.is_available(*target) {
-                log::info!("Selected accelerator: {}", target);
+                tracing::info!("Selected accelerator: {}", target);
                 return *target;
             }
         }
 
-        log::warn!("No accelerators available, falling back to CPU");
+        tracing::warn!("No accelerators available, falling back to CPU");
         AcceleratorTarget::Cpu
     }
 }

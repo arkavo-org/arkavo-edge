@@ -14,8 +14,9 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "2303d76d", default-features = false, features = ["rustls-tls"] }
-ring = "0.17"
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, features = ["rustls-tls"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+rand = { workspace = true }
 base64 = { workspace = true }
 
 [dev-dependencies]

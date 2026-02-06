@@ -68,7 +68,7 @@ impl EmbeddingService {
             let mut model_guard = self.model.write().await;
             // Double-check in case another task initialized it
             if model_guard.is_none() {
-                log::info!("Initializing embedding model from filesystem (AllMiniLML6V2)");
+                tracing::info!("Initializing embedding model from filesystem (AllMiniLML6V2)");
 
                 let model_dir = self.model_dir.clone();
                 // Run initialization in blocking thread
@@ -118,7 +118,7 @@ impl EmbeddingService {
                 })?;
 
                 *model_guard = Some(text_embedding);
-                log::info!("Embedding model initialized successfully from filesystem");
+                tracing::info!("Embedding model initialized successfully from filesystem");
             }
         }
         Ok(())

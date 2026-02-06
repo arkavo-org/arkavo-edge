@@ -261,17 +261,20 @@ pub enum LessonStatus {
 mod tests {
     use super::*;
 
+    fn make_announcement(id: Uuid, confidence: f64) -> LessonAnnouncement {
+        LessonAnnouncement::new(
+            id,
+            [0u8; 32],
+            "a".into(),
+            "s".into(),
+            "c".into(),
+            confidence,
+        )
+    }
+
     #[test]
     fn test_lesson_announcement() {
-        let ann = LessonAnnouncement::new(
-            Uuid::new_v4(),
-            [0u8; 32],
-            "agent-1".to_string(),
-            "swarm-1".to_string(),
-            "navigation".to_string(),
-            0.9,
-        );
-
+        let ann = make_announcement(Uuid::new_v4(), 0.9);
         assert!(ann.signature.is_empty());
         assert!(!ann.content_to_sign().is_empty());
         assert_eq!(ann.confidence, 0.9);
@@ -279,8 +282,7 @@ mod tests {
 
     #[test]
     fn test_lesson_vote() {
-        let vote = LessonVote::new(Uuid::new_v4(), "voter-1".to_string(), true);
-
+        let vote = LessonVote::new(Uuid::new_v4(), "voter-1".into(), true);
         assert!(vote.approve);
         assert!(vote.signature.is_empty());
         assert!(!vote.content_to_sign().is_empty());
@@ -289,7 +291,6 @@ mod tests {
     #[test]
     fn test_local_evidence() {
         let evidence = LocalEvidence::new(8, 2);
-
         assert_eq!(evidence.supporting_episodes, 8);
         assert_eq!(evidence.conflicting_episodes, 2);
         assert!((evidence.local_confidence - 0.8).abs() < 0.01);
@@ -297,15 +298,102 @@ mod tests {
 
     #[test]
     fn test_lesson_digest() {
-        let mut digest = LessonDigest::new("agent-1".to_string());
-
+        let mut digest = LessonDigest::new("agent-1".into());
         digest.add_lesson(LessonDigestEntry::new(
             Uuid::new_v4(),
             [0u8; 32],
             LessonStatus::Approved,
         ));
-
         assert_eq!(digest.known_lessons.len(), 1);
         assert_eq!(digest.known_lessons[0].status, LessonStatus::Approved);
+    }
+
+    #[test]
+    fn test_lesson_announcement_content_to_sign_deterministic() {
+        let ann = make_announcement(Uuid::new_v4(), 0.75);
+        assert_eq!(ann.content_to_sign(), ann.content_to_sign());
+    }
+
+    #[test]
+    fn test_lesson_announcement_content_includes_confidence() {
+        let id = Uuid::new_v4();
+        let mut a = make_announcement(id, 0.5);
+        let mut b = make_announcement(id, 0.9);
+        b.timestamp = a.timestamp;
+        a.timestamp = b.timestamp;
+        assert_ne!(a.content_to_sign(), b.content_to_sign());
+    }
+
+    #[test]
+    fn test_lesson_vote_approve_vs_reject() {
+        let id = Uuid::new_v4();
+        let mut approve = LessonVote::new(id, "v".into(), true);
+        let mut reject = LessonVote::new(id, "v".into(), false);
+        reject.voted_at = approve.voted_at;
+        approve.voted_at = reject.voted_at;
+        assert_ne!(approve.content_to_sign(), reject.content_to_sign());
+    }
+
+    #[test]
+    fn test_lesson_vote_with_evidence() {
+        let vote = LessonVote::new(Uuid::new_v4(), "v".into(), true);
+        assert!(vote.local_evidence.is_none());
+        let vote = vote.with_evidence(LocalEvidence::new(5, 3));
+        let ev = vote.local_evidence.unwrap();
+        assert_eq!(ev.supporting_episodes, 5);
+        assert_eq!(ev.conflicting_episodes, 3);
+    }
+
+    #[test]
+    fn test_local_evidence_zero_episodes() {
+        let ev = LocalEvidence::new(0, 0);
+        assert_eq!(ev.supporting_episodes, 0);
+        assert_eq!(ev.conflicting_episodes, 0);
+        assert!((ev.local_confidence - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_local_evidence_all_supporting() {
+        let ev = LocalEvidence::new(10, 0);
+        assert_eq!(ev.supporting_episodes, 10);
+        assert!((ev.local_confidence - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_lesson_delivery_new() {
+        let id = Uuid::new_v4();
+        let content = vec![1, 2, 3];
+        let delivery = LessonDelivery::new(id, content.clone(), [7u8; 32]);
+        assert_eq!(delivery.lesson_id, id);
+        assert_eq!(delivery.content, content);
+        assert_eq!(delivery.content_hash, [7u8; 32]);
+        assert!(delivery.votes.is_empty());
+    }
+
+    #[test]
+    fn test_lesson_delivery_with_votes() {
+        let id = Uuid::new_v4();
+        let votes = vec![
+            LessonVote::new(id, "v1".into(), true),
+            LessonVote::new(id, "v2".into(), false),
+        ];
+        let delivery = LessonDelivery::new(id, vec![], [0u8; 32]).with_votes(votes);
+        assert_eq!(delivery.votes.len(), 2);
+        assert!(delivery.votes[0].approve);
+        assert!(!delivery.votes[1].approve);
+    }
+
+    #[test]
+    fn test_lesson_status_serialization() {
+        for status in &[
+            LessonStatus::Pending,
+            LessonStatus::Approved,
+            LessonStatus::Rejected,
+            LessonStatus::Applied,
+        ] {
+            let json = serde_json::to_string(status).expect("serialize");
+            let back: LessonStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*status, back);
+        }
     }
 }

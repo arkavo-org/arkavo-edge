@@ -745,4 +745,215 @@ mod tests {
         let result = protocol.vote(Uuid::new_v4(), true).await;
         assert!(matches!(result, Err(GossipError::PatchNotFound(_))));
     }
+
+    // Covers GOSSIP-002: Unsigned announcement rejected by protocol
+    #[tokio::test]
+    async fn test_unsigned_announcement_rejected() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Create announcement WITHOUT signing it (empty signature)
+        let announcement =
+            PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "unknown-agent".into(), vec![]);
+
+        let result = protocol
+            .handle_message(GossipMessage::PatchAnnounce(announcement))
+            .await;
+        // Should fail — no key registered for "unknown-agent"
+        assert!(result.is_err());
+    }
+
+    // Covers GOSSIP-001: Fanout selects correct number of peers, excluding sender
+    #[tokio::test]
+    async fn test_fanout_respects_limit_and_exclusion() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Add 20 peers
+        for i in 0..20 {
+            protocol.add_peer(format!("peer-{i}")).await;
+        }
+
+        // Without exclusion: exactly DEFAULT_FANOUT peers
+        let peers = protocol.select_propagation_peers(None).await;
+        assert_eq!(peers.len(), DEFAULT_FANOUT);
+
+        // With exclusion: still DEFAULT_FANOUT, but excludes specified peer
+        let peers = protocol.select_propagation_peers(Some("peer-5")).await;
+        assert_eq!(peers.len(), DEFAULT_FANOUT);
+        assert!(!peers.contains(&"peer-5".to_string()));
+
+        // Fewer peers than fanout: returns all available
+        let small_protocol = create_test_protocol("agent-2");
+        small_protocol.add_peer("only-peer".into()).await;
+        let peers = small_protocol.select_propagation_peers(None).await;
+        assert_eq!(peers.len(), 1);
+    }
+
+    // Covers GOSSIP-005: Anti-entropy announces patches the peer is missing
+    #[tokio::test]
+    async fn test_anti_entropy_announces_missing_patches() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Add a signed patch
+        let keypair = AgentKeypair::generate();
+        protocol
+            .register_key("originator".into(), keypair.public_key().clone())
+            .await;
+        let mut ann =
+            PatchAnnouncement::new(Uuid::new_v4(), [1u8; 32], "originator".into(), vec![]);
+        sign_announcement(&mut ann, &keypair).unwrap();
+        protocol
+            .handle_message(GossipMessage::PatchAnnounce(ann.clone()))
+            .await
+            .unwrap();
+
+        // Peer sends empty digest (knows nothing)
+        let empty_digest = AntiEntropyDigest {
+            sender: "peer-1".into(),
+            known_patches: vec![],
+            timestamp: chrono::Utc::now(),
+        };
+        let messages = protocol
+            .handle_message(GossipMessage::AntiEntropy(empty_digest))
+            .await
+            .unwrap();
+
+        // Should announce our patch to them
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, GossipMessage::PatchAnnounce(_))),
+            "Should include PatchAnnounce for missing patch"
+        );
+    }
+
+    // Covers GOSSIP-005: Anti-entropy requests patches we don't have
+    #[tokio::test]
+    async fn test_anti_entropy_requests_unknown_patches() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Peer claims to have a patch we don't know about
+        let unknown_id = Uuid::new_v4();
+        let digest = AntiEntropyDigest {
+            sender: "peer-2".into(),
+            known_patches: vec![PatchDigestEntry {
+                patch_id: unknown_id,
+                patch_hash: [2u8; 32],
+                status: PatchStatus::Pending,
+            }],
+            timestamp: chrono::Utc::now(),
+        };
+
+        let messages = protocol
+            .handle_message(GossipMessage::AntiEntropy(digest))
+            .await
+            .unwrap();
+
+        // Should request that patch
+        let has_request = messages.iter().any(|m| match m {
+            GossipMessage::PatchRequest(req) => req.patch_id == unknown_id,
+            _ => false,
+        });
+        assert!(has_request, "Should include PatchRequest for unknown patch");
+    }
+
+    // Covers GOSSIP-005: Anti-entropy returns nothing when synced
+    #[tokio::test]
+    async fn test_anti_entropy_no_messages_when_synced() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Add a signed patch
+        let keypair = AgentKeypair::generate();
+        protocol
+            .register_key("originator".into(), keypair.public_key().clone())
+            .await;
+        let patch_id = Uuid::new_v4();
+        let mut ann = PatchAnnouncement::new(patch_id, [3u8; 32], "originator".into(), vec![]);
+        sign_announcement(&mut ann, &keypair).unwrap();
+        protocol
+            .handle_message(GossipMessage::PatchAnnounce(ann))
+            .await
+            .unwrap();
+
+        // Peer sends digest with the same patch
+        let synced_digest = AntiEntropyDigest {
+            sender: "peer-3".into(),
+            known_patches: vec![PatchDigestEntry {
+                patch_id,
+                patch_hash: [3u8; 32],
+                status: PatchStatus::Pending,
+            }],
+            timestamp: chrono::Utc::now(),
+        };
+
+        let messages = protocol
+            .handle_message(GossipMessage::AntiEntropy(synced_digest))
+            .await
+            .unwrap();
+
+        assert!(
+            messages.is_empty(),
+            "Synced digests should produce no messages, got {messages:?}"
+        );
+    }
+
+    // Covers GOSSIP-007: Rate limiting blocks flood from same peer
+    #[tokio::test]
+    async fn test_rate_limiting_blocks_flood() {
+        let config = GossipConfig::default();
+        let registry = KeyRegistry::new();
+        let protocol = GossipProtocol::new("agent-1".into(), config, registry);
+
+        let keypair = AgentKeypair::generate();
+        protocol
+            .register_key("originator".into(), keypair.public_key().clone())
+            .await;
+
+        // Send many messages from the same peer (> DEFAULT_MAX_MESSAGES_PER_PEER)
+        let mut rate_limited = false;
+        for i in 0..150 {
+            let mut ann =
+                PatchAnnouncement::new(Uuid::new_v4(), [i as u8; 32], "originator".into(), vec![]);
+            sign_announcement(&mut ann, &keypair).unwrap();
+
+            let result = protocol
+                .handle_message_from_peer("flood-peer", GossipMessage::PatchAnnounce(ann))
+                .await;
+            if matches!(result, Err(GossipError::RateLimited(_))) {
+                rate_limited = true;
+                break;
+            }
+        }
+
+        assert!(rate_limited, "Should have been rate limited after flooding");
+    }
+
+    // Covers GOSSIP-007: Known originator with WRONG signature is rejected
+    // Different from test_unsigned_announcement_rejected (unknown originator).
+    // This tests the crypto verification path, not the key-lookup path.
+    #[tokio::test]
+    async fn test_wrong_key_signature_rejected() {
+        let protocol = create_test_protocol("agent-1");
+
+        // Register key for "agent-a"
+        let keypair_a = AgentKeypair::generate();
+        protocol
+            .register_key("agent-a".into(), keypair_a.public_key().clone())
+            .await;
+
+        // Sign with DIFFERENT key — originator is known but signature won't verify
+        let keypair_b = AgentKeypair::generate();
+        let mut ann = PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "agent-a".into(), vec![]);
+        sign_announcement(&mut ann, &keypair_b).unwrap();
+
+        let result = protocol
+            .handle_message(GossipMessage::PatchAnnounce(ann))
+            .await;
+        let err = result.unwrap_err();
+
+        // Should be a SignatureVerification error (not UnknownOriginator)
+        assert!(
+            matches!(err, GossipError::SignatureVerification(_)),
+            "Expected SignatureVerification error for wrong-key, got: {err:?}"
+        );
+    }
 }

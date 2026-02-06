@@ -48,6 +48,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-session = { path = "../arkavo-session" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }
@@ -74,7 +75,6 @@ arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
-log = { workspace = true }
 anyhow = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
@@ -88,8 +88,6 @@ chrono = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-indicatif = { workspace = true }
-tiktoken-rs = { workspace = true }
 hf-hub = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }

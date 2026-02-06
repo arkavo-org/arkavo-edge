@@ -253,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.101"
+version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 dependencies = [
  "backtrace",
 ]
@@ -722,6 +722,7 @@ dependencies = [
  "arkavo-repo",
  "arkavo-router",
  "arkavo-server",
+ "arkavo-session",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
  "arkavo-terminal",
@@ -735,10 +736,8 @@ dependencies = [
  "dirs 6.0.0",
  "futures",
  "hf-hub 0.4.3 (git+https://github.com/huggingface/hf-hub)",
- "indicatif 0.18.3",
  "jsonschema",
  "libc",
- "log",
  "mdns-sd 0.14.1",
  "rand 0.8.5",
  "regex",
@@ -746,7 +745,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tiktoken-rs",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -794,8 +792,9 @@ dependencies = [
  "arkavo-config-bundle",
  "base64 0.22.1",
  "chrono",
- "opentdf 0.6.1",
- "ring",
+ "opentdf",
+ "p256",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -877,6 +876,7 @@ dependencies = [
 name = "arkavo-dataflow"
 version = "0.58.4"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "arkavo-llm",
  "arkavo-mcp",
@@ -889,12 +889,13 @@ dependencies = [
  "futures",
  "jsonschema",
  "keyring",
- "lazy-regex",
+ "pbkdf2",
  "rand 0.8.5",
- "ring",
+ "regex",
  "semver 1.0.27",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1067,7 +1068,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1131,7 +1131,6 @@ dependencies = [
  "chrono",
  "criterion",
  "futures",
- "log",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -1298,13 +1297,13 @@ dependencies = [
  "chrono",
  "fastembed",
  "hnsw_rs",
- "log",
  "serde",
  "serde_json",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1644,6 +1643,8 @@ name = "arkavo-session"
 version = "0.58.1"
 dependencies = [
  "anyhow",
+ "arkavo-llm",
+ "arkavo-memory",
  "arkavo-protocol",
  "async-trait",
  "axum",
@@ -1651,6 +1652,7 @@ dependencies = [
  "dashmap",
  "futures",
  "http",
+ "indicatif 0.18.3",
  "reqwest",
  "rustls",
  "rustls-pemfile",
@@ -1658,6 +1660,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
+ "tiktoken-rs",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -1675,10 +1678,10 @@ dependencies = [
  "anyhow",
  "libc",
  "libloading",
- "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -1709,7 +1712,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
- "opentdf 0.11.0",
+ "opentdf",
  "opentdf-kas",
  "reqwest",
  "serde",
@@ -5915,9 +5918,9 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jiff"
-version = "0.2.19"
+version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89a5b5e10d5a9ad6e5d1f4bd58225f655d6fe9767575a5e8ac5a6fe64e04495"
+checksum = "e67e8da4c49d6d9909fe03361f9b620f58898859f5c7aded68351e85e71ecf50"
 dependencies = [
  "jiff-static",
  "log",
@@ -5928,9 +5931,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.19"
+version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff7a39c8862fc1369215ccf0a8f12dd4598c7f6484704359f0351bd617034dbf"
+checksum = "e0c84ee7f197eca9a86c6fd6cb771e55eb991632f15f2bc3ca6ec838929e6e78"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6292,29 +6295,6 @@ name = "lab"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
-
-[[package]]
-name = "lazy-regex"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5c13b6857ade4c8ee05c3c3dc97d2ab5415d691213825b90d3211c425c1f907"
-dependencies = [
- "lazy-regex-proc_macros",
- "once_cell",
- "regex",
-]
-
-[[package]]
-name = "lazy-regex-proc_macros"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a95c68db5d41694cea563c86a4ba4dc02141c16ef64814108cb23def4d5438"
-dependencies = [
- "proc-macro2",
- "quote",
- "regex",
- "syn 2.0.114",
-]
 
 [[package]]
 name = "lazy_static"
@@ -7447,26 +7427,6 @@ dependencies = [
 
 [[package]]
 name = "opentdf"
-version = "0.6.1"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "chrono",
- "jsonwebtoken 9.3.1",
- "opentdf-crypto 0.6.1",
- "opentdf-protocol 0.6.1",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
- "zip",
-]
-
-[[package]]
-name = "opentdf"
 version = "0.11.0"
 source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
@@ -7475,8 +7435,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken 9.3.1",
- "opentdf-crypto 0.11.0",
- "opentdf-protocol 0.11.0",
+ "opentdf-crypto",
+ "opentdf-protocol",
  "pem",
  "rand 0.8.5",
  "reqwest",
@@ -7490,35 +7450,6 @@ dependencies = [
 
 [[package]]
 name = "opentdf-crypto"
-version = "0.6.1"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
-dependencies = [
- "aes",
- "aes-gcm",
- "base64 0.22.1",
- "hex",
- "hkdf",
- "hmac",
- "k256",
- "opentdf-protocol 0.6.1",
- "p256",
- "p384",
- "p521",
- "pkcs8 0.10.2",
- "rand 0.8.5",
- "rsa",
- "serde",
- "serde_json",
- "sha1 0.10.6",
- "sha2 0.10.9",
- "subtle",
- "thiserror 2.0.18",
- "typenum",
- "zeroize",
-]
-
-[[package]]
-name = "opentdf-crypto"
 version = "0.11.0"
 source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
@@ -7530,7 +7461,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "k256",
- "opentdf-protocol 0.11.0",
+ "opentdf-protocol",
  "p256",
  "p384",
  "p521",
@@ -7562,19 +7493,6 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "opentdf-protocol"
-version = "0.6.1"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]
@@ -7779,6 +7697,16 @@ name = "pastey"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
+
+[[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest 0.10.7",
+ "hmac",
+]
 
 [[package]]
 name = "peg"
@@ -9009,7 +8937,6 @@ dependencies = [
  "pkcs1",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
- "sha2 0.10.9",
  "signature 2.2.0",
  "spki 0.7.3",
  "subtle",

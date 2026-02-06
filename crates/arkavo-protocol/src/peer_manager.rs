@@ -9,11 +9,9 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::significant_drop_tightening)]
 
-use arkavo_protocol::http::HttpTransport;
-use arkavo_protocol::transport::{
-    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig,
-};
-use arkavo_protocol::websocket::WebSocketTransport;
+use crate::http::HttpTransport;
+use crate::transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
+use crate::websocket::WebSocketTransport;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -91,7 +89,7 @@ impl PeerManager {
     }
 
     /// Determine the appropriate transport type for a method
-    fn select_transport_for_method(&self, method: &str) -> TransportType {
+    pub fn select_transport_for_method(&self, method: &str) -> TransportType {
         if self.config.auto_upgrade_streaming && Self::is_streaming_method(method) {
             TransportType::WebSocket
         } else {
@@ -461,5 +459,12 @@ mod tests {
             manager.select_transport_for_method("agent_query"),
             TransportType::WebSocket
         );
+    }
+
+    #[test]
+    fn test_connected_peers_empty() {
+        let manager = PeerManager::new("agent".to_string());
+        let peers = manager.connected_peers();
+        assert!(peers.is_empty());
     }
 }

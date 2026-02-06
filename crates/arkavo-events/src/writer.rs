@@ -77,12 +77,24 @@ impl EventWriter {
 
         loop {
             tokio::select! {
-                Some(event) = receiver.recv() => {
-                    let mut state_guard = state.lock().await;
-                    state_guard.buffer.push_back(event);
+                result = receiver.recv() => {
+                    match result {
+                        Some(event) => {
+                            let mut state_guard = state.lock().await;
+                            state_guard.buffer.push_back(event);
 
-                    if state_guard.buffer.len() >= config.batch_size {
-                        Self::flush_buffer(&mut state_guard, config.batch_size).await;
+                            if state_guard.buffer.len() >= config.batch_size {
+                                Self::flush_buffer(&mut state_guard, config.batch_size).await;
+                            }
+                        }
+                        None => {
+                            // Sender dropped — drain buffer
+                            let mut state_guard = state.lock().await;
+                            while !state_guard.buffer.is_empty() {
+                                Self::flush_buffer(&mut state_guard, config.batch_size).await;
+                            }
+                            break;
+                        }
                     }
                 }
                 _ = flush_interval.tick() => {
@@ -91,14 +103,6 @@ impl EventWriter {
                        state_guard.last_flush.elapsed() >= config.flush_interval {
                         Self::flush_buffer(&mut state_guard, config.batch_size).await;
                     }
-                }
-                else => {
-                    // Receiver closed, do final flush
-                    let mut state_guard = state.lock().await;
-                    while !state_guard.buffer.is_empty() {
-                        Self::flush_buffer(&mut state_guard, config.batch_size).await;
-                    }
-                    break;
                 }
             }
         }
@@ -179,6 +183,20 @@ mod tests {
     use crate::EventPayload;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn make_event(seq: u64) -> Event {
+        Event::new(
+            "test-session".to_string(),
+            seq,
+            "test-agent".to_string(),
+            EventPayload::ReasoningStep {
+                step_type: "test".to_string(),
+                description: format!("Step {seq}"),
+                metadata: None,
+            },
+        )
+    }
+
+    // Covers EVENT-005: "Events serialized, written to configured sink"
     #[tokio::test]
     async fn test_event_writer_basic() {
         let counter = Arc::new(AtomicUsize::new(0));
@@ -195,24 +213,132 @@ mod tests {
             })
             .build();
 
-        // Write some events
         for i in 0..25 {
-            let event = Event::new(
-                "test-session".to_string(),
-                i,
-                "test-agent".to_string(),
-                EventPayload::ReasoningStep {
-                    step_type: "test".to_string(),
-                    description: format!("Step {i}"),
-                    metadata: None,
-                },
-            );
-            writer.write(event).await.unwrap();
+            writer.write(make_event(i)).await.unwrap();
         }
 
-        // Wait for flush
         tokio::time::sleep(Duration::from_millis(150)).await;
-
         assert_eq!(counter.load(Ordering::SeqCst), 25);
+    }
+
+    // Covers EVENT-005: "Batch writes supported" — flush triggers at batch_size
+    #[tokio::test]
+    async fn test_batch_flush_triggers_at_batch_size() {
+        let flush_count = Arc::new(AtomicUsize::new(0));
+        let flush_count_clone = flush_count.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_secs(60), // Long interval so only batch triggers
+                batch_size: 5,
+            })
+            .add_handler(move |_events| {
+                flush_count_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .build();
+
+        // Write exactly batch_size events
+        for i in 0..5 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Should have flushed once when batch_size reached
+        assert!(flush_count.load(Ordering::SeqCst) >= 1);
+    }
+
+    // Covers EVENT-005: Multiple batches accumulate correctly
+    #[tokio::test]
+    async fn test_multiple_batches_all_delivered() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let total_clone = total.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_millis(20),
+                batch_size: 10,
+            })
+            .add_handler(move |events| {
+                total_clone.fetch_add(events.len(), Ordering::SeqCst);
+            })
+            .build();
+
+        for i in 0..50 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(total.load(Ordering::SeqCst), 50);
+    }
+
+    // Covers EVENT-005: BufferFull error when writer loop has stopped
+    #[tokio::test]
+    async fn test_write_returns_buffer_full_after_abort() {
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 10,
+                flush_interval: Duration::from_millis(50),
+                batch_size: 5,
+            })
+            .build();
+
+        // Abort the writer loop so the receiver is dropped
+        writer._handle.abort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Write should now fail with BufferFull (receiver gone)
+        let result = writer.write(make_event(0)).await;
+        assert!(
+            matches!(result, Err(crate::EventError::BufferFull)),
+            "Write after abort should return BufferFull, got: {result:?}"
+        );
+    }
+
+    // Covers EVENT-005: Final flush via receiver-close `else` branch
+    // Uses a LONG flush_interval so the timer can't flush before drop.
+    // The writer_loop must drain remaining channel messages AND flush them
+    // during the `else` branch when the sender is dropped.
+    #[tokio::test]
+    async fn test_final_flush_on_sender_drop() {
+        let total = Arc::new(AtomicUsize::new(0));
+        let total_clone = total.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_secs(60), // Timer won't fire
+                batch_size: 1000,                        // Won't reach batch threshold
+            })
+            .add_handler(move |events| {
+                total_clone.fetch_add(events.len(), Ordering::SeqCst);
+            })
+            .build();
+
+        // Write 3 events — neither batch_size nor timer can flush these
+        for i in 0..3 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        // Give writer loop time to recv events from channel into its buffer
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Verify nothing flushed yet (timer hasn't fired, batch not full)
+        assert_eq!(
+            total.load(Ordering::SeqCst),
+            0,
+            "Nothing should be flushed before drop"
+        );
+
+        // Drop writer — sender closes, writer_loop enters `else` branch
+        drop(writer);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(
+            total.load(Ordering::SeqCst),
+            3,
+            "Only the else-branch final flush could have delivered these events"
+        );
     }
 }

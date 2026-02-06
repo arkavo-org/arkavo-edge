@@ -155,4 +155,55 @@ mod tests {
         assert_eq!(state.votes.len(), 1);
         assert_eq!(state.reject_count(), 1);
     }
+
+    /// GOSSIP-006: With 3 voters and 0.67 threshold, exactly 3 approvals are
+    /// needed. Two approvals stay Pending; the third tips to Approved.
+    #[test]
+    fn test_lesson_quorum_boundary() {
+        let lesson_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+
+        assert_eq!(config.required_votes(3), 3);
+
+        let mut state = LessonConsensusState::new(lesson_id);
+
+        state.add_vote(LessonVote::new(lesson_id, "voter-1".into(), true));
+        state.add_vote(LessonVote::new(lesson_id, "voter-2".into(), true));
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, LessonConsensusStatus::Pending);
+
+        state.add_vote(LessonVote::new(lesson_id, "voter-3".into(), true));
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, LessonConsensusStatus::Approved);
+    }
+
+    /// GOSSIP-008: A pending lesson consensus that exceeds the vote timeout
+    /// transitions to TimedOut.
+    #[test]
+    fn test_lesson_timeout() {
+        let lesson_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = LessonConsensusState::new(lesson_id);
+
+        state.started_at = Utc::now() - chrono::Duration::seconds(61);
+
+        state.check_timeout(&config);
+        assert_eq!(state.status, LessonConsensusStatus::TimedOut);
+    }
+
+    /// GOSSIP-006: A split vote (1 approve, 2 reject) with 3 voters should
+    /// resolve to Rejected because approval is no longer reachable.
+    #[test]
+    fn test_lesson_split_vote() {
+        let lesson_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = LessonConsensusState::new(lesson_id);
+
+        state.add_vote(LessonVote::new(lesson_id, "voter-1".into(), true));
+        state.add_vote(LessonVote::new(lesson_id, "voter-2".into(), false));
+        state.add_vote(LessonVote::new(lesson_id, "voter-3".into(), false));
+
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, LessonConsensusStatus::Rejected);
+    }
 }

@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
-use log::{debug, warn};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio_stream::Stream;
+use tracing::{debug, warn};
 
 use super::types::{ChatRequest, ChatResponse};
 use crate::{Error, LlmConfig, Message, Provider, Result, StreamResponse};

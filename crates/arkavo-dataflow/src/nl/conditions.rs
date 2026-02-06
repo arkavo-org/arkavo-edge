@@ -280,14 +280,19 @@ impl ConditionParser {
 
     fn extract_quoted_value(&self, text: &str) -> Option<String> {
         // Look for single or double quoted strings
-        use lazy_regex::regex_captures;
+        use regex::Regex;
+        use std::sync::LazyLock;
 
-        if let Some((_, content)) = regex_captures!(r"'([^']+)'", text) {
-            return Some(content.to_string());
+        static SINGLE_QUOTED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"'([^']+)'").unwrap());
+        static DOUBLE_QUOTED: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#""([^"]+)""#).unwrap());
+
+        if let Some(caps) = SINGLE_QUOTED.captures(text) {
+            return Some(caps[1].to_string());
         }
 
-        if let Some((_, content)) = regex_captures!(r#""([^"]+)""#, text) {
-            return Some(content.to_string());
+        if let Some(caps) = DOUBLE_QUOTED.captures(text) {
+            return Some(caps[1].to_string());
         }
 
         None

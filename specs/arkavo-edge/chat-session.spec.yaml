@@ -10,6 +10,8 @@ invariants:
   - Sessions auto-expire after TTL (default 3600 seconds) with 60-second check interval
   - Maximum 100 in-flight deltas before back-pressure is applied
   - Delta sequences are monotonically increasing per message
+  - Conversation manager persists messages to MemoryStorage
+  - Context messages respect token budgets and history limits
 
 scenarios:
   - id: CHAT-001
@@ -202,3 +204,177 @@ scenarios:
       - condition: Router succeeds but tool registry missing
         expected: Tool calls logged but not executed, response still delivered
     changed: "2025-01-31"
+
+  - id: CHAT-014
+    name: Create conversation manager with storage
+    criticality: high
+    given:
+      - MemoryStorage initialized
+    when: ConversationManager::new called
+    then:
+      - ConversationManager created with storage reference
+      - Token encoder initialized (cl100k_base)
+      - No active session yet
+    refs: [crates/arkavo-session/src/conversation.rs:51-58]
+    changed: "2025-02-05"
+
+  - id: CHAT-015
+    name: Start conversation session with metadata
+    criticality: high
+    given:
+      - ConversationManager initialized
+      - Model name provided
+      - Optional chat_template, system_prompt, model_size
+    when: start_session_with_metadata called
+    then:
+      - UUID v4 session_id generated
+      - ConversationSession created with metadata
+      - Session stored in MemoryStorage
+      - Current session_id set
+    refs: [crates/arkavo-session/src/conversation.rs:103-140]
+    changed: "2025-02-05"
+
+  - id: CHAT-016
+    name: Restore last conversation session with compatibility check
+    criticality: high
+    given:
+      - ConversationManager initialized
+      - Previous sessions exist in storage
+      - Optional current template/prompt/model for compatibility
+    when: restore_last_session_with_compatibility called
+    then:
+      - Most recent session retrieved from storage
+      - Template hash compatibility checked
+      - System prompt hash compatibility checked
+      - Model base name compatibility checked
+      - Session restored if compatible, else fresh start
+    refs: [crates/arkavo-session/src/conversation.rs:147-233]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Template mismatch
+        expected: Incompatible, start fresh
+      - condition: Model mismatch
+        expected: Incompatible, start fresh
+      - condition: No previous sessions
+        expected: None returned
+
+  - id: CHAT-017
+    name: Add message to conversation
+    criticality: high
+    given:
+      - Active session exists
+      - Message with role and content provided
+    when: add_message called
+    then:
+      - Token count calculated for content
+      - ConversationMessage created with metadata
+      - Message stored in MemoryStorage
+      - Session updated_at refreshed
+    refs: [crates/arkavo-session/src/conversation.rs:235-272]
+    changed: "2025-02-05"
+
+  - id: CHAT-018
+    name: Get context messages with limits
+    criticality: high
+    given:
+      - Active session with message history
+      - Optional system_message
+      - Optional max_history_turns
+    when: get_context_messages_with_limits called
+    then:
+      - Recent messages retrieved from storage
+      - Sorted by timestamp
+      - System message prepended if provided
+      - Token budget enforced (MAX_CONTEXT_TOKENS)
+      - History limit applied
+      - Messages sanitized (fence balancing)
+    refs: [crates/arkavo-session/src/conversation.rs:291-419]
+    changed: "2025-02-05"
+
+  - id: CHAT-019
+    name: Create conversation summary
+    criticality: medium
+    given:
+      - Active session with many messages
+      - LLM client available
+    when: create_summary called
+    then:
+      - Messages to summarize identified
+      - Summary prompt built
+      - LLM generates summary
+      - Summary stored as ConversationMessage with is_summary=true
+    refs: [crates/arkavo-session/src/conversation.rs:421-492]
+    changed: "2025-02-05"
+
+  - id: CHAT-020
+    name: List available conversation sessions
+    criticality: medium
+    given:
+      - ConversationManager initialized
+      - Sessions exist in storage
+    when: list_sessions called
+    then:
+      - All conversation_session types retrieved
+      - Sorted by updated_at (most recent first)
+      - Returns list of ConversationSession
+    refs: [crates/arkavo-session/src/conversation.rs:534-549]
+    changed: "2025-02-05"
+
+  - id: CHAT-021
+    name: Switch to different conversation session
+    criticality: medium
+    given:
+      - ConversationManager initialized
+      - Session ID provided
+      - Session exists in storage
+    when: switch_session called
+    then:
+      - Session existence verified
+      - current_session_id updated
+      - Returns Ok on success
+    refs: [crates/arkavo-session/src/conversation.rs:551-565]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Session not found
+        expected: Returns error
+
+  - id: CHAT-022
+    name: Get session statistics
+    criticality: medium
+    given:
+      - Active session exists
+      - Messages in storage
+    when: get_session_stats called
+    then:
+      - Message count calculated
+      - Total token count summed
+      - Fence parity checked (balanced/unbalanced)
+      - Returns (turn_count, token_count, fence_balanced)
+    refs: [crates/arkavo-session/src/conversation.rs:499-532]
+    changed: "2025-02-05"
+
+  - id: CHAT-023
+    name: Clear current session
+    criticality: low
+    given:
+      - Active session may exist
+    when: clear_session called
+    then:
+      - current_session_id set to None
+      - Returns Ok
+    refs: [crates/arkavo-session/src/conversation.rs:494-497]
+    changed: "2025-02-05"
+
+  - id: CHAT-024
+    name: Sanitize message content for small models
+    criticality: high
+    given:
+      - Message content with potential issues
+    when: sanitize_message_content called
+    then:
+      - Unbalanced triple backticks closed
+      - Trailing "Assistant:" artifacts removed
+      - '"code:" patterns padded to prevent fence generation'
+      - Sanitized content returned
+    refs: [crates/arkavo-session/src/conversation.rs:60-89]
+    changed: "2025-02-05"
