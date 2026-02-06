@@ -146,10 +146,10 @@ fn execute_a2a_chat(prompt: Option<&str>) -> Result<(), Box<dyn std::error::Erro
         // Create ChatSession (wraps A2aClient)
         let mut session = ChatSession::new(Arc::new(router), Some(Arc::new(tool_registry))).await?;
 
-        if std::env::var("ARKAVO_DEBUG").is_ok() {
-            if let Some(id) = session.session_id() {
-                eprintln!("[A2A] Session: {}", &id[..8.min(id.len())]);
-            }
+        if std::env::var("ARKAVO_DEBUG").is_ok()
+            && let Some(id) = session.session_id()
+        {
+            eprintln!("[A2A] Session: {}", &id[..8.min(id.len())]);
         }
 
         // One-shot mode

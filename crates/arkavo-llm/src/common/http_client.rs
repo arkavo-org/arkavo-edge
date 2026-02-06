@@ -142,15 +142,7 @@ impl RetryableHttpClient {
 
                     if attempt < self.builder.max_retries() {
                         let delay = self.builder.calculate_retry_delay(attempt);
-                        #[cfg(any(feature = "llm-remote", feature = "kimi"))]
-                        log::warn!(
-                            "Request failed (attempt {}/{}), retrying in {:?}",
-                            attempt + 1,
-                            self.builder.max_retries() + 1,
-                            delay
-                        );
-                        #[cfg(not(any(feature = "llm-remote", feature = "kimi")))]
-                        eprintln!(
+                        tracing::warn!(
                             "Request failed (attempt {}/{}), retrying in {:?}",
                             attempt + 1,
                             self.builder.max_retries() + 1,

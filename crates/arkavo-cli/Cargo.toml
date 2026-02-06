@@ -75,7 +75,6 @@ arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
-log = { workspace = true }
 anyhow = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }

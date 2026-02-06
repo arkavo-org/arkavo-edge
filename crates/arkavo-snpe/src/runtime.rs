@@ -19,7 +19,7 @@ impl SnpeRuntime {
         let preferred = AcceleratorTarget::from_env();
         let selected_target = capabilities.select_best(preferred);
 
-        log::info!("SNPE Runtime initialized with target: {}", selected_target);
+        tracing::info!("SNPE Runtime initialized with target: {}", selected_target);
 
         Ok(Self {
             capabilities,
@@ -36,7 +36,7 @@ impl SnpeRuntime {
             return Err(SnpeError::AcceleratorUnavailable(target.to_string()));
         }
 
-        log::info!("SNPE Runtime initialized with target: {}", target);
+        tracing::info!("SNPE Runtime initialized with target: {}", target);
 
         Ok(Self {
             capabilities,
@@ -63,7 +63,7 @@ impl SnpeRuntime {
 
         let model = DlcModel::load(path, self.selected_target)?;
 
-        log::info!(
+        tracing::info!(
             "Loaded DLC model '{}' with {} inputs, {} outputs",
             model_name,
             model.input_shapes.len(),
@@ -165,7 +165,7 @@ impl DlcModel {
             outputs.insert(name.clone(), output_tensor);
         }
 
-        log::debug!(
+        tracing::debug!(
             "Executed model {} with {} inputs, {} outputs",
             self.path.display(),
             inputs.len(),
