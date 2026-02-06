@@ -794,7 +794,7 @@ dependencies = [
  "arkavo-config-bundle",
  "base64 0.22.1",
  "chrono",
- "opentdf",
+ "opentdf 0.6.1",
  "ring",
  "serde",
  "serde_json",
@@ -1022,7 +1022,7 @@ dependencies = [
  "arkavo-protocol",
  "async-trait",
  "chrono",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "octocrab",
  "regex",
  "reqwest",
@@ -1351,7 +1351,7 @@ dependencies = [
  "dirs 6.0.0",
  "hex",
  "hmac",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "mdns-sd 0.14.1",
  "reqwest",
  "serde",
@@ -1396,7 +1396,7 @@ dependencies = [
  "if-addrs 0.14.0",
  "ipnet",
  "jsonrpsee",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "lazy_static",
  "lru",
  "metrics",
@@ -1559,7 +1559,7 @@ dependencies = [
  "dashmap",
  "governor",
  "ipnet",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "lru",
  "once_cell",
  "rand 0.8.5",
@@ -1611,7 +1611,7 @@ dependencies = [
  "hex",
  "if-addrs 0.14.0",
  "jsonrpsee",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "lru",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1709,7 +1709,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
- "opentdf",
+ "opentdf 0.11.0",
  "opentdf-kas",
  "reqwest",
  "serde",
@@ -6177,6 +6177,21 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "pem",
+ "ring",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
+name = "jsonwebtoken"
 version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
@@ -7291,6 +7306,8 @@ dependencies = [
 [[package]]
 name = "octocrab"
 version = "0.48.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5930b376c98c438a4f4259a760cda2c198efea3b82de8f8a2aff0c00a8b7c1c"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -7310,7 +7327,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-timeout",
  "hyper-util",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "once_cell",
  "percent-encoding",
  "pin-project",
@@ -7430,15 +7447,36 @@ dependencies = [
 
 [[package]]
 name = "opentdf"
+version = "0.6.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "chrono",
+ "jsonwebtoken 9.3.1",
+ "opentdf-crypto 0.6.1",
+ "opentdf-protocol 0.6.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "zip",
+]
+
+[[package]]
+name = "opentdf"
 version = "0.11.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
  "base64 0.22.1",
  "chrono",
- "jsonwebtoken",
- "opentdf-crypto",
- "opentdf-protocol",
+ "jsonwebtoken 9.3.1",
+ "opentdf-crypto 0.11.0",
+ "opentdf-protocol 0.11.0",
  "pem",
  "rand 0.8.5",
  "reqwest",
@@ -7452,7 +7490,37 @@ dependencies = [
 
 [[package]]
 name = "opentdf-crypto"
+version = "0.6.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "base64 0.22.1",
+ "hex",
+ "hkdf",
+ "hmac",
+ "k256",
+ "opentdf-protocol 0.6.1",
+ "p256",
+ "p384",
+ "p521",
+ "pkcs8 0.10.2",
+ "rand 0.8.5",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha1 0.10.6",
+ "sha2 0.10.9",
+ "subtle",
+ "thiserror 2.0.18",
+ "typenum",
+ "zeroize",
+]
+
+[[package]]
+name = "opentdf-crypto"
 version = "0.11.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7462,7 +7530,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "k256",
- "opentdf-protocol",
+ "opentdf-protocol 0.11.0",
  "p256",
  "p384",
  "p521",
@@ -7483,6 +7551,7 @@ dependencies = [
 [[package]]
 name = "opentdf-kas"
 version = "0.11.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -7497,7 +7566,21 @@ dependencies = [
 
 [[package]]
 name = "opentdf-protocol"
+version = "0.6.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=2303d76d#2303d76d1ccf30b19fbc22b15267725288f2b3e8"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "opentdf-protocol"
 version = "0.11.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8926,6 +9009,7 @@ dependencies = [
  "pkcs1",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
+ "sha2 0.10.9",
  "signature 2.2.0",
  "spki 0.7.3",
  "subtle",

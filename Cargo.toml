@@ -360,10 +360,3 @@ too_many_lines = "allow"
 [workspace.metadata.clippy]
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
-
-[patch."https://github.com/arkavo-org/opentdf-rs"]
-opentdf = { path = "vendor/opentdf-rs" }
-opentdf-kas = { path = "vendor/opentdf-rs/crates/kas" }
-
-[patch.crates-io]
-octocrab = { path = "vendor/octocrab" }
