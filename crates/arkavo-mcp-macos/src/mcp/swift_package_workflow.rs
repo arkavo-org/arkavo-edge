@@ -11,10 +11,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 // Global store for running Swift package processes
-lazy_static::lazy_static! {
-    static ref SPM_PROCESSES: Arc<Mutex<HashMap<u32, SpmProcessInfo>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-}
+static SPM_PROCESSES: std::sync::LazyLock<Arc<Mutex<HashMap<u32, SpmProcessInfo>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// Information about a running Swift package process
 struct SpmProcessInfo {

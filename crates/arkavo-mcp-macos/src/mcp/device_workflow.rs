@@ -13,10 +13,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // Global store for device log capture sessions
-lazy_static::lazy_static! {
-    static ref DEVICE_LOG_SESSIONS: Arc<Mutex<HashMap<String, DeviceLogSession>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-}
+static DEVICE_LOG_SESSIONS: std::sync::LazyLock<Arc<Mutex<HashMap<String, DeviceLogSession>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// Physical device information
 #[derive(Debug, Clone, Serialize, Deserialize)]

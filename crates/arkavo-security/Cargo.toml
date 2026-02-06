@@ -52,7 +52,6 @@ rand = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
-once_cell = { workspace = true }
 regex = { workspace = true }
 
 # For security_fixes.rs

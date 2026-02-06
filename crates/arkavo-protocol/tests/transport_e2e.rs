@@ -209,8 +209,7 @@ async fn test_http_retry_mechanism() {
     struct RetryApi;
 
     #[async_trait]
-    #[async_trait]
-impl TestApiServer for RetryApi {
+    impl TestApiServer for RetryApi {
         async fn echo(&self, message: String) -> Result<String, ErrorObjectOwned> {
             let attempt = ATTEMPT_COUNT.fetch_add(1, Ordering::SeqCst);
             if attempt < 2 {

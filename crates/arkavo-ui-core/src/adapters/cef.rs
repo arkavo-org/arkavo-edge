@@ -4,6 +4,14 @@ use arkavo_agui::UiRenderer;
 use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 use std::collections::HashMap;
 
+fn encode_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 pub struct CEFAdapter {
     renderer: CefRendererImpl,
 }
@@ -31,7 +39,7 @@ impl UserInterface for CEFAdapter {
             UIContent::Text(text) | UIContent::Markdown(text) => {
                 let html = format!(
                     r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif; white-space: pre-wrap;">{}</div>"#,
-                    html_escape::encode_text(&text)
+                    encode_html(&text)
                 );
                 self.renderer.render(&html, "", "").await?;
             }
@@ -41,21 +49,21 @@ impl UserInterface for CEFAdapter {
             } => {
                 let html = format!(
                     r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif; white-space: pre-wrap;">{}</div>"#,
-                    html_escape::encode_text(&content)
+                    encode_html(&content)
                 );
                 self.renderer.render(&html, "", "").await?;
             }
             UIContent::Error(error) => {
                 let html = format!(
                     r#"<div style="padding: 40px; font-family: system-ui; color: #d32f2f; background: #ffebee; border-radius: 8px;">{}</div>"#,
-                    html_escape::encode_text(&error)
+                    encode_html(&error)
                 );
                 self.renderer.render(&html, "", "").await?;
             }
             UIContent::StatusUpdate(status) => {
                 let html = format!(
                     r#"<div style="padding: 12px 16px; font-family: system-ui; color: #666; background: #f5f5f5; border-radius: 4px; font-size: 12px;">{}</div>"#,
-                    html_escape::encode_text(&status)
+                    encode_html(&status)
                 );
                 self.renderer
                     .update_element("#status", &html)

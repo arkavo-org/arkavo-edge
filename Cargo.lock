@@ -1173,7 +1173,6 @@ dependencies = [
  "chrono",
  "futures",
  "glob",
- "once_cell",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1198,7 +1197,6 @@ dependencies = [
  "glob",
  "handlebars",
  "jsonschema",
- "lazy_static",
  "libc",
  "rand 0.8.5",
  "regex",
@@ -1209,7 +1207,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
- "walkdir",
 ]
 
 [[package]]
@@ -1270,7 +1267,6 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "git2",
- "lazy_static",
  "octocrab",
  "regex",
  "reqwest",
@@ -1389,14 +1385,12 @@ dependencies = [
  "crossbeam-queue",
  "dashmap",
  "futures",
- "gethostname",
  "governor",
  "hex",
  "if-addrs",
  "ipnet",
  "jsonrpsee",
  "jsonwebtoken 10.3.0",
- "lazy_static",
  "lru",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1560,7 +1554,6 @@ dependencies = [
  "ipnet",
  "jsonwebtoken 10.3.0",
  "lru",
- "once_cell",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -1605,7 +1598,6 @@ dependencies = [
  "crossbeam-queue",
  "dashmap",
  "futures",
- "gethostname",
  "governor",
  "hex",
  "if-addrs",
@@ -1826,7 +1818,6 @@ dependencies = [
  "arkavo-llm",
  "arkavo-router",
  "async-trait",
- "html-escape",
  "serde",
  "serde_json",
  "tokio",
@@ -4448,16 +4439,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gethostname"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc3655aa6818d65bc620d6911f05aa7b6aeb596291e1e9f79e52df85583d1e30"
-dependencies = [
- "rustix 0.38.44",
- "windows-targets 0.52.6",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4957,15 +4938,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "html-escape"
-version = "0.2.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d1ad449764d627e22bfd7cd5e8868264fc9236e07c752972b4080cd351cb476"
-dependencies = [
- "utf8-width",
 ]
 
 [[package]]
@@ -11224,12 +11196,6 @@ name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
-
-[[package]]
-name = "utf8-width"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1292c0d970b54115d14f2492fe0170adf21d68a1de108eebc51c1df4f346a091"
 
 [[package]]
 name = "utf8_iter"

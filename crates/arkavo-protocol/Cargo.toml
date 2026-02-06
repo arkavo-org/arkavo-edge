@@ -51,7 +51,6 @@ thiserror = { workspace = true }
 # Security dependencies
 lru = { workspace = true }
 ipnet = "2.9"
-lazy_static = "1.4"
 bs58 = "0.5"
 
 # Logging
@@ -107,9 +106,6 @@ schemars = { workspace = true }
 clap = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
-# mDNS dependencies
-gethostname = { workspace = true, optional = true }
-
 # Network interface detection
 if-addrs = { workspace = true, optional = true }
 
@@ -120,7 +116,7 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 [features]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
-mdns = ["gethostname", "if-addrs"]
+mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf"]  # KAS A2A capability for TDF key operations
 

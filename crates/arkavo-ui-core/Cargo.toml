@@ -35,9 +35,6 @@ arkavo-agui = { path = "../arkavo-agui", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# HTML escaping for safe rendering
-html-escape = "0.2"
-
 # Logging
 tracing = { workspace = true }
 

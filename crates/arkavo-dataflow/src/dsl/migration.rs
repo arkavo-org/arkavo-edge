@@ -173,16 +173,16 @@ macro_rules! define_migration {
 
         impl $crate::dsl::BlueprintMigration for $name {
             fn from_version(&self) -> &::semver::Version {
-                static VERSION: ::once_cell::sync::Lazy<::semver::Version> =
-                    ::once_cell::sync::Lazy::new(|| {
+                static VERSION: ::std::sync::LazyLock<::semver::Version> =
+                    ::std::sync::LazyLock::new(|| {
                         ::semver::Version::new($from_major, $from_minor, $from_patch)
                     });
                 &VERSION
             }
 
             fn to_version(&self) -> &::semver::Version {
-                static VERSION: ::once_cell::sync::Lazy<::semver::Version> =
-                    ::once_cell::sync::Lazy::new(|| {
+                static VERSION: ::std::sync::LazyLock<::semver::Version> =
+                    ::std::sync::LazyLock::new(|| {
                         ::semver::Version::new($to_major, $to_minor, $to_patch)
                     });
                 &VERSION

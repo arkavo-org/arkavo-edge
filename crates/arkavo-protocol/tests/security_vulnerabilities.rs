@@ -372,9 +372,7 @@ fn authenticate_request(req: Request) -> Result<SessionAuth, AuthError> {
 }
 
 // Global token store for testing
-lazy_static::lazy_static! {
-    static ref TOKEN_STORE: TokenStore = TokenStore::new(1000);
-}
+static TOKEN_STORE: std::sync::LazyLock<TokenStore> = std::sync::LazyLock::new(|| TokenStore::new(1000));
 
 fn validate_token(token: &str) -> Result<(), TokenError> {
     // Extract JTI from token (simplified for testing)
@@ -410,15 +408,13 @@ fn use_token(token: &str) -> Result<(), TokenError> {
     TOKEN_STORE.mark_used(&jti)
 }
 
-lazy_static::lazy_static! {
-    static ref EGRESS_FILTER: EgressFilter = {
-        let mut filter = EgressFilter::new();
-        // Allow public APIs for testing
-        filter.allow("https://api.openai.com/v1/chat/completions");
-        filter.allow("https://generativelanguage.googleapis.com/");
-        filter
-    };
-}
+static EGRESS_FILTER: std::sync::LazyLock<EgressFilter> = std::sync::LazyLock::new(|| {
+    let mut filter = EgressFilter::new();
+    // Allow public APIs for testing
+    filter.allow("https://api.openai.com/v1/chat/completions");
+    filter.allow("https://generativelanguage.googleapis.com/");
+    filter
+});
 
 fn check_egress_allowed(url: &str) -> Result<(), EgressError> {
     EGRESS_FILTER.is_allowed(url)

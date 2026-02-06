@@ -23,7 +23,6 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 glob = { workspace = true }
-once_cell = "1.19"
 futures = "0.3"
 
 # Claude Agent SDK (native Rust - supports OAuth for Claude Max/Pro subscribers)
