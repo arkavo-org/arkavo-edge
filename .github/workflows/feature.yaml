@@ -169,7 +169,8 @@ jobs:
           - protocol    # arkavo-protocol, arkavo-observability, arkavo-workspace (44K LOC)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
-          - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui (34K LOC)
+          - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui
+          - cli         # arkavo-cli (large dep tree, needs its own disk budget)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -231,6 +232,7 @@ jobs:
             cargo test --locked -p arkavo-terminal
             cargo test --locked -p arkavo-ui-generator
             cargo test --locked -p arkavo-agui --no-default-features --features mdns
+          elif [ "${{ matrix.group }}" = "cli" ]; then
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui
             # Check arkavo-cli with cef-ui feature to catch exhaustive match errors
             # Use --no-default-features to skip llama-cpp (saves disk space)
@@ -263,6 +265,7 @@ jobs:
             cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
+          elif [ "${{ matrix.group }}" = "cli" ]; then
             # Lint arkavo-cli with cef-ui feature (catches exhaustive match errors before release)
             # Use --no-default-features to skip llama-cpp (saves disk space)
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui -- -D warnings
