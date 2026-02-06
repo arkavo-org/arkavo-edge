@@ -29,7 +29,7 @@ tracing = { workspace = true }
 
 # For GitHub tools
 base64 = { workspace = true }
-octocrab = "0.38"
+octocrab = "0.48.1"
 
 # For Git tools
 git2 = { workspace = true }

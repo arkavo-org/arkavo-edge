@@ -2,9 +2,15 @@
 //!
 //! Target: sub-microsecond total latency (feature extraction + evaluation).
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::semicolon_if_nothing_returned
+)]
+
 use arkavo_critic::{CircuitCheck, FeatureId, PolicyId, VerificationInput};
 use arkavo_llm::ProviderResponse;
 use arkavo_llm::tool_parser::ParsedToolCall;
+use arkavo_torg_circuits::CircuitFeature;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use torg_core::{BoolOp, Graph, Node, Source, evaluate_into};
 use torg_serde::to_bytes;

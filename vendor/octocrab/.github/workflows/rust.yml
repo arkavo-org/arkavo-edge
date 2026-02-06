@@ -1,0 +1,36 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        channel: [stable, beta, nightly]
+        os: [ubuntu, macos, windows]
+        features:
+        - ""
+        - "-F stream"
+    steps:
+    - uses: actions/checkout@v2
+    - run: rustup default ${{ matrix.channel }}
+    - run: cargo build --all-targets ${{ matrix.features }}
+    - run: cargo test ${{ matrix.features }}
+
+  wasm-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: rustup default stable
+    - run: rustup target add wasm32-unknown-unknown
+    - run: cargo build --target=wasm32-unknown-unknown --no-default-features
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: cargo fmt --all -- --check
+    - run: cargo clippy --tests --examples

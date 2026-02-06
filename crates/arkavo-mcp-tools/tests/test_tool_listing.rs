@@ -1,3 +1,11 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::disallowed_methods,
+    clippy::len_zero,
+    clippy::print_literal,
+    clippy::uninlined_format_args
+)]
+
 // Test to list all tools and verify filesystem tool registration
 use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
 use arkavo_memory::MemoryStorage;

@@ -689,8 +689,7 @@ async fn test_live_api_v32_speciale_thinking() {
     let content = choice.message.content.as_ref().unwrap();
     assert!(
         content.contains("42"),
-        "Expected 42 in response: {}",
-        content
+        "Expected 42 in response: {content}",
     );
 
     // Verify reasoning_content is present (the model's thinking process)

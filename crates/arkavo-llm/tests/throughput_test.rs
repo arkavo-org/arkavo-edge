@@ -3,6 +3,13 @@
 //! This test demonstrates how many small model requests (qwen3-0.6B)
 //! can complete while a large model (8B) request is running.
 
+#![allow(
+    clippy::collection_is_never_read,
+    clippy::disallowed_methods,
+    clippy::redundant_locals,
+    clippy::uninlined_format_args
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};

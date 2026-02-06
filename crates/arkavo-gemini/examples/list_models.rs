@@ -86,10 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         if let Some(input) = model.input_token_limit {
-            println!("  Input tokens: {}", input);
+            println!("  Input tokens: {input}");
         }
         if let Some(output) = model.output_token_limit {
-            println!("  Output tokens: {}", output);
+            println!("  Output tokens: {output}");
         }
     } else {
         println!("\n⚠️  Gemini 3 Pro Preview not found in model list");

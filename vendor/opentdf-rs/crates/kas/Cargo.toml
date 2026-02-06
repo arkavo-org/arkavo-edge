@@ -1,0 +1,52 @@
+[package]
+name = "opentdf-kas"
+version.workspace = true
+edition = "2024"
+rust-version = "1.91"
+description = "OpenTDF KAS (Key Access Service) server-side crypto operations"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/arkavo-org/opentdf-rs"
+authors = ["Arkavo LLC <info@arkavo.com>"]
+documentation = "https://docs.rs/opentdf-kas"
+homepage = "https://github.com/arkavo-org/opentdf-rs"
+keywords = ["opentdf", "kas", "cryptography", "nanotdf", "rewrap"]
+categories = ["cryptography"]
+readme = "README.md"
+
+[dependencies]
+# Elliptic curve cryptography
+p256 = { workspace = true }
+
+# AES-GCM for rewrap operations
+aes-gcm.workspace = true
+
+# Key derivation
+hkdf.workspace = true
+sha2.workspace = true
+
+# Encoding
+base64.workspace = true
+pem = "3.0"
+
+# Error handling
+thiserror.workspace = true
+
+# Serialization
+serde.workspace = true
+
+# Random number generation
+rand.workspace = true
+
+# RSA support (optional)
+rsa = { version = "0.9", features = ["sha2"], optional = true }
+sha1 = { workspace = true, optional = true }
+pkcs8 = { workspace = true, optional = true }
+
+[features]
+default = ["ec"]
+ec = []
+rsa = ["dep:rsa", "dep:sha1", "dep:pkcs8"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+hex = "0.4"

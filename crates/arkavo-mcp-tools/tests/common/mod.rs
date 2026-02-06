@@ -2,6 +2,8 @@
 // These may not all be used in every test file
 #![allow(dead_code)]
 
+#![allow(unreachable_pub)]
+
 use arkavo_mcp_tools::{Tool, time_sync::SyncAgentTimeTool};
 use serde_json::json;
 use std::sync::Arc;

@@ -1,0 +1,94 @@
+[package]
+name = "opentdf-crypto"
+version.workspace = true
+edition = "2024"
+rust-version = "1.91"
+description = "OpenTDF cryptographic operations with security hardening"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/arkavo-org/opentdf-rs"
+authors = ["Arkavo LLC <info@arkavo.com>"]
+documentation = "https://docs.rs/opentdf-crypto"
+homepage = "https://github.com/arkavo-org/opentdf-rs"
+keywords = ["opentdf", "tdf", "cryptography", "aes-gcm", "nanotdf"]
+categories = ["cryptography", "no-std"]
+readme = "README.md"
+
+[dependencies]
+# Core cryptography (using workspace versions where applicable)
+aes = "0.8"  # For AES-256 block cipher
+aes-gcm.workspace = true
+typenum = "1.17"  # For AES-GCM variable tag sizes
+rand.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+base64.workspace = true
+
+# Security hardening
+zeroize.workspace = true
+subtle = "2.6"
+hex = "0.4"
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Protocol types (for NanoTDF)
+opentdf-protocol = { path = "../protocol", version = "0.11.0" }
+
+# KAS feature dependencies (EC, HKDF)
+p256 = { workspace = true, optional = true }
+p384 = { workspace = true, optional = true }
+p521 = { workspace = true, optional = true }
+k256 = { workspace = true, optional = true }
+sha1 = { workspace = true, optional = true }
+hkdf = { workspace = true, optional = true }
+pkcs8 = { workspace = true, optional = true }
+spki = { version = "0.7", optional = true }
+
+# RSA backends (choose one)
+# aws-lc-rs: Constant-time RSA operations, FIPS validated (default for native)
+# Does NOT support wasm32 - use WebCrypto in browser environments
+aws-lc-rs = { version = "1.15", optional = true }
+# PEM parsing for aws-lc-rs (it only supports DER directly)
+pem = { version = "3.0", optional = true }
+
+# Legacy RustCrypto RSA (has RUSTSEC-2023-0071 timing vulnerability)
+# Only enable if you explicitly accept the timing attack risk
+# See: https://rustsec.org/advisories/RUSTSEC-2023-0071
+rsa = { version = "0.9", features = ["sha2"], optional = true }
+
+# Mbed TLS for full GCM tag size support (including 64-bit tags - NanoTDF default)
+# TODO: Complete Mbed TLS integration - currently under development
+mbedtls = { version = "0.13", default-features = false, features = ["std", "aesni"], optional = true }
+
+[features]
+default = []
+
+# RSA backend: aws-lc-rs (constant-time, FIPS validated, recommended)
+# Does NOT support wasm32 - use WebCrypto in browser environments
+aws-lc-provider = ["dep:aws-lc-rs", "dep:pem"]
+
+# RSA backend: RustCrypto (pure Rust, portable)
+# WARNING: Has RUSTSEC-2023-0071 timing vulnerability
+# Only use if aws-lc-rs build requirements cannot be met
+rustcrypto-provider = ["dep:rsa"]
+
+# KEM implementations
+kem-rsa = ["sha1", "pkcs8"]
+kem-ec = ["p256", "p384", "p521", "k256", "sha1", "hkdf", "pkcs8", "spki"]
+
+# NanoTDF support (requires EC KEM for ECDH key agreement)
+nanotdf = ["kem-ec"]
+
+# Use Mbed TLS for NanoTDF GCM operations (supports 64-128 bit tags, 64-bit is NanoTDF default)
+# NOTE: This feature is under development. Use RustCrypto (96-128 bit tags) for now.
+nanotdf-mbedtls = ["mbedtls"]
+
+# Deprecated aliases for backwards compatibility
+kas = ["aws-lc-provider", "kem-rsa", "kem-ec"]
+rustcrypto-rsa = ["rustcrypto-provider"]
+
+[dev-dependencies]

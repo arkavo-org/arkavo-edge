@@ -18,9 +18,9 @@ thiserror.workspace = true
 regex.workspace = true
 
 # External dependencies
-octocrab = "0.38"
+octocrab = "0.48.1"
 reqwest = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = { workspace = true }
 async-trait = { workspace = true }
 serde_json.workspace = true
 

@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(feature = "embeddings")]
 use arkavo_memory::embeddings::EmbeddingService;
 

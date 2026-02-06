@@ -79,17 +79,18 @@ pub async fn delete_token() -> Result<(), AgentAuthError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
     // Use a mutex to serialize storage tests since they share the same file
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
     async fn test_token_storage_roundtrip() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
 
         // Cleanup before test
         let _ = delete_token().await;
@@ -121,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_expired_token_cleanup() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
 
         // Cleanup before test to ensure no stale tokens
         let _ = delete_token().await;

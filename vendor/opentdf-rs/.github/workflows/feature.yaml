@@ -1,0 +1,174 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Dependency audit with cargo-deny
+  # Uses EmbarkStudios action with matrix strategy for optimal CI behavior
+  cargo-deny:
+    name: Dependency Audit (${{ matrix.checks }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
+          # Don't use --all-features since rustcrypto-provider has RUSTSEC-2023-0071
+          # The deny.toml already sets all-features = false
+          arguments: ""
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: format
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --lib --all-features -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: run-tests
+        run: cargo test --verbose
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: build-release
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: run-bench
+        run: cargo bench --bench memory_builder | tee output.txt
+
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: cache-registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: cache-git
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: cache-target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-target-wasm-
+
+      - name: install-wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: build-web
+        working-directory: crates/wasm
+        run: wasm-pack build --target web --out-dir pkg-web
+
+      - name: build-node
+        working-directory: crates/wasm
+        run: wasm-pack build --target nodejs --out-dir pkg-node
+
+      - name: check-size
+        run: |
+          echo "### WASM Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Web Target" >> $GITHUB_STEP_SUMMARY
+          ls -lh crates/wasm/pkg-web/*.wasm | awk '{print "- " $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Node.js Target" >> $GITHUB_STEP_SUMMARY
+          ls -lh crates/wasm/pkg-node/*.wasm | awk '{print "- " $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+
+      - name: test-wasm
+        working-directory: crates/wasm
+        run: wasm-pack test --node
+
+      - name: upload-web
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-web-${{ github.sha }}
+          path: crates/wasm/pkg-web/
+          retention-days: 7
+
+      - name: upload-node
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-node-${{ github.sha }}
+          path: crates/wasm/pkg-node/
+          retention-days: 7
+
+      - name: lint-wasm
+        working-directory: crates/wasm
+        run: |
+          cargo fmt -- --check
+          cargo clippy --target wasm32-unknown-unknown -- -D warnings

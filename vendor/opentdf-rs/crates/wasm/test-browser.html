@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenTDF WASM Browser Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            background: #f8f9fa;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .status {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .loading {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .ready {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .stat-card {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 OpenTDF WASM Browser Test</h1>
+
+    <div id="status" class="status loading">
+        ⏳ Loading WASM module...
+    </div>
+
+    <div class="container">
+        <h2>WASM Module Information</h2>
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="version">-</div>
+                <div class="stat-label">Version</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="wasm-size">-</div>
+                <div class="stat-label">WASM Size</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="load-time">-</div>
+                <div class="stat-label">Load Time</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="test-section">
+            <h3>Test 1: Create TDF Archive</h3>
+            <p>Encrypt data and create a TDF archive with a policy.</p>
+
+            <label for="tdf-data">Data to Encrypt:</label>
+            <input type="text" id="tdf-data" value="Hello, OpenTDF WASM!">
+
+            <label for="kas-url">KAS URL:</label>
+            <input type="text" id="kas-url" value="https://kas.example.com">
+
+            <button id="create-tdf-btn">Create TDF</button>
+            <button id="create-tdf-abac-btn">Create TDF with ABAC Policy</button>
+
+            <div id="create-tdf-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 2: Read TDF Manifest</h3>
+            <p>Read a TDF archive and extract its manifest.</p>
+
+            <label for="tdf-archive">TDF Archive (Base64):</label>
+            <textarea id="tdf-archive" placeholder="Paste base64-encoded TDF archive here"></textarea>
+
+            <button id="read-tdf-btn">Read TDF</button>
+
+            <div id="read-tdf-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 3: ABAC Policy Evaluation</h3>
+            <p>Evaluate attribute-based access control policies.</p>
+
+            <label for="user-attrs">User Attributes (JSON):</label>
+            <textarea id="user-attrs">{
+  "gov.example:clearance": "TOP_SECRET",
+  "gov.example:department": "ENGINEERING"
+}</textarea>
+
+            <button id="eval-simple-btn">Evaluate Simple Policy</button>
+            <button id="eval-complex-btn">Evaluate Complex Policy</button>
+
+            <div id="eval-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 4: Create Attribute Identifier</h3>
+            <p>Parse and create attribute identifiers.</p>
+
+            <label for="attr-id">Attribute Identifier:</label>
+            <input type="text" id="attr-id" value="gov.example:clearance">
+
+            <button id="create-attr-btn">Create Attribute ID</button>
+
+            <div id="attr-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 5: Policy Creation</h3>
+            <p>Create and validate policies.</p>
+
+            <label for="policy-json">Policy JSON:</label>
+            <textarea id="policy-json">{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "body": {
+    "attributes": [],
+    "dissem": ["user@example.com"]
+  }
+}</textarea>
+
+            <button id="create-policy-btn">Create Policy</button>
+
+            <div id="policy-result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Performance Metrics</h2>
+        <div id="perf-metrics" class="result info">
+            Run tests to see performance metrics...
+        </div>
+    </div>
+
+    <script type="module">
+        import init, {
+            version,
+            tdf_create,
+            tdf_read,
+            access_evaluate,
+            attribute_identifier_create,
+            policy_create
+        } from './pkg-web/opentdf_wasm.js';
+
+        let perfMetrics = [];
+        let createdTdf = null;
+        const startTime = performance.now();
+
+        // Initialize WASM
+        async function initWasm() {
+            try {
+                await init();
+                const loadTime = (performance.now() - startTime).toFixed(2);
+
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status ready';
+                statusDiv.textContent = '✅ WASM module loaded successfully!';
+
+                // Display version
+                const ver = version();
+                document.getElementById('version').textContent = ver;
+                document.getElementById('load-time').textContent = loadTime + ' ms';
+
+                // Get WASM size
+                const response = await fetch('./pkg-web/opentdf_wasm_bg.wasm');
+                const blob = await response.blob();
+                const sizeKB = (blob.size / 1024).toFixed(2);
+                document.getElementById('wasm-size').textContent = sizeKB + ' KB';
+
+                enableButtons();
+
+                console.log('OpenTDF WASM initialized, version:', ver);
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status error';
+                statusDiv.textContent = '❌ Failed to load WASM: ' + error.message;
+                console.error('WASM init error:', error);
+            }
+        }
+
+        function enableButtons() {
+            document.querySelectorAll('button').forEach(btn => {
+                btn.disabled = false;
+            });
+        }
+
+        function showResult(elementId, message, type = 'success') {
+            const element = document.getElementById(elementId);
+            element.className = `result ${type}`;
+            element.textContent = message;
+        }
+
+        function addPerfMetric(test, duration) {
+            perfMetrics.push({ test, duration });
+            updatePerfDisplay();
+        }
+
+        function updatePerfDisplay() {
+            const display = document.getElementById('perf-metrics');
+            const metrics = perfMetrics.map(m =>
+                `${m.test}: ${m.duration.toFixed(2)}ms`
+            ).join('\n');
+            display.textContent = metrics || 'No metrics yet';
+        }
+
+        // Test 1: Create TDF
+        document.getElementById('create-tdf-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const data = document.getElementById('tdf-data').value;
+                const kasUrl = document.getElementById('kas-url').value;
+
+                const policy = {
+                    uuid: crypto.randomUUID(),
+                    body: {
+                        attributes: [],
+                        dissem: ['user@example.com']
+                    }
+                };
+
+                const dataBase64 = btoa(data);
+                const result = tdf_create(dataBase64, kasUrl, JSON.stringify(policy));
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    createdTdf = result.data;
+                    showResult('create-tdf-result',
+                        `✅ TDF created successfully!\n\nSize: ${result.data.length} bytes (base64)\nTime: ${duration.toFixed(2)}ms\n\nTDF Archive:\n${result.data.substring(0, 200)}...`,
+                        'success');
+                    document.getElementById('tdf-archive').value = result.data;
+                    addPerfMetric('Create TDF', duration);
+                } else {
+                    showResult('create-tdf-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('create-tdf-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Create TDF with ABAC
+        document.getElementById('create-tdf-abac-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const data = document.getElementById('tdf-data').value;
+                const kasUrl = document.getElementById('kas-url').value;
+
+                const policy = {
+                    uuid: crypto.randomUUID(),
+                    body: {
+                        attributes: [{
+                            type: "AND",
+                            conditions: [{
+                                attribute: {
+                                    namespace: "gov.example",
+                                    name: "clearance"
+                                },
+                                operator: "minimumOf",
+                                value: "SECRET"
+                            }]
+                        }],
+                        dissem: ['user@example.com']
+                    }
+                };
+
+                const dataBase64 = btoa(data);
+                const result = tdf_create(dataBase64, kasUrl, JSON.stringify(policy));
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    createdTdf = result.data;
+                    showResult('create-tdf-result',
+                        `✅ TDF with ABAC policy created!\n\nSize: ${result.data.length} bytes\nTime: ${duration.toFixed(2)}ms\nPolicy: Requires "gov.example:clearance" >= SECRET`,
+                        'success');
+                    document.getElementById('tdf-archive').value = result.data;
+                    addPerfMetric('Create TDF with ABAC', duration);
+                } else {
+                    showResult('create-tdf-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('create-tdf-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Test 2: Read TDF
+        document.getElementById('read-tdf-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const tdfData = document.getElementById('tdf-archive').value;
+                if (!tdfData) {
+                    showResult('read-tdf-result', '❌ Please enter a TDF archive', 'error');
+                    return;
+                }
+
+                const result = tdf_read(tdfData);
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    const manifest = JSON.parse(result.data);
+                    showResult('read-tdf-result',
+                        `✅ Manifest read successfully!\n\nTime: ${duration.toFixed(2)}ms\n\nManifest:\n${JSON.stringify(manifest, null, 2)}`,
+                        'success');
+                    addPerfMetric('Read TDF Manifest', duration);
+                } else {
+                    showResult('read-tdf-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('read-tdf-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Test 3: Evaluate policies
+        document.getElementById('eval-simple-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const userAttrs = document.getElementById('user-attrs').value;
+
+                const policy = {
+                    attribute: {
+                        namespace: "gov.example",
+                        name: "clearance"
+                    },
+                    operator: "equals",
+                    value: "TOP_SECRET"
+                };
+
+                const result = access_evaluate(JSON.stringify(policy), userAttrs);
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    const granted = result.data === 'true';
+                    showResult('eval-result',
+                        `${granted ? '✅' : '❌'} Access ${granted ? 'GRANTED' : 'DENIED'}\n\nTime: ${duration.toFixed(2)}ms\nPolicy: clearance == TOP_SECRET\nResult: ${granted}`,
+                        granted ? 'success' : 'error');
+                    addPerfMetric('Simple Policy Evaluation', duration);
+                } else {
+                    showResult('eval-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('eval-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        document.getElementById('eval-complex-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const userAttrs = document.getElementById('user-attrs').value;
+
+                const policy = {
+                    type: "AND",
+                    conditions: [
+                        {
+                            attribute: { namespace: "gov.example", name: "clearance" },
+                            operator: "minimumOf",
+                            value: "SECRET"
+                        },
+                        {
+                            attribute: { namespace: "gov.example", name: "department" },
+                            operator: "equals",
+                            value: "ENGINEERING"
+                        }
+                    ]
+                };
+
+                const result = access_evaluate(JSON.stringify(policy), userAttrs);
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    const granted = result.data === 'true';
+                    showResult('eval-result',
+                        `${granted ? '✅' : '❌'} Access ${granted ? 'GRANTED' : 'DENIED'}\n\nTime: ${duration.toFixed(2)}ms\nPolicy: (clearance >= SECRET) AND (department == ENGINEERING)\nResult: ${granted}`,
+                        granted ? 'success' : 'error');
+                    addPerfMetric('Complex Policy Evaluation', duration);
+                } else {
+                    showResult('eval-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('eval-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Test 4: Create attribute identifier
+        document.getElementById('create-attr-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const attrId = document.getElementById('attr-id').value;
+                const result = attribute_identifier_create(attrId);
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    const parsed = JSON.parse(result.data);
+                    showResult('attr-result',
+                        `✅ Attribute identifier created!\n\nTime: ${duration.toFixed(2)}ms\n\nParsed:\n${JSON.stringify(parsed, null, 2)}`,
+                        'success');
+                    addPerfMetric('Create Attribute ID', duration);
+                } else {
+                    showResult('attr-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('attr-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Test 5: Create policy
+        document.getElementById('create-policy-btn').addEventListener('click', () => {
+            const start = performance.now();
+            try {
+                const policyJson = document.getElementById('policy-json').value;
+                const result = policy_create(policyJson);
+                const duration = performance.now() - start;
+
+                if (result.success) {
+                    const policy = JSON.parse(result.data);
+                    showResult('policy-result',
+                        `✅ Policy created and validated!\n\nTime: ${duration.toFixed(2)}ms\n\nPolicy:\n${JSON.stringify(policy, null, 2)}`,
+                        'success');
+                    addPerfMetric('Create Policy', duration);
+                } else {
+                    showResult('policy-result', '❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showResult('policy-result', '❌ Exception: ' + error.message, 'error');
+            }
+        });
+
+        // Disable all buttons until WASM loads
+        document.querySelectorAll('button').forEach(btn => {
+            btn.disabled = true;
+        });
+
+        // Initialize
+        initWasm();
+    </script>
+</body>
+</html>

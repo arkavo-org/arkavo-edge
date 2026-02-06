@@ -1,0 +1,55 @@
+# cargo-deny configuration for opentdf-rs
+# See https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+]
+# Don't use all-features since rustcrypto-rsa has a known vulnerability (RUSTSEC-2023-0071)
+# The rustcrypto-rsa feature is explicitly documented as vulnerable and opt-in only
+# We check default features which uses aws-lc-rs (constant-time, no advisory)
+all-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# No ignores - we use aws-lc-rs for native RSA (constant-time)
+# and WebCrypto for browser WASM (browser-native crypto)
+# The rustcrypto-rsa feature is excluded from the graph check above
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "OpenSSL",
+    # webpki-roots uses this permissive data license
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+# Skip duplicate version warnings for these crates
+# These are transitive dependencies with version mismatches in the ecosystem
+skip = [
+    { name = "getrandom" },
+    { name = "untrusted" },
+]
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

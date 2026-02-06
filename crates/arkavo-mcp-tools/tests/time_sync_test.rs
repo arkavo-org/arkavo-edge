@@ -1,6 +1,8 @@
+#![allow(clippy::disallowed_methods, clippy::uninlined_format_args)]
+
 use arkavo_mcp_tools::{
     Tool, ToolRegistry,
-    time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
+    time_sync::{GetAgentTimeTool, SyncAgentTimeTool},
 };
 use arkavo_memory::MemoryStorage;
 use serde_json::json;

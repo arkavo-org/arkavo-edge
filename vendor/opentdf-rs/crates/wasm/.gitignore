@@ -1,0 +1,15 @@
+# WASM build artifacts
+pkg/
+pkg-web/
+pkg-node/
+target/
+
+# Node modules
+node_modules/
+package-lock.json
+
+# npm
+*.tgz
+
+# Test artifacts
+wasm-pack.log

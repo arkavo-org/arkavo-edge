@@ -1,0 +1,209 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/wasm/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/release.yaml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: cache-registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: cache-git
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: cache-target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-wasm-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-target-wasm-release-
+
+      - name: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@arkavo-org'
+
+      - name: install-wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: build-wasm
+        working-directory: crates/wasm
+        run: wasm-pack build --release --target web --out-dir pkg-web --scope arkavo-org
+
+      - name: test-wasm
+        working-directory: crates/wasm
+        run: |
+          wasm-pack test --headless --firefox
+          wasm-pack test --headless --chrome
+
+      - name: get-version
+        id: version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version from Cargo.toml: $VERSION"
+
+      - name: check-tag-exists
+        id: check_tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Tag $VERSION already exists, skipping release"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Tag $VERSION does not exist, will create release"
+          fi
+
+      - name: create-archive
+        run: |
+          cd crates/wasm
+          tar -czf ../../opentdf-wasm-web.tar.gz -C pkg-web .
+
+      - name: generate-checksum
+        run: sha256sum opentdf-wasm-web.tar.gz > opentdf-wasm-web.tar.gz.sha256
+
+      - name: create-tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+          echo "✅ Created and pushed tag: $VERSION"
+
+      - name: publish-npm
+        if: steps.check_tag.outputs.exists == 'false'
+        working-directory: crates/wasm/pkg-web
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Check if version already published
+          if npm view @arkavo-org/opentdf-wasm@$VERSION 2>/dev/null; then
+            echo "⚠️ Version $VERSION already published to npm, skipping"
+            exit 0
+          fi
+          npm publish
+          echo "✅ Published to npm: @arkavo-org/opentdf-wasm@$VERSION"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: false
+
+      - name: create-release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: OpenTDF WASM ${{ steps.version.outputs.version }}
+          body: |
+            ## OpenTDF WASM ${{ steps.version.outputs.version }}
+
+            WebAssembly bindings for OpenTDF (Trusted Data Format) - Browser target
+
+            ### Download
+
+            - `opentdf-wasm-web.tar.gz` - Web browser target (ES modules)
+
+            ### Usage
+
+            ```javascript
+            import init, { tdf_create, tdf_decrypt_with_kas, version } from './opentdf_wasm.js';
+            await init();
+            console.log('OpenTDF version:', version());
+            ```
+
+            See the [WASM README](https://github.com/arkavo-org/opentdf-rs/blob/main/crates/wasm/README.md) for complete documentation.
+
+            ### Verification
+
+            Verify download with SHA256 checksum:
+            ```bash
+            sha256sum -c opentdf-wasm-web.tar.gz.sha256
+            ```
+          files: |
+            opentdf-wasm-web.tar.gz
+            opentdf-wasm-web.tar.gz.sha256
+          draft: false
+          prerelease: false
+
+      - name: upload-artifacts
+        if: steps.check_tag.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentdf-wasm-latest
+          path: |
+            opentdf-wasm-web.tar.gz
+            opentdf-wasm-web.tar.gz.sha256
+          retention-days: 90
+
+      - name: summary
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG_EXISTS="${{ steps.check_tag.outputs.exists }}"
+
+          echo "## WASM Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $VERSION (from Cargo.toml)" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** Web (ES Modules)" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$TAG_EXISTS" == "false" ]; then
+            echo "**Release:** ✅ Created new release" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Release:** ⚠️ Tag already exists, no release created" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Archive" >> $GITHUB_STEP_SUMMARY
+          ls -lh opentdf-wasm-web.tar.gz | awk '{print "- " $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### WASM File" >> $GITHUB_STEP_SUMMARY
+          ls -lh crates/wasm/pkg-web/*.wasm | awk '{print "- " $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checksum" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat opentdf-wasm-web.tar.gz.sha256 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

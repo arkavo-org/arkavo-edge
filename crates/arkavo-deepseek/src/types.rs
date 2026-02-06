@@ -449,7 +449,7 @@ mod tests {
     fn test_expiration_constant_format() {
         let (year, month, day) = V32_SPECIALE_EXPIRATION;
         assert_eq!(year, 2025);
-        assert!(month >= 1 && month <= 12);
-        assert!(day >= 1 && day <= 31);
+        assert!((1..=12).contains(&month));
+        assert!((1..=31).contains(&day));
     }
 }

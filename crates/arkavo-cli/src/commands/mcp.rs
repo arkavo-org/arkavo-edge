@@ -219,6 +219,69 @@ fn error_response(
     })
 }
 
+const REDACTED: &str = "[REDACTED]";
+const MAX_LOG_PAYLOAD_CHARS: usize = 2048;
+const SENSITIVE_KEY_PATTERNS: &[&str] = &[
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+    "auth",
+    "cookie",
+    "session",
+    "private_key",
+    "bearer",
+];
+
+fn is_sensitive_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    SENSITIVE_KEY_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+}
+
+fn redact_value_for_log(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut redacted = serde_json::Map::with_capacity(map.len());
+            for (key, val) in map {
+                if is_sensitive_key(key) {
+                    redacted.insert(key.clone(), Value::String(REDACTED.to_string()));
+                } else {
+                    redacted.insert(key.clone(), redact_value_for_log(val));
+                }
+            }
+            Value::Object(redacted)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(redact_value_for_log).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(max_chars).collect();
+    format!("{truncated}... [truncated, {count} chars total]")
+}
+
+fn sanitize_json_line_for_log(line: &str) -> String {
+    match serde_json::from_str::<Value>(line) {
+        Ok(value) => sanitize_json_value_for_log(&value),
+        Err(_) => truncate_for_log("[non-json payload redacted]", MAX_LOG_PAYLOAD_CHARS),
+    }
+}
+
+fn sanitize_json_value_for_log(value: &Value) -> String {
+    let redacted = redact_value_for_log(value);
+    let serialized = serde_json::to_string(&redacted).unwrap_or_else(|_| "{}".to_string());
+    truncate_for_log(&serialized, MAX_LOG_PAYLOAD_CHARS)
+}
+
 #[allow(clippy::missing_panics_doc)]
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize schemas
@@ -252,7 +315,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     for line in reader.lines() {
         let line = match line {
             Ok(l) => {
-                eprintln!("MCP Server received: {l}");
+                eprintln!("MCP Server received: {}", sanitize_json_line_for_log(&l));
                 l
             }
             Err(e) => {
@@ -535,8 +598,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Err(e) = validate_response(&response_json) {
             eprintln!("ERROR: Generated invalid response: {e}");
             eprintln!(
-                "Response was: {}",
-                serde_json::to_string_pretty(&response_json)?
+                "Redacted response was: {}",
+                sanitize_json_value_for_log(&response_json)
             );
 
             // Send internal error instead
@@ -557,7 +620,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // Send validated response
         let response_str = serde_json::to_string(&response)?;
-        eprintln!("MCP Server sending response: {response_str}");
+        eprintln!(
+            "MCP Server sending response: {}",
+            sanitize_json_value_for_log(&response_json)
+        );
         writeln!(stdout, "{response_str}")?;
         stdout.flush()?;
     }
@@ -604,5 +670,42 @@ mod tests {
             "method": "test"
         });
         assert!(validate_request(&invalid_request).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_json_line_for_log_redacts_nested_sensitive_fields() {
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"tool":"x","api_key":"sk-123","nested":{"token":"abc","password":"p@ss"}}}"#;
+        let sanitized = sanitize_json_line_for_log(line);
+
+        assert!(!sanitized.contains("sk-123"));
+        assert!(!sanitized.contains("\"abc\""));
+        assert!(!sanitized.contains("p@ss"));
+        assert!(sanitized.contains(REDACTED));
+        assert!(sanitized.contains("tools/call"));
+    }
+
+    #[test]
+    fn test_sanitize_json_value_for_log_redacts_response_result_and_error_data() {
+        let value = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "access_token": "tok-xyz",
+                "payload": "ok"
+            },
+            "error": {
+                "code": -32603,
+                "message": "boom",
+                "data": {
+                    "secret": "super-secret"
+                }
+            }
+        });
+
+        let sanitized = sanitize_json_value_for_log(&value);
+        assert!(!sanitized.contains("tok-xyz"));
+        assert!(!sanitized.contains("super-secret"));
+        assert!(sanitized.contains(REDACTED));
+        assert!(sanitized.contains("\"payload\":\"ok\""));
     }
 }

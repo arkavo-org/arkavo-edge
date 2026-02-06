@@ -53,6 +53,7 @@ fn convert_message(msg: Message) -> arkavo_qwen::Message {
 fn convert_stream_response(resp: arkavo_qwen::StreamResponse) -> crate::StreamResponse {
     crate::StreamResponse {
         content: resp.content,
+        reasoning_content: None,
         done: resp.done,
     }
 }
@@ -102,6 +103,7 @@ impl Provider for QwenProvider {
 
 #[cfg(test)]
 mod tests {
+    use super::convert_message;
     use crate::Message;
 
     #[test]

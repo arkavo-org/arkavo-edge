@@ -1,0 +1,12 @@
+[package]
+name = "opentdf-wasi-test"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+# This prevents inheriting the parent workspace
+
+[dependencies]
+opentdf = { path = "..", default-features = false }
+uuid = { version = "1.8.0", features = ["v4"] }
+base64 = "0.22.1"

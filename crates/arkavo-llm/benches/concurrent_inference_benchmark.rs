@@ -3,6 +3,8 @@
 //! Measures throughput of small model (qwen3-0.6B) while large model (8B) is busy.
 //! This demonstrates the benefits of multi-model concurrent inference.
 
+#![allow(clippy::uninlined_format_args)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

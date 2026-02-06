@@ -187,6 +187,7 @@ impl Drop for NtpServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -256,12 +257,12 @@ mod tests {
     #[test]
     fn test_write_timestamp() {
         let mut dest = [0u8; 8];
-        NtpServer::write_timestamp(&mut dest, 3_900_000_000, 0x80000000);
+        NtpServer::write_timestamp(&mut dest, 3_900_000_000, 0x8000_0000);
 
         let seconds = u32::from_be_bytes([dest[0], dest[1], dest[2], dest[3]]);
         let fraction = u32::from_be_bytes([dest[4], dest[5], dest[6], dest[7]]);
 
         assert_eq!(seconds, 3_900_000_000);
-        assert_eq!(fraction, 0x80000000);
+        assert_eq!(fraction, 0x8000_0000);
     }
 }

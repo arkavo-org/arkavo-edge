@@ -649,6 +649,29 @@ impl MemoryStorage {
         })
     }
 
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        let id_str = id.to_string();
+        let rows_affected = sqlx::query("DELETE FROM memories WHERE id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+
+        if rows_affected == 0 {
+            return Err(MemoryError::NotFound);
+        }
+
+        self.embeddings.write().unwrap().remove(&id);
+        self.access_times.write().unwrap().remove(&id);
+        self.evicted_ids.write().unwrap().remove(&id);
+        self.id_mapping
+            .write()
+            .unwrap()
+            .retain(|_, mapped| *mapped != id);
+
+        Ok(())
+    }
+
     pub async fn search(
         &self,
         query: &str,
