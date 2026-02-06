@@ -161,22 +161,6 @@ impl ContinuationHint {
             partial_output: None,
         }
     }
-
-    /// Check if this hint meets the confidence threshold for auto-extension
-    pub fn meets_threshold(&self, min_confidence: f64, min_progress: f64) -> bool {
-        self.confidence >= min_confidence && self.progress >= min_progress
-    }
-
-    /// Check if the extension request is reasonable
-    pub fn is_reasonable(&self, max_steps: u32, max_cost: f64) -> bool {
-        self.estimated_steps <= max_steps && self.estimated_cost_usd <= max_cost
-    }
-
-    /// Set partial output
-    pub fn with_partial_output(mut self, output: serde_json::Value) -> Self {
-        self.partial_output = Some(output);
-        self
-    }
 }
 
 /// Serde support for Duration
@@ -234,22 +218,5 @@ mod tests {
         assert!(!result.is_success());
         assert!(!result.is_failure());
         assert!(result.needs_continuation());
-    }
-
-    #[test]
-    fn test_continuation_hint_thresholds() {
-        let hint = ContinuationHint::new(2, 0.9, 0.8, "Almost done");
-
-        assert!(hint.meets_threshold(0.8, 0.7));
-        assert!(!hint.meets_threshold(0.95, 0.7));
-        assert!(!hint.meets_threshold(0.8, 0.9));
-    }
-
-    #[test]
-    fn test_continuation_hint_reasonable() {
-        let hint = ContinuationHint::new(2, 0.9, 0.8, "Almost done");
-
-        assert!(hint.is_reasonable(5, 1.0));
-        assert!(!hint.is_reasonable(1, 1.0)); // Too many steps
     }
 }

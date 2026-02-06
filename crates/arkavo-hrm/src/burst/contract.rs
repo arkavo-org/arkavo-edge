@@ -52,19 +52,6 @@ pub enum ContextStrategy {
     Ledger,
 }
 
-impl ContextStrategy {
-    /// Estimate token overhead for this strategy
-    pub fn estimated_overhead_tokens(&self) -> u64 {
-        match self {
-            Self::Full => 5000,
-            Self::SummaryOnly => 500,
-            Self::LastNMessages(n) => (*n as u64) * 200,
-            Self::ArtifactReference => 100,
-            Self::Ledger => 300,
-        }
-    }
-}
-
 /// A bounded execution contract
 ///
 /// Defines the resource limits for a single burst of work. The executor
@@ -157,53 +144,6 @@ impl BurstContract {
         self
     }
 
-    /// Disable extensions
-    pub fn without_extensions(mut self) -> Self {
-        self.allow_extensions = false;
-        self
-    }
-
-    /// Check if the contract is still valid
-    pub fn is_valid(&self) -> bool {
-        self.state == BurstState::Active && Utc::now() < self.expires_at
-    }
-
-    /// Check if the contract has expired
-    pub fn is_expired(&self) -> bool {
-        Utc::now() >= self.expires_at
-    }
-
-    /// Check if an extension can be granted
-    pub fn can_extend(&self) -> bool {
-        self.allow_extensions && self.extensions_granted < self.max_extensions
-    }
-
-    /// Grant an extension, returning a new contract
-    pub fn extend(&self, additional_steps: u32, additional_time: Duration) -> Option<Self> {
-        if !self.can_extend() {
-            return None;
-        }
-
-        let now = Utc::now();
-        Some(Self {
-            id: Uuid::new_v4(),
-            subtask_id: self.subtask_id,
-            max_steps: additional_steps,
-            max_wall_time: additional_time,
-            max_tokens: self.max_tokens / 2, // Reduce token budget for extensions
-            max_cost_usd: self.max_cost_usd / 2.0,
-            issued_at: now,
-            expires_at: now
-                + chrono::Duration::from_std(additional_time + Duration::from_secs(15))
-                    .unwrap_or(chrono::Duration::seconds(60)),
-            state: BurstState::Active,
-            context_strategy: self.context_strategy.clone(),
-            allow_extensions: self.allow_extensions,
-            max_extensions: self.max_extensions,
-            extensions_granted: self.extensions_granted + 1,
-        })
-    }
-
     /// Remaining time until expiry
     pub fn remaining_time(&self) -> Duration {
         let now = Utc::now();
@@ -212,26 +152,6 @@ impl BurstContract {
         } else {
             (self.expires_at - now).to_std().unwrap_or(Duration::ZERO)
         }
-    }
-
-    /// Mark the contract as completed
-    pub fn complete(&mut self) {
-        self.state = BurstState::Completed;
-    }
-
-    /// Mark the contract as exhausted
-    pub fn exhaust(&mut self) {
-        self.state = BurstState::Exhausted;
-    }
-
-    /// Mark the contract as expired
-    pub fn expire(&mut self) {
-        self.state = BurstState::Expired;
-    }
-
-    /// Mark the contract as cancelled
-    pub fn cancel(&mut self) {
-        self.state = BurstState::Cancelled;
     }
 }
 
@@ -266,39 +186,7 @@ mod tests {
         let contract = BurstContract::new(subtask_id);
 
         assert_eq!(contract.subtask_id, subtask_id);
-        assert!(contract.is_valid());
-        assert!(!contract.is_expired());
         assert_eq!(contract.state, BurstState::Active);
-    }
-
-    #[test]
-    fn test_contract_extension() {
-        let subtask_id = Uuid::new_v4();
-        let contract = BurstContract::new(subtask_id);
-
-        assert!(contract.can_extend());
-
-        let extended = contract.extend(2, Duration::from_secs(30));
-        assert!(extended.is_some());
-
-        let ext = extended.unwrap();
-        assert_eq!(ext.extensions_granted, 1);
-        assert_eq!(ext.max_steps, 2);
-    }
-
-    #[test]
-    fn test_no_extensions_when_disabled() {
-        let subtask_id = Uuid::new_v4();
-        let contract = BurstContract::new(subtask_id).without_extensions();
-
-        assert!(!contract.can_extend());
-        assert!(contract.extend(2, Duration::from_secs(30)).is_none());
-    }
-
-    #[test]
-    fn test_context_strategy_overhead() {
-        assert!(ContextStrategy::Full.estimated_overhead_tokens() > 1000);
-        assert!(ContextStrategy::ArtifactReference.estimated_overhead_tokens() < 200);
     }
 
     #[test]
@@ -325,67 +213,10 @@ mod tests {
     }
 
     #[test]
-    fn test_context_strategy_all_variants() {
-        assert_eq!(ContextStrategy::Full.estimated_overhead_tokens(), 5000);
-        assert_eq!(
-            ContextStrategy::SummaryOnly.estimated_overhead_tokens(),
-            500
-        );
-        assert_eq!(
-            ContextStrategy::LastNMessages(5).estimated_overhead_tokens(),
-            1000
-        );
-        assert_eq!(
-            ContextStrategy::ArtifactReference.estimated_overhead_tokens(),
-            100
-        );
-        assert_eq!(ContextStrategy::Ledger.estimated_overhead_tokens(), 300);
-    }
-
-    #[test]
     fn test_context_strategy_default() {
         assert!(matches!(
             ContextStrategy::default(),
             ContextStrategy::ArtifactReference
         ));
-    }
-
-    #[test]
-    fn test_contract_state_transitions() {
-        let mut c = BurstContract::new(Uuid::new_v4());
-        assert_eq!(c.state, BurstState::Active);
-        c.complete();
-        assert_eq!(c.state, BurstState::Completed);
-
-        let mut c2 = BurstContract::new(Uuid::new_v4());
-        c2.exhaust();
-        assert_eq!(c2.state, BurstState::Exhausted);
-
-        let mut c3 = BurstContract::new(Uuid::new_v4());
-        c3.expire();
-        assert_eq!(c3.state, BurstState::Expired);
-
-        let mut c4 = BurstContract::new(Uuid::new_v4());
-        c4.cancel();
-        assert_eq!(c4.state, BurstState::Cancelled);
-    }
-
-    #[test]
-    fn test_extension_budget_halved() {
-        let contract = BurstContract::new(Uuid::new_v4());
-        let original_tokens = contract.max_tokens;
-        let original_cost = contract.max_cost_usd;
-        let ext = contract.extend(2, Duration::from_secs(30)).unwrap();
-        assert_eq!(ext.max_tokens, original_tokens / 2);
-        assert!((ext.max_cost_usd - original_cost / 2.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_max_extensions_limit() {
-        let contract = BurstContract::new(Uuid::new_v4());
-        let ext1 = contract.extend(1, Duration::from_secs(10)).unwrap();
-        let ext2 = ext1.extend(1, Duration::from_secs(10)).unwrap();
-        assert!(!ext2.can_extend());
-        assert!(ext2.extend(1, Duration::from_secs(10)).is_none());
     }
 }

@@ -118,12 +118,6 @@ impl LoopDetector {
         self.failure_counts.get(&hash).copied().unwrap_or(0)
     }
 
-    /// Clear all failure tracking
-    pub fn clear(&mut self) {
-        self.failure_counts.clear();
-        self.recent_descriptions.clear();
-    }
-
     /// Get the hash of a description (for storing in GlobalTaskState)
     pub fn get_hash(description: &str) -> u64 {
         Self::hash_description(description)
@@ -298,16 +292,5 @@ mod tests {
         assert_eq!(d.failure_count("task A"), 1);
         d.record_failure("task A");
         assert_eq!(d.failure_count("task A"), 2);
-    }
-
-    #[test]
-    fn test_clear_resets_all() {
-        let mut d = LoopDetector::new();
-        d.record_failure("task A");
-        d.record_failure("task A");
-        assert!(d.would_thrash("task A"));
-        d.clear();
-        assert_eq!(d.failure_count("task A"), 0);
-        assert!(!d.would_thrash("task A"));
     }
 }

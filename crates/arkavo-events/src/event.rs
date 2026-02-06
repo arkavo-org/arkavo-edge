@@ -42,16 +42,6 @@ impl Event {
         }
     }
 
-    pub fn with_parent(mut self, parent_id: Uuid) -> Self {
-        self.metadata.parent_event_id = Some(parent_id);
-        self
-    }
-
-    pub fn with_correlation(mut self, correlation_id: String) -> Self {
-        self.metadata.correlation_id = Some(correlation_id);
-        self
-    }
-
     pub fn event_type(&self) -> &'static str {
         match &self.payload {
             EventPayload::PromptSent { .. } => "prompt_sent",
@@ -125,19 +115,6 @@ mod tests {
     fn new_stores_sequence() {
         let event = make_event();
         assert_eq!(event.sequence, 1);
-    }
-
-    #[test]
-    fn with_parent_sets_parent_event_id() {
-        let parent_id = Uuid::new_v4();
-        let event = make_event().with_parent(parent_id);
-        assert_eq!(event.metadata.parent_event_id, Some(parent_id));
-    }
-
-    #[test]
-    fn with_correlation_sets_correlation_id() {
-        let event = make_event().with_correlation("corr-xyz".to_string());
-        assert_eq!(event.metadata.correlation_id, Some("corr-xyz".to_string()));
     }
 
     #[test]

@@ -77,8 +77,9 @@ pub struct ContextChunkRequest {
 
 impl ContextChunkRequest {
     /// Create a new chunk request by indices
+    #[cfg(test)]
     #[must_use]
-    pub fn by_indices(manifest_id: String, requester: String, indices: Vec<usize>) -> Self {
+    pub(crate) fn by_indices(manifest_id: String, requester: String, indices: Vec<usize>) -> Self {
         Self {
             manifest_id,
             requester,
@@ -88,8 +89,13 @@ impl ContextChunkRequest {
     }
 
     /// Create a new chunk request by keyword search
+    #[cfg(test)]
     #[must_use]
-    pub fn by_keywords(manifest_id: String, requester: String, keywords: Vec<String>) -> Self {
+    pub(crate) fn by_keywords(
+        manifest_id: String,
+        requester: String,
+        keywords: Vec<String>,
+    ) -> Self {
         Self {
             manifest_id,
             requester,

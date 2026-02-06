@@ -8,7 +8,6 @@ pub mod conversation_manager {
 }
 pub mod first_run;
 pub mod hardware;
-pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
 pub mod mcp_spawner;
