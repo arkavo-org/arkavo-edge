@@ -2,10 +2,7 @@
 //!
 //! Target: sub-microsecond total latency (feature extraction + evaluation).
 
-#![allow(
-    clippy::disallowed_methods,
-    clippy::semicolon_if_nothing_returned
-)]
+#![allow(clippy::disallowed_methods, clippy::semicolon_if_nothing_returned)]
 
 use arkavo_critic::{CircuitCheck, FeatureId, PolicyId, VerificationInput};
 use arkavo_llm::ProviderResponse;

@@ -687,10 +687,7 @@ async fn test_live_api_v32_speciale_thinking() {
     // V3.2-Speciale should return reasoning_content (thinking) and content
     let choice = response.choices.first().unwrap();
     let content = choice.message.content.as_ref().unwrap();
-    assert!(
-        content.contains("42"),
-        "Expected 42 in response: {content}",
-    );
+    assert!(content.contains("42"), "Expected 42 in response: {content}",);
 
     // Verify reasoning_content is present (the model's thinking process)
     assert!(

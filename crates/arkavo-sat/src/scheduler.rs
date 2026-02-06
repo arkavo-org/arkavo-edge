@@ -237,6 +237,7 @@ pub fn probe_sync(task: &ProbeTask) -> SatResult<Vec<BoundaryProbe>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use torg_core::{Builder, Token};

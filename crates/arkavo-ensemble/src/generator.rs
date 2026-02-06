@@ -232,6 +232,7 @@ impl LlmSynthesizer for MockSynthesizer {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use torg_core::{Builder, Token};
