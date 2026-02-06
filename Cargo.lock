@@ -10707,32 +10707,32 @@ dependencies = [
 
 [[package]]
 name = "torg-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a55bc6a09d072d87bb53b71f5fadd257ba717fb3fd1624e766fed191591a29"
+checksum = "f1f1dd3f897d364485320fa135e2492f99fe00c6ef5dfc32f6814b90895a3474"
 dependencies = [
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "torg-mask"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fec362e441f527da7316aa9a2720f2294f2dae949a5e7e19a8450af9f28fa4d4"
+checksum = "6398f53e42c6fb47506d40e616239abd5d297dd24553698800ca0538d1ade2e2"
 dependencies = [
  "torg-core",
 ]
 
 [[package]]
 name = "torg-serde"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f746998025e243a6b816388b79592bcac39187229c79ffec0ac1f10ef6e437b"
+checksum = "d610935ac72046cad8f91f298b8a222ab91522ac447f9749edb566859029c167"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "torg-core",
 ]
 
