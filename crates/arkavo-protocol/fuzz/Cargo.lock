@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "async-trait",
  "serde",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -229,8 +229,9 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "arkavo-llm",
  "arkavo-mcp",
@@ -243,12 +244,13 @@ dependencies = [
  "futures",
  "jsonschema",
  "keyring",
- "lazy-regex",
+ "pbkdf2",
  "rand 0.8.5",
- "ring",
+ "regex",
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -260,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -278,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "bincode",
  "chrono",
@@ -302,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "bytes",
  "dashmap",
@@ -321,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "git2",
  "tempfile",
@@ -330,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -346,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -367,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -385,14 +387,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-llama-cpp-sys",
 ]
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "bindgen",
  "cmake",
@@ -401,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -415,7 +417,6 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
- "log",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -433,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -443,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -457,7 +458,6 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "git2",
- "lazy_static",
  "octocrab",
  "regex",
  "reqwest",
@@ -467,13 +467,12 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "urlencoding",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-memory"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -481,18 +480,18 @@ dependencies = [
  "bytemuck",
  "chrono",
  "hnsw_rs",
- "log",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-observability"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -509,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -535,7 +534,6 @@ dependencies = [
  "ipnet",
  "jsonrpsee",
  "jsonwebtoken",
- "lazy_static",
  "lru",
  "notify",
  "rand 0.8.5",
@@ -550,16 +548,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
- "tower 0.5.3",
+ "tower",
  "tracing",
- "urlencoding",
  "uuid",
  "webpki-roots 0.26.11",
 ]
 
 [[package]]
 name = "arkavo-router"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -596,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -614,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.58.3"
+version = "0.58.5"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -731,7 +728,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite",
- "tower 0.5.3",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -2553,9 +2550,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e281ae70cc3b98dac15fced3366a880949e65fc66e345ce857a5682d152f3e62"
+checksum = "1fba77a59c4c644fd48732367624d1bcf6f409f9c9a286fbc71d2f1fc0b2ea16"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -2571,9 +2568,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-client-transport"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc4280b709ac3bb5e16cf3bad5056a0ec8df55fa89edfe996361219aadc2c7ea"
+checksum = "a2a320a3f1464e4094f780c4d48413acd786ce5627aaaecfac9e9c7431d13ae1"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -2586,7 +2583,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "soketto",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -2596,9 +2593,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-core"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "348ee569eaed52926b5e740aae20863762b16596476e943c9e415a6479021622"
+checksum = "693c93cbb7db25f4108ed121304b671a36002c2db67dff2ee4391a688c738547"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2610,24 +2607,24 @@ dependencies = [
  "jsonrpsee-types",
  "parking_lot",
  "pin-project",
- "rand 0.8.5",
+ "rand 0.9.2",
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tower",
  "tracing",
  "wasm-bindgen-futures",
 ]
 
 [[package]]
 name = "jsonrpsee-http-client"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f50c389d6e6a52eb7c3548a6600c90cf74d9b71cb5912209833f00a5479e9a01"
+checksum = "6962d2bd295f75e97dd328891e58fce166894b974c1f7ce2e7597f02eeceb791"
 dependencies = [
- "async-trait",
  "base64 0.22.1",
  "http-body",
  "hyper",
@@ -2639,18 +2636,17 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
- "tower 0.4.13",
- "tracing",
+ "tower",
  "url",
 ]
 
 [[package]]
 name = "jsonrpsee-proc-macros"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7398cddf5013cca4702862a2692b66c48a3bd6cf6ec681a47453c93d63cf8de5"
+checksum = "2fa4f5daed39f982a1bb9d15449a28347490ad42b212f8eaa2a2a344a0dce9e9"
 dependencies = [
  "heck 0.5.0",
  "proc-macro-crate",
@@ -2661,9 +2657,9 @@ dependencies = [
 
 [[package]]
 name = "jsonrpsee-server"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21429bcdda37dcf2d43b68621b994adede0e28061f816b038b0f18c70c143d51"
+checksum = "d38b0bcf407ac68d241f90e2d46041e6a06988f97fe1721fb80b91c42584fae6"
 dependencies = [
  "futures-util",
  "http",
@@ -2678,47 +2674,49 @@ dependencies = [
  "serde",
  "serde_json",
  "soketto",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower 0.4.13",
+ "tower",
  "tracing",
 ]
 
 [[package]]
 name = "jsonrpsee-types"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0f05e0028e55b15dbd2107163b3c744cd3bb4474f193f95d9708acbf5677e44"
+checksum = "66df7256371c45621b3b7d2fb23aea923d577616b9c0e9c0b950a6ea5c2be0ca"
 dependencies = [
  "http",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "jsonrpsee-wasm-client"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9d745e4f543fc10fc0e2b11aa1f3be506b1e475d412167e7191a65ecd239f1c"
+checksum = "6b67695cbcf4653f39f8f8738925547e0e23fd9fe315bccf951097b9f6a38781"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "tower",
 ]
 
 [[package]]
 name = "jsonrpsee-ws-client"
-version = "0.24.10"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78fc744f17e7926d57f478cf9ca6e1ee5d8332bf0514860b1a3cdf1742e614cc"
+checksum = "2da2694c9ff271a9d3ebfe520f6b36820e85133a51be77a3cb549fd615095261"
 dependencies = [
  "http",
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "tower",
  "url",
 ]
 
@@ -2798,29 +2796,6 @@ checksum = "ed9625ffda8729b85e45cf04090035ac368927b8cebc34898e7c120f52e4838b"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
-]
-
-[[package]]
-name = "lazy-regex"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5c13b6857ade4c8ee05c3c3dc97d2ab5415d691213825b90d3211c425c1f907"
-dependencies = [
- "lazy-regex-proc_macros",
- "once_cell",
- "regex",
-]
-
-[[package]]
-name = "lazy-regex-proc_macros"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a95c68db5d41694cea563c86a4ba4dc02141c16ef64814108cb23def4d5438"
-dependencies = [
- "proc-macro2",
- "quote",
- "regex",
- "syn",
 ]
 
 [[package]]
@@ -3249,9 +3224,9 @@ dependencies = [
 
 [[package]]
 name = "octocrab"
-version = "0.49.5"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89f6f72d7084a80bf261bb6b6f83bd633323d5633d5ec7988c6c95b20448b2b5"
+checksum = "c5930b376c98c438a4f4259a760cda2c198efea3b82de8f8a2aff0c00a8b7c1c"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3282,7 +3257,7 @@ dependencies = [
  "serde_urlencoded",
  "snafu",
  "tokio",
- "tower 0.5.3",
+ "tower",
  "tower-http",
  "tracing",
  "url",
@@ -3437,6 +3412,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest",
+ "hmac",
 ]
 
 [[package]]
@@ -3957,7 +3942,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "tower 0.5.3",
+ "tower",
  "tower-http",
  "tower-service",
  "url",
@@ -5123,39 +5108,24 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "torg-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a55bc6a09d072d87bb53b71f5fadd257ba717fb3fd1624e766fed191591a29"
+checksum = "f1f1dd3f897d364485320fa135e2492f99fe00c6ef5dfc32f6814b90895a3474"
 dependencies = [
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "torg-serde"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f746998025e243a6b816388b79592bcac39187229c79ffec0ac1f10ef6e437b"
+checksum = "d610935ac72046cad8f91f298b8a222ab91522ac447f9749edb566859029c167"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "torg-core",
-]
-
-[[package]]
-name = "tower"
-version = "0.4.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
-dependencies = [
- "futures-core",
- "futures-util",
- "pin-project",
- "pin-project-lite",
- "tower-layer",
- "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -5188,7 +5158,7 @@ dependencies = [
  "http-body",
  "iri-string",
  "pin-project-lite",
- "tower 0.5.3",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5391,12 +5361,6 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
-
-[[package]]
-name = "urlencoding"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf-8"
@@ -6141,18 +6105,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.38"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57cf3aa6855b23711ee9852dfc97dfaa51c45feaba5b645d0c777414d494a961"
+checksum = "db6d35d663eadb6c932438e763b262fe1a70987f9ae936e60158176d710cae4a"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.38"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a616990af1a287837c4fe6596ad77ef57948f787e46ce28e166facc0cc1cb75"
+checksum = "4122cd3169e94605190e77839c9a40d40ed048d305bfdc146e7df40ab0f3e517"
 dependencies = [
  "proc-macro2",
  "quote",

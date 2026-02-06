@@ -1022,7 +1022,7 @@ dependencies = [
  "arkavo-protocol",
  "async-trait",
  "chrono",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "octocrab",
  "regex",
  "reqwest",
@@ -1344,7 +1344,7 @@ dependencies = [
  "dirs 6.0.0",
  "hex",
  "hmac",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "mdns-sd",
  "reqwest",
  "serde",
@@ -1388,7 +1388,7 @@ dependencies = [
  "if-addrs",
  "ipnet",
  "jsonrpsee",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "lru",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1548,7 +1548,7 @@ dependencies = [
  "dashmap",
  "governor",
  "ipnet",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "lru",
  "rand 0.8.5",
  "regex",
@@ -1597,7 +1597,7 @@ dependencies = [
  "hex",
  "if-addrs",
  "jsonrpsee",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "lru",
  "metrics",
  "metrics-exporter-prometheus",
@@ -3610,7 +3610,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3899,7 +3899,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5077,7 +5077,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
@@ -5097,7 +5097,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -5796,7 +5796,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6118,25 +6118,11 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "9.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
-dependencies = [
- "base64 0.22.1",
- "js-sys",
- "pem",
- "ring",
- "serde",
- "serde_json",
- "simple_asn1",
-]
-
-[[package]]
-name = "jsonwebtoken"
 version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
  "getrandom 0.2.17",
@@ -7022,7 +7008,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7233,7 +7219,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-timeout",
  "hyper-util",
- "jsonwebtoken 10.3.0",
+ "jsonwebtoken",
  "once_cell",
  "percent-encoding",
  "pin-project",
@@ -7353,14 +7339,14 @@ dependencies = [
 
 [[package]]
 name = "opentdf"
-version = "0.11.0"
-source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
+version = "0.11.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs#085429f7033e52339722dbbc4d26d5a43c205a1f"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
  "base64 0.22.1",
  "chrono",
- "jsonwebtoken 9.3.1",
+ "jsonwebtoken",
  "opentdf-crypto",
  "opentdf-protocol",
  "pem",
@@ -7370,14 +7356,15 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "url",
  "uuid",
  "zip",
 ]
 
 [[package]]
 name = "opentdf-crypto"
-version = "0.11.0"
-source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
+version = "0.11.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs#085429f7033e52339722dbbc4d26d5a43c205a1f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7407,8 +7394,8 @@ dependencies = [
 
 [[package]]
 name = "opentdf-kas"
-version = "0.11.0"
-source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
+version = "0.11.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs#085429f7033e52339722dbbc4d26d5a43c205a1f"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -7423,8 +7410,8 @@ dependencies = [
 
 [[package]]
 name = "opentdf-protocol"
-version = "0.11.0"
-source = "git+https://github.com/arkavo-org/opentdf-rs#e87df2104326d0e1a1f8579297796187aa0e7a1a"
+version = "0.11.1"
+source = "git+https://github.com/arkavo-org/opentdf-rs#085429f7033e52339722dbbc4d26d5a43c205a1f"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8275,7 +8262,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8312,9 +8299,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8961,7 +8948,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10170,7 +10157,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11681,7 +11668,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
