@@ -288,6 +288,8 @@ impl LlamaModel {
 
     /// Get the output embedding size (new in b7785)
     pub fn n_embd_out(&self) -> i32 {
+        // Upstream removed/changed the output-embedding accessor in newer llama.cpp.
+        // For decoder-only models we use in-embedding size as the stable fallback.
         unsafe { ffi::llama_model_n_embd_inp(self.ptr) }
     }
 }
@@ -310,6 +312,8 @@ pub enum ParamsFitStatus {
 /// This is useful for automatically configuring models on systems with limited GPU memory.
 #[cfg(not(target_env = "musl"))]
 pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String> {
+    // llama_params_fit is not exposed in current bindings; use a conservative fallback.
+    // We return CPU-only (0 GPU layers) with at least the model's trained context.
     let model = LlamaModel::from_file(model_path)?;
     Ok((0, model.get_trained_context_size().max(n_ctx_min)))
 }
@@ -876,6 +880,8 @@ impl LlamaSampler {
     /// when confident and more exploratory when uncertain.
     pub fn add_adaptive_p(&self, target: f32, decay: f32, seed: u32) {
         let _ = (decay, seed);
+        // llama_sampler_init_adaptive_p is not available in the current API surface.
+        // min_p provides a close dynamic-probability alternative with supported ABI.
         let adaptive_sampler = unsafe { ffi::llama_sampler_init_min_p(target, 1) };
         if !adaptive_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, adaptive_sampler) };

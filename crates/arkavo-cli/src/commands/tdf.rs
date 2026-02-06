@@ -166,7 +166,6 @@ async fn handle_encrypt(
 }
 
 #[allow(clippy::future_not_send)]
-#[allow(clippy::unused_async)]
 async fn handle_decrypt(
     input: PathBuf,
     output: Option<PathBuf>,
@@ -227,6 +226,7 @@ async fn handle_decrypt(
     #[cfg(not(feature = "kas"))]
     {
         let _ = (input, output, client_id, client_secret);
+        std::future::ready(()).await;
         anyhow::bail!(
             "TDF decrypt requires the 'kas' feature. Rebuild arkavo-cli with --features kas"
         );
