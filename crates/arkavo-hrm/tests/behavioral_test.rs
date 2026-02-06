@@ -337,3 +337,149 @@ async fn test_continuation_hint_preserved() {
     // Budget should reflect the spending
     assert_eq!(loaded.budget.tokens_used, 800);
 }
+
+// --- HRM-002: MaxSubtasksExceeded error includes correct counts ---
+
+#[tokio::test]
+async fn test_max_subtasks_error_reports_counts() {
+    // Covers HRM-002: Error variant carries correct current/max values
+    let conductor = setup();
+    let mut task = conductor
+        .create_task("Test".into(), TaskBudget::default())
+        .await
+        .unwrap();
+    task.max_total_subtasks = 2;
+    conductor.store().save(&task).await.unwrap();
+
+    conductor
+        .add_subtask(task.id, "Step 1".into(), vec![])
+        .await
+        .unwrap();
+    conductor
+        .add_subtask(task.id, "Step 2".into(), vec![])
+        .await
+        .unwrap();
+
+    let err = conductor
+        .add_subtask(task.id, "Step 3".into(), vec![])
+        .await
+        .unwrap_err();
+    // Verify the error carries correct counts (not just that it's the right variant)
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("2/2"),
+        "Error should report current=2, max=2, got: {msg}"
+    );
+    assert!(err.is_terminal(), "MaxSubtasksExceeded should be terminal");
+}
+
+// --- HRM-003: Budget tracking and auto-completion ---
+
+#[tokio::test]
+async fn test_budget_exhaustion_after_spending() {
+    // Covers HRM-003: Budget transitions from has_remaining=true to false
+    // after recording a result that exceeds the limit.
+    let conductor = setup();
+    let task = conductor
+        .create_task("Test".into(), tight_budget(0.05, 100))
+        .await
+        .unwrap();
+    // Starts with budget remaining
+    assert!(
+        task.budget.has_remaining(),
+        "Fresh budget should have remaining"
+    );
+
+    let subtask = conductor
+        .add_subtask(task.id, "Work".into(), vec![])
+        .await
+        .unwrap();
+    // Spend MORE than budget allows
+    let result = BurstResult::success(Uuid::new_v4(), serde_json::json!({})).with_metrics(
+        1,
+        200,
+        0.10,
+        Duration::from_secs(1),
+    );
+    conductor
+        .record_result(task.id, subtask.id, result)
+        .await
+        .unwrap();
+
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert!(
+        !loaded.budget.has_remaining(),
+        "Budget should be exhausted after overspend"
+    );
+    assert!(loaded.budget.spent_usd >= 0.10);
+    assert_eq!(loaded.budget.tokens_used, 200);
+}
+
+#[tokio::test]
+async fn test_task_status_auto_completes() {
+    // Covers HRM-003: task auto-completes when all subtasks complete
+    let conductor = setup();
+    let task = conductor
+        .create_task("Test".into(), TaskBudget::default())
+        .await
+        .unwrap();
+
+    let s1 = conductor
+        .add_subtask(task.id, "Step 1".into(), vec![])
+        .await
+        .unwrap();
+    let s2 = conductor
+        .add_subtask(task.id, "Step 2".into(), vec![])
+        .await
+        .unwrap();
+
+    for sid in [s1.id, s2.id] {
+        conductor
+            .record_result(
+                task.id,
+                sid,
+                BurstResult::success(Uuid::new_v4(), serde_json::json!({})),
+            )
+            .await
+            .unwrap();
+    }
+
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert_eq!(loaded.status, TaskStatus::Completed);
+}
+
+#[tokio::test]
+async fn test_task_status_fails_when_all_terminal() {
+    // Covers HRM-003: task fails when all subtasks fail with no retries left
+    let conductor = setup();
+    let task = conductor
+        .create_task("Test".into(), TaskBudget::default())
+        .await
+        .unwrap();
+
+    let s1 = conductor
+        .add_subtask(task.id, "A".into(), vec![])
+        .await
+        .unwrap();
+    let s2 = conductor
+        .add_subtask(task.id, "B".into(), vec![])
+        .await
+        .unwrap();
+
+    // Exhaust retries: default max_retries=3, so fail 4 times each
+    for sid in [s1.id, s2.id] {
+        for _ in 0..4 {
+            conductor
+                .record_result(
+                    task.id,
+                    sid,
+                    BurstResult::failure(Uuid::new_v4(), "err".into()),
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert_eq!(loaded.status, TaskStatus::Failed);
+}
