@@ -42,7 +42,6 @@ serde_yaml = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = { workspace = true }
-urlencoding = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }

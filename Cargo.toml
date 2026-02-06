@@ -207,7 +207,6 @@ governor = "0.6"
 dashmap = "5.5"
 crossbeam-queue = "0.3"
 jsonwebtoken = "10"
-urlencoding = "2.1"
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 if-addrs = "0.14"
 metrics = "0.24"

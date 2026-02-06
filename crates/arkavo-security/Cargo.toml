@@ -40,7 +40,6 @@ reqwest = { workspace = true, features = ["json"] }
 
 # URL handling
 url = { workspace = true }
-urlencoding = "2"
 
 # Time handling
 chrono = { workspace = true }

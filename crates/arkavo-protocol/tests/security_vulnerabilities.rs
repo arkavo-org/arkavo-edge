@@ -372,7 +372,8 @@ fn authenticate_request(req: Request) -> Result<SessionAuth, AuthError> {
 }
 
 // Global token store for testing
-static TOKEN_STORE: std::sync::LazyLock<TokenStore> = std::sync::LazyLock::new(|| TokenStore::new(1000));
+static TOKEN_STORE: std::sync::LazyLock<TokenStore> =
+    std::sync::LazyLock::new(|| TokenStore::new(1000));
 
 fn validate_token(token: &str) -> Result<(), TokenError> {
     // Extract JTI from token (simplified for testing)

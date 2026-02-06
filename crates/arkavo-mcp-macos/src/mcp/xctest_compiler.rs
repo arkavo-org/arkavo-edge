@@ -1323,7 +1323,6 @@ fn find_compiled_binary(derived_data: &Path, name: &str) -> Result<PathBuf> {
         None
     }
 
-    walk(derived_data, name).ok_or_else(|| {
-        TestError::Mcp(format!("Binary {name} not found in DerivedData"))
-    })
+    walk(derived_data, name)
+        .ok_or_else(|| TestError::Mcp(format!("Binary {name} not found in DerivedData")))
 }
