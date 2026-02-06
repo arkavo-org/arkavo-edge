@@ -1,8 +1,8 @@
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::Result;
 use arkavo_memory::storage::MemoryStorage;
-use ring::aead::{AES_256_GCM, Aad, BoundKey, Nonce, NonceSequence, SealingKey, UnboundKey};
-use ring::pbkdf2;
-use ring::rand::{SecureRandom, SystemRandom};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -49,28 +49,10 @@ struct SecureCredentialData {
     salt: String,           // Base64 encoded
 }
 
-/// Simple nonce sequence for AES-GCM
-struct NonceSeq {
-    nonce: [u8; 12],
-}
-
-impl NonceSeq {
-    fn new(nonce: [u8; 12]) -> Self {
-        Self { nonce }
-    }
-}
-
-impl NonceSequence for NonceSeq {
-    fn advance(&mut self) -> Result<Nonce, ring::error::Unspecified> {
-        Nonce::try_assume_unique_for_key(&self.nonce)
-    }
-}
-
 /// Authentication manager for secure credential storage
 pub struct AuthManager {
     credentials: Arc<RwLock<HashMap<String, AuthCredential>>>,
     storage: Arc<MemoryStorage>,
-    rng: SystemRandom,
 }
 
 impl AuthManager {
@@ -80,7 +62,6 @@ impl AuthManager {
         let manager = Self {
             credentials: Arc::new(RwLock::new(HashMap::new())),
             storage,
-            rng: SystemRandom::new(),
         };
 
         // Load existing credentials from storage
@@ -116,7 +97,6 @@ impl AuthManager {
         let manager = Self {
             credentials: Arc::new(RwLock::new(HashMap::new())),
             storage,
-            rng: SystemRandom::new(),
         };
 
         Ok(manager)
@@ -343,45 +323,36 @@ impl AuthManager {
 
         // Generate salt for key derivation
         let mut salt = [0u8; 32];
-        self.rng
-            .fill(&mut salt)
-            .map_err(|_| anyhow::anyhow!("Failed to generate salt"))?;
+        rand::rngs::OsRng.fill_bytes(&mut salt);
 
         // Derive key from a master key (in production, this would come from secure storage)
         let master_key = self.get_or_create_master_key()?;
         let mut derived_key = [0u8; 32];
-        pbkdf2::derive(
-            pbkdf2::PBKDF2_HMAC_SHA256,
-            std::num::NonZeroU32::new(PBKDF2_ITERATIONS).expect("PBKDF2_ITERATIONS is non-zero"),
-            &salt,
+        pbkdf2::pbkdf2_hmac::<sha2::Sha256>(
             master_key.as_bytes(),
+            &salt,
+            PBKDF2_ITERATIONS,
             &mut derived_key,
         );
 
-        // Create encryption key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, &derived_key)
+        // Create cipher
+        let cipher = Aes256Gcm::new_from_slice(&derived_key)
             .map_err(|_| anyhow::anyhow!("Failed to create encryption key"))?;
-        let mut sealing_key = SealingKey::new(unbound_key, NonceSeq::new([0u8; 12]));
 
         // Generate nonce
-        let mut nonce = [0u8; 12];
-        self.rng
-            .fill(&mut nonce)
-            .map_err(|_| anyhow::anyhow!("Failed to generate nonce"))?;
+        let mut nonce_bytes = [0u8; 12];
+        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         // Encrypt the credential
-        let mut in_out = value.as_bytes().to_vec();
-        let tag = sealing_key
-            .seal_in_place_separate_tag(Aad::empty(), &mut in_out)
+        let in_out = cipher
+            .encrypt(&nonce, value.as_bytes())
             .map_err(|_| anyhow::anyhow!("Encryption failed"))?;
-
-        // Append tag to encrypted data
-        in_out.extend_from_slice(tag.as_ref());
 
         let secure_data = SecureCredentialData {
             credential_id: credential_id.to_string(),
             encrypted_data: base64::engine::general_purpose::STANDARD.encode(&in_out),
-            nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
+            nonce: base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
             salt: base64::engine::general_purpose::STANDARD.encode(salt),
         };
 
@@ -434,7 +405,6 @@ impl AuthManager {
 
             // Decrypt AES-256-GCM encrypted data
             use base64::Engine;
-            use ring::aead::{Aad, OpeningKey};
 
             let encrypted_data =
                 base64::engine::general_purpose::STANDARD.decode(&secure_data.encrypted_data)?;
@@ -448,40 +418,27 @@ impl AuthManager {
             // Derive key from master key
             let master_key = self.get_or_create_master_key()?;
             let mut derived_key = [0u8; 32];
-            pbkdf2::derive(
-                pbkdf2::PBKDF2_HMAC_SHA256,
-                std::num::NonZeroU32::new(PBKDF2_ITERATIONS)
-                    .expect("PBKDF2_ITERATIONS is non-zero"),
-                &salt,
+            pbkdf2::pbkdf2_hmac::<sha2::Sha256>(
                 master_key.as_bytes(),
+                &salt,
+                PBKDF2_ITERATIONS,
                 &mut derived_key,
             );
 
-            // Create decryption key
-            let unbound_key = UnboundKey::new(&AES_256_GCM, &derived_key)
+            // Create cipher and nonce
+            let cipher = Aes256Gcm::new_from_slice(&derived_key)
                 .map_err(|_| anyhow::anyhow!("Failed to create decryption key"))?;
-
-            // Create nonce
-            let mut nonce = [0u8; 12];
-            nonce.copy_from_slice(&nonce_bytes);
-            let nonce_seq = NonceSeq::new(nonce);
-
-            let mut opening_key = OpeningKey::new(unbound_key, nonce_seq);
-
-            // Split encrypted data and tag
-            let tag_size = AES_256_GCM.tag_len();
-            if encrypted_data.len() < tag_size {
-                return Err(anyhow::anyhow!("Invalid encrypted data"));
-            }
-
-            let mut in_out = encrypted_data;
+            let nonce_arr: [u8; 12] = nonce_bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid nonce length"))?;
+            let nonce = Nonce::from(nonce_arr);
 
             // Decrypt
-            let decrypted = opening_key
-                .open_in_place(Aad::empty(), &mut in_out)
+            let decrypted = cipher
+                .decrypt(&nonce, encrypted_data.as_ref())
                 .map_err(|_| anyhow::anyhow!("Decryption failed"))?;
 
-            let value = String::from_utf8(decrypted.to_vec())?;
+            let value = String::from_utf8(decrypted)?;
             return Ok(Some(value));
         }
 

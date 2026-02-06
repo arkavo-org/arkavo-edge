@@ -1,10 +1,13 @@
 pub mod builtin_mcp;
 pub mod commands;
-pub mod conversation_manager;
 pub mod feedback_analyzer;
+
+// Re-export conversation module from arkavo-session for backwards compatibility
+pub mod conversation_manager {
+    pub use arkavo_session::conversation::*;
+}
 pub mod first_run;
 pub mod hardware;
-pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
 pub mod mcp_spawner;
@@ -12,7 +15,11 @@ pub mod mcp_spawner;
 pub mod memory_integration;
 pub mod mock_llm_server;
 pub mod mock_provider;
-pub mod peer_manager;
+
+// Re-export peer_manager module from arkavo-protocol for backwards compatibility
+pub mod peer_manager {
+    pub use arkavo_protocol::peer_manager::*;
+}
 pub mod prompt_loader;
 pub mod secure_http;
 pub mod tool_integration;

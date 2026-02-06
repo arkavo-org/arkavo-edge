@@ -20,6 +20,7 @@ pub mod a2a_mcp_bridge;
 pub mod agent_config;
 pub mod agent_registry;
 pub mod auth;
+pub mod chat_commands;
 pub mod chat_session;
 pub mod config;
 pub mod config_transport;
@@ -36,6 +37,7 @@ pub mod metrics_subscription;
 pub mod network;
 pub mod oauth2;
 pub mod openrpc;
+pub mod peer_manager;
 pub mod push_notifications;
 pub mod rate_limit;
 pub mod registration;
@@ -53,6 +55,9 @@ pub mod websocket;
 pub use a2a::{A2aClient, A2aClientError};
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 pub use auth::{AuthBackend, JwtAuthBackend, MultiAuthBackend, SessionAuth};
+pub use chat_commands::{
+    ChatSession, CommandResult, ContextMode, PendingContext, execute_command, parse_command,
+};
 pub use chat_session::ChatSessionManager;
 pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use data_classification::{
@@ -85,6 +90,9 @@ pub use types::{
     DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
 };
 pub use websocket::WebSocketTransport;
+
+// Re-export peer manager types
+pub use peer_manager::{PeerManager, PeerManagerConfig, TransportType};
 
 pub struct Client;
 

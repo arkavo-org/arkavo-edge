@@ -225,4 +225,102 @@ mod tests {
         // The last vote was false
         assert_eq!(state.reject_count(), 1);
     }
+
+    /// GOSSIP-004: With 3 voters and 0.67 threshold, exactly 3 approvals are
+    /// needed. Two approvals should stay Pending; the third tips to Approved.
+    #[test]
+    fn test_quorum_exact_boundary() {
+        let patch_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+
+        // Confirm required votes: ceil(3 * 0.67) = ceil(2.01) = 3
+        assert_eq!(config.required_votes(3), 3);
+
+        let mut state = ConsensusState::new(patch_id);
+
+        // Two approvals are not enough
+        state.add_vote(PatchVote::new(patch_id, "voter-1".into(), true));
+        state.add_vote(PatchVote::new(patch_id, "voter-2".into(), true));
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, ConsensusStatus::Pending);
+
+        // Third approval reaches the boundary
+        state.add_vote(PatchVote::new(patch_id, "voter-3".into(), true));
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, ConsensusStatus::Approved);
+    }
+
+    /// GOSSIP-004: A split vote (1 approve, 2 reject) with 3 voters should
+    /// resolve to Rejected because approval is no longer reachable.
+    #[test]
+    fn test_split_vote_no_consensus() {
+        let patch_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = ConsensusState::new(patch_id);
+
+        state.add_vote(PatchVote::new(patch_id, "voter-1".into(), true));
+        state.add_vote(PatchVote::new(patch_id, "voter-2".into(), false));
+        state.add_vote(PatchVote::new(patch_id, "voter-3".into(), false));
+
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, ConsensusStatus::Rejected);
+    }
+
+    /// GOSSIP-008: A pending consensus that exceeds the vote timeout
+    /// transitions to TimedOut.
+    #[test]
+    fn test_timeout_transitions_to_timed_out() {
+        let patch_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = ConsensusState::new(patch_id);
+
+        // Simulate elapsed time beyond the 60-second timeout
+        state.started_at = Utc::now() - chrono::Duration::seconds(61);
+
+        state.check_timeout(&config);
+        assert_eq!(state.status, ConsensusStatus::TimedOut);
+    }
+
+    /// GOSSIP-008: Timeout only affects Pending states. An already-Approved
+    /// consensus must remain Approved regardless of elapsed time.
+    #[test]
+    fn test_timeout_only_affects_pending() {
+        let patch_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = ConsensusState::new(patch_id);
+
+        // Reach quorum first (use low threshold so 1 vote suffices)
+        let approve_config = QuorumConfig::with_threshold(0.5);
+        state.add_vote(PatchVote::new(patch_id, "voter-1".into(), true));
+        state.check_quorum(1, &approve_config);
+        assert_eq!(state.status, ConsensusStatus::Approved);
+
+        // Push started_at into the past well beyond timeout
+        state.started_at = Utc::now() - chrono::Duration::seconds(61);
+
+        state.check_timeout(&config);
+        assert_eq!(state.status, ConsensusStatus::Approved);
+    }
+
+    /// GOSSIP-004: Once quorum is reached (Approved), add_vote is a no-op.
+    /// The status stays Approved and the new vote is silently dropped.
+    #[test]
+    fn test_late_vote_after_quorum() {
+        let patch_id = Uuid::new_v4();
+        let config = QuorumConfig::default();
+        let mut state = ConsensusState::new(patch_id);
+
+        // Reach Approved with 3 unanimous votes
+        state.add_vote(PatchVote::new(patch_id, "voter-1".into(), true));
+        state.add_vote(PatchVote::new(patch_id, "voter-2".into(), true));
+        state.add_vote(PatchVote::new(patch_id, "voter-3".into(), true));
+        state.check_quorum(3, &config);
+        assert_eq!(state.status, ConsensusStatus::Approved);
+
+        // Late vote is silently dropped because status is no longer Pending
+        state.add_vote(PatchVote::new(patch_id, "voter-4".into(), true));
+        assert_eq!(state.approve_count(), 3);
+        assert_eq!(state.votes.len(), 3);
+        assert_eq!(state.status, ConsensusStatus::Approved);
+    }
 }

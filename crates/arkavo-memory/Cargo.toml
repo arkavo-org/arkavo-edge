@@ -28,7 +28,7 @@ fastembed = { workspace = true, optional = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 hnsw_rs = { workspace = true, optional = true }

@@ -37,6 +37,7 @@ mod evidence;
 pub mod features;
 mod judge;
 mod pipeline;
+pub mod response_analyzer;
 mod validator;
 
 pub use checks::{
@@ -49,6 +50,7 @@ pub use evidence::{CheckSeverity, VerificationEvidence, VerificationStatus};
 pub use features::FeatureId;
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use pipeline::{CriticPipeline, PipelineResult};
+pub use response_analyzer::{AnalysisResult, DetectedIssue, ResponseAnalyzer};
 pub use validator::{ResponseValidator, ValidationError};
 
 /// Create a CriticPipeline with default checks

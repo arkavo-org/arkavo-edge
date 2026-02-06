@@ -32,6 +32,7 @@
 pub mod burst;
 pub mod conductor;
 pub mod error;
+pub mod feedback;
 pub mod schemas;
 pub mod store;
 pub mod tools;
@@ -40,8 +41,9 @@ pub mod tools;
 pub use burst::{BurstContract, BurstResult, BurstState, ContextStrategy, ContinuationHint};
 pub use conductor::Conductor;
 pub use error::{Error, Result};
+pub use feedback::{BurstFeedback, FeedbackIssue, ModelPattern};
 pub use schemas::{
-    BurstFeedback, FeedbackIssue, GlobalTaskState, ModelPattern, Priority, SubTask, SubTaskBudget,
-    SubTaskResult, TaskBudget, TaskStatus, VerificationStatus,
+    GlobalTaskState, Priority, SubTask, SubTaskBudget, SubTaskResult, TaskBudget, TaskStatus,
+    VerificationStatus,
 };
 pub use store::{InMemoryTaskStore, TaskStore};

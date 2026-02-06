@@ -5,6 +5,7 @@
 //! # Modules
 //!
 //! - `chat_session`: Manages chat sessions with LLM providers
+//! - `conversation`: Conversation history and context management
 //! - `websocket`: WebSocket connection handling for real-time communication
 //! - `http`: HTTP session management and client handling
 //! - `session_persistence`: Persistent storage for session state using SQLite
@@ -23,6 +24,7 @@
 
 #![warn(unreachable_pub)]
 
+pub mod conversation;
 pub mod error;
 
 // Re-export session-related modules from arkavo-protocol
@@ -48,6 +50,11 @@ pub use arkavo_protocol::websocket::WebSocketTransport;
 // Re-export types from arkavo-protocol that are used in session management
 pub use arkavo_protocol::auth::SessionAuth;
 pub use arkavo_protocol::types::ChatSession;
+
+// Re-export conversation types
+pub use conversation::{
+    ConversationManager, ConversationMessage, ConversationSession, is_debug, set_debug,
+};
 
 use thiserror::Error;
 

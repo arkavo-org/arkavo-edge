@@ -42,16 +42,6 @@ impl Event {
         }
     }
 
-    pub fn with_parent(mut self, parent_id: Uuid) -> Self {
-        self.metadata.parent_event_id = Some(parent_id);
-        self
-    }
-
-    pub fn with_correlation(mut self, correlation_id: String) -> Self {
-        self.metadata.correlation_id = Some(correlation_id);
-        self
-    }
-
     pub fn event_type(&self) -> &'static str {
         match &self.payload {
             EventPayload::PromptSent { .. } => "prompt_sent",
@@ -65,5 +55,175 @@ impl Event {
             EventPayload::SessionStarted { .. } => "session_started",
             EventPayload::SessionEnded { .. } => "session_ended",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::payload::FileOp;
+    use serde_json::Value;
+
+    fn make_prompt_payload() -> EventPayload {
+        EventPayload::PromptSent {
+            prompt: "hello".to_string(),
+            model: "test-model".to_string(),
+            parameters: None,
+        }
+    }
+
+    fn make_event() -> Event {
+        Event::new(
+            "sess-001".to_string(),
+            1,
+            "agent-1".to_string(),
+            make_prompt_payload(),
+        )
+    }
+
+    #[test]
+    fn new_generates_non_nil_uuid() {
+        let event = make_event();
+        assert!(!event.id.is_nil());
+    }
+
+    #[test]
+    fn new_has_schema_version_1_0_0() {
+        let event = make_event();
+        assert_eq!(event.metadata.schema_version, "1.0.0");
+    }
+
+    #[test]
+    fn new_has_no_parent_event_id() {
+        let event = make_event();
+        assert!(event.metadata.parent_event_id.is_none());
+    }
+
+    #[test]
+    fn new_has_no_correlation_id() {
+        let event = make_event();
+        assert!(event.metadata.correlation_id.is_none());
+    }
+
+    #[test]
+    fn new_stores_session_id() {
+        let event = make_event();
+        assert_eq!(event.session_id, "sess-001");
+    }
+
+    #[test]
+    fn new_stores_sequence() {
+        let event = make_event();
+        assert_eq!(event.sequence, 1);
+    }
+
+    #[test]
+    fn event_type_prompt_sent() {
+        let event = make_event();
+        assert_eq!(event.event_type(), "prompt_sent");
+    }
+
+    #[test]
+    fn event_type_model_response() {
+        let payload = EventPayload::ModelResponse {
+            model: "m".to_string(),
+            response: "r".to_string(),
+            usage: None,
+            duration_ms: 100,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "model_response");
+    }
+
+    #[test]
+    fn event_type_tool_call() {
+        let payload = EventPayload::ToolCall {
+            tool_name: "read".to_string(),
+            parameters: Value::Null,
+            tool_call_id: None,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "tool_call");
+    }
+
+    #[test]
+    fn event_type_tool_result() {
+        let payload = EventPayload::ToolResult {
+            tool_name: "read".to_string(),
+            tool_call_id: None,
+            success: true,
+            result: Value::Null,
+            duration_ms: 50,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "tool_result");
+    }
+
+    #[test]
+    fn event_type_file_operation() {
+        let payload = EventPayload::FileOperation {
+            operation: FileOp::Read,
+            path: "/tmp/f".to_string(),
+            content_preview: None,
+            success: true,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "file_operation");
+    }
+
+    #[test]
+    fn event_type_reasoning_step() {
+        let payload = EventPayload::ReasoningStep {
+            step_type: "plan".to_string(),
+            description: "d".to_string(),
+            metadata: None,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "reasoning_step");
+    }
+
+    #[test]
+    fn event_type_stream_delta() {
+        let payload = EventPayload::StreamDelta {
+            stream_id: "s1".to_string(),
+            sequence: 0,
+            delta_type: "text".to_string(),
+            content: "c".to_string(),
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "stream_delta");
+    }
+
+    #[test]
+    fn event_type_error() {
+        let payload = EventPayload::Error {
+            error_type: "runtime".to_string(),
+            message: "oops".to_string(),
+            stack_trace: None,
+            recoverable: None,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "error");
+    }
+
+    #[test]
+    fn event_type_session_started() {
+        let payload = EventPayload::SessionStarted {
+            capabilities: None,
+            metadata: None,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "session_started");
+    }
+
+    #[test]
+    fn event_type_session_ended() {
+        let payload = EventPayload::SessionEnded {
+            reason: "done".to_string(),
+            duration_ms: 1000,
+            summary: None,
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "session_ended");
     }
 }

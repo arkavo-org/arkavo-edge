@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Context Management and Compression
 module: arkavo_context
 version: 0.57.2
@@ -7,6 +9,8 @@ invariants:
   - Semantic chunking preserves meaning
   - Deduplication removes redundant content
   - Compression pipeline configurable
+  - RLM activation triggered at 70% context threshold
+  - Context ledger offloads old messages automatically
 
 scenarios:
   - id: CTX-001
@@ -109,3 +113,147 @@ scenarios:
       - Final prompt returned
     refs: [crates/arkavo-context/src/prompt_enricher.rs:1-60]
     changed: "2025-01-31"
+
+  - id: CTX-007
+    name: Check RLM activation threshold
+    criticality: high
+    given:
+      - Input content provided
+      - Model hint available
+      - Cloud vs local flag set
+    when: check_rlm_activation called
+    then:
+      - Input tokens estimated
+      - Model context size determined
+      - Activation checked at 70% threshold
+      - Returns activation hint if exceeded
+    refs: [crates/arkavo-context/src/rlm_detection.rs:20-60]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Input below 70% threshold
+        expected: Returns None
+      - condition: Input exceeds 70% threshold
+        expected: Returns activation hint message
+      - condition: Unknown model
+        expected: Uses default context size
+
+  - id: CTX-008
+    name: Calculate context offload threshold by model size
+    criticality: high
+    given:
+      - Model size hint provided (270M, 1B, 2B, 7B, etc.)
+      - Is cloud provider flag set
+    when: Context ledger thresholds determined
+    then:
+      - "270M: 2KB threshold, 2 turns preserved"
+      - "1B: 4KB threshold, 4 turns preserved"
+      - "2B: 8KB threshold, 4 turns preserved"
+      - "7B: 16KB threshold, 6 turns preserved"
+      - "Large local: 32KB threshold, 8 turns preserved"
+      - "Cloud (Gemini/Claude/GPT): 256KB threshold, 20 turns preserved"
+    refs: [crates/arkavo-context/src/ledger_chat.rs:30-70]
+    changed: "2025-02-05"
+
+  - id: CTX-009
+    name: Offload context to ledger when threshold exceeded
+    criticality: high
+    given:
+      - Conversation context exceeds threshold
+      - ContextLedger initialized
+      - MemoryStorage available
+    when: prepare_context_for_burst called
+    then:
+      - Oldest messages selected for offloading
+      - N recent turns preserved based on model
+      - Messages archived to ContextLedger
+      - "[ARCHIVED: summary] pointers inserted"
+      - Compressed context returned
+    refs: [crates/arkavo-context/src/ledger_chat.rs:71-120]
+    changed: "2025-02-05"
+
+  - id: CTX-010
+    name: Restore archived context from ledger
+    criticality: high
+    given:
+      - ContextLedger has archived entries
+      - Archived pointer in current context
+      - MemoryStorage available
+    when: Context restore requested
+    then:
+      - Archived content retrieved by ID
+      - Full context reconstructed
+      - Available for model processing
+    refs: [crates/arkavo-context/src/ledger_chat.rs:121-150]
+    changed: "2025-02-05"
+
+  - id: CTX-011
+    name: Generate summary for archived context
+    criticality: medium
+    given:
+      - Messages being archived
+      - Optional summary provided or auto-generate
+    when: ContextSummarizer::summarize called
+    then:
+      - "If summary provided: used directly"
+      - "If no summary: local LLM generates 10-20 word description"
+      - "Summary embedded in [ARCHIVED: ...] pointer"
+      - Meaningful context preserved
+    refs: [crates/arkavo-context/src/summarizer.rs:1-80]
+    changed: "2025-02-05"
+
+  - id: CTX-012
+    name: Skip offload for small contexts
+    criticality: medium
+    given:
+      - Context below min_offload_chars threshold (default 2000)
+    when: prepare_context_for_burst called
+    then:
+      - Offloading skipped
+      - Full context preserved
+      - No [ARCHIVED] pointers added
+    refs: [crates/arkavo-context/src/ledger_chat.rs:90-100]
+    changed: "2025-02-05"
+
+  - id: CTX-013
+    name: Estimate tokens for content
+    criticality: medium
+    given:
+      - Text content provided
+    when: estimate_tokens called
+    then:
+      - Approximate token count returned
+      - ~4 characters per token heuristic
+      - Used for budget management
+    refs: [crates/arkavo-context/src/token_estimation.rs:10-30]
+    changed: "2025-02-05"
+
+  - id: CTX-014
+    name: Determine if repository context should attach
+    criticality: medium
+    given:
+      - User prompt provided
+      - Repo context mode set (auto/on/off)
+    when: should_attach_repo_context called
+    then:
+      - 'Mode "off": always false'
+      - 'Mode "on": always true'
+      - 'Mode "auto": keyword detection'
+      - Code keywords trigger true (readme, cargo, error, etc.)
+      - Greetings/math return false
+    refs: [crates/arkavo-context/src/repo_context.rs:20-90]
+    changed: "2025-02-05"
+
+  - id: CTX-015
+    name: Compress repository context for small models
+    criticality: medium
+    given:
+      - Full repository context available
+      - Max tokens for model specified
+    when: compress_repo_context called
+    then:
+      - Context truncated to fit token budget
+      - Headers and key sections prioritized
+      - Digest format with clear header
+      - Reference to full docs included
+    refs: [crates/arkavo-context/src/repo_context.rs:91-130]
+    changed: "2025-02-05"

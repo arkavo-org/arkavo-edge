@@ -15,6 +15,7 @@ pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod preflight;
+pub mod response;
 pub mod rlm;
 pub mod selector;
 pub mod stream;
@@ -46,6 +47,9 @@ pub use rlm::{
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
+
+// Re-export response processing types
+pub use response::{sanitize_response, strip_think_blocks, strip_tool_blocks};
 
 pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,

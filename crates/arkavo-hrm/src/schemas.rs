@@ -46,37 +46,21 @@ impl TaskStatus {
 /// Global state for the entire orchestration objective
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalTaskState {
-    /// Unique identifier for this task
     pub id: Uuid,
-    /// Human-readable description of the objective
     pub objective: String,
-    /// Current overall status
     pub status: TaskStatus,
-    /// Priority level
     pub priority: Priority,
-    /// Decomposed subtasks
     pub subtasks: Vec<SubTask>,
-    /// When the task was created
     pub created_at: DateTime<Utc>,
-    /// When the task was last updated
     pub updated_at: DateTime<Utc>,
-    /// Deadline if set
     pub deadline: Option<DateTime<Utc>>,
-    /// Overall budget constraints
     pub budget: TaskBudget,
-    /// Task-level metadata
     pub metadata: HashMap<String, serde_json::Value>,
-    /// Parent task ID if this is a nested task
     pub parent_id: Option<Uuid>,
-    /// Correlation ID for tracing
     pub correlation_id: String,
-
-    // Loop detection guardrails
     /// Maximum total subtasks allowed (prevents infinite decomposition)
     pub max_total_subtasks: u32,
-    /// Current recursion depth
     pub recursion_depth: u32,
-    /// Hashes of failed subtask descriptions (for thrashing detection)
     pub failed_subtask_hashes: Vec<u64>,
 }
 
@@ -159,7 +143,7 @@ impl Default for TaskBudget {
             spent_usd: 0.0,
             max_tokens: 100_000,
             tokens_used: 0,
-            max_wall_time: Duration::from_secs(3600), // 1 hour
+            max_wall_time: Duration::from_secs(3600),
             elapsed: Duration::ZERO,
         }
     }
@@ -194,35 +178,20 @@ impl TaskBudget {
 /// A decomposed unit of work
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubTask {
-    /// Unique identifier
     pub id: Uuid,
-    /// Parent task ID
     pub parent_id: Uuid,
-    /// Sequence number within parent
     pub sequence: u32,
-    /// Description of what this subtask does
     pub description: String,
-    /// Current status
     pub status: TaskStatus,
-    /// Required capabilities to execute
     pub required_capabilities: Vec<String>,
-    /// IDs of subtasks that must complete first
     pub dependencies: Vec<Uuid>,
-    /// Assigned agent ID (if scheduled)
     pub assigned_agent: Option<String>,
-    /// Assigned model (if scheduled)
     pub assigned_model: Option<String>,
-    /// Individual budget for this subtask
     pub budget: SubTaskBudget,
-    /// Results from execution
     pub result: Option<SubTaskResult>,
-    /// Retry count
     pub retry_count: u32,
-    /// Maximum retries allowed
     pub max_retries: u32,
-    /// When created
     pub created_at: DateTime<Utc>,
-    /// When last updated
     pub updated_at: DateTime<Utc>,
 }
 
@@ -321,196 +290,6 @@ impl VerificationStatus {
     }
 }
 
-/// Type of feedback issue detected in model output
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-pub enum FeedbackIssue {
-    /// Model wrapped output in code fences when not needed
-    UnwantedCodeFence,
-    /// Model called a tool that doesn't exist
-    HallucinatedTool,
-    /// Model used wrong tool call format
-    InvalidToolFormat,
-    /// Model refused to answer when it should have
-    UnexpectedRefusal,
-    /// Model looped or repeated output
-    OutputLoop,
-    /// Model triggered wrong MoE expert (e.g., coding for chat)
-    WrongExpertRouting,
-    /// Model output was empty or timed out
-    EmptyOrTimeout,
-    /// Response was correct
-    #[default]
-    Correct,
-}
-
-/// Feedback record for model learning
-/// Captures what went wrong and how to improve
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BurstFeedback {
-    /// Unique feedback ID
-    pub id: Uuid,
-    /// When this feedback was recorded
-    pub timestamp: DateTime<Utc>,
-    /// Model that generated the response
-    pub model_name: String,
-    /// Model family (glm, gemma, qwen, etc.)
-    pub model_family: String,
-    /// Original user prompt
-    pub prompt: String,
-    /// Keywords extracted from prompt
-    pub prompt_keywords: Vec<String>,
-    /// Model's raw response
-    pub response: String,
-    /// Type of issue detected
-    pub issue: FeedbackIssue,
-    /// Human-readable description of the issue
-    pub issue_description: String,
-    /// What the correct behavior should have been
-    pub expected_behavior: Option<String>,
-    /// Confidence in this feedback (0.0-1.0)
-    pub confidence: f64,
-    /// Associated task/subtask IDs
-    pub task_id: Option<Uuid>,
-    pub subtask_id: Option<Uuid>,
-}
-
-impl BurstFeedback {
-    /// Create new feedback record
-    pub fn new(model_name: String, model_family: String, prompt: String, response: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            timestamp: Utc::now(),
-            model_name,
-            model_family,
-            prompt,
-            prompt_keywords: Vec::new(),
-            response,
-            issue: FeedbackIssue::Correct,
-            issue_description: String::new(),
-            expected_behavior: None,
-            confidence: 1.0,
-            task_id: None,
-            subtask_id: None,
-        }
-    }
-
-    /// Record a code fence issue
-    pub fn with_code_fence_issue(mut self) -> Self {
-        self.issue = FeedbackIssue::UnwantedCodeFence;
-        self.issue_description = "Model wrapped response in code fences".to_string();
-        self.expected_behavior = Some("Plain text response without formatting".to_string());
-        self
-    }
-
-    /// Record an output loop/timeout issue
-    pub fn with_loop_issue(mut self) -> Self {
-        self.issue = FeedbackIssue::OutputLoop;
-        self.issue_description = "Model output looped or timed out".to_string();
-        self
-    }
-
-    /// Record wrong expert routing (MoE models)
-    pub fn with_wrong_expert(mut self, expected_expert: &str) -> Self {
-        self.issue = FeedbackIssue::WrongExpertRouting;
-        self.issue_description = format!(
-            "Expected {} expert, got coding/tool expert",
-            expected_expert
-        );
-        self
-    }
-
-    /// Extract keywords from the prompt for pattern matching
-    pub fn extract_keywords(&mut self) {
-        let lower = self.prompt.to_lowercase();
-        let mut keywords = Vec::new();
-
-        // Math indicators
-        if lower.contains('+') || lower.contains('-') || lower.contains('*') || lower.contains('/')
-        {
-            keywords.push("math_operator".to_string());
-        }
-        if lower.contains("calculate") || lower.contains("compute") || lower.contains("sum") {
-            keywords.push("math_verb".to_string());
-        }
-
-        // Question indicators
-        if lower.contains("what is") || lower.contains("what's") {
-            keywords.push("what_question".to_string());
-        }
-        if lower.contains("how") {
-            keywords.push("how_question".to_string());
-        }
-
-        // Code indicators
-        if lower.contains("code") || lower.contains("function") || lower.contains("program") {
-            keywords.push("code_request".to_string());
-        }
-
-        // Greeting indicators
-        if lower.starts_with("hi") || lower.starts_with("hello") || lower.starts_with("hey") {
-            keywords.push("greeting".to_string());
-        }
-
-        self.prompt_keywords = keywords;
-    }
-}
-
-/// Learned pattern from feedback
-/// Used to adjust prompts for specific models
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelPattern {
-    /// Pattern ID
-    pub id: Uuid,
-    /// Model family this pattern applies to
-    pub model_family: String,
-    /// Keywords that trigger this pattern
-    pub trigger_keywords: Vec<String>,
-    /// The issue this pattern addresses
-    pub issue_type: FeedbackIssue,
-    /// Recommended prompt adjustment
-    pub prompt_adjustment: String,
-    /// How many times this pattern was observed
-    pub observation_count: u32,
-    /// Success rate after applying adjustment (0.0-1.0)
-    pub success_rate: f64,
-    /// When pattern was first observed
-    pub first_seen: DateTime<Utc>,
-    /// When pattern was last observed
-    pub last_seen: DateTime<Utc>,
-}
-
-impl ModelPattern {
-    /// Create a new pattern from feedback
-    pub fn from_feedback(feedback: &BurstFeedback) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4(),
-            model_family: feedback.model_family.clone(),
-            trigger_keywords: feedback.prompt_keywords.clone(),
-            issue_type: feedback.issue,
-            prompt_adjustment: String::new(),
-            observation_count: 1,
-            success_rate: 0.0,
-            first_seen: now,
-            last_seen: now,
-        }
-    }
-
-    /// Update pattern with new observation
-    pub fn observe(&mut self) {
-        self.observation_count += 1;
-        self.last_seen = Utc::now();
-    }
-
-    /// Record a success/failure after applying adjustment
-    pub fn record_outcome(&mut self, success: bool) {
-        // Exponential moving average for success rate
-        let alpha = 0.2;
-        let outcome = if success { 1.0 } else { 0.0 };
-        self.success_rate = alpha * outcome + (1.0 - alpha) * self.success_rate;
-    }
-}
-
 /// Serde support for Duration
 mod duration_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -537,37 +316,85 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_task_state_creation() {
-        let task = GlobalTaskState::new("Test objective".to_string(), TaskBudget::default());
+    fn test_task_status_terminal_and_progress() {
+        assert!(TaskStatus::Completed.is_terminal());
+        assert!(TaskStatus::Failed.is_terminal());
+        assert!(TaskStatus::Cancelled.is_terminal());
+        assert!(!TaskStatus::Pending.is_terminal());
+        assert!(!TaskStatus::Running.is_terminal());
+        assert!(TaskStatus::Pending.can_progress());
+        assert!(TaskStatus::Running.can_progress());
+        assert!(!TaskStatus::Completed.can_progress());
+        assert!(!TaskStatus::Suspended.can_progress());
+        assert_eq!(TaskStatus::default(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_priority() {
+        assert!(Priority::Low < Priority::Normal);
+        assert!(Priority::Normal < Priority::High);
+        assert!(Priority::High < Priority::Critical);
+        assert_eq!(Priority::default(), Priority::Normal);
+    }
+
+    #[test]
+    fn test_global_task_state() {
+        let mut task = GlobalTaskState::new("obj".to_string(), TaskBudget::default());
         assert_eq!(task.status, TaskStatus::Pending);
         assert!(task.subtasks.is_empty());
         assert!(task.can_add_subtask());
+        assert_eq!(task.progress(), 0.0);
+        task.max_total_subtasks = 1;
+        task.subtasks
+            .push(SubTask::new(task.id, 0, "a".to_string()));
+        assert!(!task.can_add_subtask());
     }
 
     #[test]
-    fn test_task_budget_tracking() {
-        let mut budget = TaskBudget::default();
-        assert!(budget.has_remaining());
-
-        budget.record_spending(5.0, 50_000, Duration::from_secs(1800));
-        assert!(budget.has_remaining());
-        assert_eq!(budget.remaining_cost(), 5.0);
-
-        budget.record_spending(6.0, 0, Duration::ZERO);
-        assert!(!budget.has_remaining());
+    fn test_task_counts_and_progress() {
+        let mut task = GlobalTaskState::new("t".to_string(), TaskBudget::default());
+        let mut s1 = SubTask::new(task.id, 0, "a".to_string());
+        s1.status = TaskStatus::Completed;
+        let mut s2 = SubTask::new(task.id, 1, "b".to_string());
+        s2.status = TaskStatus::Failed;
+        task.subtasks = vec![s1, s2];
+        assert_eq!(task.completed_count(), 1);
+        assert_eq!(task.failed_count(), 1);
+        assert!((task.progress() - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn test_subtask_dependencies() {
-        let parent_id = Uuid::new_v4();
-        let mut subtask = SubTask::new(parent_id, 0, "Test subtask".to_string());
+    fn test_task_budget() {
+        let mut b = TaskBudget::default();
+        assert!(b.has_remaining());
+        b.record_spending(5.0, 50_000, Duration::from_secs(1800));
+        assert_eq!(b.remaining_cost(), 5.0);
+        assert_eq!(b.remaining_tokens(), 50_000);
+        b.record_spending(6.0, 0, Duration::ZERO);
+        assert!(!b.has_remaining());
+        assert_eq!(b.remaining_cost(), 0.0);
+    }
 
-        let dep1 = Uuid::new_v4();
-        let dep2 = Uuid::new_v4();
-        subtask.dependencies = vec![dep1, dep2];
+    #[test]
+    fn test_subtask() {
+        let pid = Uuid::new_v4();
+        let mut s = SubTask::new(pid, 0, "t".to_string());
+        assert!(!s.can_retry());
+        s.status = TaskStatus::Failed;
+        assert!(s.can_retry());
+        s.retry_count = 3;
+        assert!(!s.can_retry());
+        let d1 = Uuid::new_v4();
+        s.dependencies = vec![d1];
+        assert!(!s.dependencies_met(&[]));
+        assert!(s.dependencies_met(&[d1]));
+    }
 
-        assert!(!subtask.dependencies_met(&[dep1]));
-        assert!(subtask.dependencies_met(&[dep1, dep2]));
-        assert!(subtask.dependencies_met(&[dep1, dep2, Uuid::new_v4()]));
+    #[test]
+    fn test_verification_status() {
+        assert!(VerificationStatus::Passed.is_passed());
+        assert!(!VerificationStatus::Pending.is_passed());
+        assert!(VerificationStatus::Failed { reason: "x".into() }.is_failed());
+        assert!(!VerificationStatus::Passed.is_failed());
     }
 }

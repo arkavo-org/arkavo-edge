@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: LLM Response Critic and Verification
 module: arkavo_critic
 version: 0.57.2
@@ -7,6 +9,8 @@ invariants:
   - Fast checks first (Circuit <1μs, Schema <1ms)
   - Pluggable check architecture
   - Evidence collection for audits
+  - Response analysis detects common model failure patterns
+  - Feedback episodes stored for persistent learning
 
 scenarios:
   - id: CRIT-001
@@ -125,3 +129,154 @@ scenarios:
       - Timeouts defined
     refs: [crates/arkavo-critic/src/config.rs:1-50]
     changed: "2025-01-31"
+
+  - id: CRIT-009
+    name: Analyze response for code fence issues
+    criticality: high
+    given:
+      - ResponseAnalyzer initialized with model name
+      - Simple query prompt provided (e.g., "what is 2+2")
+      - Response contains code fences
+    when: ResponseAnalyzer::analyze called
+    then:
+      - Issue detected as UnwantedCodeFence
+      - Feedback created with model_family and issue type
+      - Prompt keywords extracted for pattern matching
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:59-101]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Complex coding query with code fences
+        expected: No issue detected (appropriate use)
+      - condition: Greeting with code fences
+        expected: UnwantedCodeFence detected
+
+  - id: CRIT-010
+    name: Detect output loops in model responses
+    criticality: high
+    given:
+      - ResponseAnalyzer initialized
+      - Response with repetitive content provided
+    when: ResponseAnalyzer::analyze called
+    then:
+      - Repetition pattern detected
+      - OutputLoop issue identified
+      - Feedback created with loop metadata
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:134-184]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Repeated consecutive lines (3+ times)
+        expected: Loop detected
+      - condition: Q&A pattern repetition (3+ questions)
+        expected: Loop detected
+      - condition: Normal varied response
+        expected: No loop detected
+
+  - id: CRIT-011
+    name: Record feedback as learning episode
+    criticality: high
+    given:
+      - Model name and prompt available
+      - Response analyzed with detected issue
+      - LearningStore initialized
+    when: record_model_feedback called
+    then:
+      - Episode created with observation and outcome
+      - Category formatted as "model:{family}:{issue}"
+      - Episode stored in LearningStore
+      - Issue type returned for caller handling
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:82-169]
+    changed: "2025-02-05"
+
+  - id: CRIT-012
+    name: Check for pattern-based prompt adjustment
+    criticality: medium
+    given:
+      - Model name provided
+      - Prompt text available
+      - LearningStore has loop episodes for model
+    when: check_for_pattern_adjustment called
+    then:
+      - Math query pattern detected ("what is" + operators)
+      - Loop episode count checked for model family
+      - PatternAdjustment returned if threshold met
+      - Suggested max_tokens reduced for loopy models
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:252-299]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: No loop history for model
+        expected: No adjustment suggested
+      - condition: Non-math query
+        expected: No adjustment suggested
+
+  - id: CRIT-013
+    name: Detect wrong expert routing for GLM models
+    criticality: medium
+    given:
+      - GLM model family detected
+      - Chat query prompt (greeting, casual)
+      - Response contains code indicators (def, import, etc.)
+    when: ResponseAnalyzer::analyze called
+    then:
+      - WrongExpert issue detected
+      - Expected "conversation" expert noted
+      - Feedback created for routing improvement
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:92-98]
+    changed: "2025-02-05"
+
+  - id: CRIT-014
+    name: Extract first answer from loopy response
+    criticality: medium
+    given:
+      - Loopy response with repetition
+      - is_math_query flag set
+    when: extract_first_answer called
+    then:
+      - "For math: First line with number extracted"
+      - "For non-math: Content before repetition returned"
+      - Clean answer without loop artifacts
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:231-275]
+    changed: "2025-02-05"
+
+  - id: CRIT-015
+    name: Record timeout feedback
+    criticality: high
+    given:
+      - Model name provided
+      - Prompt that caused timeout
+    when: record_timeout_feedback called
+    then:
+      - Timeout episode created
+      - Category set as "model:{family}:timeout"
+      - Episode stored in LearningStore
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:172-210]
+    changed: "2025-02-05"
+
+  - id: CRIT-016
+    name: Get model issue counts by category
+    criticality: medium
+    given:
+      - Model family specified
+      - LearningStore has episodes
+    when: get_model_issue_counts called
+    then:
+      - Returns counts for each issue category
+      - "Categories: loop, code_fence, timeout, wrong_expert, hallucinated_tool"
+      - Empty categories omitted from results
+    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:213-240]
+    changed: "2025-02-05"
+
+  - id: CRIT-017
+    name: Detect model family from name
+    criticality: low
+    given:
+      - Model name string provided
+    when: detect_model_family called
+    then:
+      - '"glm" returned for GLM models'
+      - '"gemma" returned for Gemma models'
+      - '"qwen" returned for Qwen models'
+      - '"mistral" returned for Mistral/Ministral models'
+      - '"deepseek" returned for DeepSeek models'
+      - '"unknown" returned for unrecognized models'
+    refs: [crates/arkavo-critic/src/response_analyzer.rs:212-227]
+    changed: "2025-02-05"

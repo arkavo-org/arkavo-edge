@@ -10,11 +10,11 @@ static SNPE_LIB: OnceLock<Library> = OnceLock::new();
 pub fn load_snpe() -> Result<&'static Library> {
     SNPE_LIB.get_or_init(|| match find_and_load_library() {
         Ok(lib) => {
-            log::info!("SNPE library loaded successfully");
+            tracing::info!("SNPE library loaded successfully");
             lib
         }
         Err(e) => {
-            log::warn!("Failed to load SNPE library: {}", e);
+            tracing::warn!("Failed to load SNPE library: {}", e);
             panic!("SNPE library not available");
         }
     });
@@ -28,7 +28,7 @@ fn find_and_load_library() -> Result<Library> {
     for path in &search_paths {
         let lib_path = path.join("libSNPE.so");
         if lib_path.exists() {
-            log::info!("Found SNPE library at: {}", lib_path.display());
+            tracing::info!("Found SNPE library at: {}", lib_path.display());
             return unsafe { Library::new(&lib_path) }
                 .map_err(|e| SnpeError::LibraryLoadFailed(e.to_string()));
         }
@@ -84,6 +84,6 @@ mod tests {
     #[test]
     fn test_availability_check() {
         let available = is_snpe_available();
-        log::info!("SNPE available: {}", available);
+        tracing::info!("SNPE available: {}", available);
     }
 }

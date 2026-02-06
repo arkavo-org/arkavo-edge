@@ -124,7 +124,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.58.3"
+version = "0.58.4"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -158,7 +158,6 @@ chrono = { version = "0.4.41", features = ["serde"] }
 keyring = "3.6"
 
 # Common utilities
-log = "0.4"
 url = "2.5"
 http = "1.1"
 lru = "0.16"

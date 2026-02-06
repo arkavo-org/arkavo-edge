@@ -1,5 +1,7 @@
 use crate::error::{Error, Result};
-use ring::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, KeyPair as RingKeyPair};
+use p256::ecdsa::{
+    SigningKey, VerifyingKey, signature::SignatureEncoding, signature::Signer, signature::Verifier,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,12 +19,16 @@ impl PublicKey {
     }
 
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<bool> {
-        use ring::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
+        let verifying_key = VerifyingKey::from_sec1_bytes(&self.bytes)
+            .map_err(|e| Error::Signature(format!("Invalid public key: {}", e)))?;
 
-        let public_key = UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &self.bytes);
+        let sig = match p256::ecdsa::DerSignature::from_bytes(signature) {
+            Ok(s) => s,
+            Err(_) => return Ok(false),
+        };
 
-        match public_key.verify(message, signature) {
-            Ok(_) => Ok(true),
+        match verifying_key.verify(message, &sig) {
+            Ok(()) => Ok(true),
             Err(_) => Ok(false),
         }
     }
@@ -43,15 +49,12 @@ impl PrivateKey {
     }
 
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let rng = ring::rand::SystemRandom::new();
-        let key_pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &self.bytes, &rng)
-            .map_err(|e| Error::Signature(format!("Failed to create key pair: {}", e)))?;
+        let signing_key = SigningKey::from_slice(&self.bytes)
+            .map_err(|e| Error::Signature(format!("Failed to create signing key: {}", e)))?;
 
-        let signature = key_pair
-            .sign(&rng, message)
-            .map_err(|e| Error::Signature(format!("Failed to sign: {}", e)))?;
+        let signature: p256::ecdsa::DerSignature = signing_key.sign(message);
 
-        Ok(signature.as_ref().to_vec())
+        Ok(signature.to_vec())
     }
 }
 
@@ -62,19 +65,15 @@ pub struct KeyPair {
 
 impl KeyPair {
     pub fn generate() -> Result<Self> {
-        let rng = ring::rand::SystemRandom::new();
-        let pkcs8_bytes = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
-            .map_err(|e| Error::KeyGeneration(format!("Failed to generate key pair: {}", e)))?;
+        let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
+        let verifying_key = VerifyingKey::from(&signing_key);
 
-        let key_pair =
-            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8_bytes.as_ref(), &rng)
-                .map_err(|e| Error::KeyGeneration(format!("Failed to parse key pair: {}", e)))?;
-
-        let public_key_bytes = key_pair.public_key().as_ref().to_vec();
+        let private_bytes = signing_key.to_bytes().to_vec();
+        let public_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
 
         Ok(Self {
-            private_key: PrivateKey::from_bytes(pkcs8_bytes.as_ref().to_vec()),
-            public_key: PublicKey::from_bytes(public_key_bytes),
+            private_key: PrivateKey::from_bytes(private_bytes),
+            public_key: PublicKey::from_bytes(public_bytes),
         })
     }
 }

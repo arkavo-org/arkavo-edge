@@ -53,12 +53,12 @@ pub struct MemoryIntegration {
 #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
 impl MemoryIntegration {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        log::info!("Initializing memory integration...");
+        tracing::info!("Initializing memory integration...");
 
-        log::info!("Using bundled AllMiniLML6V2 model for text embeddings");
+        tracing::info!("Using bundled AllMiniLML6V2 model for text embeddings");
 
         let storage = Arc::new(MemoryStorage::new().await?);
-        log::info!(
+        tracing::info!(
             "Memory storage initialized at: {}",
             MemoryStorage::get_data_directory()?.display()
         );

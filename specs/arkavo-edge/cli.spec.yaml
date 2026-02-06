@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Arkavo Edge CLI Interface
 module: arkavo_cli
 version: 0.57.2
@@ -7,6 +9,8 @@ invariants:
   - API keys loaded from .arkavo/AGENTS.md
   - First-run experience checks model availability
   - Commands dispatch to appropriate handlers
+  - Interactive REPL commands start with "/"
+  - Session commands persist state to MemoryStorage
 
 scenarios:
   - id: CLI-001
@@ -113,3 +117,176 @@ scenarios:
     edge_cases:
       - condition: Not macOS
         expected: Error message, early exit
+
+  - id: CLI-008
+    name: Handle /new command in REPL
+    criticality: high
+    given:
+      - Interactive chat REPL active
+      - User types "/new"
+    when: Command parsed and executed
+    then:
+      - New conversation session created
+      - Previous session cleared from memory
+      - Fresh context initialized
+      - Confirmation message displayed
+    refs: [crates/arkavo-cli/src/commands/chat.rs:150-170]
+    changed: "2025-02-05"
+
+  - id: CLI-009
+    name: Handle /clear command in REPL
+    criticality: high
+    given:
+      - Interactive chat REPL active
+      - Current session has message history
+      - User types "/clear"
+    when: Command parsed and executed
+    then:
+      - Session history cleared
+      - Current session_id preserved
+      - Context messages reset
+      - Confirmation message displayed
+    refs: [crates/arkavo-cli/src/commands/chat.rs:171-185]
+    changed: "2025-02-05"
+
+  - id: CLI-010
+    name: Handle /context command in REPL
+    criticality: medium
+    given:
+      - Interactive chat REPL active
+      - User types "/context auto|on|off"
+    when: Command parsed and executed
+    then:
+      - Repo context mode updated
+      - '"auto": context attached based on keywords'
+      - '"on": context always attached'
+      - '"off": context never attached'
+      - Current mode displayed
+    refs: [crates/arkavo-cli/src/commands/chat.rs:186-210]
+    changed: "2025-02-05"
+
+  - id: CLI-011
+    name: Handle /history command in REPL
+    criticality: medium
+    given:
+      - Interactive chat REPL active
+      - Active conversation session
+      - User types "/history"
+    when: Command parsed and executed
+    then:
+      - Session statistics retrieved
+      - Message count displayed
+      - Token count displayed
+      - Fence parity status shown
+    refs: [crates/arkavo-cli/src/commands/chat.rs:211-230]
+    changed: "2025-02-05"
+
+  - id: CLI-012
+    name: Handle /switch command in REPL
+    criticality: medium
+    given:
+      - Interactive chat REPL active
+      - Multiple sessions exist
+      - User types "/switch <session_id>"
+    when: Command parsed and executed
+    then:
+      - Session ID validated
+      - Session switched if exists
+      - Context loaded from session
+      - Confirmation or error displayed
+    refs: [crates/arkavo-cli/src/commands/chat.rs:231-260]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Session ID not found
+        expected: Error message displayed
+      - condition: Invalid session ID format
+        expected: Error message displayed
+
+  - id: CLI-013
+    name: Handle /read command in REPL
+    criticality: medium
+    given:
+      - Interactive chat REPL active
+      - User types "/read <file_path>"
+    when: Command parsed and executed
+    then:
+      - File path validated
+      - File content read
+      - Content added to context as user message
+      - Confirmation displayed
+    refs: [crates/arkavo-cli/src/commands/chat.rs:261-290]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: File not found
+        expected: Error message displayed
+      - condition: Permission denied
+        expected: Error message displayed
+      - condition: Binary file
+        expected: Warning or rejection
+
+  - id: CLI-014
+    name: Handle /list command in REPL
+    criticality: medium
+    given:
+      - Interactive chat REPL active
+      - User types "/list [path]"
+    when: Command parsed and executed
+    then:
+      - "Directory listed (default: current)"
+      - Files and subdirectories shown
+      - Formatted for readability
+    refs: [crates/arkavo-cli/src/commands/chat.rs:291-310]
+    changed: "2025-02-05"
+
+  - id: CLI-015
+    name: Handle chat with model parameters
+    criticality: high
+    given:
+      - CLI invoked with chat command
+      - Sampling parameters provided
+    when: Chat executed with parameters
+    then:
+      - --temperature controls randomness
+      - --top-p controls nucleus sampling
+      - --top-k controls vocabulary cutoff
+      - --max-tokens limits response length
+      - --seed ensures reproducibility
+      - Parameters passed to LLM client
+    refs: [crates/arkavo-cli/src/commands/chat.rs:100-150]
+    changed: "2025-02-05"
+
+  - id: CLI-016
+    name: Handle chat with image for vision
+    criticality: medium
+    given:
+      - CLI invoked with chat command
+      - --image path provided
+      - Vision-capable model selected
+    when: Chat executed with image
+    then:
+      - Image file loaded
+      - Image encoded for model
+      - Multi-modal query constructed
+      - Model processes image + text
+    refs: [crates/arkavo-cli/src/commands/chat.rs:151-165]
+    changed: "2025-02-05"
+    edge_cases:
+      - condition: Image file not found
+        expected: Error before model call
+      - condition: Non-vision model
+        expected: Error or text-only mode
+
+  - id: CLI-017
+    name: Handle /exit or /quit command
+    criticality: high
+    given:
+      - Interactive chat REPL active
+      - User types "/exit" or "/quit"
+    when: Command parsed
+    then:
+      - REPL loop exits gracefully
+      - Session closed properly
+      - Resources cleaned up
+      - Returns to shell
+    refs: [crates/arkavo-cli/src/commands/chat.rs:311-320]
+    changed: "2025-02-05"

@@ -36,12 +36,12 @@ pub use tensor::{SnpeTensor, TensorShape};
 pub fn initialize() -> Result<()> {
     match load_snpe() {
         Ok(_) => {
-            log::info!("SNPE library loaded successfully");
+            tracing::info!("SNPE library loaded successfully");
             Ok(())
         }
         Err(e) => {
-            log::warn!("SNPE library not available: {}", e);
-            log::warn!("Falling back to CPU inference");
+            tracing::warn!("SNPE library not available: {}", e);
+            tracing::warn!("Falling back to CPU inference");
             Err(e)
         }
     }
@@ -60,9 +60,9 @@ mod tests {
     fn test_availability() {
         let available = is_snpe_available();
         if available {
-            log::info!("SNPE is available");
+            tracing::info!("SNPE is available");
         } else {
-            log::info!("SNPE is not available (expected in CI)");
+            tracing::info!("SNPE is not available (expected in CI)");
         }
     }
 }

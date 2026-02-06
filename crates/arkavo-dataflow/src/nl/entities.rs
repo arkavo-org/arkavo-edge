@@ -130,8 +130,11 @@ impl EntityRecognizer {
 
         // Third pass: Look for quoted entities
         // But skip quoted strings that are likely condition values
-        use lazy_regex::regex;
-        let quoted_regex = regex!(r#"["']([^"']+)["']"#);
+        use regex::Regex;
+        use std::sync::LazyLock;
+        static QUOTED_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"["']([^"']+)["']"#).unwrap());
+        let quoted_regex = &*QUOTED_RE;
         let condition_keywords = ["contains", "equals", "matches", "starts with", "ends with"];
 
         for cap in quoted_regex.captures_iter(input) {
