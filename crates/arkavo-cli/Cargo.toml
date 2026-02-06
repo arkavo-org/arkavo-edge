@@ -89,8 +89,6 @@ chrono = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-indicatif = { workspace = true }
-tiktoken-rs = { workspace = true }
 hf-hub = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
