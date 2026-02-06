@@ -22,7 +22,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 
 # For agent discovery
-mdns-sd = { version = "0.11", optional = true }
+mdns-sd = { workspace = true, optional = true }
 
 [features]
 default = ["mdns"]

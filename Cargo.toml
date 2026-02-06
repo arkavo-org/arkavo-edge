@@ -124,7 +124,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.58.4"
+version = "0.58.5"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -186,7 +186,7 @@ handlebars = "6.2"
 
 # Terminal and UI
 ratatui = "0.30.0"
-crossterm = { version = "0.28.1", features = ["event-stream"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
 indicatif = "0.18"
 
 # Git and filesystem
@@ -199,7 +199,7 @@ walkdir = "2.5.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
 
 # HTTP and networking
-jsonrpsee = { version = "0.24.9", features = ["client", "server", "ws-client", "macros"] }
+jsonrpsee = { version = "0.25", features = ["client", "server", "ws-client", "macros"] }
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false }
@@ -213,8 +213,8 @@ urlencoding = "2.1"
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 gethostname = "0.5"
 if-addrs = "0.14"
-metrics = "0.23"
-metrics-exporter-prometheus = "0.15"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 mdns-sd = "0.14"

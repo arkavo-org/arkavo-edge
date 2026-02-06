@@ -4,7 +4,7 @@ use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent};
 use futures::StreamExt;
-use jsonrpsee::{PendingSubscriptionSink, SubscriptionMessage, core::SubscriptionResult};
+use jsonrpsee::{PendingSubscriptionSink, core::SubscriptionResult};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -46,7 +46,7 @@ pub async fn handle_message_stream(
                 timestamp: chrono::Utc::now(),
             };
 
-            if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+            if let Ok(msg) = serde_json::value::to_raw_value(&delta) {
                 let _ = _sink.send(msg).await;
             }
 
@@ -62,7 +62,7 @@ pub async fn handle_message_stream(
                 timestamp: chrono::Utc::now(),
             };
 
-            if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+            if let Ok(msg) = serde_json::value::to_raw_value(&delta) {
                 let _ = _sink.send(msg).await;
             }
         });
@@ -111,8 +111,8 @@ pub async fn handle_chat_stream(
             while let Some(delta) = delta_rx.recv().await {
                 delta_count += 1;
                 info!(session.id = %session_id, delta_count, "Forwarding delta to client");
-                if let Ok(msg) = SubscriptionMessage::from_json(&delta)
-                    && sink.send(msg.clone()).await.is_err()
+                if let Ok(msg) = serde_json::value::to_raw_value(&delta)
+                    && sink.send(msg).await.is_err()
                 {
                     warn!(session.id = %session_id, "Client disconnected, stopping delta forwarding");
                     break;
@@ -207,8 +207,8 @@ pub async fn handle_chat_subscribe(
                                     }
                                 };
 
-                                if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
-                                    && sink.send(msg.clone()).await.is_err()
+                                if let Ok(msg) = serde_json::value::to_raw_value(&message_delta)
+                                    && sink.send(msg).await.is_err()
                                 {
                                     break;
                                 }
@@ -232,7 +232,7 @@ pub async fn handle_chat_subscribe(
                         timestamp: chrono::Utc::now(),
                     };
 
-                    if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+                    if let Ok(msg) = serde_json::value::to_raw_value(&error_delta) {
                         let _ = sink.send(msg).await;
                     }
                 }
@@ -251,7 +251,7 @@ pub async fn handle_chat_subscribe(
                 timestamp: chrono::Utc::now(),
             };
 
-            if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+            if let Ok(msg) = serde_json::value::to_raw_value(&error_delta) {
                 let _ = sink.send(msg).await;
             }
         }
