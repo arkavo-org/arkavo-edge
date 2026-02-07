@@ -3,6 +3,14 @@
 //! Measures: How many small requests (qwen3-0.6B) can complete
 //! while a large request (8B model) is running?
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::unchecked_time_subtraction,
+    clippy::uninlined_format_args,
+    unused_imports,
+    unused_variables
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};

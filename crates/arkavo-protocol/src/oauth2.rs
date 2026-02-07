@@ -8,6 +8,22 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+fn percent_encode(input: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuth2Config {
     pub client_id: String,
@@ -289,8 +305,8 @@ impl OAuth2Provider {
             "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
             self.config.authorization_endpoint,
             self.config.client_id,
-            urlencoding::encode(&self.config.redirect_uri),
-            urlencoding::encode(&self.config.scopes.join(" ")),
+            percent_encode(&self.config.redirect_uri),
+            percent_encode(&self.config.scopes.join(" ")),
             state
         )
     }

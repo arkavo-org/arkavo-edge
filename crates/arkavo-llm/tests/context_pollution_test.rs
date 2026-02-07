@@ -3,6 +3,12 @@
 //! These tests demonstrate potential issues with KV cache pollution
 //! when contexts are shared between requests without proper isolation.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::significant_drop_tightening,
+    clippy::uninlined_format_args
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

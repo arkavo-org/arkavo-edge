@@ -383,6 +383,7 @@ pub fn context_tool_schemas() -> Vec<ToolSchema> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

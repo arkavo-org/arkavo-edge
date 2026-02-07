@@ -46,9 +46,8 @@ mod auth_manager_regression_tests {
                     error_msg.contains("at least 32 characters"),
                     "Expected error message to mention '32 character' requirement.\n\
                     Expected: Message containing 'at least 32 characters'\n\
-                    Actual: {}\n\
+                    Actual: {error_msg}\n\
                     Context: Validation should reject master_key='short' (5 chars)",
-                    error_msg
                 );
             }
         }
@@ -87,9 +86,8 @@ mod auth_manager_regression_tests {
                         && error_msg.contains("at least 32 characters"),
                     "Expected error message to mention both 'Master key' and '32 characters'.\n\
                     Expected: Message containing 'Master key' AND 'at least 32 characters'\n\
-                    Actual: {}\n\
+                    Actual: {error_msg}\n\
                     Context: AuthManager should fail when no master key is available from env or keychain",
-                    error_msg
                 );
             }
         }

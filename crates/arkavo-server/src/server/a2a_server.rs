@@ -777,8 +777,10 @@ impl A2aServer {
 
         info!("Starting A2A server on {}", addr);
 
-        let server = ServerBuilder::default()
+        let server_cfg = jsonrpsee::server::ServerConfig::builder()
             .max_connections(self.config.max_connections as u32)
+            .build();
+        let server = ServerBuilder::with_config(server_cfg)
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;

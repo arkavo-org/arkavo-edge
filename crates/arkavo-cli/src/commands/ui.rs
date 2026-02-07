@@ -384,12 +384,12 @@ async fn handle_prompt_async(
         #[cfg(all(unix, feature = "mcp-tools"))]
         {
             use crate::mcp_integration::McpConnection;
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             let mcp_result = McpConnection::new_in_process_async()
                 .await
                 .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
             let mcp_result = McpConnection::new_cross_platform()
                 .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
@@ -494,12 +494,12 @@ async fn handle_prompt_async(
         use crate::mcp_integration::McpConnection;
         // Use async version for macOS (avoids nested runtime panic)
         // Use cross-platform version for other Unix systems
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         let mcp_result = McpConnection::new_in_process_async()
             .await
             .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
         let mcp_result = McpConnection::new_cross_platform()
             .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 

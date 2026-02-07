@@ -53,6 +53,7 @@ impl HealthReporter for CefHealthReporter {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use arkavo_observability::health_reporter::HealthStatus;

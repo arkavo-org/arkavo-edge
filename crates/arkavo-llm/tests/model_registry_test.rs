@@ -3,6 +3,8 @@
 //! Tests for the ModelRegistry which manages multiple loaded models
 //! and enables concurrent inference across different models.
 
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::{ModelRegistry, MultiModelProvider, Provider, SamplingConfig};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

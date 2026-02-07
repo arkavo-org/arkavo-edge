@@ -7,6 +7,43 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+fn percent_encode(input: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
+fn percent_decode(input: &str) -> String {
+    let mut decoded = Vec::with_capacity(input.len());
+    let mut bytes = input.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let hi = bytes.next().and_then(|c| char::from(c).to_digit(16));
+            let lo = bytes.next().and_then(|c| char::from(c).to_digit(16));
+            if let (Some(h), Some(l)) = (hi, lo) {
+                decoded.push((h * 16 + l) as u8);
+            } else {
+                decoded.push(b'%');
+            }
+        } else if b == b'+' {
+            decoded.push(b' ');
+        } else {
+            decoded.push(b);
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// A single search result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -107,7 +144,7 @@ impl WebSearchTool {
 
         format!(
             "https://html.duckduckgo.com/html/?q={}",
-            urlencoding::encode(&full_query)
+            percent_encode(&full_query)
         )
     }
 
@@ -152,7 +189,7 @@ impl WebSearchTool {
                 url.split("uddg=")
                     .nth(1)
                     .and_then(|s| s.split('&').next())
-                    .map(|s| urlencoding::decode(s).unwrap_or_default().to_string())
+                    .map(percent_decode)
                     .unwrap_or_else(|| url.to_string())
             } else {
                 url.to_string()
@@ -399,6 +436,7 @@ impl Tool for WebSearchTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

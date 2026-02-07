@@ -3,6 +3,8 @@
 //! CORRECTION: The user correctly identified that my initial assumption was wrong.
 //! We should NOT clear the KV cache between requests - that defeats its purpose!
 
+#![allow(clippy::disallowed_methods)]
+
 #[test]
 fn test_correct_context_architecture_understanding() {
     println!("\n========================================");

@@ -1,4 +1,4 @@
-#![allow(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_methods, clippy::significant_drop_tightening)]
 
 use arkavo_mcp_tools::{
     Tool,

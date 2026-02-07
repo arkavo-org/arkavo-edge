@@ -1,6 +1,12 @@
 //! Manual test for all new MCP tools
 //! Run with: cargo test -p arkavo-mcp-macos --test manual_tool_test -- --nocapture
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::ignore_without_reason,
+    clippy::uninlined_format_args
+)]
+
 use arkavo_mcp_macos::mcp::server::Tool;
 use serde_json::json;
 

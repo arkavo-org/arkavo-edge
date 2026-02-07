@@ -130,7 +130,7 @@ async fn test_model_search_by_capability() {
     };
 
     // Test capability filtering
-    let models = vec![code_model, vision_model];
+    let models = [code_model, vision_model];
 
     let streaming_models: Vec<_> = models
         .iter()

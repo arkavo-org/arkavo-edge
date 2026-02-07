@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 /// Regression test for the double-async timeout bug
 ///
 /// Bug: DOMCommandBuilder::try_recv_message was wrapping the already-non-blocking
@@ -48,25 +50,26 @@ async fn test_no_timeout_on_fast_messages() {
     // Try to receive the message with realistic polling (like ui.rs does)
     let mut received = false;
     for attempt in 1..=10 {
-        eprintln!("[TEST CLIENT] Poll attempt {}", attempt);
+        eprintln!("[TEST CLIENT] Poll attempt {attempt}");
 
         match transport.try_recv_message().await {
             Ok(Some(ReceivedMessage::Event(event))) => {
-                eprintln!("[TEST CLIENT] ✓ Received event: {}", event.value);
+                let value = &event.value;
+                eprintln!("[TEST CLIENT] ✓ Received event: {value}");
                 assert_eq!(event.event_type, "submit");
                 assert_eq!(event.value, "test");
                 received = true;
                 break;
             }
             Ok(Some(other)) => {
-                eprintln!("[TEST CLIENT] Got other message: {:?}", other);
+                eprintln!("[TEST CLIENT] Got other message: {other:?}");
             }
             Ok(None) => {
                 eprintln!("[TEST CLIENT] No message (will retry)");
             }
             Err(e) => {
-                eprintln!("[TEST CLIENT] Error: {}", e);
-                panic!("Should not get error, got: {}", e);
+                eprintln!("[TEST CLIENT] Error: {e}");
+                panic!("Should not get error, got: {e}");
             }
         }
 
@@ -109,10 +112,8 @@ async fn test_rapid_polling_no_timeout() {
     for attempt in 1..=20 {
         match transport.try_recv_message().await {
             Ok(Some(ReceivedMessage::Event(event))) => {
-                eprintln!(
-                    "[TEST RAPID] ✓ Received on attempt {}: {}",
-                    attempt, event.value
-                );
+                let value = &event.value;
+                eprintln!("[TEST RAPID] ✓ Received on attempt {attempt}: {value}");
                 assert_eq!(event.value, "rapid test");
                 received = true;
                 break;
@@ -121,7 +122,7 @@ async fn test_rapid_polling_no_timeout() {
                 // This is expected when no message available
             }
             Err(e) => {
-                panic!("Rapid polling should never error, got: {}", e);
+                panic!("Rapid polling should never error, got: {e}");
             }
             _ => {}
         }

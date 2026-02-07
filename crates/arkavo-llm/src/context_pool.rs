@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_pool_default() {
-        let pool: ContextPool = Default::default();
+        let pool = ContextPool::default();
         let stats = pool.all_stats();
         assert!(stats.is_empty());
     }

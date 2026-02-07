@@ -183,6 +183,7 @@ impl VerificationCheck for SemanticCheck {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods, clippy::unnecessary_literal_bound)]
 mod tests {
     use super::*;
     use arkavo_llm::{Message, Provider, ProviderResponse};

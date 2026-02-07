@@ -15,6 +15,9 @@ use crate::types::{
     TdfManifest,
 };
 
+type MockKasResponses = HashMap<String, Result<Vec<u8>, String>>;
+type BlobStore = HashMap<String, Vec<u8>>;
+
 /// Mock TDF encryptor/decryptor for testing.
 ///
 /// Performs simple XOR "encryption" - NOT secure, only for testing.
@@ -133,7 +136,7 @@ impl TdfDecryptor for MockTdfService {
 /// Mock KAS client for testing.
 #[derive(Debug, Clone, Default)]
 pub struct MockKasClient {
-    responses: Arc<Mutex<HashMap<String, Result<Vec<u8>, String>>>>,
+    responses: Arc<Mutex<MockKasResponses>>,
     health: Arc<Mutex<bool>>,
 }
 
@@ -151,7 +154,7 @@ impl MockKasClient {
     pub fn with_rewrap_response(self, policy: &str, key: Vec<u8>) -> Self {
         self.responses
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(policy.to_string(), Ok(key));
         self
     }
@@ -160,21 +163,21 @@ impl MockKasClient {
     pub fn with_rewrap_error(self, policy: &str, error: &str) -> Self {
         self.responses
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(policy.to_string(), Err(error.to_string()));
         self
     }
 
     /// Set health check result.
     pub fn set_healthy(&self, healthy: bool) {
-        *self.health.lock().unwrap() = healthy;
+        *self.health.lock().unwrap_or_else(|e| e.into_inner()) = healthy;
     }
 }
 
 #[async_trait(?Send)]
 impl KasClient for MockKasClient {
     async fn rewrap(&self, _wrapped_key: &str, policy: &str) -> Result<Vec<u8>, TdfError> {
-        let responses = self.responses.lock().unwrap();
+        let responses = self.responses.lock().unwrap_or_else(|e| e.into_inner());
         match responses.get(policy) {
             Some(Ok(key)) => Ok(key.clone()),
             Some(Err(e)) => Err(TdfError::Kas(e.clone())),
@@ -183,14 +186,14 @@ impl KasClient for MockKasClient {
     }
 
     async fn health_check(&self) -> Result<bool, TdfError> {
-        Ok(*self.health.lock().unwrap())
+        Ok(*self.health.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
 
 /// Mock blob transport for testing.
 #[derive(Debug, Clone, Default)]
 pub struct MockBlobTransport {
-    blobs: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    blobs: Arc<Mutex<BlobStore>>,
     next_ticket: Arc<Mutex<u64>>,
     healthy: Arc<Mutex<bool>>,
 }
@@ -208,18 +211,21 @@ impl MockBlobTransport {
 
     /// Pre-populate a blob for fetching.
     pub fn with_blob(self, ticket: &str, data: Vec<u8>) -> Self {
-        self.blobs.lock().unwrap().insert(ticket.to_string(), data);
+        self.blobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(ticket.to_string(), data);
         self
     }
 
     /// Set health check result.
     pub fn set_healthy(&self, healthy: bool) {
-        *self.healthy.lock().unwrap() = healthy;
+        *self.healthy.lock().unwrap_or_else(|e| e.into_inner()) = healthy;
     }
 
     /// Get all stored blobs (for assertions).
     pub fn get_blobs(&self) -> HashMap<String, Vec<u8>> {
-        self.blobs.lock().unwrap().clone()
+        self.blobs.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -247,13 +253,14 @@ impl BlobTransport for MockBlobTransport {
     }
 
     async fn stage(&self, data: &[u8]) -> Result<String, TransportError> {
-        let mut ticket_id = self.next_ticket.lock().unwrap();
+        let mut ticket_id = self.next_ticket.lock().unwrap_or_else(|e| e.into_inner());
         let ticket = format!("mock-ticket-{ticket_id}");
         *ticket_id += 1;
+        drop(ticket_id);
 
         self.blobs
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(ticket.clone(), data.to_vec());
         Ok(ticket)
     }
@@ -261,14 +268,14 @@ impl BlobTransport for MockBlobTransport {
     async fn fetch(&self, ticket: &str) -> Result<Vec<u8>, TransportError> {
         self.blobs
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(ticket)
             .cloned()
             .ok_or_else(|| TransportError::Fetch(format!("Ticket not found: {ticket}")))
     }
 
     async fn health_check(&self) -> Result<bool, TransportError> {
-        Ok(*self.healthy.lock().unwrap())
+        Ok(*self.healthy.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
 

@@ -162,6 +162,7 @@ impl BlobTransport for IrohTransport {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::io::Cursor;

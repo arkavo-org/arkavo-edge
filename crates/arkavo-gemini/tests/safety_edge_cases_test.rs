@@ -1,3 +1,5 @@
+#![allow(clippy::collection_is_never_read, clippy::disallowed_methods)]
+
 use arkavo_gemini::RestClient;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;

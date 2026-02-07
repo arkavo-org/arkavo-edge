@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_cef::{ReceivedMessage, UdsTransport};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -52,7 +54,7 @@ async fn test_event_loop_with_realistic_timing() {
     while start.elapsed() < Duration::from_secs(1) {
         poll_count += 1;
         let elapsed = start.elapsed().as_millis();
-        eprintln!("[TEST CLIENT] Poll #{} at {}ms", poll_count, elapsed);
+        eprintln!("[TEST CLIENT] Poll #{poll_count} at {elapsed}ms");
 
         // Try to receive message (this uses 10ms timeout in dom_commands.rs:63)
         match transport.try_recv_message().await {
@@ -67,13 +69,13 @@ async fn test_event_loop_with_realistic_timing() {
                 break;
             }
             Ok(Some(other)) => {
-                eprintln!("[TEST CLIENT] Got other message: {:?}", other);
+                eprintln!("[TEST CLIENT] Got other message: {other:?}");
             }
             Ok(None) => {
                 eprintln!("[TEST CLIENT] No message (timeout or no data)");
             }
             Err(e) => {
-                eprintln!("[TEST CLIENT] Error: {}", e);
+                eprintln!("[TEST CLIENT] Error: {e}");
             }
         }
 
@@ -132,7 +134,7 @@ async fn test_event_loop_with_longer_timeout() {
     while start.elapsed() < Duration::from_secs(1) {
         poll_count += 1;
         let elapsed = start.elapsed().as_millis();
-        eprintln!("[TEST CLIENT LONG] Poll #{} at {}ms", poll_count, elapsed);
+        eprintln!("[TEST CLIENT LONG] Poll #{poll_count} at {elapsed}ms");
 
         // Use custom 50ms timeout (proposed fix)
         match tokio::time::timeout(Duration::from_millis(50), transport.try_recv_message()).await {
@@ -151,7 +153,7 @@ async fn test_event_loop_with_longer_timeout() {
                 eprintln!("[TEST CLIENT LONG] No message");
             }
             Ok(Err(e)) => {
-                eprintln!("[TEST CLIENT LONG] Error: {}", e);
+                eprintln!("[TEST CLIENT LONG] Error: {e}");
             }
             Err(_) => {
                 eprintln!("[TEST CLIENT LONG] 50ms timeout");
@@ -194,8 +196,8 @@ async fn test_message_queue_draining_pattern() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         for i in 1..=3 {
-            eprintln!("[TEST SERVER DRAIN] Sending event #{}", i);
-            let event_data = create_event_message("submit", "#input", &format!("event {}", i));
+            eprintln!("[TEST SERVER DRAIN] Sending event #{i}");
+            let event_data = create_event_message("submit", "#input", &format!("event {i}"));
             stream.write_all(&event_data).await.unwrap();
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -229,7 +231,7 @@ async fn test_message_queue_draining_pattern() {
                 break;
             }
             Err(e) => {
-                eprintln!("[TEST CLIENT DRAIN] Error: {}", e);
+                eprintln!("[TEST CLIENT DRAIN] Error: {e}");
                 break;
             }
         }
@@ -239,8 +241,7 @@ async fn test_message_queue_draining_pattern() {
     assert_eq!(
         events_received.len(),
         3,
-        "Should receive all 3 events. Got: {:?}",
-        events_received
+        "Should receive all 3 events. Got: {events_received:?}"
     );
     assert_eq!(events_received[0], "event 1");
     assert_eq!(events_received[1], "event 2");

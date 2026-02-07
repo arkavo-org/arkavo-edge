@@ -8,6 +8,22 @@ use arkavo_crypto::AgentKeypair;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use std::time::Duration;
 
+fn percent_encode(input: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
 /// Client for agent authentication with the authnz-rs API.
 pub struct AgentAuthClient {
     config: AgentAuthConfig,
@@ -35,7 +51,7 @@ impl AgentAuthClient {
         let url = format!(
             "{}/agents/challenge?did={}",
             self.config.base_url,
-            urlencoding::encode(did)
+            percent_encode(did)
         );
 
         let response = self.http_client.get(&url).send().await?;

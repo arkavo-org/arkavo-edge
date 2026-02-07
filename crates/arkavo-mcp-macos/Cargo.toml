@@ -21,9 +21,6 @@ embeddings = ["memory", "arkavo-memory/embeddings"]
 # Async runtime
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "time", "io-util"] }
 
-# Lazy static for global state
-lazy_static = "1.5"
-
 # Error handling
 thiserror = { workspace = true }
 
@@ -68,7 +65,6 @@ async-trait = { workspace = true }
 
 # File system
 glob = "0.3"
-walkdir = { workspace = true }
 
 # JSON Schema validation
 jsonschema = { workspace = true }

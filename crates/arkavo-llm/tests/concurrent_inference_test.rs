@@ -5,6 +5,8 @@
 //! - Requests to different models run in parallel
 //! - Thread safety of the ModelRegistry
 
+#![allow(clippy::disallowed_methods, clippy::uninlined_format_args)]
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::ModelRegistry;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

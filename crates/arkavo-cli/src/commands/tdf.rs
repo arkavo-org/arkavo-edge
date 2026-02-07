@@ -172,53 +172,65 @@ async fn handle_decrypt(
     client_id: Option<String>,
     client_secret: Option<String>,
 ) -> Result<()> {
-    use arkavo_tdf::{ArkavoKasClient, ArkavoKasConfig, TdfManifest};
+    #[cfg(feature = "kas")]
+    {
+        use arkavo_tdf::{ArkavoKasClient, ArkavoKasConfig, TdfManifest};
 
-    println!("Decrypting {}...", input.display());
+        println!("Decrypting {}...", input.display());
 
-    let json = fs::read_to_string(&input)
-        .await
-        .with_context(|| format!("Failed to read {}", input.display()))?;
+        let json = fs::read_to_string(&input)
+            .await
+            .with_context(|| format!("Failed to read {}", input.display()))?;
 
-    let manifest: TdfManifest =
-        serde_json::from_str(&json).context("Failed to parse TDF manifest")?;
+        let manifest: TdfManifest =
+            serde_json::from_str(&json).context("Failed to parse TDF manifest")?;
 
-    let client_id = client_id.ok_or_else(|| {
-        anyhow::anyhow!(
-            "OAuth client ID required. Set --client-id or ARKAVO_CLIENT_ID environment variable"
-        )
-    })?;
+        let client_id = client_id.ok_or_else(|| {
+            anyhow::anyhow!(
+                "OAuth client ID required. Set --client-id or ARKAVO_CLIENT_ID environment variable"
+            )
+        })?;
 
-    let mut config = ArkavoKasConfig::new(client_id);
-    if let Some(secret) = client_secret {
-        config = config.with_client_secret(secret);
+        let mut config = ArkavoKasConfig::new(client_id);
+        if let Some(secret) = client_secret {
+            config = config.with_client_secret(secret);
+        }
+
+        let kas_client = ArkavoKasClient::new(config)?;
+        let plaintext = kas_client
+            .decrypt_manifest(&manifest)
+            .await
+            .context("Decryption failed")?;
+
+        let output_path = output.unwrap_or_else(|| {
+            let mut p = input.clone();
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            let stripped = name
+                .strip_suffix(".tdf.json")
+                .or_else(|| name.strip_suffix(".tdf"))
+                .unwrap_or(&name);
+            p.set_file_name(format!("{stripped}.decrypted"));
+            p
+        });
+
+        fs::write(&output_path, &plaintext)
+            .await
+            .with_context(|| format!("Failed to write {}", output_path.display()))?;
+
+        println!("Decrypted to {}", output_path.display());
+        println!("  Size: {} bytes", plaintext.len());
+
+        Ok(())
     }
 
-    let kas_client = ArkavoKasClient::new(config)?;
-    let plaintext = kas_client
-        .decrypt_manifest(&manifest)
-        .await
-        .context("Decryption failed")?;
-
-    let output_path = output.unwrap_or_else(|| {
-        let mut p = input.clone();
-        let name = p.file_name().unwrap().to_string_lossy().to_string();
-        let stripped = name
-            .strip_suffix(".tdf.json")
-            .or_else(|| name.strip_suffix(".tdf"))
-            .unwrap_or(&name);
-        p.set_file_name(format!("{stripped}.decrypted"));
-        p
-    });
-
-    fs::write(&output_path, &plaintext)
-        .await
-        .with_context(|| format!("Failed to write {}", output_path.display()))?;
-
-    println!("Decrypted to {}", output_path.display());
-    println!("  Size: {} bytes", plaintext.len());
-
-    Ok(())
+    #[cfg(not(feature = "kas"))]
+    {
+        let _ = (input, output, client_id, client_secret);
+        std::future::ready(()).await;
+        anyhow::bail!(
+            "TDF decrypt requires the 'kas' feature. Rebuild arkavo-cli with --features kas"
+        );
+    }
 }
 
 #[cfg(feature = "iroh")]

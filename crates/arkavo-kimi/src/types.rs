@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_thinking_mode_default() {
-        let default: ThinkingMode = Default::default();
+        let default = ThinkingMode::default();
         assert!(matches!(default, ThinkingMode::Enabled));
     }
 

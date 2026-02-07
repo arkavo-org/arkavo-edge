@@ -151,6 +151,7 @@ impl ToolExecutor {
 // Note: Default cannot be implemented for ToolExecutor since it requires async storage initialization.
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use serde_json::json;

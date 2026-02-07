@@ -1,3 +1,10 @@
+#![allow(
+    clippy::disallowed_methods,
+    clippy::ignore_without_reason,
+    clippy::manual_is_multiple_of,
+    clippy::uninlined_format_args
+)]
+
 #[cfg(feature = "ntp-server")]
 mod common;
 

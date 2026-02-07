@@ -39,6 +39,35 @@ pub struct ToolIntegrationResult {
     pub total_iterations: usize,
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
+async fn verify_response_with_critic(
+    critic: &arkavo_critic::CriticPipeline,
+    task_description: &str,
+    response: &ProviderResponse,
+    tool_calls: Vec<ParsedToolCall>,
+    available_tools: Vec<arkavo_mcp_tools::ToolInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut response_for_critic = response.clone();
+    response_for_critic.tool_calls = tool_calls;
+
+    let input = arkavo_critic::VerificationInput::new(
+        task_description.to_string(),
+        response_for_critic,
+        available_tools,
+    );
+    let result = critic.verify(&input).await;
+    if result.passed {
+        Ok(())
+    } else {
+        let failures: Vec<String> = result
+            .failures()
+            .iter()
+            .map(|e| e.description.clone())
+            .collect();
+        Err(format!("Response rejected by critic: {failures:?}").into())
+    }
+}
+
 /// Process messages with automatic tool calling via Router
 ///
 /// This function:
@@ -530,23 +559,18 @@ pub async fn process_with_tools(
             tool_calls = parsed_calls;
         }
 
-        if tool_calls.is_empty() {
-            // Post-LLM validation via critic pipeline
-            let input = arkavo_critic::VerificationInput::new(
-                task_description.to_string(),
-                response.clone(),
-                vec![],
-            );
-            let result = critic.verify(&input).await;
-            if !result.passed {
-                let failures: Vec<String> = result
-                    .failures()
-                    .iter()
-                    .map(|e| e.description.clone())
-                    .collect();
-                return Err(format!("Response rejected by critic: {failures:?}").into());
-            }
+        // Post-LLM validation via critic pipeline for both action and non-action paths
+        // This must run before any tool execution to enforce guardrails consistently.
+        verify_response_with_critic(
+            &critic,
+            task_description,
+            &response,
+            tool_calls.clone(),
+            registry_arc.list_tools(),
+        )
+        .await?;
 
+        if tool_calls.is_empty() {
             return Ok(ToolIntegrationResult {
                 final_response: response.content,
                 tool_executions: all_tool_executions,
@@ -842,6 +866,46 @@ pub async fn process_with_tools_interactive(
     _messages: Vec<Message>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     Err("Tool integration requires Unix platform with mcp-tools feature".into())
+}
+
+#[cfg(all(unix, feature = "mcp-tools", test))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn critic_blocks_unsafe_content_before_execution() {
+        let critic = arkavo_critic::default_pipeline();
+        let response = ProviderResponse {
+            content: "Here is an api_key: secret123".to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        };
+
+        let result =
+            verify_response_with_critic(&critic, "test", &response, vec![], Vec::new()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn critic_validates_schema_on_tool_call_path() {
+        let critic = arkavo_critic::default_pipeline();
+        let response = ProviderResponse {
+            content: "Calling tool".to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        };
+        let tool_calls = vec![ParsedToolCall {
+            tool_name: "unknown_tool".to_string(),
+            arguments: serde_json::json!({}),
+            call_id: None,
+        }];
+
+        let result =
+            verify_response_with_critic(&critic, "test", &response, tool_calls, Vec::new()).await;
+        assert!(result.is_err());
+    }
 }
 
 /// Fallback for platforms without tool support

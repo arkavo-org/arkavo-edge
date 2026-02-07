@@ -40,7 +40,6 @@ reqwest = { workspace = true, features = ["json"] }
 
 # URL handling
 url = { workspace = true }
-urlencoding = "2"
 
 # Time handling
 chrono = { workspace = true }
@@ -52,7 +51,6 @@ rand = { workspace = true }
 
 # Utilities
 uuid = { workspace = true }
-once_cell = { workspace = true }
 regex = { workspace = true }
 
 # For security_fixes.rs

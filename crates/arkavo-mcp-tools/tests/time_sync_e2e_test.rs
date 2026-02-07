@@ -1,3 +1,10 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::disallowed_methods,
+    clippy::needless_collect,
+    clippy::uninlined_format_args
+)]
+
 mod common;
 
 use arkavo_mcp_tools::{

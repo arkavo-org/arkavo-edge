@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 /// Regression test for the try_recv_error() blocking bug
 ///
 /// Bug: DOMCommandBuilder::try_recv_error() was calling the BLOCKING
@@ -61,7 +63,7 @@ async fn test_try_recv_error_does_not_consume_events() {
     // Every 100ms, poll for errors (line 117)
     let mut event_received = false;
     for iteration in 1..=10 {
-        eprintln!("[TEST CLIENT] Event loop iteration {}", iteration);
+        eprintln!("[TEST CLIENT] Event loop iteration {iteration}");
 
         // Line 117 in ui.rs: Poll for console errors
         match commands.try_recv_error().await {
@@ -72,7 +74,7 @@ async fn test_try_recv_error_does_not_consume_events() {
                 // No error (expected)
             }
             Err(e) => {
-                panic!("try_recv_error should not error, got: {}", e);
+                panic!("try_recv_error should not error, got: {e}");
             }
         }
 
@@ -90,14 +92,14 @@ async fn test_try_recv_error_does_not_consume_events() {
                     break;
                 }
                 Ok(Some(other)) => {
-                    eprintln!("[TEST CLIENT] Got other message: {:?}", other);
+                    eprintln!("[TEST CLIENT] Got other message: {other:?}");
                 }
                 Ok(None) => {
                     // No more messages
                     break;
                 }
                 Err(e) => {
-                    panic!("try_recv_message should not error, got: {}", e);
+                    panic!("try_recv_message should not error, got: {e}");
                 }
             }
         }
@@ -160,8 +162,7 @@ async fn test_rapid_try_recv_error_polling() {
         // Verify it's actually non-blocking (should complete quickly)
         assert!(
             elapsed < Duration::from_millis(20),
-            "try_recv_error should be non-blocking, took {:?}",
-            elapsed
+            "try_recv_error should be non-blocking, took {elapsed:?}"
         );
 
         // Check for the event

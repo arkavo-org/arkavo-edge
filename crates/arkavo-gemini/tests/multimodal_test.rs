@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::RestClient;
 use base64::{Engine as _, engine::general_purpose};
 

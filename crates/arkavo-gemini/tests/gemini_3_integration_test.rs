@@ -1,3 +1,5 @@
+#![allow(clippy::collection_is_never_read, clippy::disallowed_methods)]
+
 use arkavo_gemini::{FunctionDeclaration, RestClient};
 use serde_json::{Value, json};
 

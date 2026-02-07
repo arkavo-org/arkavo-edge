@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✓ Registered {} tools\n", tools.len());
     println!("Creating REST client...");
-    println!("Using model: {}\n", model);
+    println!("Using model: {model}\n");
 
     let client = RestClient::new(api_key, &model);
 

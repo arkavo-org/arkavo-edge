@@ -2,6 +2,7 @@ use crate::error::{GeminiError, Result};
 use crate::types::FunctionCall;
 use dashmap::DashMap;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
@@ -19,6 +20,7 @@ pub struct ToolDispatcher {
     tools: DashMap<String, Arc<ToolDefinition>>,
     semaphore: Arc<Semaphore>,
     processed_ids: Arc<DashMap<String, ()>>,
+    in_flight_ids: Arc<DashMap<String, ()>>,
 }
 
 impl ToolDispatcher {
@@ -27,6 +29,7 @@ impl ToolDispatcher {
             tools: DashMap::new(),
             semaphore: Arc::new(Semaphore::new(max_concurrency)),
             processed_ids: Arc::new(DashMap::new()),
+            in_flight_ids: Arc::new(DashMap::new()),
         }
     }
 
@@ -52,18 +55,23 @@ impl ToolDispatcher {
     ///
     /// # Panics
     ///
-    /// Panics if the semaphore is closed unexpectedly.
+    /// Tool handlers may still panic internally; panic join errors are converted
+    /// into per-call `ToolExecutionError` results.
     pub async fn dispatch(&self, calls: Vec<FunctionCall>) -> Vec<(String, Result<Value>)> {
         let mut results = Vec::new();
         let mut tasks = Vec::new();
+        let mut batch_seen_ids = HashSet::new();
 
         for call in calls {
+            if !batch_seen_ids.insert(call.id.clone()) {
+                debug!("Skipping duplicate tool call in batch: {}", call.id);
+                continue;
+            }
+
             if self.is_duplicate(&call.id) {
                 debug!("Skipping duplicate tool call: {}", call.id);
                 continue;
             }
-
-            self.mark_processed(&call.id);
 
             let tool = match self.tools.get(&call.name) {
                 Some(t) => t.clone(),
@@ -80,20 +88,34 @@ impl ToolDispatcher {
                 }
             };
 
+            self.mark_in_flight(&call.id);
             let semaphore = self.semaphore.clone();
             let task = tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.expect("Semaphore closed");
-                let result = Self::execute_tool(&tool, call.args);
-                (call.id, result)
+                let _permit = semaphore.acquire_owned().await.map_err(|e| {
+                    GeminiError::ToolExecutionError(format!("Semaphore closed: {e}"))
+                })?;
+                Self::execute_tool(&tool, call.args)
             });
 
-            tasks.push(task);
+            tasks.push((call.id, task));
         }
 
-        for task in tasks {
-            if let Ok(result) = task.await {
-                results.push(result);
+        for (call_id, task) in tasks {
+            match task.await {
+                Ok(result) => {
+                    if result.is_ok() {
+                        self.mark_processed(&call_id);
+                    }
+                    results.push((call_id.clone(), result));
+                }
+                Err(e) => results.push((
+                    call_id.clone(),
+                    Err(GeminiError::ToolExecutionError(format!(
+                        "Tool call task failed: {e}"
+                    ))),
+                )),
             }
+            self.clear_in_flight(&call_id);
         }
 
         results
@@ -128,11 +150,19 @@ impl ToolDispatcher {
     }
 
     fn is_duplicate(&self, id: &str) -> bool {
-        self.processed_ids.contains_key(id)
+        self.processed_ids.contains_key(id) || self.in_flight_ids.contains_key(id)
     }
 
     fn mark_processed(&self, id: &str) {
         self.processed_ids.insert(id.to_string(), ());
+    }
+
+    fn mark_in_flight(&self, id: &str) {
+        self.in_flight_ids.insert(id.to_string(), ());
+    }
+
+    fn clear_in_flight(&self, id: &str) {
+        self.in_flight_ids.remove(id);
     }
 
     pub fn clear_processed_ids(&self) {
@@ -205,6 +235,15 @@ mod tests {
     async fn test_idempotency() {
         let dispatcher = ToolDispatcher::new(4);
         let id = Uuid::new_v4().to_string();
+        let mut registry = ToolRegistry::new();
+
+        registry.register(
+            "test",
+            "idempotency test tool",
+            serde_json::json!({"type": "object"}),
+            |_args| Ok(serde_json::json!({"ok": true})),
+        );
+        registry.build(&dispatcher);
 
         let calls = vec![
             FunctionCall {
@@ -221,5 +260,117 @@ mod tests {
 
         let results = dispatcher.dispatch(calls).await;
         assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_failed_call_id_can_be_retried() {
+        let dispatcher = ToolDispatcher::new(4);
+        let mut registry = ToolRegistry::new();
+        let call_id = Uuid::new_v4().to_string();
+
+        registry.register(
+            "flaky_tool",
+            "Fails once then succeeds",
+            serde_json::json!({"type": "object"}),
+            {
+                let failed_once = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                move |_args| {
+                    if !failed_once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        return Err(GeminiError::ToolExecutionError(
+                            "transient failure".to_string(),
+                        ));
+                    }
+                    Ok(serde_json::json!({"ok": true}))
+                }
+            },
+        );
+        registry.build(&dispatcher);
+
+        let first = dispatcher
+            .dispatch(vec![FunctionCall {
+                id: call_id.clone(),
+                name: "flaky_tool".to_string(),
+                args: serde_json::json!({}),
+            }])
+            .await;
+        assert_eq!(first.len(), 1);
+        assert!(first[0].1.is_err());
+
+        let second = dispatcher
+            .dispatch(vec![FunctionCall {
+                id: call_id.clone(),
+                name: "flaky_tool".to_string(),
+                args: serde_json::json!({}),
+            }])
+            .await;
+        assert_eq!(second.len(), 1);
+        assert!(second[0].1.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_successful_call_id_is_not_reprocessed() {
+        let dispatcher = ToolDispatcher::new(4);
+        let mut registry = ToolRegistry::new();
+        let call_id = Uuid::new_v4().to_string();
+
+        registry.register(
+            "ok_tool",
+            "Always succeeds",
+            serde_json::json!({"type": "object"}),
+            |_args| Ok(serde_json::json!({"ok": true})),
+        );
+        registry.build(&dispatcher);
+
+        let first = dispatcher
+            .dispatch(vec![FunctionCall {
+                id: call_id.clone(),
+                name: "ok_tool".to_string(),
+                args: serde_json::json!({}),
+            }])
+            .await;
+        assert_eq!(first.len(), 1);
+        assert!(first[0].1.is_ok());
+
+        let second = dispatcher
+            .dispatch(vec![FunctionCall {
+                id: call_id.clone(),
+                name: "ok_tool".to_string(),
+                args: serde_json::json!({}),
+            }])
+            .await;
+        assert_eq!(second.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_returns_error_when_tool_task_panics() {
+        let dispatcher = ToolDispatcher::new(4);
+        let mut registry = ToolRegistry::new();
+        let call_id = Uuid::new_v4().to_string();
+
+        registry.register(
+            "panic_tool",
+            "Panics to test task error handling",
+            serde_json::json!({"type": "object"}),
+            |_args| {
+                panic!("boom");
+            },
+        );
+        registry.build(&dispatcher);
+
+        let calls = vec![FunctionCall {
+            id: call_id.clone(),
+            name: "panic_tool".to_string(),
+            args: serde_json::json!({}),
+        }];
+
+        let results = dispatcher.dispatch(calls).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, call_id);
+        match &results[0].1 {
+            Err(GeminiError::ToolExecutionError(message)) => {
+                assert!(message.contains("task failed"));
+            }
+            other => panic!("expected ToolExecutionError, got {other:?}"),
+        }
     }
 }

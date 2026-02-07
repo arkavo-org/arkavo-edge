@@ -12,9 +12,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // Global store for active debug sessions using tokio Mutex
-lazy_static::lazy_static! {
-    static ref DEBUG_SESSIONS: Arc<Mutex<HashMap<String, DebugSession>>> = Arc::new(Mutex::new(HashMap::new()));
-}
+static DEBUG_SESSIONS: std::sync::LazyLock<Arc<Mutex<HashMap<String, DebugSession>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// Represents an active LLDB debug session
 struct DebugSession {

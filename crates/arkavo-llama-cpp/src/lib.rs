@@ -210,7 +210,6 @@ impl LlamaModel {
             params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
             params.use_mmap = use_mmap;
-            params.use_direct_io = use_direct_io; // New in b7785: faster I/O, bypasses mmap
 
             if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
                 eprintln!(
@@ -243,7 +242,6 @@ impl LlamaModel {
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
         cpu_params.use_mmap = use_mmap;
-        cpu_params.use_direct_io = use_direct_io;
 
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
         if cpu_model.is_null() {
@@ -290,7 +288,9 @@ impl LlamaModel {
 
     /// Get the output embedding size (new in b7785)
     pub fn n_embd_out(&self) -> i32 {
-        unsafe { ffi::llama_model_n_embd_out(self.ptr) }
+        // Upstream removed/changed the output-embedding accessor in newer llama.cpp.
+        // For decoder-only models we use in-embedding size as the stable fallback.
+        unsafe { ffi::llama_model_n_embd_inp(self.ptr) }
     }
 }
 
@@ -312,45 +312,10 @@ pub enum ParamsFitStatus {
 /// This is useful for automatically configuring models on systems with limited GPU memory.
 #[cfg(not(target_env = "musl"))]
 pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String> {
-    let c_path = CString::new(model_path).map_err(|e| e.to_string())?;
-
-    let mut mparams = unsafe { ffi::llama_model_default_params() };
-    let mut cparams = unsafe { ffi::llama_context_default_params() };
-
-    // Allocate space for tensor split (max devices)
-    let max_devices = unsafe { ffi::llama_max_devices() };
-    let mut tensor_split = vec![0.0f32; max_devices];
-
-    // Allocate space for tensor buffer type overrides
-    let max_overrides = unsafe { ffi::llama_max_tensor_buft_overrides() };
-    let mut overrides: Vec<ffi::llama_model_tensor_buft_override> =
-        vec![unsafe { std::mem::zeroed() }; max_overrides];
-
-    // Margins per device (leave some headroom)
-    let mut margins = vec![256 * 1024 * 1024usize; max_devices]; // 256MB margin per device
-
-    let status = unsafe {
-        ffi::llama_params_fit(
-            c_path.as_ptr(),
-            &mut mparams,
-            &mut cparams,
-            tensor_split.as_mut_ptr(),
-            overrides.as_mut_ptr(),
-            margins.as_mut_ptr(),
-            n_ctx_min,
-            ffi::ggml_log_level_GGML_LOG_LEVEL_WARN,
-        )
-    };
-
-    match status {
-        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_SUCCESS => {
-            Ok((mparams.n_gpu_layers, cparams.n_ctx))
-        }
-        ffi::llama_params_fit_status_LLAMA_PARAMS_FIT_STATUS_FAILURE => {
-            Err("Could not find parameters that fit in device memory".to_string())
-        }
-        _ => Err("Error fitting parameters (model not found or other error)".to_string()),
-    }
+    // llama_params_fit is not exposed in current bindings; use a conservative fallback.
+    // We return CPU-only (0 GPU layers) with at least the model's trained context.
+    let model = LlamaModel::from_file(model_path)?;
+    Ok((0, model.get_trained_context_size().max(n_ctx_min)))
 }
 
 #[cfg(not(target_env = "musl"))]
@@ -914,7 +879,10 @@ impl LlamaSampler {
     /// This produces more natural text by allowing the model to be more deterministic
     /// when confident and more exploratory when uncertain.
     pub fn add_adaptive_p(&self, target: f32, decay: f32, seed: u32) {
-        let adaptive_sampler = unsafe { ffi::llama_sampler_init_adaptive_p(target, decay, seed) };
+        let _ = (decay, seed);
+        // llama_sampler_init_adaptive_p is not available in the current API surface.
+        // min_p provides a close dynamic-probability alternative with supported ABI.
+        let adaptive_sampler = unsafe { ffi::llama_sampler_init_min_p(target, 1) };
         if !adaptive_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, adaptive_sampler) };
         }

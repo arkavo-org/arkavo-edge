@@ -4,6 +4,22 @@ use thiserror::Error;
 
 pub mod qr;
 
+fn percent_encode(input: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
 #[derive(Error, Debug)]
 pub enum RegistrationError {
     #[error("QR code generation failed: {0}")]
@@ -75,21 +91,21 @@ impl AgentDescriptor {
         self.validate_endpoint();
 
         let did = self.did_key.as_deref().unwrap_or("");
-        let mut url = format!("arkavo://agent/authorize?did={}", urlencoding::encode(did));
+        let mut url = format!("arkavo://agent/authorize?did={}", percent_encode(did));
 
         if let Some(name) = &self.name {
-            url.push_str(&format!("&name={}", urlencoding::encode(name)));
+            url.push_str(&format!("&name={}", percent_encode(name)));
         }
 
         // Convert http:// endpoint to ws:// for WebSocket JSON-RPC connection
         let ws_endpoint = self.endpoint.replacen("http://", "ws://", 1);
-        url.push_str(&format!("&rpc={}", urlencoding::encode(&ws_endpoint)));
+        url.push_str(&format!("&rpc={}", percent_encode(&ws_endpoint)));
 
         if !self.entitlements.is_empty() {
             let entitlements_str = self.entitlements.join(",");
             url.push_str(&format!(
                 "&entitlements={}",
-                urlencoding::encode(&entitlements_str)
+                percent_encode(&entitlements_str)
             ));
         }
 
@@ -125,7 +141,7 @@ impl AgentDescriptor {
         let mut url = format!("arkavo://agent?public_key={}", self.public_key);
 
         if let Some(mdns) = &self.mdns_service {
-            url.push_str(&format!("&mdns_service={}", urlencoding::encode(mdns)));
+            url.push_str(&format!("&mdns_service={}", percent_encode(mdns)));
         }
 
         url

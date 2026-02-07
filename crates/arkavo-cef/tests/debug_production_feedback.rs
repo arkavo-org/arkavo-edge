@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 /// Quick test to debug the production feedback issue
 use arkavo_cef::UdsTransport;
 use std::time::Duration;
@@ -39,7 +41,7 @@ async fn test_exact_production_feedback_format() {
         buffer.push(status);
 
         // exec_time_ns (line 274-275)
-        let exec_time_ns: u64 = 210875;
+        let exec_time_ns: u64 = 210_875;
         buffer.extend_from_slice(&exec_time_ns.to_le_bytes());
 
         // msg_len (placeholder) (line 277-279)
@@ -104,7 +106,7 @@ async fn test_exact_production_feedback_format() {
             assert_eq!(feedback.message, "OK");
         }
         Err(e) => {
-            panic!("[TEST CLIENT] Failed to deserialize feedback: {}", e);
+            panic!("[TEST CLIENT] Failed to deserialize feedback: {e}");
         }
     }
 

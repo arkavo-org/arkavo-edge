@@ -42,7 +42,6 @@ serde_yaml = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = { workspace = true }
-urlencoding = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
@@ -69,7 +68,6 @@ sqlx = { workspace = true }
 schemars = { workspace = true }
 
 # mDNS dependencies
-gethostname = { workspace = true, optional = true }
 if-addrs = { workspace = true, optional = true }
 
 # Metrics dependencies
@@ -100,7 +98,7 @@ clap = { workspace = true, optional = true }
 default = []
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
-mdns = ["gethostname", "if-addrs"]
+mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf"]
 llama-cpp = ["arkavo-llm/llama-cpp"]

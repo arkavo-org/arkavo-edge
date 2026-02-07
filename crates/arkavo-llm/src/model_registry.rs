@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_registry_default() {
-        let registry: ModelRegistry = Default::default();
+        let registry = ModelRegistry::default();
         assert!(registry.is_empty());
     }
 

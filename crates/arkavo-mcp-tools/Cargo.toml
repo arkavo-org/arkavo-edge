@@ -17,7 +17,6 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-memory = { path = "../arkavo-memory" }
 async-recursion = "1.1"
 async-trait = { workspace = true }
-lazy_static = "1.5"
 uuid = { version = "1.11", features = ["v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,14 +28,13 @@ tracing = { workspace = true }
 
 # For GitHub tools
 base64 = { workspace = true }
-octocrab = "0.38"
+octocrab = "0.48.1"
 
 # For Git tools
 git2 = { workspace = true }
 
 # For web search tool
 reqwest = { workspace = true }
-urlencoding = "2.1"
 
 # For time synchronization
 sntpc = "0.6"

@@ -24,4 +24,4 @@ tokio = { workspace = true, features = ["full"] }
 
 [features]
 default = []
-kas = []
+kas = ["opentdf/kas"]
