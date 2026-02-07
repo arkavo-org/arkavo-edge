@@ -1306,12 +1306,15 @@ int main(int argc, char * argv[]) {
 
 /// Find compiled binary in DerivedData
 fn find_compiled_binary(derived_data: &Path, name: &str) -> Result<PathBuf> {
-    fn walk(dir: &Path, name: &str) -> Option<PathBuf> {
+    fn walk(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
+        if depth == 0 {
+            return None;
+        }
         let entries = std::fs::read_dir(dir).ok()?;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if let Some(found) = walk(&path, name) {
+            if path.is_dir() && !path.is_symlink() {
+                if let Some(found) = walk(&path, name, depth - 1) {
                     return Some(found);
                 }
             } else if path.file_name() == Some(std::ffi::OsStr::new(name))
@@ -1323,6 +1326,6 @@ fn find_compiled_binary(derived_data: &Path, name: &str) -> Result<PathBuf> {
         None
     }
 
-    walk(derived_data, name)
+    walk(derived_data, name, 12)
         .ok_or_else(|| TestError::Mcp(format!("Binary {name} not found in DerivedData")))
 }
