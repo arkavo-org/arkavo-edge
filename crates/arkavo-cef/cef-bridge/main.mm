@@ -131,12 +131,15 @@ int main(int argc, char* argv[]) {
 
     CefMainArgs main_args(argc, argv);
 
-    // Parse socket path for browser process
+    // Parse command-line arguments
     std::string socket_path = "/tmp/arkavo_dom.sock";
+    int debug_port = 0;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--socket" && i + 1 < argc) {
             socket_path = argv[++i];
+        } else if (arg == "--remote-debugging-port" && i + 1 < argc) {
+            debug_port = std::stoi(argv[++i]);
         }
     }
 
@@ -178,6 +181,11 @@ int main(int argc, char* argv[]) {
 #else
     settings.windowless_rendering_enabled = false;
 #endif
+
+    if (debug_port > 0) {
+        settings.remote_debugging_port = debug_port;
+        std::cout << "Remote debugging enabled on port " << debug_port << std::endl;
+    }
 
     // Set unique cache path per instance to avoid singleton lock conflicts
     std::string cache_id = socket_path;

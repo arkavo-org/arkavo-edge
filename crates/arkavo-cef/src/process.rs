@@ -21,13 +21,20 @@ impl CefProcess {
             })?;
         }
 
-        let child = Command::new(renderer_path.as_ref())
-            .arg("--socket")
+        let mut cmd = Command::new(renderer_path.as_ref());
+        cmd.arg("--socket")
             .arg(&socket_path)
             .arg("--disable-gpu")
             .arg("--disable-software-rasterizer")
             .arg("--disable-javascript")
-            .arg("--no-sandbox")
+            .arg("--no-sandbox");
+
+        if let Ok(port) = std::env::var("ARKAVO_CEF_DEBUG_PORT") {
+            cmd.arg("--remote-debugging-port").arg(&port);
+            info!("CEF remote debugging enabled on port {}", port);
+        }
+
+        let child = cmd
             .spawn()
             .map_err(|e| CefError::ProcessStartFailed(e.to_string()))?;
 
