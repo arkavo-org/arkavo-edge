@@ -1,5 +1,6 @@
 #![allow(clippy::disallowed_methods)] // False positive in clippy
 
+mod capabilities;
 mod demo;
 mod schema;
 
@@ -34,6 +35,17 @@ enum Commands {
         #[arg(long, help = "Generate wire protocol schemas")]
         wire: bool,
     },
+    #[command(about = "Browse platform capabilities from specs")]
+    Capabilities {
+        #[arg(long, help = "Show full capability table")]
+        matrix: bool,
+        #[arg(long, help = "Compact list with descriptions")]
+        list: bool,
+        #[arg(long, help = "Filter by name, description, or module")]
+        search: Option<String>,
+        #[arg(help = "Show detail for a specific capability")]
+        name: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +68,14 @@ async fn main() -> Result<()> {
             wire,
         } => {
             schema::generate_schemas(check, config, wire)?;
+        }
+        Commands::Capabilities {
+            matrix,
+            list,
+            search,
+            name,
+        } => {
+            capabilities::run(matrix, list, search, name)?;
         }
     }
 

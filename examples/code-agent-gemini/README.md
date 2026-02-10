@@ -1,5 +1,10 @@
 # Gemini Code Agent Example
 
+<!-- ARKAVO-CAPABILITY: gemini -->
+> **Specs**: [10 scenarios](../../specs/arkavo-edge/gemini.spec.yaml)
+> **Browse**: `cargo xtask capabilities gemini`
+<!-- /ARKAVO-CAPABILITY -->
+
 This example demonstrates Arkavo's native integration with Google Gemini 2.5 Pro and Flash models for advanced coding tasks, with comprehensive benchmarking against Claude Code SDK.
 
 ## Overview

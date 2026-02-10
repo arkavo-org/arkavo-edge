@@ -1,5 +1,10 @@
 # Orchestrator Agent Example
 
+<!-- ARKAVO-CAPABILITY: orchestrator -->
+> **Specs**: [11 scenarios](../../specs/arkavo-edge/orchestrator.spec.yaml)
+> **Browse**: `cargo xtask capabilities orchestrator`
+<!-- /ARKAVO-CAPABILITY -->
+
 This example demonstrates an AI Orchestrator Agent that coordinates work across a mesh of specialized agents.
 
 ## Architecture

@@ -1,5 +1,10 @@
 # Fleet Immunity: Black Ice Scenario
 
+<!-- ARKAVO-CAPABILITY: gossip-protocol -->
+> **Specs**: [8 scenarios](../../specs/arkavo-edge/gossip-protocol.spec.yaml)
+> **Browse**: `cargo xtask capabilities gossip-protocol`
+<!-- /ARKAVO-CAPABILITY -->
+
 This example demonstrates a self-healing artificial immune system using autonomous delivery rovers that learn from crashes and share safety lessons across the fleet in real-time.
 
 ## The Story

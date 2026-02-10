@@ -1,3 +1,6 @@
+[alias]
+xtask = "run --package xtask --"
+
 # Cargo build configuration for faster compilation
 
 [build]

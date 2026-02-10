@@ -1,5 +1,10 @@
 # Secure Agent
 
+<!-- ARKAVO-CAPABILITY: network-security -->
+> **Specs**: [17 scenarios](../../specs/arkavo-edge/network-security.spec.yaml)
+> **Browse**: `cargo xtask capabilities network-security`
+<!-- /ARKAVO-CAPABILITY -->
+
 Demonstrates preflight policy configuration for input moderation.
 
 ## What You'll Learn

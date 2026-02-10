@@ -1,5 +1,10 @@
 # Claude Agent SDK Integration
 
+<!-- ARKAVO-CAPABILITY: mcp-claude -->
+> **Specs**: [9 scenarios](../../specs/arkavo-edge/mcp-claude.spec.yaml)
+> **Browse**: `cargo xtask capabilities mcp-claude`
+<!-- /ARKAVO-CAPABILITY -->
+
 This example demonstrates Arkavo's native Rust integration with the Claude Agent SDK (`anthropic-agent-sdk`).
 
 ## Architecture
