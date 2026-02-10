@@ -105,8 +105,12 @@ impl AgUiGateway {
         tokio::spawn(async move {
             println!("AG-UI: Starting mDNS discovery...");
             match crate::gateway_mdns::run_mdns_discovery(
-                agents_clone, agent_connections_for_mdns, telemetry_tx_for_mdns,
-            ).await {
+                agents_clone,
+                agent_connections_for_mdns,
+                telemetry_tx_for_mdns,
+            )
+            .await
+            {
                 Ok(_) => println!("AG-UI: mDNS discovery completed"),
                 Err(e) => eprintln!("AG-UI: mDNS discovery error: {e}"),
             }
@@ -123,7 +127,8 @@ impl AgUiGateway {
                 interval.tick().await;
                 let snapshot = sampler.sample_metrics(&metrics_collector);
                 let _ = telemetry_tx_for_metrics
-                    .send(TelemetryEvent::MetricsSnapshot { snapshot }).await;
+                    .send(TelemetryEvent::MetricsSnapshot { snapshot })
+                    .await;
             }
         });
 
@@ -131,12 +136,18 @@ impl AgUiGateway {
         {
             use arkavo_observability::health_reporter::HealthRegistry;
             let registry = HealthRegistry::global();
-            registry.register(Arc::new(crate::health::AguiHealthReporter::new())).await;
+            registry
+                .register(Arc::new(crate::health::AguiHealthReporter::new()))
+                .await;
             use arkavo_router::health::RouterHealthReporter;
             let cc = Arc::new(arkavo_router::ConnectivityChecker::new());
-            registry.register(Arc::new(RouterHealthReporter::new(cc))).await;
+            registry
+                .register(Arc::new(RouterHealthReporter::new(cc)))
+                .await;
             use arkavo_ui_generator::health::GlobalHealthReporterWrapper;
-            registry.register(Arc::new(GlobalHealthReporterWrapper)).await;
+            registry
+                .register(Arc::new(GlobalHealthReporterWrapper))
+                .await;
             println!("AG-UI: Health reporters registered");
         }
 
@@ -149,7 +160,8 @@ impl AgUiGateway {
             let storage = Arc::new(MemoryStorage::new().await?);
             let tool_registry = Arc::new(ToolRegistry::new(storage));
             let health_monitor = crate::health_monitor::HealthMonitor::new(tool_registry)
-                .await?.with_interval(30);
+                .await?
+                .with_interval(30);
             let _health_task = health_monitor.start(health_alert_tx.clone()).await?;
             println!("AG-UI: Health monitor started (30s interval)");
         }
@@ -163,7 +175,8 @@ impl AgUiGateway {
             let _collector_task = collector.start(command_health_tx).await?;
             let timeout_handler = TimeoutHandler::new().await?;
             let _timeout_task = timeout_handler
-                .start(command_health_rx, health_alert_tx.clone()).await;
+                .start(command_health_rx, health_alert_tx.clone())
+                .await;
             println!("AG-UI: Command health collector started");
         }
 
@@ -184,7 +197,10 @@ impl AgUiGateway {
         // Monitor agent changes
         spawn_agent_monitor(self.connections.clone(), discovered_agents.clone());
 
-        let telemetry_rx = self.telemetry_rx.take().expect("telemetry_rx already taken");
+        let telemetry_rx = self
+            .telemetry_rx
+            .take()
+            .expect("telemetry_rx already taken");
 
         let state = AppState {
             connections: self.connections.clone(),
@@ -200,12 +216,27 @@ impl AgUiGateway {
 
         let app = Router::new()
             .route("/", get(crate::gateway_static::index_handler))
-            .route("/static/*path", get(crate::gateway_static::static_file_handler))
+            .route(
+                "/static/*path",
+                get(crate::gateway_static::static_file_handler),
+            )
             .route("/ws", get(crate::gateway_ws::websocket_handler))
-            .route("/agent/:id", post(crate::gateway_proxy::agent_proxy_handler))
-            .route("/api/dataflow/*path", post(crate::gateway_proxy::dataflow_handler))
-            .route("/telemetry", get(crate::gateway_status::telemetry_websocket_handler))
-            .route("/debug", get(crate::gateway_status::debug_websocket_handler))
+            .route(
+                "/agent/:id",
+                post(crate::gateway_proxy::agent_proxy_handler),
+            )
+            .route(
+                "/api/dataflow/*path",
+                post(crate::gateway_proxy::dataflow_handler),
+            )
+            .route(
+                "/telemetry",
+                get(crate::gateway_status::telemetry_websocket_handler),
+            )
+            .route(
+                "/debug",
+                get(crate::gateway_status::debug_websocket_handler),
+            )
             .with_state(state);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
@@ -230,7 +261,10 @@ fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, ConnectionIn
 
             let storage = match MemoryStorage::new().await {
                 Ok(s) => Arc::new(s),
-                Err(e) => { eprintln!("Failed to init storage for health: {e}"); continue; }
+                Err(e) => {
+                    eprintln!("Failed to init storage for health: {e}");
+                    continue;
+                }
             };
             let registry = ToolRegistry::new(storage);
             let tools = registry.list_tools();
@@ -241,10 +275,13 @@ fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, ConnectionIn
             let conns = connections.read().await;
 
             let system_status = SystemStatus {
-                uptime: format!("{} seconds",
+                uptime: format!(
+                    "{} seconds",
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default().as_secs()),
+                        .unwrap_or_default()
+                        .as_secs()
+                ),
                 memory_usage: "N/A".to_string(),
                 active_connections: conns.len() as u32,
             };
@@ -255,24 +292,35 @@ fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, ConnectionIn
             };
 
             if let Ok(router) = LlmRouter::new().await {
-                let llms = router.get_available_llms().into_iter()
+                let llms = router
+                    .get_available_llms()
+                    .into_iter()
                     .map(|info| LlmStatus {
-                        name: info.name, provider: info.provider,
-                        connected: info.available, model: info.model, requests_today: 0,
-                    }).collect();
+                        name: info.name,
+                        provider: info.provider,
+                        connected: info.available,
+                        model: info.model,
+                        requests_today: 0,
+                    })
+                    .collect();
 
                 let health_data = HealthData {
                     status: format!("{:?}", overall_health),
-                    components: health_reports.iter().map(|r| ComponentHealth {
-                        component: r.component.clone(),
-                        status: format!("{:?}", r.status),
-                        message: r.message.clone(),
-                    }).collect(),
+                    components: health_reports
+                        .iter()
+                        .map(|r| ComponentHealth {
+                            component: r.component.clone(),
+                            status: format!("{:?}", r.status),
+                            message: r.message.clone(),
+                        })
+                        .collect(),
                 };
 
                 let status_event = AgUiEvent::StatusUpdate {
-                    system: system_status, mcp_tools: mcp_tools_status,
-                    llms, health: health_data,
+                    system: system_status,
+                    mcp_tools: mcp_tools_status,
+                    llms,
+                    health: health_data,
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
                 for (_, conn_info) in conns.iter() {
@@ -293,23 +341,39 @@ fn spawn_agent_monitor(
         loop {
             interval.tick().await;
             let agents_list = agents.read().await;
-            let current: std::collections::HashSet<String> = agents_list.iter()
+            let current: std::collections::HashSet<String> = agents_list
+                .iter()
                 .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
                 .collect();
 
             for agent_id in current.difference(&previous) {
-                if let Some(agent) = agents_list.iter()
+                if let Some(agent) = agents_list
+                    .iter()
                     .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(agent_id.as_str()))
                 {
                     let event = AgUiEvent::AgentDiscovered {
                         agent_id: agent_id.clone(),
-                        endpoint: agent.get("endpoint").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        purpose: agent.get("purpose").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        model: agent.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        endpoint: agent
+                            .get("endpoint")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        purpose: agent
+                            .get("purpose")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        model: agent
+                            .get("model")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     let conns = connections.read().await;
-                    for (_, ci) in conns.iter() { let _ = ci._ws_tx.send(event.clone()).await; }
+                    for (_, ci) in conns.iter() {
+                        let _ = ci._ws_tx.send(event.clone()).await;
+                    }
                 }
             }
 
@@ -320,7 +384,9 @@ fn spawn_agent_monitor(
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
                 let conns = connections.read().await;
-                for (_, ci) in conns.iter() { let _ = ci._ws_tx.send(event.clone()).await; }
+                for (_, ci) in conns.iter() {
+                    let _ = ci._ws_tx.send(event.clone()).await;
+                }
             }
 
             previous = current;

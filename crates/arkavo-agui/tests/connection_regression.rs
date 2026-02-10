@@ -15,7 +15,10 @@ async fn test_chat_send_accepts_void_response() {
     // The old bug: String cannot deserialize from null
     let null_json = serde_json::Value::Null;
     let result: Result<String, _> = serde_json::from_value(null_json);
-    assert!(result.is_err(), "String must NOT deserialize from null JSON");
+    assert!(
+        result.is_err(),
+        "String must NOT deserialize from null JSON"
+    );
 }
 
 /// Regression: AgentConnection.connect() built WS URL as ws://{endpoint}/ws
@@ -52,12 +55,7 @@ async fn test_mdns_blocking_to_async_bridge() {
 
     // Async consumer receives all messages without blocking the runtime
     let mut received = Vec::new();
-    while let Ok(msg) = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        rx.recv(),
-    )
-    .await
-    {
+    while let Ok(msg) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
         if let Some(msg) = msg {
             received.push(msg);
         } else {

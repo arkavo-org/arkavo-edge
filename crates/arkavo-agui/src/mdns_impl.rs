@@ -93,7 +93,10 @@ pub mod mdns {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        println!("AG-UI: Discovered service: {} at {}:{}", service_name, host, port);
+        println!(
+            "AG-UI: Discovered service: {} at {}:{}",
+            service_name, host, port
+        );
 
         // Extract agent information from properties
         let properties = info.get_properties();
@@ -122,7 +125,9 @@ pub mod mdns {
             if let Some(ip_prop) = properties.get("ip") {
                 ip_prop.val_str().to_string()
             } else {
-                println!("AG-UI: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1");
+                println!(
+                    "AG-UI: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1"
+                );
                 "127.0.0.1".to_string()
             }
         } else {
@@ -167,7 +172,10 @@ pub mod mdns {
                 ));
 
                 if let Err(e) = connection.connect().await {
-                    println!("AG-UI: Failed to connect to agent {}: {}", agent_id_clone, e);
+                    println!(
+                        "AG-UI: Failed to connect to agent {}: {}",
+                        agent_id_clone, e
+                    );
                 } else {
                     println!("AG-UI: Connected to agent: {}", agent_id_clone);
                     let mut connections = agent_connections_clone.write().await;

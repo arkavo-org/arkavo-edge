@@ -113,8 +113,7 @@ async fn dispatch_debug_command(
                 let event = AgUiEvent::StateDelta {
                     patch: vec![JsonPatch::Add {
                         path: "/sessions".to_string(),
-                        value: serde_json::to_value(sessions)
-                            .unwrap_or(serde_json::Value::Null),
+                        value: serde_json::to_value(sessions).unwrap_or(serde_json::Value::Null),
                     }],
                     event_id: format!("sessions-{}", uuid::Uuid::new_v4()),
                 };
@@ -126,8 +125,7 @@ async fn dispatch_debug_command(
             let event = AgUiEvent::StateDelta {
                 patch: vec![JsonPatch::Add {
                     path: "/active_sessions".to_string(),
-                    value: serde_json::to_value(sessions)
-                        .unwrap_or(serde_json::Value::Null),
+                    value: serde_json::to_value(sessions).unwrap_or(serde_json::Value::Null),
                 }],
                 event_id: format!("active-sessions-{}", uuid::Uuid::new_v4()),
             };
@@ -208,14 +206,28 @@ async fn dispatch_debug_command(
 #[derive(serde::Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DebugCommand {
-    SubscribeSession { session_id: String },
-    UnsubscribeSession { session_id: String },
-    GetRecentSessions { limit: usize },
+    SubscribeSession {
+        session_id: String,
+    },
+    UnsubscribeSession {
+        session_id: String,
+    },
+    GetRecentSessions {
+        limit: usize,
+    },
     GetActiveSessions,
-    AttachToAgent { agent_id: String },
-    DetachFromAgent { agent_id: String },
-    StartRecording { session_id: String },
-    StopRecording { session_id: String },
+    AttachToAgent {
+        agent_id: String,
+    },
+    DetachFromAgent {
+        agent_id: String,
+    },
+    StartRecording {
+        session_id: String,
+    },
+    StopRecording {
+        session_id: String,
+    },
     GetSessionEvents {
         session_id: String,
         limit: Option<usize>,
