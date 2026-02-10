@@ -8,7 +8,6 @@
 ## Runtime Configuration
 
 ```yaml
-model: claude-sonnet-4-20250514
 listen: 0.0.0.0:8340
 mdns: true
 ```
@@ -62,7 +61,6 @@ The orchestrator needs these tools to coordinate the mesh:
 
 ```yaml
 purpose: "Intelligent task routing and coordination for the Arkavo agent mesh"
-model: claude-sonnet-4-20250514
 listen: 0.0.0.0:8340
 mdns: true
 ```

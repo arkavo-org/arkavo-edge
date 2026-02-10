@@ -43,20 +43,15 @@ void ArkavoApp::OnBeforeCommandLineProcessing(
     // Enable single-process mode (avoids multi-process IPC issues)
     command_line->AppendSwitch("single-process");
 
-    // Single-process mode: software rendering via SwiftShader
-    command_line->AppendSwitchWithValue("use-angle", "swiftshader");
-    command_line->AppendSwitchWithValue("use-gl", "swiftshader");
-
-    // Disable GPU-accelerated features (software rendering only)
+    // Disable GPU entirely to avoid SwiftShader crashes on macOS ARM64
+    command_line->AppendSwitch("disable-gpu");
     command_line->AppendSwitch("disable-gpu-compositing");
+    command_line->AppendSwitch("disable-software-rasterizer");
 
-    // Reduce compositor/gpu paths for software rendering
+    // Disable GPU-accelerated features
     command_line->AppendSwitchWithValue("disable-features",
         "VizDisplayCompositor,UseSkiaRenderer,CanvasOopRasterization,"
         "Accelerated2dCanvas,ThreadedDisplayCompositor");
-
-    // OSR-specific: enable frame scheduling for windowless rendering
-    command_line->AppendSwitch("enable-begin-frame-scheduling");
 
     // Disable keychain/password manager to prevent login keychain prompts
     command_line->AppendSwitch("use-mock-keychain");

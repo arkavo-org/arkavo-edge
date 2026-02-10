@@ -186,7 +186,7 @@ impl AgentConnection {
     pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         *self.status.write().await = ConnectionStatus::Connecting;
 
-        let url = format!("ws://{}/ws", self.endpoint);
+        let url = format!("ws://{}", self.endpoint);
         println!("Connecting to agent {} at {}", self.agent_id, url);
 
         let client = WsClientBuilder::default()
@@ -616,7 +616,7 @@ impl AgentConnection {
 
         // Send the message to the session
         client
-            .request::<String, _>("chat_send", rpc_params![session_id, user_message])
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
             .await
             .map_err(|e| format!("Failed to send message: {e}"))?;
 

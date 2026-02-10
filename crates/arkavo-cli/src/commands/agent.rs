@@ -166,7 +166,6 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
 ## Runtime Configuration
 
 ```yaml
-model: ollama://127.0.0.1:11434/qwen3:0.6b
 listen: 0.0.0.0:8342
 mdns: true
 ```
@@ -216,7 +215,6 @@ Customize the following values for your agent:
 
 ```yaml
 purpose: "Describe your agent's primary purpose and goals here"
-model: ollama://127.0.0.1:11434/qwen3:0.6b
 listen: 0.0.0.0:8342
 mdns: true
 ```
@@ -529,8 +527,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 current_agent = Some(AgentConfig {
                     name,
                     purpose: String::new(),
-                    model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                    listen: "0.0.0.0:0".to_string(),                          // Dynamic port
+                    model: String::new(),
+                    listen: "0.0.0.0:0".to_string(),
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
@@ -579,8 +577,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     current_agent = Some(AgentConfig {
                         name: section_name.clone(),
                         purpose: String::new(),
-                        model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
-                        listen: "0.0.0.0:0".to_string(),                          // Dynamic port
+                        model: String::new(),
+                        listen: "0.0.0.0:0".to_string(),
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),

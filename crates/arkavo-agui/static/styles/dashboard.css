@@ -1,0 +1,279 @@
+/* Budget panel */
+.budget-gauge {
+    display: flex;
+    justify-content: center;
+    padding: 20px 0;
+}
+
+.budget-gauge svg { width: 180px; height: 100px; }
+
+.gauge-track { fill: none; stroke: var(--bg-tertiary); stroke-width: 12; }
+.gauge-fill { fill: none; stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset 0.5s; }
+.gauge-fill.healthy { stroke: var(--success); }
+.gauge-fill.warning { stroke: var(--warning); }
+.gauge-fill.critical { stroke: #f97316; }
+.gauge-fill.exhausted { stroke: var(--error); }
+
+.gauge-text {
+    font-size: 22px;
+    font-weight: 700;
+    fill: var(--text-primary);
+    text-anchor: middle;
+}
+
+.gauge-label {
+    font-size: 10px;
+    fill: var(--text-secondary);
+    text-anchor: middle;
+}
+
+/* Stats grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.stat-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.stat-card-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+}
+
+.stat-card-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stat-card-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+/* Cost breakdown table */
+.cost-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 16px;
+}
+
+.cost-table th {
+    text-align: left;
+    padding: 8px 10px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+
+.cost-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cost-table td.mono { font-family: monospace; }
+
+/* Split bar */
+.split-bar {
+    height: 24px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    margin-bottom: 16px;
+}
+
+.split-bar-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    transition: width 0.3s;
+}
+
+.split-bar-segment.local { background: var(--success); color: #000; }
+.split-bar-segment.cloud { background: var(--accent); color: #000; }
+
+.split-bar-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.split-bar-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.split-bar-legend .local-label::before { background: var(--success); }
+.split-bar-legend .cloud-label::before { background: var(--accent); }
+
+/* Recommendations list */
+.recommendations-list {
+    list-style: none;
+    margin-bottom: 16px;
+}
+
+.recommendations-list li {
+    padding: 8px 10px;
+    font-size: 12px;
+    border-left: 3px solid var(--accent);
+    margin-bottom: 6px;
+    background: var(--bg-secondary);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Budget alert banner */
+.budget-alert {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 16px;
+    font-weight: 500;
+}
+
+.budget-alert.warning { background: rgba(251, 191, 36, 0.15); border: 1px solid var(--warning); color: var(--warning); }
+.budget-alert.critical { background: rgba(249, 115, 22, 0.15); border: 1px solid #f97316; color: #f97316; }
+.budget-alert.exhausted { background: rgba(239, 68, 68, 0.15); border: 1px solid var(--error); color: var(--error); }
+
+/* Section title used across dashboard panels */
+.section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin: 16px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Health panel */
+.health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.health-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.health-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.health-card-name { font-weight: 600; font-size: 13px; }
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-dot.Healthy { background: var(--success); }
+.status-dot.Warning { background: var(--warning); }
+.status-dot.Unhealthy { background: var(--error); }
+.status-dot.Unknown { background: var(--text-secondary); }
+
+.health-card-msg { font-size: 11px; color: var(--text-secondary); }
+
+/* LLM list */
+.llm-list { margin-bottom: 16px; }
+
+.llm-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.llm-connected { color: var(--success); }
+.llm-disconnected { color: var(--error); }
+
+.llm-name { font-weight: 600; flex: 1; }
+.llm-provider { color: var(--text-secondary); }
+
+/* System info */
+.sys-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.sys-info-label { color: var(--text-secondary); }
+.sys-info-value { color: var(--text-primary); font-family: monospace; }
+
+/* Router panel */
+.stacked-bar {
+    height: 32px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    margin-bottom: 8px;
+}
+
+.stacked-bar-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 30px;
+    transition: width 0.3s;
+}
+
+.stacked-bar-segment.local { background: var(--success); color: #000; }
+.stacked-bar-segment.cloud { background: var(--accent); color: #000; }
+
+/* Decision log */
+.decision-log {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.decision-item {
+    padding: 8px 10px;
+    border-left: 3px solid var(--accent);
+    margin-bottom: 6px;
+    font-size: 12px;
+    background: var(--bg-secondary);
+    border-radius: 0 4px 4px 0;
+}
+
+.decision-time { font-size: 10px; color: var(--text-secondary); }
+.decision-model { font-weight: 600; }
+.decision-reason { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+.decision-cost { font-family: monospace; color: var(--warning); font-size: 11px; }
