@@ -23,24 +23,19 @@ pub mod mdns {
         let receiver = mdns.browse(service_type)?;
         println!("AG-UI: mDNS browsing for {service_type}");
 
-        let agents_clone = agents.clone();
-        let connections_clone = agent_connections.clone();
-        let telemetry_clone = telemetry_tx.clone();
+        // Channel bridges blocking mDNS recv thread → async handler
+        let (info_tx, mut info_rx) = mpsc::channel::<ServiceInfo>(16);
 
-        // Use spawn_blocking to avoid blocking the tokio async runtime
+        // Blocking thread: receive mDNS events, forward resolved services
         tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
             loop {
-                match receiver.recv_timeout(Duration::from_secs(5)) {
-                    Ok(event) => match event {
+                if let Ok(event) = receiver.recv_timeout(Duration::from_secs(5)) {
+                    match event {
                         ServiceEvent::ServiceResolved(info) => {
                             println!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
-                            rt.block_on(handle_service_discovered(
-                                info,
-                                agents_clone.clone(),
-                                connections_clone.clone(),
-                                telemetry_clone.clone(),
-                            ));
+                            if info_tx.blocking_send(info).is_err() {
+                                break; // Receiver dropped
+                            }
                         }
                         ServiceEvent::ServiceFound(_, fullname) => {
                             println!("AG-UI: mDNS ServiceFound: {fullname}");
@@ -54,14 +49,22 @@ pub mod mdns {
                         ServiceEvent::SearchStopped(stype) => {
                             println!("AG-UI: mDNS SearchStopped: {stype}");
                         }
-                        other => {
-                            println!("AG-UI: mDNS other event: {other:?}");
-                        }
-                    },
-                    Err(_) => {
-                        // Timeout — normal, keep polling
+                        _ => {}
                     }
                 }
+            }
+        });
+
+        // Async task: handle discovered services without blocking
+        tokio::spawn(async move {
+            while let Some(info) = info_rx.recv().await {
+                handle_service_discovered(
+                    info,
+                    agents.clone(),
+                    agent_connections.clone(),
+                    telemetry_tx.clone(),
+                )
+                .await;
             }
         });
 
