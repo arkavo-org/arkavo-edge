@@ -2,16 +2,38 @@
 
 Learn to build AI agent systems through hands-on examples.
 
+> 🎯 **New to Arkavo?** Try the [Capability Browser](../CAPABILITIES.md) to find what you need:
+> `cargo xtask capabilities` - Interactive browser
+> `cargo xtask capabilities --matrix` - Quick overview
+
 ## Quick Start (5 minutes)
 
 ```bash
 # 1. Build Arkavo (from repo root)
 cargo build
 
-# 2. Run your first agent
+# 2. Browse capabilities interactively
+cargo xtask capabilities
+
+# 3. Or run your first agent directly
 cd examples/01-hello-world
 ./run.sh
 ```
+
+## Capability Map
+
+Each example demonstrates specific Arkavo capabilities. Find by use case:
+
+| I want to... | Start Here | Key Capabilities |
+|--------------|------------|------------------|
+| Build a coding assistant | [code-agent-claude](code-agent-claude/) | Core Agent, MCP Tools |
+| Create a multi-agent team | [software-development-simple](software-development-simple/) | Multi-Agent Mesh, A2A Protocol |
+| Add learning to agents | [fleet-immunity](fleet-immunity/) | Gossip Learning |
+| Use external tools | [minecraft](minecraft/) | MCP Tools |
+| Secure my agents | [secure-agent](secure-agent/) | Preflight Policies |
+| Build production system | [software-development-lifecycle](software-development-lifecycle/) | HRM, Orchestrator |
+
+See [CAPABILITIES.md](../CAPABILITIES.md) for the full capability matrix.
 
 ## Learning Path
 

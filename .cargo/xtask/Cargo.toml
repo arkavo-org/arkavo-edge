@@ -17,3 +17,6 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 schemars = "0.8"
 serde_yaml = { workspace = true }
+regex = { workspace = true }
+walkdir = "2.4"
+colored = "2.1"

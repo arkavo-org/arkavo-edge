@@ -1,0 +1,401 @@
+#![allow(dead_code)] // Fields/methods used by spec_test_cmds
+use anyhow::{Context, Result};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Spec {
+    pub feature: String,
+    pub module: String,
+    pub version: String,
+    #[serde(default)]
+    pub invariants: Vec<String>,
+    pub scenarios: Vec<Scenario>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Scenario {
+    pub id: String,
+    pub name: String,
+    pub criticality: Criticality,
+    #[serde(default)]
+    pub given: Vec<String>,
+    pub when: String,
+    #[serde(default)]
+    pub then: Vec<String>,
+    #[serde(default)]
+    pub refs: Vec<String>,
+    #[serde(default)]
+    pub edge_cases: Vec<EdgeCase>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EdgeCase {
+    pub condition: String,
+    pub expected: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Criticality {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+impl Criticality {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+
+    pub fn priority(&self) -> u8 {
+        match self {
+            Self::Critical => 4,
+            Self::High => 3,
+            Self::Medium => 2,
+            Self::Low => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Test {
+    pub name: String,
+    pub file: PathBuf,
+    pub line: usize,
+    pub scenarios_covered: Vec<String>,
+    pub is_async: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScenarioCoverage {
+    pub scenario: Scenario,
+    pub tests: Vec<Test>,
+    pub status: CoverageStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverageStatus {
+    Covered,
+    Partial,
+    Missing,
+}
+
+impl CoverageStatus {
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            Self::Covered => "🟢",
+            Self::Partial => "🟡",
+            Self::Missing => "🔴",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CoverageReport {
+    pub specs: Vec<SpecCoverage>,
+    pub total_scenarios: usize,
+    pub covered_scenarios: usize,
+    pub partial_scenarios: usize,
+    pub missing_scenarios: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpecCoverage {
+    pub spec: Spec,
+    pub file: PathBuf,
+    pub scenarios: Vec<ScenarioCoverage>,
+}
+
+impl CoverageReport {
+    pub fn coverage_percentage(&self) -> f64 {
+        if self.total_scenarios == 0 {
+            return 0.0;
+        }
+        (self.covered_scenarios as f64 / self.total_scenarios as f64) * 100.0
+    }
+}
+
+// --- SpecParser ---
+
+pub struct SpecParser;
+
+impl SpecParser {
+    pub fn parse_file(path: &Path) -> Result<Spec> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("reading spec: {}", path.display()))?;
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("parsing spec YAML: {}", path.display()))
+    }
+
+    pub fn parse_all_specs(specs_dir: &Path) -> Result<Vec<(PathBuf, Spec)>> {
+        let mut specs = Vec::new();
+        for entry in std::fs::read_dir(specs_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                match Self::parse_file(&path) {
+                    Ok(spec) => specs.push((path, spec)),
+                    Err(e) => eprintln!("Warning: skipping {}: {e}", path.display()),
+                }
+            }
+        }
+        Ok(specs)
+    }
+}
+
+// --- TestDiscovery ---
+
+pub struct TestDiscovery {
+    scenario_pattern: Regex,
+    test_pattern: Regex,
+}
+
+impl TestDiscovery {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            scenario_pattern: Regex::new(r"Covers\s+([A-Z]+-\d+)")?,
+            test_pattern: Regex::new(r"(async\s+)?fn\s+(test_\w+)")?,
+        })
+    }
+
+    pub fn discover_tests(&self, crates_dir: &Path) -> Result<Vec<Test>> {
+        let mut tests = Vec::new();
+        for entry in WalkDir::new(crates_dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                if let Ok(file_tests) = self.parse_test_file(path) {
+                    tests.extend(file_tests);
+                }
+            }
+        }
+        Ok(tests)
+    }
+
+    fn parse_test_file(&self, path: &Path) -> Result<Vec<Test>> {
+        let content = std::fs::read_to_string(path)?;
+        let mut tests = Vec::new();
+        let mut current_scenarios = Vec::new();
+
+        for (line_num, line) in content.lines().enumerate() {
+            for cap in self.scenario_pattern.captures_iter(line) {
+                current_scenarios.push(cap[1].to_string());
+            }
+            if let Some(cap) = self.test_pattern.captures(line) {
+                tests.push(Test {
+                    name: cap[2].to_string(),
+                    file: path.to_path_buf(),
+                    line: line_num + 1,
+                    scenarios_covered: current_scenarios.clone(),
+                    is_async: cap.get(1).is_some(),
+                });
+                current_scenarios.clear();
+            }
+        }
+        Ok(tests)
+    }
+}
+
+// --- CoverageAnalyzer ---
+
+pub struct CoverageAnalyzer;
+
+impl CoverageAnalyzer {
+    pub fn analyze(specs: Vec<(PathBuf, Spec)>, tests: Vec<Test>) -> CoverageReport {
+        let mut tests_by_scenario: HashMap<String, Vec<Test>> = HashMap::new();
+        for test in tests {
+            for scenario in &test.scenarios_covered {
+                tests_by_scenario
+                    .entry(scenario.clone())
+                    .or_default()
+                    .push(test.clone());
+            }
+        }
+
+        let mut spec_coverages = Vec::new();
+        let (mut total, mut covered, mut partial, mut missing) = (0, 0, 0, 0);
+
+        for (file, spec) in specs {
+            let mut scenario_coverages = Vec::new();
+            for scenario in &spec.scenarios {
+                total += 1;
+                let scenario_tests = tests_by_scenario
+                    .get(&scenario.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let status = match scenario_tests.len() {
+                    0 => {
+                        missing += 1;
+                        CoverageStatus::Missing
+                    }
+                    1 => {
+                        partial += 1;
+                        CoverageStatus::Partial
+                    }
+                    _ => {
+                        covered += 1;
+                        CoverageStatus::Covered
+                    }
+                };
+                scenario_coverages.push(ScenarioCoverage {
+                    scenario: scenario.clone(),
+                    tests: scenario_tests,
+                    status,
+                });
+            }
+            spec_coverages.push(SpecCoverage {
+                spec,
+                file,
+                scenarios: scenario_coverages,
+            });
+        }
+
+        CoverageReport {
+            specs: spec_coverages,
+            total_scenarios: total,
+            covered_scenarios: covered,
+            partial_scenarios: partial,
+            missing_scenarios: missing,
+        }
+    }
+}
+
+// --- TestGenerator ---
+
+pub struct TestGenerator;
+
+impl TestGenerator {
+    pub fn generate_stub(spec: &Spec, scenario: &Scenario) -> String {
+        let fn_name = Self::scenario_to_fn_name(scenario);
+        let module = spec.module.replace("::", "_");
+        format!(
+            r#"/// Covers {id}: {name}
+/// Spec: specs/arkavo-edge/{module}.spec.yaml
+/// Criticality: {crit}
+#[tokio::test]
+async fn {fn_name}() {{
+    // TODO: Arrange - Set up preconditions
+    // Given: {given}
+
+    // TODO: Act - Execute the action
+    // When: {when}
+
+    // TODO: Assert - Verify expected outcomes
+    // Then: {then}
+
+    unimplemented!("Test stub for {id} - implement based on spec");
+}}
+"#,
+            id = scenario.id,
+            name = scenario.name,
+            module = module,
+            crit = scenario.criticality.as_str(),
+            given = scenario.given.join(", "),
+            when = scenario.when,
+            then = scenario.then.join(", "),
+        )
+    }
+
+    fn scenario_to_fn_name(scenario: &Scenario) -> String {
+        let sanitized = scenario
+            .name
+            .to_lowercase()
+            .replace(' ', "_")
+            .replace(|c: char| !c.is_alphanumeric() && c != '_', "");
+        format!(
+            "test_{}_{}",
+            scenario.id.to_lowercase().replace('-', "_"),
+            sanitized
+        )
+    }
+
+    pub fn generate_full_module(spec: &Spec, uncovered_only: bool, tests: &[Test]) -> String {
+        let mut output = format!(
+            "//! Auto-generated tests for {f}\n//! Module: {m}\n\n",
+            f = spec.feature,
+            m = spec.module,
+        );
+        let covered: HashSet<String> = tests
+            .iter()
+            .flat_map(|t| t.scenarios_covered.clone())
+            .collect();
+        for scenario in &spec.scenarios {
+            if uncovered_only && covered.contains(&scenario.id) {
+                continue;
+            }
+            output.push_str(&Self::generate_stub(spec, scenario));
+            output.push('\n');
+        }
+        output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_spec() {
+        let yaml = r#"
+feature: Test Feature
+module: test_module
+version: 0.1.0
+invariants:
+  - Test invariant
+scenarios:
+  - id: TEST-001
+    name: Test scenario
+    criticality: high
+    given:
+      - System is ready
+    when: Action is triggered
+    then:
+      - Expected result occurs
+"#;
+        let spec: Spec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(spec.feature, "Test Feature");
+        assert_eq!(spec.scenarios.len(), 1);
+        assert_eq!(spec.scenarios[0].id, "TEST-001");
+    }
+
+    #[test]
+    fn test_coverage_status_and_criticality() {
+        assert_eq!(CoverageStatus::Covered.emoji(), "🟢");
+        assert_eq!(CoverageStatus::Partial.emoji(), "🟡");
+        assert_eq!(CoverageStatus::Missing.emoji(), "🔴");
+        assert_eq!(Criticality::Critical.priority(), 4);
+        assert_eq!(Criticality::Low.priority(), 1);
+    }
+
+    #[test]
+    fn test_generate_stub() {
+        let spec = Spec {
+            feature: "Test".into(),
+            module: "test_mod".into(),
+            version: "0.1.0".into(),
+            invariants: vec![],
+            scenarios: vec![],
+        };
+        let scenario = Scenario {
+            id: "TEST-001".into(),
+            name: "Basic test".into(),
+            criticality: Criticality::High,
+            given: vec!["A system".into()],
+            when: "action occurs".into(),
+            then: vec!["result happens".into()],
+            refs: vec![],
+            edge_cases: vec![],
+        };
+        let stub = TestGenerator::generate_stub(&spec, &scenario);
+        assert!(stub.contains("Covers TEST-001"));
+        assert!(stub.contains("test_test_001_basic_test"));
+    }
+}

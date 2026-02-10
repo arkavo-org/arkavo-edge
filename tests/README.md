@@ -2,6 +2,23 @@
 
 This directory contains all test-related files for the Arkavo Edge project.
 
+## Spec-Driven Testing
+
+The project uses **BDD specifications** in `specs/arkavo-edge/*.yaml` to define expected behavior. The xtask `spec-test` subcommand connects these specs to test implementations.
+
+```bash
+# View coverage of specs vs tests
+cargo xtask spec-test coverage
+
+# Find scenarios without tests
+cargo xtask spec-test uncovered
+
+# Generate test stubs from specs
+cargo xtask spec-test generate --uncovered-only
+```
+
+See [docs/spec-driven-testing.md](../docs/spec-driven-testing.md) for details.
+
 ## Running Tests
 
 ### Automated Tests
