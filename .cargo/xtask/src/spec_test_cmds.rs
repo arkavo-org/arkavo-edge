@@ -4,7 +4,7 @@ use crate::spec_test::{
 use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -83,8 +83,8 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
 }
 
 fn cmd_coverage(
-    specs_dir: &PathBuf,
-    crates_dir: &PathBuf,
+    specs_dir: &Path,
+    crates_dir: &Path,
     detailed: bool,
     filter_spec: Option<String>,
 ) -> Result<()> {
@@ -196,8 +196,8 @@ fn cmd_coverage(
 }
 
 fn cmd_uncovered(
-    specs_dir: &PathBuf,
-    crates_dir: &PathBuf,
+    specs_dir: &Path,
+    crates_dir: &Path,
     generate: bool,
     output: PathBuf,
 ) -> Result<()> {
@@ -274,7 +274,7 @@ fn cmd_uncovered(
 }
 
 fn cmd_generate(
-    specs_dir: &PathBuf,
+    specs_dir: &Path,
     filter_spec: Option<String>,
     uncovered_only: bool,
     output: PathBuf,
@@ -343,8 +343,8 @@ fn cmd_run(
 }
 
 fn cmd_list(
-    specs_dir: &PathBuf,
-    crates_dir: &PathBuf,
+    specs_dir: &Path,
+    crates_dir: &Path,
     filter_spec: Option<String>,
     with_tests: bool,
 ) -> Result<()> {
