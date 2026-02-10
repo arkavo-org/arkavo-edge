@@ -5,10 +5,6 @@ pub async fn index_handler() -> Html<&'static str> {
     Html(include_str!("../static/index.html"))
 }
 
-pub async fn chat_ui_handler() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
-}
-
 pub async fn static_file_handler(AxumPath(path): AxumPath<String>) -> Response {
     let path = path.strip_prefix('/').unwrap_or(&path);
     match path {

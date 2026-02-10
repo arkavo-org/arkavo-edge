@@ -128,12 +128,16 @@ async fn dispatch_event(
     cost_handler: &Arc<RwLock<crate::cost_handler::CostHandler>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
     match event {
         AgUiEvent::Connect { agent_id, agui_version, since_event_id: _ } => {
             handle_connect(agent_id, agui_version, session_id, connections, agents, tx).await?;
         }
-        AgUiEvent::ChatOpen { agent_id } => {
-            handle_chat_open(agent_id, session_id, connections, agent_connections, tx).await?;
+        AgUiEvent::ChatOpen { ref agent_id } => {
+            let ac = agent_connections.read().await;
+            println!("AG-UI: ChatOpen for agent: {agent_id} (agent_connections has {} entries: {:?})", ac.len(), ac.keys().collect::<Vec<_>>());
+            drop(ac);
+            handle_chat_open(agent_id.clone(), session_id, connections, agent_connections, tx).await?;
         }
         AgUiEvent::ChatClose { agent_id } => {
             let ac = agent_connections.read().await;
@@ -144,6 +148,7 @@ async fn dispatch_event(
             }
         }
         AgUiEvent::UserMessage { agent_id, content, attachments: _ } => {
+            println!("AG-UI: UserMessage for agent: {agent_id}, content length: {}", content.len());
             handle_user_message(agent_id, content, agent_connections, tx).await?;
         }
         AgUiEvent::GetBudgetStatus { .. }

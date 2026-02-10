@@ -7,7 +7,6 @@ pub mod mdns {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::{RwLock, mpsc};
-    use tracing::{info, warn};
 
     /// Discovers A2A agents using mDNS
     pub async fn discover_agents(
@@ -17,51 +16,59 @@ pub mod mdns {
         >,
         telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Starting mDNS discovery service with mdns-sd...");
+        println!("AG-UI: mDNS daemon starting...");
 
-        // Create the mDNS daemon
         let mdns = ServiceDaemon::new()?;
-
-        // Browse for _a2a._tcp services
         let service_type = "_a2a._tcp.local.";
         let receiver = mdns.browse(service_type)?;
+        println!("AG-UI: mDNS browsing for {service_type}");
 
-        // Spawn a task to handle discovered services
         let agents_clone = agents.clone();
         let connections_clone = agent_connections.clone();
         let telemetry_clone = telemetry_tx.clone();
-        tokio::spawn(async move {
+
+        // Use spawn_blocking to avoid blocking the tokio async runtime
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
             loop {
-                match receiver.recv_timeout(Duration::from_secs(1)) {
+                match receiver.recv_timeout(Duration::from_secs(5)) {
                     Ok(event) => match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            handle_service_discovered(
+                            println!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
+                            rt.block_on(handle_service_discovered(
                                 info,
                                 agents_clone.clone(),
                                 connections_clone.clone(),
                                 telemetry_clone.clone(),
-                            )
-                            .await;
+                            ));
+                        }
+                        ServiceEvent::ServiceFound(_, fullname) => {
+                            println!("AG-UI: mDNS ServiceFound: {fullname}");
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
-                            info!("Service removed: {}", fullname);
-                            // Agent cleanup handled by connection timeout
+                            println!("AG-UI: mDNS ServiceRemoved: {fullname}");
                         }
-                        _ => {
-                            // Handle other events if needed
+                        ServiceEvent::SearchStarted(stype) => {
+                            println!("AG-UI: mDNS SearchStarted: {stype}");
+                        }
+                        ServiceEvent::SearchStopped(stype) => {
+                            println!("AG-UI: mDNS SearchStopped: {stype}");
+                        }
+                        other => {
+                            println!("AG-UI: mDNS other event: {other:?}");
                         }
                     },
                     Err(_) => {
-                        // Timeout - continue loop
+                        // Timeout — normal, keep polling
                     }
                 }
             }
         });
 
-        // Keep the daemon running
-        tokio::time::sleep(Duration::from_secs(3600)).await;
-
-        Ok(())
+        // Keep the daemon alive (it's dropped when this future completes)
+        loop {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
     }
 
     async fn handle_service_discovered(
@@ -83,7 +90,7 @@ pub mod mdns {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        info!("Discovered service: {} at {}:{}", service_name, host, port);
+        println!("AG-UI: Discovered service: {} at {}:{}", service_name, host, port);
 
         // Extract agent information from properties
         let properties = info.get_properties();
@@ -100,7 +107,7 @@ pub mod mdns {
         let model = properties
             .get("model")
             .map(|v| v.val_str().to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
+            .unwrap_or_else(|| "auto (router-selected)".to_string());
 
         // Extract agent_id from properties if available
         if let Some(id_prop) = properties.get("agent_id") {
@@ -112,7 +119,7 @@ pub mod mdns {
             if let Some(ip_prop) = properties.get("ip") {
                 ip_prop.val_str().to_string()
             } else {
-                warn!("Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1");
+                println!("AG-UI: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1");
                 "127.0.0.1".to_string()
             }
         } else {
@@ -136,7 +143,7 @@ pub mod mdns {
             .any(|a| a.get("id") == agent_info.get("id"));
 
         if !exists {
-            info!("Adding new agent to list: {}", agent_id);
+            println!("AG-UI: Adding new agent to list: {}", agent_id);
 
             // Auto-connect to discovered agent
             let agent_id_clone = agent_id.clone();
@@ -145,25 +152,21 @@ pub mod mdns {
             let agent_connections_clone = agent_connections.clone();
 
             tokio::spawn(async move {
-                info!(
-                    "Auto-connecting to discovered agent: {} at {}",
+                println!(
+                    "AG-UI: Auto-connecting to agent: {} at {}",
                     agent_id_clone, endpoint
                 );
 
-                // Create connection
                 let connection = Arc::new(crate::agent_connection::AgentConnection::new(
                     agent_id_clone.clone(),
                     endpoint.clone(),
                     telemetry_tx_clone,
                 ));
 
-                // Connect to the agent
                 if let Err(e) = connection.connect().await {
-                    warn!("Failed to auto-connect to agent {}: {}", agent_id_clone, e);
+                    println!("AG-UI: Failed to connect to agent {}: {}", agent_id_clone, e);
                 } else {
-                    info!("Successfully auto-connected to agent: {}", agent_id_clone);
-
-                    // Store connection
+                    println!("AG-UI: Connected to agent: {}", agent_id_clone);
                     let mut connections = agent_connections_clone.write().await;
                     connections.insert(agent_id_clone.clone(), connection);
                 }
@@ -180,7 +183,7 @@ pub mod mdns {
         purpose: &str,
         model: &str,
     ) -> Result<ServiceDaemon, Box<dyn std::error::Error>> {
-        info!("Registering mDNS service for agent: {}", agent_id);
+        println!("AG-UI: Registering mDNS service for agent: {}", agent_id);
 
         let mdns = ServiceDaemon::new()?;
 
@@ -209,7 +212,7 @@ pub mod mdns {
 
         mdns.register(service_info)?;
 
-        info!("mDNS service registered successfully");
+        println!("AG-UI: mDNS service registered successfully");
         Ok(mdns)
     }
 }

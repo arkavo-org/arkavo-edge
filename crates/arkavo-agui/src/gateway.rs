@@ -7,11 +7,9 @@ use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use axum::{
     Router,
-    response::sse::{Event, Sse},
     routing::{get, post},
 };
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
@@ -203,9 +201,7 @@ impl AgUiGateway {
         let app = Router::new()
             .route("/", get(crate::gateway_static::index_handler))
             .route("/static/*path", get(crate::gateway_static::static_file_handler))
-            .route("/chat", get(crate::gateway_static::chat_ui_handler))
             .route("/ws", get(crate::gateway_ws::websocket_handler))
-            .route("/events", get(sse_handler))
             .route("/agent/:id", post(crate::gateway_proxy::agent_proxy_handler))
             .route("/api/dataflow/*path", post(crate::gateway_proxy::dataflow_handler))
             .route("/telemetry", get(crate::gateway_status::telemetry_websocket_handler))
@@ -220,21 +216,6 @@ impl AgUiGateway {
         axum::serve(listener, app).await?;
         Ok(())
     }
-}
-
-async fn sse_handler(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
-    use futures::stream;
-    let agents = state.agents;
-    let event_stream = stream::unfold(agents, |agents| async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let agents_list = agents.read().await.clone();
-        let response = serde_json::json!({ "agents": agents_list });
-        let event = Event::default().event("discovery").data(response.to_string());
-        Some((Ok::<_, Infallible>(event), agents))
-    });
-    Sse::new(event_stream)
 }
 
 fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>) {

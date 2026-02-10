@@ -123,15 +123,6 @@ if (taskCancelBtn) taskCancelBtn.addEventListener('click', hideAddTaskModal);
 var taskSubmitBtn = document.getElementById('task-submit-btn');
 if (taskSubmitBtn) taskSubmitBtn.addEventListener('click', submitTask);
 
-var chatCloseBtn = document.getElementById('chat-close-btn');
-if (chatCloseBtn) chatCloseBtn.addEventListener('click', closeChat);
-
-var chatSendBtn = document.getElementById('chat-send');
-if (chatSendBtn) chatSendBtn.addEventListener('click', sendChatMessage);
-
-var chatInput = document.getElementById('chat-input');
-if (chatInput) chatInput.addEventListener('keypress', handleChatKeypress);
-
 // Initialize
 connect();
 switchView('agents');
