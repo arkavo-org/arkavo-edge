@@ -1,0 +1,5 @@
+error: invalid spec ID `HRM003`: must match [A-Z]+-[0-9]+ (e.g. HRM-003)
+ --> tests/compile_fail/no_dash.rs:3:8
+  |
+3 | #[spec("HRM003")]
+  |        ^^^^^^^^

@@ -1,5 +1,4 @@
 //! Integration tests for feedback analyzer pipeline
-//! Covers CRIT-011, CRIT-012, CRIT-015, CRIT-016
 //!
 //! Tests the ResponseAnalyzer + LearningStore + Episode pipeline directly,
 //! bypassing the global OnceCell in feedback_analyzer.rs.
@@ -10,6 +9,7 @@ use arkavo_critic::{DetectedIssue, ResponseAnalyzer};
 use arkavo_router::learning::{
     Episode, EpisodeOutcome, LearningStore, Observation, QualityMetrics,
 };
+use arkavo_test_macros::spec;
 use uuid::Uuid;
 
 async fn setup_store() -> (LearningStore, tempfile::TempDir) {
@@ -56,9 +56,7 @@ fn build_feedback_episode(
     )
 }
 
-// Covers CRIT-011: Category produced by ResponseAnalyzer matches what
-// check_for_pattern_adjustment queries — if these diverge, adjustment
-// never triggers (real bug scenario).
+#[spec("CRIT-011")]
 #[tokio::test]
 async fn test_category_consistency_between_record_and_lookup() {
     let (store, _tmp) = setup_store().await;
@@ -95,8 +93,7 @@ async fn test_category_consistency_between_record_and_lookup() {
     assert_eq!(episodes.len(), 2);
 }
 
-// Covers CRIT-012: Threshold logic — adjustment triggers at >=2 loop episodes
-// for math prompts but NOT for non-math prompts or different issue types.
+#[spec("CRIT-012")]
 #[tokio::test]
 async fn test_adjustment_threshold_respects_prompt_type() {
     let (store, _tmp) = setup_store().await;
@@ -137,7 +134,7 @@ async fn test_adjustment_threshold_respects_prompt_type() {
     );
 }
 
-// Covers CRIT-012: Below threshold — 1 episode is not enough
+#[spec("CRIT-012")]
 #[tokio::test]
 async fn test_single_loop_episode_below_threshold() {
     let (store, _tmp) = setup_store().await;
@@ -155,7 +152,7 @@ async fn test_single_loop_episode_below_threshold() {
     );
 }
 
-// Covers CRIT-015: Timeout detection produces correct category and episode shape
+#[spec("CRIT-015")]
 #[tokio::test]
 async fn test_timeout_detection_and_storage() {
     let (store, _tmp) = setup_store().await;
@@ -180,8 +177,7 @@ async fn test_timeout_detection_and_storage() {
     assert!(obs["state_before"]["prompt"].as_str().is_some());
 }
 
-// Covers CRIT-016: Cross-category isolation — code_fence episodes must not
-// leak into loop queries or vice versa.
+#[spec("CRIT-016")]
 #[tokio::test]
 async fn test_cross_category_isolation() {
     let (store, _tmp) = setup_store().await;

@@ -1,0 +1,5 @@
+error: invalid spec ID `hrm-003`: must match [A-Z]+-[0-9]+ (e.g. HRM-003)
+ --> tests/compile_fail/invalid_id.rs:3:8
+  |
+3 | #[spec("hrm-003")]
+  |        ^^^^^^^^^

@@ -1,10 +1,10 @@
 #![allow(dead_code)] // Fields/methods used by spec_test_cmds
 use anyhow::{Context, Result};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+
+pub use crate::spec_test_discovery::TestDiscovery;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Spec {
@@ -152,58 +152,6 @@ impl SpecParser {
     }
 }
 
-// --- TestDiscovery ---
-
-pub struct TestDiscovery {
-    scenario_pattern: Regex,
-    test_pattern: Regex,
-}
-
-impl TestDiscovery {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            scenario_pattern: Regex::new(r"Covers\s+([A-Z]+-\d+)")?,
-            test_pattern: Regex::new(r"(async\s+)?fn\s+(test_\w+)")?,
-        })
-    }
-
-    pub fn discover_tests(&self, crates_dir: &Path) -> Result<Vec<Test>> {
-        let mut tests = Vec::new();
-        for entry in WalkDir::new(crates_dir).into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                if let Ok(file_tests) = self.parse_test_file(path) {
-                    tests.extend(file_tests);
-                }
-            }
-        }
-        Ok(tests)
-    }
-
-    fn parse_test_file(&self, path: &Path) -> Result<Vec<Test>> {
-        let content = std::fs::read_to_string(path)?;
-        let mut tests = Vec::new();
-        let mut current_scenarios = Vec::new();
-
-        for (line_num, line) in content.lines().enumerate() {
-            for cap in self.scenario_pattern.captures_iter(line) {
-                current_scenarios.push(cap[1].to_string());
-            }
-            if let Some(cap) = self.test_pattern.captures(line) {
-                tests.push(Test {
-                    name: cap[2].to_string(),
-                    file: path.to_path_buf(),
-                    line: line_num + 1,
-                    scenarios_covered: current_scenarios.clone(),
-                    is_async: cap.get(1).is_some(),
-                });
-                current_scenarios.clear();
-            }
-        }
-        Ok(tests)
-    }
-}
-
 // --- CoverageAnalyzer ---
 
 pub struct CoverageAnalyzer;
@@ -277,7 +225,8 @@ impl TestGenerator {
         let fn_name = Self::scenario_to_fn_name(scenario);
         let module = spec.module.replace("::", "_");
         format!(
-            r#"/// Covers {id}: {name}
+            r#"#[spec("{id}")]
+/// {name}
 /// Spec: specs/arkavo-edge/{module}.spec.yaml
 /// Criticality: {crit}
 #[tokio::test]
@@ -395,7 +344,7 @@ scenarios:
             edge_cases: vec![],
         };
         let stub = TestGenerator::generate_stub(&spec, &scenario);
-        assert!(stub.contains("Covers TEST-001"));
+        assert!(stub.contains(r#"#[spec("TEST-001")]"#));
         assert!(stub.contains("test_test_001_basic_test"));
     }
 }

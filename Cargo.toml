@@ -62,6 +62,7 @@ members = [
     "crates/arkavo-hrm",
     "crates/arkavo-security",
     "crates/arkavo-critic",
+    "crates/arkavo-test-macros",
     "crates/arkavo-tasks",
     "crates/arkavo-server",
     "crates/arkavo-torg-circuits",
@@ -224,6 +225,11 @@ hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = fal
 fastembed = "4"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.6"
+
+# Proc macro
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", default-features = false }
 
 # Dev dependencies
 criterion = { version = "0.5", features = ["async_tokio"] }

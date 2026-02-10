@@ -60,16 +60,24 @@ pub enum Commands {
     },
 }
 
-pub fn run(
-    command: Commands,
-    specs_dir: PathBuf,
-    crates_dir: PathBuf,
-) -> Result<()> {
+pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result<()> {
     match command {
-        Commands::Coverage { detailed, spec } => cmd_coverage(&specs_dir, &crates_dir, detailed, spec),
-        Commands::Uncovered { generate, output } => cmd_uncovered(&specs_dir, &crates_dir, generate, output),
-        Commands::Generate { spec, uncovered_only, output } => cmd_generate(&specs_dir, spec, uncovered_only, output),
-        Commands::Run { scenario, spec, criticality } => cmd_run(scenario, spec, criticality),
+        Commands::Coverage { detailed, spec } => {
+            cmd_coverage(&specs_dir, &crates_dir, detailed, spec)
+        }
+        Commands::Uncovered { generate, output } => {
+            cmd_uncovered(&specs_dir, &crates_dir, generate, output)
+        }
+        Commands::Generate {
+            spec,
+            uncovered_only,
+            output,
+        } => cmd_generate(&specs_dir, spec, uncovered_only, output),
+        Commands::Run {
+            scenario,
+            spec,
+            criticality,
+        } => cmd_run(scenario, spec, criticality),
         Commands::List { spec, with_tests } => cmd_list(&specs_dir, &crates_dir, spec, with_tests),
     }
 }
@@ -90,27 +98,41 @@ fn cmd_coverage(
 
     let specs: Vec<_> = if let Some(filter) = filter_spec {
         let filter_lower = filter.to_lowercase();
-        report.specs.into_iter()
+        report
+            .specs
+            .into_iter()
             .filter(|s| {
-                let name = s.file.file_stem()
-                    .and_then(|n| n.to_str()).unwrap_or("")
-                    .replace(".spec", "").to_lowercase();
-                name.contains(&filter_lower) || s.spec.feature.to_lowercase().contains(&filter_lower)
+                let name = s
+                    .file
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .replace(".spec", "")
+                    .to_lowercase();
+                name.contains(&filter_lower)
+                    || s.spec.feature.to_lowercase().contains(&filter_lower)
             })
             .collect()
     } else {
         report.specs
     };
 
-    println!("{:<25} {:>8} {:>8} {:>12}", "Spec", "Total", "Covered", "Status");
+    println!(
+        "{:<25} {:>8} {:>8} {:>12}",
+        "Spec", "Total", "Covered", "Status"
+    );
     println!("{}", "-".repeat(60));
 
     for spec_cov in &specs {
         let total = spec_cov.scenarios.len();
-        let covered = spec_cov.scenarios.iter()
+        let covered = spec_cov
+            .scenarios
+            .iter()
             .filter(|s| matches!(s.status, CoverageStatus::Covered))
             .count();
-        let partial = spec_cov.scenarios.iter()
+        let partial = spec_cov
+            .scenarios
+            .iter()
             .filter(|s| matches!(s.status, CoverageStatus::Partial))
             .count();
 
@@ -122,7 +144,9 @@ fn cmd_coverage(
             "🔴 Missing".red()
         };
 
-        let name = spec_cov.file.file_stem()
+        let name = spec_cov
+            .file
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .replace(".spec", "");
@@ -132,20 +156,38 @@ fn cmd_coverage(
 
     println!("{}", "-".repeat(60));
     let total_scenarios: usize = specs.iter().map(|s| s.scenarios.len()).sum();
-    let total_covered: usize = specs.iter()
-        .map(|s| s.scenarios.iter().filter(|sc| matches!(sc.status, CoverageStatus::Covered)).count())
+    let total_covered: usize = specs
+        .iter()
+        .map(|s| {
+            s.scenarios
+                .iter()
+                .filter(|sc| matches!(sc.status, CoverageStatus::Covered))
+                .count()
+        })
         .sum();
 
-    println!("{:<25} {:>8} {:>8}", "TOTAL", total_scenarios, total_covered);
-    let pct = if total_scenarios > 0 { (total_covered as f64 / total_scenarios as f64) * 100.0 } else { 0.0 };
+    println!(
+        "{:<25} {:>8} {:>8}",
+        "TOTAL", total_scenarios, total_covered
+    );
+    let pct = if total_scenarios > 0 {
+        (total_covered as f64 / total_scenarios as f64) * 100.0
+    } else {
+        0.0
+    };
     println!("\nCoverage: {pct:.1}%\n");
 
     if detailed {
         for spec_cov in &specs {
             println!("{} {}", "▶".cyan(), spec_cov.spec.feature.bold());
             for sc in &spec_cov.scenarios {
-                println!("  {} {} - {} ({} tests)",
-                    sc.status.emoji(), sc.scenario.id.dimmed(), sc.scenario.name, sc.tests.len());
+                println!(
+                    "  {} {} - {} ({} tests)",
+                    sc.status.emoji(),
+                    sc.scenario.id.dimmed(),
+                    sc.scenario.name,
+                    sc.tests.len()
+                );
             }
             println!();
         }
@@ -166,9 +208,13 @@ fn cmd_uncovered(
     let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
     let report = CoverageAnalyzer::analyze(specs, tests);
 
-    let uncovered_by_spec: Vec<_> = report.specs.iter()
+    let uncovered_by_spec: Vec<_> = report
+        .specs
+        .iter()
         .map(|s| {
-            let uncovered: Vec<_> = s.scenarios.iter()
+            let uncovered: Vec<_> = s
+                .scenarios
+                .iter()
                 .filter(|sc| matches!(sc.status, CoverageStatus::Missing))
                 .collect();
             (s, uncovered)
@@ -182,11 +228,29 @@ fn cmd_uncovered(
     }
 
     for (spec_cov, uncovered) in &uncovered_by_spec {
-        let spec_name = spec_cov.file.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-        println!("{} {} ({} uncovered)", "▶".red(), spec_name.bold(), uncovered.len());
+        let spec_name = spec_cov
+            .file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        println!(
+            "{} {} ({} uncovered)",
+            "▶".red(),
+            spec_name.bold(),
+            uncovered.len()
+        );
         for sc in uncovered {
-            println!("  {} {}: {}", "•".red(), sc.scenario.id.dimmed(), sc.scenario.name);
-            println!("    [{}] {}", sc.scenario.criticality.as_str().to_uppercase(), sc.scenario.when);
+            println!(
+                "  {} {}: {}",
+                "•".red(),
+                sc.scenario.id.dimmed(),
+                sc.scenario.name
+            );
+            println!(
+                "    [{}] {}",
+                sc.scenario.criticality.as_str().to_uppercase(),
+                sc.scenario.when
+            );
         }
         println!();
     }
@@ -194,8 +258,12 @@ fn cmd_uncovered(
     if generate {
         std::fs::create_dir_all(&output)?;
         for (spec_cov, _) in &uncovered_by_spec {
-            let spec_name = spec_cov.file.file_stem()
-                .and_then(|s| s.to_str()).unwrap_or("unknown").replace(".spec", "");
+            let spec_name = spec_cov
+                .file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .replace(".spec", "");
             let output_file = output.join(format!("{spec_name}_tests.rs"));
             let content = TestGenerator::generate_full_module(&spec_cov.spec, true, &[]);
             std::fs::write(&output_file, content)?;
@@ -216,8 +284,11 @@ fn cmd_generate(
 
     let specs = SpecParser::parse_all_specs(specs_dir)?;
     for (path, spec) in specs {
-        let spec_name = path.file_stem()
-            .and_then(|s| s.to_str()).unwrap_or("unknown").replace(".spec", "");
+        let spec_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .replace(".spec", "");
         if let Some(ref filter) = filter_spec {
             let filter_lower = filter.to_lowercase();
             if !spec_name.to_lowercase().contains(&filter_lower)
@@ -229,9 +300,17 @@ fn cmd_generate(
         let output_file = output.join(format!("{spec_name}_tests.rs"));
         let content = TestGenerator::generate_full_module(&spec, uncovered_only, &[]);
         std::fs::write(&output_file, content)?;
-        println!("Generated: {} ({} scenarios)", output_file.display(), spec.scenarios.len());
+        println!(
+            "Generated: {} ({} scenarios)",
+            output_file.display(),
+            spec.scenarios.len()
+        );
     }
-    println!("\n{} {}", "Done!".green(), format!("Stubs written to: {}", output.display()).dimmed());
+    println!(
+        "\n{} {}",
+        "Done!".green(),
+        format!("Stubs written to: {}", output.display()).dimmed()
+    );
     Ok(())
 }
 
@@ -279,7 +358,10 @@ fn cmd_list(
     };
 
     for (path, spec) in specs {
-        let spec_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+        let spec_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
         if let Some(ref filter) = filter_spec {
             let filter_lower = filter.to_lowercase();
             if !spec_name.to_lowercase().contains(&filter_lower)
@@ -288,16 +370,30 @@ fn cmd_list(
                 continue;
             }
         }
-        println!("{} {} - {}", "▶".cyan(), spec_name.bold(), spec.feature.dimmed());
+        println!(
+            "{} {} - {}",
+            "▶".cyan(),
+            spec_name.bold(),
+            spec.feature.dimmed()
+        );
         for scenario in &spec.scenarios {
             let crit_color = match scenario.criticality {
                 Criticality::Critical => "critical".red(),
                 Criticality::High => "high".yellow(),
                 _ => scenario.criticality.as_str().normal(),
             };
-            print!("  {} {} [{}] {}", "•".normal(), scenario.id.dimmed(), crit_color, scenario.name);
+            print!(
+                "  {} {} [{}] {}",
+                "•".normal(),
+                scenario.id.dimmed(),
+                crit_color,
+                scenario.name
+            );
             if let Some(ref t) = tests {
-                let count = t.iter().filter(|test| test.scenarios_covered.contains(&scenario.id)).count();
+                let count = t
+                    .iter()
+                    .filter(|test| test.scenarios_covered.contains(&scenario.id))
+                    .count();
                 if count > 0 {
                     print!(" {}", format!("({count} tests)").green());
                 } else {

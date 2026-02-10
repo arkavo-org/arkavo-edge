@@ -1,0 +1,22 @@
+[package]
+name = "arkavo-test-macros"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Proc macro for spec-driven test traceability"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["parsing", "proc-macro"] }
+
+[dev-dependencies]
+trybuild = "1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

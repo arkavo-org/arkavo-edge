@@ -1,10 +1,9 @@
 //! Behavioral integration tests for HRM spec scenarios
-//! Covers: HRM-003 (budget enforcement), HRM-004 (loop detection),
-//!         HRM-005 (state persistence), HRM-006 (continuation hints)
 
 use arkavo_hrm::{
     BurstResult, Conductor, ContinuationHint, InMemoryTaskStore, TaskBudget, TaskStatus, TaskStore,
 };
+use arkavo_test_macros::spec;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -27,9 +26,9 @@ fn tight_budget(max_cost: f64, max_tokens: u64) -> TaskBudget {
 
 // --- HRM-003: Budget enforcement ---
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_budget_enforcement_cost() {
-    // Covers HRM-003: "Budget enforced" — cost dimension
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), tight_budget(0.10, 100_000))
@@ -59,9 +58,9 @@ async fn test_budget_enforcement_cost() {
     assert!(loaded.budget.spent_usd >= 0.15);
 }
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_budget_enforcement_tokens() {
-    // Covers HRM-003: "Budget enforced" — token dimension
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), tight_budget(10.0, 500))
@@ -91,9 +90,9 @@ async fn test_budget_enforcement_tokens() {
     assert_eq!(loaded.budget.remaining_tokens(), 0);
 }
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_budget_tracking_incremental() {
-    // Covers HRM-003: Budget accumulates across multiple subtask results
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), tight_budget(1.0, 10_000))
@@ -126,9 +125,9 @@ async fn test_budget_tracking_incremental() {
 
 // --- HRM-005: State persistence ---
 
+#[spec("HRM-005")]
 #[tokio::test]
 async fn test_state_persists_through_lifecycle() {
-    // Covers HRM-005: "GlobalTaskState serialized, stored durably, recovery possible"
     let store = InMemoryTaskStore::new();
     let store_ref = std::sync::Arc::new(store);
     let conductor = Conductor::with_shared_store(store_ref.clone());
@@ -159,9 +158,9 @@ async fn test_state_persists_through_lifecycle() {
     assert!((recovered.budget.spent_usd - 0.05).abs() < f64::EPSILON);
 }
 
+#[spec("HRM-005")]
 #[tokio::test]
 async fn test_store_list_by_status() {
-    // Covers HRM-005: Store can query tasks by status
     let store = InMemoryTaskStore::new();
     let store_ref = std::sync::Arc::new(store);
     let conductor = Conductor::with_shared_store(store_ref.clone());
@@ -218,9 +217,9 @@ async fn test_store_list_by_status() {
 
 // --- HRM-004: Loop detection integration ---
 
+#[spec("HRM-004")]
 #[tokio::test]
 async fn test_thrashing_blocks_add_subtask() {
-    // Covers HRM-004: "Strategic thrashing flagged, intervention triggered"
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), TaskBudget::default())
@@ -255,9 +254,9 @@ async fn test_thrashing_blocks_add_subtask() {
     );
 }
 
+#[spec("HRM-004")]
 #[tokio::test]
 async fn test_thrashing_with_similar_descriptions() {
-    // Covers HRM-004: Similar descriptions detected as same pattern
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), TaskBudget::default())
@@ -301,9 +300,9 @@ async fn test_thrashing_with_similar_descriptions() {
 
 // --- HRM-006: Continuation hints ---
 
+#[spec("HRM-006")]
 #[tokio::test]
 async fn test_continuation_hint_preserved() {
-    // Covers HRM-006: "Remaining work identified, context strategy selected"
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), TaskBudget::default())
@@ -340,9 +339,9 @@ async fn test_continuation_hint_preserved() {
 
 // --- HRM-002: MaxSubtasksExceeded error includes correct counts ---
 
+#[spec("HRM-002")]
 #[tokio::test]
 async fn test_max_subtasks_error_reports_counts() {
-    // Covers HRM-002: Error variant carries correct current/max values
     let conductor = setup();
     let mut task = conductor
         .create_task("Test".into(), TaskBudget::default())
@@ -375,10 +374,9 @@ async fn test_max_subtasks_error_reports_counts() {
 
 // --- HRM-003: Budget tracking and auto-completion ---
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_budget_exhaustion_after_spending() {
-    // Covers HRM-003: Budget transitions from has_remaining=true to false
-    // after recording a result that exceeds the limit.
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), tight_budget(0.05, 100))
@@ -415,9 +413,9 @@ async fn test_budget_exhaustion_after_spending() {
     assert_eq!(loaded.budget.tokens_used, 200);
 }
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_task_status_auto_completes() {
-    // Covers HRM-003: task auto-completes when all subtasks complete
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), TaskBudget::default())
@@ -448,9 +446,9 @@ async fn test_task_status_auto_completes() {
     assert_eq!(loaded.status, TaskStatus::Completed);
 }
 
+#[spec("HRM-003")]
 #[tokio::test]
 async fn test_task_status_fails_when_all_terminal() {
-    // Covers HRM-003: task fails when all subtasks fail with no retries left
     let conductor = setup();
     let task = conductor
         .create_task("Test".into(), TaskBudget::default())

@@ -22,3 +22,4 @@ tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid.workspace = true
 rand = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }

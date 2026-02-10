@@ -132,7 +132,7 @@ fn generate_openrpc_schema(schemas_dir: &Path, check: bool) -> Result<()> {
 fn generate_config_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
     println!("Generating config schemas...");
 
-    use schemars::{schema_for, JsonSchema};
+    use schemars::{JsonSchema, schema_for};
 
     // Generate schema for ServerConfig
     #[derive(JsonSchema)]
@@ -171,7 +171,7 @@ fn generate_config_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
 fn generate_wire_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
     println!("Generating wire protocol schemas...");
 
-    use schemars::{schema_for, JsonSchema};
+    use schemars::{JsonSchema, schema_for};
     use serde::{Deserialize, Serialize};
 
     // Define simplified wire protocol types for schema generation

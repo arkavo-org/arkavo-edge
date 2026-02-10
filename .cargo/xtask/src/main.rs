@@ -5,6 +5,7 @@ mod demo;
 mod schema;
 mod spec_test;
 mod spec_test_cmds;
+mod spec_test_discovery;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
