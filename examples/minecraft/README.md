@@ -1,5 +1,10 @@
 # Minecraft Survival Swarm
 
+<!-- ARKAVO-CAPABILITY: mcp-tools -->
+> **Specs**: [10 scenarios](../../specs/arkavo-edge/mcp-tools.spec.yaml)
+> **Browse**: `cargo xtask capabilities mcp-tools`
+<!-- /ARKAVO-CAPABILITY -->
+
 This example demonstrates a 5-agent HRM (Hierarchical Reasoning Model) swarm controlling a single Minecraft bot in vanilla Survival mode.
 
 ## The Story

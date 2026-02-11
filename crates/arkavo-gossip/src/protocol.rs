@@ -641,6 +641,7 @@ mod tests {
     use super::*;
     use crate::verification::sign_announcement;
     use arkavo_crypto::AgentKeypair;
+    use arkavo_test_macros::spec;
 
     fn create_test_protocol(agent_id: &str) -> GossipProtocol {
         let config = GossipConfig::default();
@@ -746,7 +747,7 @@ mod tests {
         assert!(matches!(result, Err(GossipError::PatchNotFound(_))));
     }
 
-    // Covers GOSSIP-002: Unsigned announcement rejected by protocol
+    #[spec("GOSSIP-002")]
     #[tokio::test]
     async fn test_unsigned_announcement_rejected() {
         let protocol = create_test_protocol("agent-1");
@@ -762,7 +763,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Covers GOSSIP-001: Fanout selects correct number of peers, excluding sender
+    #[spec("GOSSIP-001")]
     #[tokio::test]
     async fn test_fanout_respects_limit_and_exclusion() {
         let protocol = create_test_protocol("agent-1");
@@ -788,7 +789,7 @@ mod tests {
         assert_eq!(peers.len(), 1);
     }
 
-    // Covers GOSSIP-005: Anti-entropy announces patches the peer is missing
+    #[spec("GOSSIP-005")]
     #[tokio::test]
     async fn test_anti_entropy_announces_missing_patches() {
         let protocol = create_test_protocol("agent-1");
@@ -826,7 +827,7 @@ mod tests {
         );
     }
 
-    // Covers GOSSIP-005: Anti-entropy requests patches we don't have
+    #[spec("GOSSIP-005")]
     #[tokio::test]
     async fn test_anti_entropy_requests_unknown_patches() {
         let protocol = create_test_protocol("agent-1");
@@ -856,7 +857,7 @@ mod tests {
         assert!(has_request, "Should include PatchRequest for unknown patch");
     }
 
-    // Covers GOSSIP-005: Anti-entropy returns nothing when synced
+    #[spec("GOSSIP-005")]
     #[tokio::test]
     async fn test_anti_entropy_no_messages_when_synced() {
         let protocol = create_test_protocol("agent-1");
@@ -896,7 +897,7 @@ mod tests {
         );
     }
 
-    // Covers GOSSIP-007: Rate limiting blocks flood from same peer
+    #[spec("GOSSIP-007")]
     #[tokio::test]
     async fn test_rate_limiting_blocks_flood() {
         let config = GossipConfig::default();
@@ -927,9 +928,7 @@ mod tests {
         assert!(rate_limited, "Should have been rate limited after flooding");
     }
 
-    // Covers GOSSIP-007: Known originator with WRONG signature is rejected
-    // Different from test_unsigned_announcement_rejected (unknown originator).
-    // This tests the crypto verification path, not the key-lookup path.
+    #[spec("GOSSIP-007")]
     #[tokio::test]
     async fn test_wrong_key_signature_rejected() {
         let protocol = create_test_protocol("agent-1");

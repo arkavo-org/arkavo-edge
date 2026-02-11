@@ -1,5 +1,10 @@
 # Arkavo Multi-Agent Knowledge Sharing System
 
+<!-- ARKAVO-CAPABILITY: orchestrator -->
+> **Specs**: [11 scenarios](../../specs/arkavo-edge/orchestrator.spec.yaml)
+> **Browse**: `cargo xtask capabilities orchestrator`
+<!-- /ARKAVO-CAPABILITY -->
+
 This directory contains 11 hyper-specialized AI agents that collaborate through a mesh network to share knowledge and solve complex tasks.
 
 ## Architecture

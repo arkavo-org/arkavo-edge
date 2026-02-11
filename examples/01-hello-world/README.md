@@ -1,5 +1,10 @@
 # Hello World Agent
 
+<!-- ARKAVO-CAPABILITY: llm-core -->
+> **Specs**: [6 scenarios](../../specs/arkavo-edge/llm-core.spec.yaml)
+> **Browse**: `cargo xtask capabilities llm-core`
+<!-- /ARKAVO-CAPABILITY -->
+
 Your first Arkavo agent in 5 minutes.
 
 ## What You'll Learn

@@ -49,3 +49,4 @@ llama-cpp = ["arkavo-context/llama-cpp", "dep:arkavo-context"]
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 rand = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }

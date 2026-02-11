@@ -1,5 +1,10 @@
 # Family Travel Mesh Demo - HRM Orchestration
 
+<!-- ARKAVO-CAPABILITY: hrm -->
+> **Specs**: [6 scenarios](../../specs/arkavo-edge/hrm.spec.yaml)
+> **Browse**: `cargo xtask capabilities hrm`
+<!-- /ARKAVO-CAPABILITY -->
+
 This demo implements the complete HRM-Style Orchestration architecture from Issue #236 using a "Family Travel Planning" use case.
 
 ## Architecture

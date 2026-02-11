@@ -18,3 +18,4 @@ tokio = { workspace = true, features = ["sync", "time", "rt"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
+arkavo-test-macros = { path = "../arkavo-test-macros" }

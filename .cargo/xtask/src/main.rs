@@ -1,10 +1,15 @@
 #![allow(clippy::disallowed_methods)] // False positive in clippy
 
+mod capabilities;
 mod demo;
 mod schema;
+mod spec_test;
+mod spec_test_cmds;
+mod spec_test_discovery;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "cargo xtask")]
@@ -34,6 +39,28 @@ enum Commands {
         #[arg(long, help = "Generate wire protocol schemas")]
         wire: bool,
     },
+    #[command(about = "Browse platform capabilities from specs")]
+    Capabilities {
+        #[arg(long, help = "Show full capability table")]
+        matrix: bool,
+        #[arg(long, help = "Compact list with descriptions")]
+        list: bool,
+        #[arg(long, help = "Filter by name, description, or module")]
+        search: Option<String>,
+        #[arg(help = "Show detail for a specific capability")]
+        name: Option<String>,
+    },
+    #[command(about = "Spec-driven testing framework")]
+    SpecTest {
+        /// Path to specs directory
+        #[arg(short, long, default_value = "specs/arkavo-edge")]
+        specs: PathBuf,
+        /// Path to crates directory
+        #[arg(short, long, default_value = "crates")]
+        crates: PathBuf,
+        #[command(subcommand)]
+        command: spec_test_cmds::Commands,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +83,21 @@ async fn main() -> Result<()> {
             wire,
         } => {
             schema::generate_schemas(check, config, wire)?;
+        }
+        Commands::Capabilities {
+            matrix,
+            list,
+            search,
+            name,
+        } => {
+            capabilities::run(matrix, list, search, name)?;
+        }
+        Commands::SpecTest {
+            specs,
+            crates,
+            command,
+        } => {
+            spec_test_cmds::run(command, specs, crates)?;
         }
     }
 

@@ -181,6 +181,7 @@ impl EventWriterBuilder {
 mod tests {
     use super::*;
     use crate::EventPayload;
+    use arkavo_test_macros::spec;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn make_event(seq: u64) -> Event {
@@ -196,7 +197,7 @@ mod tests {
         )
     }
 
-    // Covers EVENT-005: "Events serialized, written to configured sink"
+    #[spec("EVENT-005")]
     #[tokio::test]
     async fn test_event_writer_basic() {
         let counter = Arc::new(AtomicUsize::new(0));
@@ -221,7 +222,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 25);
     }
 
-    // Covers EVENT-005: "Batch writes supported" — flush triggers at batch_size
+    #[spec("EVENT-005")]
     #[tokio::test]
     async fn test_batch_flush_triggers_at_batch_size() {
         let flush_count = Arc::new(AtomicUsize::new(0));
@@ -248,7 +249,7 @@ mod tests {
         assert!(flush_count.load(Ordering::SeqCst) >= 1);
     }
 
-    // Covers EVENT-005: Multiple batches accumulate correctly
+    #[spec("EVENT-005")]
     #[tokio::test]
     async fn test_multiple_batches_all_delivered() {
         let total = Arc::new(AtomicUsize::new(0));
@@ -273,7 +274,7 @@ mod tests {
         assert_eq!(total.load(Ordering::SeqCst), 50);
     }
 
-    // Covers EVENT-005: BufferFull error when writer loop has stopped
+    #[spec("EVENT-005")]
     #[tokio::test]
     async fn test_write_returns_buffer_full_after_abort() {
         let writer = EventWriterBuilder::new()
@@ -296,10 +297,7 @@ mod tests {
         );
     }
 
-    // Covers EVENT-005: Final flush via receiver-close `else` branch
-    // Uses a LONG flush_interval so the timer can't flush before drop.
-    // The writer_loop must drain remaining channel messages AND flush them
-    // during the `else` branch when the sender is dropped.
+    #[spec("EVENT-005")]
     #[tokio::test]
     async fn test_final_flush_on_sender_drop() {
         let total = Arc::new(AtomicUsize::new(0));
