@@ -125,7 +125,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.58.8"
+version = "0.58.9"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -213,7 +213,7 @@ if-addrs = "0.14"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "set-header"] }
 mdns-sd = "0.14"
 
 # LLM and ML

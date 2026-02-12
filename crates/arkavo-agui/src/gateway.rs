@@ -237,6 +237,7 @@ impl AgUiGateway {
                 "/debug",
                 get(crate::gateway_status::debug_websocket_handler),
             )
+            .layer(crate::gateway_security::security_headers())
             .with_state(state);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();

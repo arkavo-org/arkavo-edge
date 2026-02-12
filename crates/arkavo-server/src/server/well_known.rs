@@ -2,6 +2,7 @@ use axum::{Json, Router, extract::State, http::StatusCode, response::IntoRespons
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{info, warn};
 
 use arkavo_protocol::mcp_registry::McpRegistry;
@@ -120,6 +121,26 @@ async fn get_agent_json(State(state): State<WellKnownState>) -> impl IntoRespons
 fn create_well_known_router(state: WellKnownState) -> Router {
     Router::new()
         .route("/.well-known/agent.json", get(get_agent_json))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            axum::http::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_FRAME_OPTIONS,
+            axum::http::HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::REFERRER_POLICY,
+            axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_XSS_PROTECTION,
+            axum::http::HeaderValue::from_static("0"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            axum::http::HeaderValue::from_static("default-src 'none'"),
+        ))
         .with_state(state)
 }
 

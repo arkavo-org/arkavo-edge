@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -64,7 +64,15 @@ impl WebhookServer {
                 state.clone(),
                 verify_signature,
             ))
-            .layer(CorsLayer::permissive())
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::list([
+                        "https://github.com".parse().expect("valid origin"),
+                        "https://api.github.com".parse().expect("valid origin"),
+                    ]))
+                    .allow_methods([axum::http::Method::POST, axum::http::Method::GET])
+                    .allow_headers([axum::http::header::CONTENT_TYPE]),
+            )
             .with_state(state)
     }
 

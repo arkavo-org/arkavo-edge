@@ -233,7 +233,9 @@ impl CodeSolver {
         for line in &lines {
             // Valid patch lines start with: ' ', '+', '-', '@', 'd', 'i', '---', '+++'
             if !line.is_empty() {
-                let first_char = line.chars().next().unwrap();
+                let Some(first_char) = line.chars().next() else {
+                    continue;
+                };
                 let is_valid = matches!(first_char, ' ' | '+' | '-' | '@' | 'd' | 'i' | '\\')
                     || line.starts_with("---")
                     || line.starts_with("+++")

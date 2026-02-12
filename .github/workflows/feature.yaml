@@ -346,6 +346,17 @@ jobs:
           # Advisories run separately so new RustSec entries don't break unrelated PRs
           # bans, licenses, sources run together as they're deterministic
 
+  cargo-audit:
+    name: Security Audit
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Run cargo audit
+        run: cargo audit
+
   build-linux:
     name: Build Linux (${{ matrix.target || matrix.device }})
     runs-on: ${{ matrix.os }}
@@ -1469,7 +1480,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check, validate-specs]
+    needs: [version-check, format, test-and-lint, cargo-deny, cargo-audit, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check, validate-specs]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1479,6 +1490,7 @@ jobs:
                 "${{ needs.format.result }}" != "success" || \
                 "${{ needs.test-and-lint.result }}" != "success" || \
                 "${{ needs.cargo-deny.result }}" != "success" || \
+                "${{ needs.cargo-audit.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.binary-smoke-test.result }}" != "success" || \

@@ -54,17 +54,20 @@ impl TokenStore {
     pub fn is_revoked(&self, jti: &str) -> bool {
         // Check cache first (requires write lock for LRU)
         {
-            let mut cache = self.cache.write().unwrap();
+            let mut cache = self.cache.write().expect("lock poisoned");
             if let Some(cached) = cache.get(jti) {
                 return *cached;
             }
         }
 
         // Check blacklist
-        let revoked = self.blacklist.read().unwrap().contains(jti);
+        let revoked = self.blacklist.read().expect("lock poisoned").contains(jti);
 
         // Update cache
-        self.cache.write().unwrap().put(jti.to_string(), revoked);
+        self.cache
+            .write()
+            .expect("lock poisoned")
+            .put(jti.to_string(), revoked);
 
         revoked
     }
@@ -74,8 +77,14 @@ impl TokenStore {
     /// # Panics
     /// Panics if the RwLock is poisoned
     pub fn revoke(&self, jti: &str) {
-        self.blacklist.write().unwrap().insert(jti.to_string());
-        self.cache.write().unwrap().put(jti.to_string(), true);
+        self.blacklist
+            .write()
+            .expect("lock poisoned")
+            .insert(jti.to_string());
+        self.cache
+            .write()
+            .expect("lock poisoned")
+            .put(jti.to_string(), true);
     }
 
     /// Check if token has been used (replay protection)
@@ -83,7 +92,7 @@ impl TokenStore {
     /// # Panics
     /// Panics if the RwLock is poisoned
     pub fn is_used(&self, jti: &str) -> bool {
-        self.used_jtis.read().unwrap().contains(jti)
+        self.used_jtis.read().expect("lock poisoned").contains(jti)
     }
 
     /// Mark token as used
@@ -91,7 +100,7 @@ impl TokenStore {
     /// # Panics
     /// Panics if the RwLock is poisoned
     pub fn mark_used(&self, jti: &str) -> Result<(), TokenError> {
-        let mut used = self.used_jtis.write().unwrap();
+        let mut used = self.used_jtis.write().expect("lock poisoned");
         if used.contains(jti) {
             return Err(TokenError::AlreadyUsed);
         }
@@ -170,16 +179,24 @@ impl EgressFilter {
             .insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
 
         // Private IPv4 ranges
-        self.blocked_ranges.push("10.0.0.0/8".parse().unwrap());
-        self.blocked_ranges.push("172.16.0.0/12".parse().unwrap());
-        self.blocked_ranges.push("192.168.0.0/16".parse().unwrap());
-        self.blocked_ranges.push("127.0.0.0/8".parse().unwrap());
-        self.blocked_ranges.push("169.254.0.0/16".parse().unwrap()); // Link-local
+        self.blocked_ranges
+            .push("10.0.0.0/8".parse().expect("valid CIDR literal"));
+        self.blocked_ranges
+            .push("172.16.0.0/12".parse().expect("valid CIDR literal"));
+        self.blocked_ranges
+            .push("192.168.0.0/16".parse().expect("valid CIDR literal"));
+        self.blocked_ranges
+            .push("127.0.0.0/8".parse().expect("valid CIDR literal"));
+        self.blocked_ranges
+            .push("169.254.0.0/16".parse().expect("valid CIDR literal")); // Link-local
 
         // Private IPv6 ranges
-        self.blocked_ranges.push("fc00::/7".parse().unwrap()); // Unique local
-        self.blocked_ranges.push("fe80::/10".parse().unwrap()); // Link-local
-        self.blocked_ranges.push("::1/128".parse().unwrap()); // Loopback
+        self.blocked_ranges
+            .push("fc00::/7".parse().expect("valid CIDR literal")); // Unique local
+        self.blocked_ranges
+            .push("fe80::/10".parse().expect("valid CIDR literal")); // Link-local
+        self.blocked_ranges
+            .push("::1/128".parse().expect("valid CIDR literal")); // Loopback
     }
 
     /// Add URL to allowlist
@@ -303,12 +320,12 @@ impl RateLimiter {
     /// Check if request is allowed
     ///
     /// # Panics
-    /// Panics if the RwLock is poisoned or if the window duration cannot be subtracted
+    /// Panics if the RwLock is poisoned
     pub fn check(&self) -> Result<(), RateLimitError> {
         let now = Instant::now();
-        let window_start = now.checked_sub(self.window).unwrap();
+        let window_start = now.checked_sub(self.window).unwrap_or(now);
 
-        let mut requests = self.requests.write().unwrap();
+        let mut requests = self.requests.write().expect("lock poisoned");
 
         // Remove expired requests
         requests.retain(|&time| time > window_start);
@@ -326,12 +343,12 @@ impl RateLimiter {
     /// Get current request count
     ///
     /// # Panics
-    /// Panics if the RwLock is poisoned or if the window duration cannot be subtracted
+    /// Panics if the RwLock is poisoned
     pub fn current_count(&self) -> usize {
         let now = Instant::now();
-        let window_start = now.checked_sub(self.window).unwrap();
+        let window_start = now.checked_sub(self.window).unwrap_or(now);
 
-        let requests = self.requests.read().unwrap();
+        let requests = self.requests.read().expect("lock poisoned");
         requests.iter().filter(|&&time| time > window_start).count()
     }
 }
