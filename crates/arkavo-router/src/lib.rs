@@ -696,10 +696,10 @@ impl Router {
             if !response.tool_calls.is_empty() {
                 let display_count = response.tool_calls.len().min(5);
                 for tc in response.tool_calls.iter().take(display_count) {
-                    eprintln!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
+                    tracing::debug!("[LLM] Tool call: {} args={}", tc.tool_name, tc.arguments);
                 }
                 if response.tool_calls.len() > 5 {
-                    eprintln!(
+                    tracing::debug!(
                         "[LLM] ... and {} more tool calls",
                         response.tool_calls.len() - 5
                     );

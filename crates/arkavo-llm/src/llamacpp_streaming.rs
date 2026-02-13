@@ -6,6 +6,7 @@ use arkavo_llama_cpp::multimodal::{
     MtmdBitmap, MtmdContext, default_media_marker, encode_chunk, get_output_embeddings,
     preprocess_image_for_clip, tokenize_with_images,
 };
+use arkavo_llama_cpp::ModelFormat;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
@@ -90,6 +91,29 @@ fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
     }
 }
 
+/// Return stop sequences that indicate the model is self-prompting (generating a new user turn).
+/// These are chat template turn markers — a valid assistant response should never contain them.
+fn stop_sequences_for_format(format: ModelFormat) -> &'static [&'static str] {
+    match format {
+        ModelFormat::Qwen3 => &["<|im_start|>user"],
+        ModelFormat::Gemma3 => &["<start_of_turn>user"],
+        ModelFormat::MistralV3 => &["[INST]"],
+        ModelFormat::GLM4 => &["<|user|>"],
+    }
+}
+
+/// Check if accumulated text contains a stop sequence indicating self-prompting.
+/// Returns the byte offset of the stop sequence if found, or None.
+fn detect_self_prompting(accumulated: &str, format: ModelFormat) -> Option<usize> {
+    let stop_seqs = stop_sequences_for_format(format);
+    for seq in stop_seqs {
+        if let Some(pos) = accumulated.find(seq) {
+            return Some(pos);
+        }
+    }
+    None
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[derive(Debug, Clone)]
 pub(crate) struct StreamingConfig {
@@ -100,6 +124,8 @@ pub(crate) struct StreamingConfig {
     pub seed: u32,
     /// Enable dry sampling for repetition prevention (critical for GLM-4.7-Flash)
     pub use_dry_sampling: bool,
+    /// Model format for stop-sequence detection (prevents self-prompting)
+    pub model_format: ModelFormat,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -165,11 +191,11 @@ pub(crate) async fn generate_tokens_with_context(
             );
         }
 
-        // Use dry sampling for GLM models to prevent repetition loops
+        // Use dry sampling to prevent repetition loops
         let sampler = if config.use_dry_sampling {
-            let dry_config = DrySamplingConfig::for_glm();
+            let dry_config = DrySamplingConfig::for_glm(); // multiplier 1.1 works well across models
             let vocab = model.get_vocab();
-            let n_ctx_train = 32768; // GLM-4.7 context size
+            let n_ctx_train = model.get_trained_context_size() as i32;
             unsafe {
                 create_sampler_chain_with_dry(
                     config.temperature,
@@ -212,6 +238,8 @@ pub(crate) async fn generate_tokens_with_context(
 
         // Buffer for incomplete UTF-8 sequences
         let mut utf8_buffer: Vec<u8> = Vec::new();
+        // Detection buffer: decodes with special=true so template markers are visible
+        let mut detection_buffer = String::new();
 
         for _ in 0..max_generation {
             validate_logits(&ctx)?;
@@ -235,7 +263,50 @@ pub(crate) async fn generate_tokens_with_context(
                 break;
             }
 
-            // Get raw bytes for this token
+            // Decode with special=true for stop-sequence detection
+            // Special tokens like <|im_start|> are only visible in this representation
+            let mut special_text = String::new();
+            if let Ok(special_bytes) = token_to_bytes(vocab, token, true) {
+                if let Ok(s) = std::str::from_utf8(&special_bytes) {
+                    special_text = s.to_string();
+                    detection_buffer.push_str(s);
+                }
+            }
+
+            // Inject think markers that are special tokens into the user-facing stream
+            // so downstream consumers (process_stream) can detect and suppress them
+            if special_text == "<think>" || special_text == "</think>" {
+                let _ = tx.send(Ok(StreamResponse {
+                    content: special_text,
+                    reasoning_content: None,
+                    done: false,
+                }));
+            }
+
+            // Check for self-prompting using the detection buffer (with special tokens)
+            if let Some(stop_pos) = detect_self_prompting(&detection_buffer, config.model_format) {
+                if is_debug() {
+                    eprintln!(
+                        "⛔ Stop-sequence detected: model self-prompting at byte {} in detection buffer",
+                        stop_pos
+                    );
+                }
+                tracing::info!("Generation stopped: self-prompting detected");
+                // Flush any valid content remaining in utf8_buffer before the marker
+                if !utf8_buffer.is_empty() {
+                    let piece = extract_valid_utf8(&mut utf8_buffer);
+                    if !piece.is_empty() {
+                        let _ = tx.send(Ok(StreamResponse {
+                            content: piece,
+                            reasoning_content: None,
+                            done: false,
+                        }));
+                    }
+                }
+                break;
+            }
+
+            // Get raw bytes for this token (special=false for user-visible output)
             let token_bytes = token_to_bytes(vocab, token, false)
                 .map_err(|e| Error::Config(format!("Failed to decode token: {e}")))?;
 
@@ -473,5 +544,83 @@ pub(crate) async fn generate_tokens_with_vision(
 
     if let Err(e) = result {
         let _ = tx.send(Err(e));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stop_sequences_qwen3() {
+        let seqs = stop_sequences_for_format(ModelFormat::Qwen3);
+        assert!(seqs.contains(&"<|im_start|>user"));
+    }
+
+    #[test]
+    fn test_stop_sequences_gemma3() {
+        let seqs = stop_sequences_for_format(ModelFormat::Gemma3);
+        assert!(seqs.contains(&"<start_of_turn>user"));
+    }
+
+    #[test]
+    fn test_stop_sequences_mistral() {
+        let seqs = stop_sequences_for_format(ModelFormat::MistralV3);
+        assert!(seqs.contains(&"[INST]"));
+    }
+
+    #[test]
+    fn test_stop_sequences_glm4() {
+        let seqs = stop_sequences_for_format(ModelFormat::GLM4);
+        assert!(seqs.contains(&"<|user|>"));
+    }
+
+    #[test]
+    fn test_detect_self_prompting_qwen3() {
+        let text = "Here is a hello world script:\n```python\nprint('hello')\n```\n<|im_start|>user\nNow write one that takes input";
+        let pos = detect_self_prompting(text, ModelFormat::Qwen3);
+        assert!(pos.is_some());
+        let offset = pos.unwrap();
+        assert!(text[..offset].contains("print('hello')"));
+        assert!(!text[..offset].contains("<|im_start|>user"));
+    }
+
+    #[test]
+    fn test_detect_self_prompting_gemma3() {
+        let text = "Hello world!\n<start_of_turn>user\nAnother prompt";
+        assert!(detect_self_prompting(text, ModelFormat::Gemma3).is_some());
+    }
+
+    #[test]
+    fn test_detect_self_prompting_mistral() {
+        let text = "Some response</s>[INST] Another question [/INST]";
+        assert!(detect_self_prompting(text, ModelFormat::MistralV3).is_some());
+    }
+
+    #[test]
+    fn test_detect_self_prompting_glm4() {
+        let text = "Code output here\n<|user|>\nWrite more code";
+        assert!(detect_self_prompting(text, ModelFormat::GLM4).is_some());
+    }
+
+    #[test]
+    fn test_no_false_positive_on_clean_response() {
+        let text = "Here is your Python hello world:\n```python\nprint('Hello, World!')\n```\nThis script prints Hello, World! to the console.";
+        assert!(detect_self_prompting(text, ModelFormat::Qwen3).is_none());
+        assert!(detect_self_prompting(text, ModelFormat::Gemma3).is_none());
+        assert!(detect_self_prompting(text, ModelFormat::MistralV3).is_none());
+        assert!(detect_self_prompting(text, ModelFormat::GLM4).is_none());
+    }
+
+    #[test]
+    fn test_no_false_positive_on_empty() {
+        assert!(detect_self_prompting("", ModelFormat::Qwen3).is_none());
+    }
+
+    #[test]
+    fn test_stop_position_is_start_of_marker() {
+        let text = "Good response<|im_start|>user\nBad self-prompt";
+        let pos = detect_self_prompting(text, ModelFormat::Qwen3).unwrap();
+        assert_eq!(pos, "Good response".len());
     }
 }

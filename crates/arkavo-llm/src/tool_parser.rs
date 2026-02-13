@@ -34,6 +34,25 @@ pub struct ThinkingExtraction {
 }
 
 impl ToolParser {
+    /// Strip fence-formatted tool call blocks from content
+    ///
+    /// Removes ```tool_name\n...\n``` and ```tool_name``` patterns,
+    /// returning only the surrounding natural language text.
+    pub fn strip_fence_blocks(text: &str) -> String {
+        // Match all three fence patterns used by parse_fence
+        let patterns = [
+            r"```[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```",  // ```tool\ncontent```
+            r"```\s*\n[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```\ntool\ncontent```
+            r"```[a-z][a-z0-9_\-:]*```",                 // ```tool```
+        ];
+        let combined = patterns.join("|");
+        let re = Regex::new(&combined).unwrap();
+        let result = re.replace_all(text, "");
+        // Collapse runs of 3+ newlines into 2 (preserving paragraph breaks)
+        let collapse = Regex::new(r"\n{3,}").unwrap();
+        collapse.replace_all(result.trim(), "\n\n").to_string()
+    }
+
     /// Strip GLM-4 thinking blocks from model output
     ///
     /// GLM-4.7-Flash outputs `<|thought|>...<|/thought|>` blocks before tool calls.
@@ -692,6 +711,27 @@ I'll get that now."#;
         let calls = ToolParser::parse_fence(text).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "get_agent_time");
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_no_arg_tool() {
+        let text = "```get_agent_time```The current time is Friday.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "The current time is Friday.");
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_with_args() {
+        let text = "Let me check.\n\n```get_weather\nlocation: NYC\n```\n\nHere you go.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "Let me check.\n\nHere you go.");
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_no_fences() {
+        let text = "Just a regular response.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "Just a regular response.");
     }
 
     #[test]

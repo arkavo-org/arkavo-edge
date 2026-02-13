@@ -139,8 +139,12 @@ extern "C" fn llama_log_callback_filtered(
                     if str_slice.contains("tensor API disabled for pre-M") {
                         return;
                     }
-                    // Skip tokenizer config warnings for models with non-standard EOS handling
-                    if str_slice.contains("special_eos_id is not in special_eog_ids") {
+                    // Skip tokenizer config warnings for models with non-standard special token handling
+                    if str_slice.contains("is not in special_eog_ids") {
+                        return;
+                    }
+                    // Skip llama_context informational messages (yarn_attn_factor, etc.)
+                    if str_slice.contains("llama_context") {
                         return;
                     }
                 }
