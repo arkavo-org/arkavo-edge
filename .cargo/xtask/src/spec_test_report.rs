@@ -176,10 +176,15 @@ fn collect_uncovered(specs: &[SpecCoverage]) -> Vec<(&str, &str, &str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec_test::{ScenarioCoverage, Scenario, Spec, SpecCoverage};
+    use crate::spec_test::{Scenario, ScenarioCoverage, Spec, SpecCoverage};
     use std::path::PathBuf;
 
-    fn make_scenario(id: &str, name: &str, crit: Criticality, status: CoverageStatus) -> ScenarioCoverage {
+    fn make_scenario(
+        id: &str,
+        name: &str,
+        crit: Criticality,
+        status: CoverageStatus,
+    ) -> ScenarioCoverage {
         ScenarioCoverage {
             scenario: Scenario {
                 id: id.to_string(),
@@ -212,10 +217,23 @@ mod tests {
 
     #[test]
     fn markdown_report_contains_table_and_marker() {
-        let specs = vec![make_spec("auth", vec![
-            make_scenario("AUTH-1", "Login", Criticality::Critical, CoverageStatus::Covered),
-            make_scenario("AUTH-2", "Logout", Criticality::High, CoverageStatus::Missing),
-        ])];
+        let specs = vec![make_spec(
+            "auth",
+            vec![
+                make_scenario(
+                    "AUTH-1",
+                    "Login",
+                    Criticality::Critical,
+                    CoverageStatus::Covered,
+                ),
+                make_scenario(
+                    "AUTH-2",
+                    "Logout",
+                    Criticality::High,
+                    CoverageStatus::Missing,
+                ),
+            ],
+        )];
         let (md, gate) = format_markdown_report(&specs, 2, 1, 50.0, Some(85.0), true);
         assert!(md.contains("<!-- spec-coverage-report -->"));
         assert!(md.contains("| auth |"));
@@ -226,9 +244,15 @@ mod tests {
 
     #[test]
     fn quality_gate_passes_when_thresholds_met() {
-        let specs = vec![make_spec("net", vec![
-            make_scenario("NET-1", "Connect", Criticality::Critical, CoverageStatus::Covered),
-        ])];
+        let specs = vec![make_spec(
+            "net",
+            vec![make_scenario(
+                "NET-1",
+                "Connect",
+                Criticality::Critical,
+                CoverageStatus::Covered,
+            )],
+        )];
         let (md, gate) = format_markdown_report(&specs, 1, 1, 100.0, Some(85.0), true);
         assert!(md.contains(":white_check_mark:"));
         assert!(gate.passed);
@@ -236,9 +260,15 @@ mod tests {
 
     #[test]
     fn uncovered_details_section_rendered() {
-        let specs = vec![make_spec("io", vec![
-            make_scenario("IO-1", "Read file", Criticality::Low, CoverageStatus::Missing),
-        ])];
+        let specs = vec![make_spec(
+            "io",
+            vec![make_scenario(
+                "IO-1",
+                "Read file",
+                Criticality::Low,
+                CoverageStatus::Missing,
+            )],
+        )];
         let (md, _) = format_markdown_report(&specs, 1, 0, 0.0, None, false);
         assert!(md.contains("<details>"));
         assert!(md.contains("| IO-1 |"));

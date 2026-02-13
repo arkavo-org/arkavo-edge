@@ -690,10 +690,22 @@ components:
       - Policy binding prevents tampering
       - Forward secrecy for key agreement
 
+  - name: session-security
+    file: session-security.spec.yaml
+    module: arkavo_session::security
+    description: Session security hardening with timeouts, device binding, and revocation
+    criticality: critical
+    scenario_count: 21
+    invariants:
+      - Sessions have mandatory timeouts
+      - Sessions bound to device identity
+      - Sessions can be revoked immediately
+      - Logs never contain secrets or PII
+
 stats:
-  total_specs: 60
-  total_scenarios: 510
-  critical_scenarios: 115
+  total_specs: 61
+  total_scenarios: 531
+  critical_scenarios: 123
   coverage_areas:
     - authentication
     - authorization

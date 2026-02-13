@@ -11,19 +11,16 @@ use std::process;
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Show coverage summary
+    /// Show coverage summary (supports --markdown for CI PR comments)
     Coverage {
         #[arg(short, long)]
         detailed: bool,
         #[arg(long)]
         spec: Option<String>,
-        /// Output GitHub-flavored markdown (for CI PR comments)
         #[arg(long)]
         markdown: bool,
-        /// Exit non-zero if coverage percentage is below this threshold
         #[arg(long)]
         fail_under: Option<f64>,
-        /// Exit non-zero if any critical/high scenario has zero tests
         #[arg(long)]
         critical_required: bool,
     },
@@ -63,15 +60,33 @@ pub enum Commands {
 pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result<()> {
     match command {
         Commands::Coverage {
-            detailed, spec, markdown, fail_under, critical_required,
-        } => cmd_coverage(&specs_dir, &crates_dir, detailed, spec, markdown, fail_under, critical_required),
+            detailed,
+            spec,
+            markdown,
+            fail_under,
+            critical_required,
+        } => cmd_coverage(
+            &specs_dir,
+            &crates_dir,
+            detailed,
+            spec,
+            markdown,
+            fail_under,
+            critical_required,
+        ),
         Commands::Uncovered { generate, output } => {
             cmd_uncovered(&specs_dir, &crates_dir, generate, output)
         }
-        Commands::Generate { spec, uncovered_only, output } => {
-            cmd_generate(&specs_dir, spec, uncovered_only, output)
-        }
-        Commands::Run { scenario, spec, criticality } => cmd_run(scenario, spec, criticality),
+        Commands::Generate {
+            spec,
+            uncovered_only,
+            output,
+        } => cmd_generate(&specs_dir, spec, uncovered_only, output),
+        Commands::Run {
+            scenario,
+            spec,
+            criticality,
+        } => cmd_run(scenario, spec, criticality),
         Commands::List { spec, with_tests } => cmd_list(&specs_dir, &crates_dir, spec, with_tests),
     }
 }
@@ -100,8 +115,13 @@ fn filter_specs(specs: Vec<SpecCoverage>, filter: Option<String>) -> Vec<SpecCov
 }
 
 fn cmd_coverage(
-    specs_dir: &Path, crates_dir: &Path, detailed: bool, filter_spec: Option<String>,
-    markdown: bool, fail_under: Option<f64>, critical_required: bool,
+    specs_dir: &Path,
+    crates_dir: &Path,
+    detailed: bool,
+    filter_spec: Option<String>,
+    markdown: bool,
+    fail_under: Option<f64>,
+    critical_required: bool,
 ) -> Result<()> {
     let specs = SpecParser::parse_all_specs(specs_dir)?;
     let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
@@ -112,7 +132,12 @@ fn cmd_coverage(
 
     if markdown {
         let (md, gate) = spec_test_report::format_markdown_report(
-            &filtered, total, covered, pct, fail_under, critical_required,
+            &filtered,
+            total,
+            covered,
+            pct,
+            fail_under,
+            critical_required,
         );
         print!("{md}");
         if !gate.passed {
@@ -133,12 +158,22 @@ fn count_by_status(spec: &SpecCoverage, status: CoverageStatus) -> usize {
 }
 
 fn print_terminal_report(specs: &[SpecCoverage], detailed: bool, pct: f64) {
-    println!("{}\n{}\n", "Spec Coverage Report".bold().cyan(), "====================".cyan());
-    println!("{:<25} {:>8} {:>8} {:>12}", "Spec", "Total", "Covered", "Status");
+    println!(
+        "{}\n{}\n",
+        "Spec Coverage Report".bold().cyan(),
+        "====================".cyan()
+    );
+    println!(
+        "{:<25} {:>8} {:>8} {:>12}",
+        "Spec", "Total", "Covered", "Status"
+    );
     println!("{}", "-".repeat(60));
 
     for s in specs {
-        let (total, covered) = (s.scenarios.len(), count_by_status(s, CoverageStatus::Covered));
+        let (total, covered) = (
+            s.scenarios.len(),
+            count_by_status(s, CoverageStatus::Covered),
+        );
         let partial = count_by_status(s, CoverageStatus::Partial);
         let status = if covered == total {
             "Full".green()
@@ -147,12 +182,21 @@ fn print_terminal_report(specs: &[SpecCoverage], detailed: bool, pct: f64) {
         } else {
             "Missing".red()
         };
-        println!("{:<25} {:>8} {:>8} {:>12}", spec_name(&s.file), total, covered, status);
+        println!(
+            "{:<25} {:>8} {:>8} {:>12}",
+            spec_name(&s.file),
+            total,
+            covered,
+            status
+        );
     }
 
     println!("{}", "-".repeat(60));
     let total: usize = specs.iter().map(|s| s.scenarios.len()).sum();
-    let covered: usize = specs.iter().map(|s| count_by_status(s, CoverageStatus::Covered)).sum();
+    let covered: usize = specs
+        .iter()
+        .map(|s| count_by_status(s, CoverageStatus::Covered))
+        .sum();
     println!("{:<25} {:>8} {:>8}", "TOTAL", total, covered);
     println!("\nCoverage: {pct:.1}%\n");
 
@@ -162,7 +206,10 @@ fn print_terminal_report(specs: &[SpecCoverage], detailed: bool, pct: f64) {
             for sc in &s.scenarios {
                 println!(
                     "  {} {} - {} ({} tests)",
-                    sc.status.emoji(), sc.scenario.id.dimmed(), sc.scenario.name, sc.tests.len()
+                    sc.status.emoji(),
+                    sc.scenario.id.dimmed(),
+                    sc.scenario.name,
+                    sc.tests.len()
                 );
             }
             println!();
@@ -171,18 +218,28 @@ fn print_terminal_report(specs: &[SpecCoverage], detailed: bool, pct: f64) {
 }
 
 fn cmd_uncovered(
-    specs_dir: &Path, crates_dir: &Path, generate: bool, output: PathBuf,
+    specs_dir: &Path,
+    crates_dir: &Path,
+    generate: bool,
+    output: PathBuf,
 ) -> Result<()> {
-    println!("{}\n{}\n", "Uncovered Scenarios".bold().yellow(), "==================".yellow());
+    println!(
+        "{}\n{}\n",
+        "Uncovered Scenarios".bold().yellow(),
+        "==================".yellow()
+    );
 
     let specs = SpecParser::parse_all_specs(specs_dir)?;
     let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
     let report = CoverageAnalyzer::analyze(specs, tests);
 
     let uncovered_by_spec: Vec<_> = report
-        .specs.iter()
+        .specs
+        .iter()
         .map(|s| {
-            let uncovered: Vec<_> = s.scenarios.iter()
+            let uncovered: Vec<_> = s
+                .scenarios
+                .iter()
                 .filter(|sc| matches!(sc.status, CoverageStatus::Missing))
                 .collect();
             (s, uncovered)
@@ -197,12 +254,23 @@ fn cmd_uncovered(
 
     for (spec_cov, uncovered) in &uncovered_by_spec {
         let name = spec_name(&spec_cov.file);
-        println!("{} {} ({} uncovered)", "▶".red(), name.bold(), uncovered.len());
+        println!(
+            "{} {} ({} uncovered)",
+            "▶".red(),
+            name.bold(),
+            uncovered.len()
+        );
         for sc in uncovered {
-            println!("  {} {}: {}", "•".red(), sc.scenario.id.dimmed(), sc.scenario.name);
+            println!(
+                "  {} {}: {}",
+                "•".red(),
+                sc.scenario.id.dimmed(),
+                sc.scenario.name
+            );
             println!(
                 "    [{}] {}",
-                sc.scenario.criticality.as_str().to_uppercase(), sc.scenario.when
+                sc.scenario.criticality.as_str().to_uppercase(),
+                sc.scenario.when
             );
         }
         println!();
@@ -222,13 +290,14 @@ fn cmd_uncovered(
 }
 
 fn cmd_generate(
-    specs_dir: &Path, filter_spec: Option<String>, uncovered_only: bool, output: PathBuf,
+    specs_dir: &Path,
+    filter_spec: Option<String>,
+    uncovered_only: bool,
+    output: PathBuf,
 ) -> Result<()> {
     println!("{}\n", "Generating Test Stubs".bold().green());
     std::fs::create_dir_all(&output)?;
-
-    let specs = SpecParser::parse_all_specs(specs_dir)?;
-    for (path, spec) in specs {
+    for (path, spec) in SpecParser::parse_all_specs(specs_dir)? {
         let name = spec_name(&path);
         if let Some(ref filter) = filter_spec {
             let f = filter.to_lowercase();
@@ -237,9 +306,15 @@ fn cmd_generate(
             }
         }
         let output_file = output.join(format!("{name}_tests.rs"));
-        let content = TestGenerator::generate_full_module(&spec, uncovered_only, &[]);
-        std::fs::write(&output_file, content)?;
-        println!("Generated: {} ({} scenarios)", output_file.display(), spec.scenarios.len());
+        std::fs::write(
+            &output_file,
+            TestGenerator::generate_full_module(&spec, uncovered_only, &[]),
+        )?;
+        println!(
+            "Generated: {} ({} scenarios)",
+            output_file.display(),
+            spec.scenarios.len()
+        );
     }
     println!(
         "\n{} {}",
@@ -249,33 +324,30 @@ fn cmd_generate(
     Ok(())
 }
 
-fn cmd_run(
-    scenario: Option<String>, spec: Option<String>, criticality: Option<String>,
-) -> Result<()> {
+fn cmd_run(scenario: Option<String>, spec: Option<String>, crit: Option<String>) -> Result<()> {
     println!("{}\n", "Running Spec Tests".bold().blue());
-    let filter = if let Some(ref s) = scenario {
-        println!("Running tests for scenario: {}", s.yellow());
-        Some(s.clone())
-    } else if let Some(ref s) = spec {
-        println!("Running tests for spec: {}", s.yellow());
-        Some(s.clone())
-    } else if let Some(ref c) = criticality {
-        println!("Running tests with criticality: {}", c.yellow());
-        Some(format!("criticality:{c}"))
-    } else {
-        println!("Running all spec-tagged tests");
-        None
-    };
-    println!("\n{}", "Execute:".dimmed());
-    match filter {
-        Some(f) => println!("  cargo test {f}"),
-        None => println!("  cargo test"),
+    let filter = scenario
+        .or(spec)
+        .or(crit.map(|c| format!("criticality:{c}")));
+    match &filter {
+        Some(f) => println!(
+            "Running: {}\n{}  cargo test {f}",
+            f.yellow(),
+            "Execute:\n".dimmed()
+        ),
+        None => println!(
+            "Running all spec-tagged tests\n{}  cargo test",
+            "Execute:\n".dimmed()
+        ),
     }
     Ok(())
 }
 
 fn cmd_list(
-    specs_dir: &Path, crates_dir: &Path, filter_spec: Option<String>, with_tests: bool,
+    specs_dir: &Path,
+    crates_dir: &Path,
+    filter_spec: Option<String>,
+    with_tests: bool,
 ) -> Result<()> {
     println!("{}\n", "Spec Scenarios".bold().cyan());
 
@@ -301,9 +373,16 @@ fn cmd_list(
                 Criticality::High => "high".yellow(),
                 _ => scenario.criticality.as_str().normal(),
             };
-            print!("  {} {} [{}] {}", "•".normal(), scenario.id.dimmed(), crit_color, scenario.name);
+            print!(
+                "  {} {} [{}] {}",
+                "•".normal(),
+                scenario.id.dimmed(),
+                crit_color,
+                scenario.name
+            );
             if let Some(ref t) = tests {
-                let count = t.iter()
+                let count = t
+                    .iter()
                     .filter(|test| test.scenarios_covered.contains(&scenario.id))
                     .count();
                 if count > 0 {

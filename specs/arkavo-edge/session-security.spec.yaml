@@ -2,10 +2,6 @@
 
 feature: Session Security Hardening
 module: arkavo_session::security
-description: |
-  Security hardening for IssueActionEffortSession including timeouts, device binding,
-  session revocation, log sanitization, error sanitization, cryptographic agility,
-  and FFI fuzzing capabilities.
 version: 1.0.0
 
 invariants:
@@ -34,7 +30,7 @@ scenarios:
       - Cleanup callbacks are invoked
       - Audit log entry created (without session secrets)
     refs: [crates/arkavo-session/src/timeout.rs]
-    tdd_phase: red
+
 
   - id: SESS-002
     name: Idle session timeout enforced
@@ -48,7 +44,7 @@ scenarios:
       - In-flight operations complete but new ones are rejected
       - Metrics recorded for idle timeout
     refs: [crates/arkavo-session/src/timeout.rs]
-    tdd_phase: red
+
 
   - id: SESS-003
     name: Timeout configuration validation
@@ -61,7 +57,7 @@ scenarios:
       - Default secure values are used
       - Warning is logged
     refs: [crates/arkavo-session/src/timeout.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # Device Binding
@@ -78,7 +74,7 @@ scenarios:
       - Session token is cryptographically bound to device key
       - Any operation requires device key verification
     refs: [crates/arkavo-session/src/device_binding.rs]
-    tdd_phase: red
+
 
   - id: SESS-005
     name: Session rejected from different device
@@ -92,7 +88,7 @@ scenarios:
       - Security event is logged
       - Optional: Session is revoked (configurable)
     refs: [crates/arkavo-session/src/device_binding.rs]
-    tdd_phase: red
+
 
   - id: SESS-006
     name: Device rotation with re-authentication
@@ -106,7 +102,7 @@ scenarios:
       - Old session on Device A is revoked
       - Audit trail records the rotation
     refs: [crates/arkavo-session/src/device_binding.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # Session Revocation
@@ -124,7 +120,7 @@ scenarios:
       - In-flight operations are notified
       - Cleanup completes within 100ms
     refs: [crates/arkavo-session/src/revocation.rs]
-    tdd_phase: red
+
 
   - id: SESS-008
     name: User-initiated session revocation (logout)
@@ -137,7 +133,7 @@ scenarios:
       - Client is notified
       - All tokens are invalidated
     refs: [crates/arkavo-session/src/revocation.rs]
-    tdd_phase: red
+
 
   - id: SESS-009
     name: Bulk revocation by criteria
@@ -150,7 +146,7 @@ scenarios:
       - Operation is atomic (all or none)
       - Audit log records bulk action
     refs: [crates/arkavo-session/src/revocation.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # Log Sanitization
@@ -166,7 +162,7 @@ scenarios:
       - Log structure is preserved
       - No partial token leakage
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
-    tdd_phase: red
+
 
   - id: SESS-011
     name: PII redacted in session logs
@@ -179,7 +175,7 @@ scenarios:
       - Non-PII context is preserved
       - Redaction is consistent across log levels
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
-    tdd_phase: red
+
 
   - id: SESS-012
     name: Structured log sanitization
@@ -192,7 +188,7 @@ scenarios:
       - Values are replaced with type-preserving masks
       - Arrays and nested objects are recursively sanitized
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # Error Sanitization
@@ -208,7 +204,7 @@ scenarios:
       - Internal details are logged internally
       - Error correlation ID is provided
     refs: [crates/arkavo-session/src/error.rs]
-    tdd_phase: red
+
 
   - id: SESS-014
     name: Security errors have appropriate detail levels
@@ -221,7 +217,7 @@ scenarios:
       - Internal: Specific reason (expired, revoked, invalid signature)
       - Admin audit: Full details with timestamps
     refs: [crates/arkavo-session/src/error.rs]
-    tdd_phase: red
+
 
   - id: SESS-015
     name: Error chain preserves security context
@@ -234,7 +230,7 @@ scenarios:
       - Internal error chain is preserved for logging
       - Source error classification is maintained
     refs: [crates/arkavo-session/src/error.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # Cryptographic Agility
@@ -250,7 +246,7 @@ scenarios:
       - P-256, P-384 are supported
       - Invalid algorithms are rejected at startup
     refs: [crates/arkavo-session/src/crypto_config.rs]
-    tdd_phase: red
+
 
   - id: SESS-017
     name: PQC-ready algorithm negotiation
@@ -263,7 +259,7 @@ scenarios:
       - Hybrid classical/PQC is supported
       - Fallback to classical if PQC unavailable
     refs: [crates/arkavo-session/src/crypto_config.rs]
-    tdd_phase: red
+
 
   - id: SESS-018
     name: Crypto agility version negotiation
@@ -276,7 +272,7 @@ scenarios:
       - Best mutual algorithm is selected
       - Downgrade attacks are detected
     refs: [crates/arkavo-session/src/crypto_config.rs]
-    tdd_phase: red
+
 
   # ============================================================================
   # FFI Fuzzing
@@ -292,7 +288,7 @@ scenarios:
       - Memory safety is verified (no crashes, use-after-free)
       - Return values are validated
     refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
-    tdd_phase: red
+
 
   - id: SESS-020
     name: Fuzzing corpus generation from valid inputs
@@ -305,7 +301,7 @@ scenarios:
       - Edge cases are included (empty, max size, boundary values)
       - Mutation strategies target session-specific fields
     refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
-    tdd_phase: red
+
 
   - id: SESS-021
     name: Continuous fuzzing integration
@@ -318,6 +314,4 @@ scenarios:
       - New crashes are reported immediately
       - Coverage reports are generated
     refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
-    tdd_phase: red
 
-changed: "2026-02-12"
