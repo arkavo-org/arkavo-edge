@@ -86,7 +86,7 @@ scenarios:
     then:
       - Request is rejected with DeviceBindingError
       - Security event is logged
-      - Optional: Session is revoked (configurable)
+      - "Optional: Session is revoked (configurable)"
     refs: [crates/arkavo-session/src/device_binding.rs]
 
 
@@ -213,9 +213,9 @@ scenarios:
       - Authentication/authorization error occurs
     when: Error is processed
     then:
-      - External: Generic "authentication failed"
-      - Internal: Specific reason (expired, revoked, invalid signature)
-      - Admin audit: Full details with timestamps
+      - "External: Generic authentication failed"
+      - "Internal: Specific reason (expired, revoked, invalid signature)"
+      - "Admin audit: Full details with timestamps"
     refs: [crates/arkavo-session/src/error.rs]
 
 
