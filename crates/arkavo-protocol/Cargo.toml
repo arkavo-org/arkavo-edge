@@ -51,6 +51,7 @@ thiserror = { workspace = true }
 lru = { workspace = true }
 ipnet = "2.9"
 bs58 = "0.5"
+arkavo-validation = { path = "../arkavo-validation" }
 
 # Logging
 tracing = { workspace = true }

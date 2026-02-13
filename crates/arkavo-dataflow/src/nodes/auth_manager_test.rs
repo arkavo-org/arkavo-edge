@@ -26,6 +26,7 @@ mod auth_manager_regression_tests {
         // This test verifies that we don't panic on invalid master key scenarios
 
         // Set an invalid master key (too short)
+        // SAFETY: Test runs in isolation via nextest; no concurrent env access
         unsafe {
             std::env::set_var("ARKAVO_MASTER_KEY", "short");
         }
@@ -52,7 +53,7 @@ mod auth_manager_regression_tests {
             }
         }
 
-        // Clean up
+        // SAFETY: Test runs in isolation via nextest; no concurrent env access
         unsafe {
             std::env::remove_var("ARKAVO_MASTER_KEY");
         }
@@ -63,7 +64,7 @@ mod auth_manager_regression_tests {
         // Regression test for PR #200: Ensure keychain integration works properly
         // This test verifies the fallback mechanism when keychain is not available
 
-        // Clear any existing master key
+        // SAFETY: Test runs in isolation via nextest; no concurrent env access
         unsafe {
             std::env::remove_var("ARKAVO_MASTER_KEY");
         }

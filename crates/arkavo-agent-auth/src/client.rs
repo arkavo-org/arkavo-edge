@@ -114,12 +114,19 @@ impl AgentAuthClient {
             }
 
             match self.try_authenticate(keypair, &did).await {
-                Ok(token) => return Ok(token),
-                Err(AgentAuthError::NotAuthorized) => return Err(AgentAuthError::NotAuthorized),
+                Ok(token) => {
+                    tracing::info!(event = "auth_decision", action = "permit", subject = %did, "Agent authenticated");
+                    return Ok(token);
+                }
+                Err(AgentAuthError::NotAuthorized) => {
+                    tracing::info!(event = "auth_decision", action = "deny", subject = %did, "Agent not authorized");
+                    return Err(AgentAuthError::NotAuthorized);
+                }
                 Err(e) => last_error = Some(e),
             }
         }
 
+        tracing::info!(event = "auth_decision", action = "deny", subject = %did, "Agent auth retries exhausted");
         Err(last_error.unwrap_or(AgentAuthError::TokenRequest(
             "Authentication failed after retries".into(),
         )))

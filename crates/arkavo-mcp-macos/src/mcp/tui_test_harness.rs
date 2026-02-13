@@ -323,8 +323,9 @@ impl TuiTestHarness {
                     {
                         // Kill the entire process group
                         let pid = session.process.id();
+                        // SAFETY: PID originates from a child process we spawned; negative PID
+                        // targets the process group which we own
                         unsafe {
-                            // Kill process group (negative PID)
                             libc::kill(-(pid as i32), libc::SIGTERM);
                             std::thread::sleep(std::time::Duration::from_millis(100));
                             libc::kill(-(pid as i32), libc::SIGKILL);

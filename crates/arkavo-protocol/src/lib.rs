@@ -40,6 +40,7 @@ pub mod openrpc;
 pub mod peer_manager;
 pub mod push_notifications;
 pub mod rate_limit;
+pub mod rate_limit_middleware;
 pub mod registration;
 pub mod security;
 pub mod security_fixes;
@@ -76,6 +77,7 @@ pub use metrics_subscription::{
 pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{IpRateLimiter, RateLimitConfig, RateLimiter, spawn_cleanup_task};
+pub use rate_limit_middleware::{extract_client_ip, ip_rate_limit_middleware};
 pub use registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
     VerifyResponse,

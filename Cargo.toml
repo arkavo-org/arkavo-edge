@@ -61,6 +61,7 @@ members = [
     "crates/arkavo-titan",
     "crates/arkavo-hrm",
     "crates/arkavo-security",
+    "crates/arkavo-validation",
     "crates/arkavo-critic",
     "crates/arkavo-test-macros",
     "crates/arkavo-tasks",

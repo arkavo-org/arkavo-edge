@@ -521,6 +521,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1193,6 +1194,7 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-memory",
  "arkavo-repo",
+ "arkavo-validation",
  "async-trait",
  "base64 0.22.1",
  "cc",
@@ -1238,6 +1240,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-memory",
+ "arkavo-validation",
  "async-trait",
  "chrono",
  "futures",
@@ -1264,6 +1267,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
+ "arkavo-validation",
  "async-recursion",
  "async-trait",
  "base64 0.22.1",
@@ -1379,6 +1383,7 @@ dependencies = [
  "arkavo-router",
  "arkavo-server",
  "arkavo-tdf",
+ "arkavo-validation",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -1547,12 +1552,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "bs58",
  "chrono",
  "crossbeam-queue",
  "dashmap",
  "governor",
- "ipnet",
  "jsonwebtoken",
  "lru",
  "rand 0.8.5",
@@ -1857,6 +1860,14 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "arkavo-validation"
+version = "0.58.9"
+dependencies = [
+ "ipnet",
+ "serde_json",
 ]
 
 [[package]]

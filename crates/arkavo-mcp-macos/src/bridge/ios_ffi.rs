@@ -48,6 +48,8 @@ impl RustTestHarness {
         let params_cstr = CString::new(params)
             .map_err(|e| TestError::Bridge(format!("Invalid params string: {e}")))?;
 
+        // SAFETY: CStrings are valid null-terminated; bridge pointer verified non-null above;
+        // null return is checked; string is copied before free
         unsafe {
             let result_ptr =
                 ios_bridge_execute_action(bridge, action_cstr.as_ptr(), params_cstr.as_ptr());
@@ -80,6 +82,8 @@ impl RustTestHarness {
             .to_string());
         };
 
+        // SAFETY: Bridge pointer verified non-null above; null return is checked;
+        // string is copied before free
         unsafe {
             let state_ptr = ios_bridge_get_current_state(bridge);
 
@@ -120,6 +124,8 @@ impl RustTestHarness {
         let data_cstr = CString::new(data)
             .map_err(|e| TestError::Bridge(format!("Invalid data string: {e}")))?;
 
+        // SAFETY: CStrings are valid null-terminated; bridge pointer verified non-null above;
+        // null return is checked; string is copied before free
         unsafe {
             let result_ptr = ios_bridge_mutate_state(
                 bridge,
@@ -174,6 +180,8 @@ impl RustTestHarness {
             return Ok(vec![]);
         };
 
+        // SAFETY: Bridge pointer verified non-null above; size is written by FFI;
+        // null return is checked; slice length comes from FFI size output; data is copied before free
         unsafe {
             let mut size: usize = 0;
             let snapshot_ptr = ios_bridge_create_snapshot(bridge, &raw mut size);
@@ -195,6 +203,7 @@ impl RustTestHarness {
             return Ok(());
         };
 
+        // SAFETY: Bridge pointer verified non-null above; data slice is valid for its len
         unsafe {
             ios_bridge_restore_snapshot(bridge, data.as_ptr().cast::<c_void>(), data.len());
         }
@@ -234,5 +243,7 @@ impl Default for RustTestHarness {
     }
 }
 
+// SAFETY: RustTestHarness is only accessed from a single task; the bridge pointer
+// is set once during init and all FFI calls are sequential
 unsafe impl Send for RustTestHarness {}
 unsafe impl Sync for RustTestHarness {}

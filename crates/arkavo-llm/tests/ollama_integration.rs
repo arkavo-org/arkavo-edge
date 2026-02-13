@@ -1,5 +1,6 @@
 #![cfg(feature = "llm-remote")]
 #![allow(clippy::disallowed_methods)]
+// SAFETY: All set_var/remove_var calls run under #[serial] ensuring no concurrent env access
 
 use arkavo_llm::{LlmClient, Message};
 use serial_test::serial;

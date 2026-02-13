@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
@@ -62,24 +62,10 @@ impl FileSystemKit {
     }
 
     fn validate_path(&self, path: &str) -> Result<PathBuf> {
-        let path = Path::new(path);
-
-        // Convert to absolute path if relative
-        let abs_path = if path.is_relative() {
-            std::env::current_dir()
-                .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?
-                .join(path)
-        } else {
-            path.to_path_buf()
-        };
-
-        // Basic security check - ensure path doesn't contain suspicious patterns
-        let path_str = abs_path.to_string_lossy();
-        if path_str.contains("..") || path_str.contains('~') {
-            return Err(ToolError::Mcp("Path traversal not allowed".to_string()));
-        }
-
-        Ok(abs_path)
+        let base = std::env::current_dir()
+            .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?;
+        arkavo_validation::validate_no_traversal(&base, path)
+            .map_err(|e| ToolError::Mcp(e.to_string()))
     }
 }
 

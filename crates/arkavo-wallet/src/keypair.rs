@@ -15,7 +15,7 @@ pub struct EvmKeypair {
 impl EvmKeypair {
     /// Generate a new random keypair
     pub fn generate() -> Self {
-        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
         Self { signing_key }
     }
 

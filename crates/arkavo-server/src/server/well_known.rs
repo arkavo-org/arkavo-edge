@@ -1,4 +1,7 @@
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{
+    Json, Router, extract::State, http::StatusCode, middleware, response::IntoResponse,
+    routing::get,
+};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -6,6 +9,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{info, warn};
 
 use arkavo_protocol::mcp_registry::McpRegistry;
+use arkavo_protocol::rate_limit::IpRateLimiter;
 use arkavo_protocol::types::{AgentCapabilities, AgentCard, AgentProvider, AgentSkill};
 
 use super::config_helpers::AgentMetadata;
@@ -16,6 +20,7 @@ pub struct WellKnownState {
     pub agent_metadata: Arc<RwLock<AgentMetadata>>,
     pub mcp_registry: Arc<McpRegistry>,
     pub rpc_port: u16,
+    pub rate_limiter: Arc<IpRateLimiter>,
     /// Whether KAS capability is enabled
     #[cfg(feature = "kas")]
     pub kas_enabled: bool,
@@ -119,8 +124,13 @@ async fn get_agent_json(State(state): State<WellKnownState>) -> impl IntoRespons
 
 /// Create the axum router for well-known endpoints
 fn create_well_known_router(state: WellKnownState) -> Router {
+    let rate_limiter = state.rate_limiter.clone();
     Router::new()
         .route("/.well-known/agent.json", get(get_agent_json))
+        .layer(middleware::from_fn(
+            arkavo_protocol::ip_rate_limit_middleware,
+        ))
+        .layer(axum::Extension(rate_limiter))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
             axum::http::HeaderValue::from_static("nosniff"),
@@ -161,7 +171,12 @@ pub async fn start_well_known_server(
     );
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, router).await {
+        if let Err(e) = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        {
             warn!("Well-known HTTP server error: {}", e);
         }
     });
@@ -189,6 +204,9 @@ mod tests {
             agent_metadata,
             mcp_registry,
             rpc_port: 8080,
+            rate_limiter: Arc::new(IpRateLimiter::new(
+                arkavo_protocol::rate_limit::RateLimitConfig::default(),
+            )),
             #[cfg(feature = "kas")]
             kas_enabled: false,
         };

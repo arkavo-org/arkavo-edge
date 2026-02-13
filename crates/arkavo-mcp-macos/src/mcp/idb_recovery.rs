@@ -194,11 +194,7 @@ impl IdbRecovery {
             eprintln!("[IdbRecovery] Cleared connected devices tracking");
         }
 
-        // Step 4: Clear any IDB-specific environment variables that might be cached
-        unsafe {
-            std::env::remove_var("IDB_COMPANION_PORT");
-            std::env::remove_var("IDB_GRPC_PORT");
-        }
+        // Step 4: IDB port env vars are set on Command::env() at spawn time, not globally
 
         // Step 5: If using embedded IDB, re-initialize it
         #[cfg(target_os = "macos")]

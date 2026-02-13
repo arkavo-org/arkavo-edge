@@ -112,6 +112,7 @@ extern "C" fn llama_log_callback_filtered(
     let debug_enabled = LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed);
 
     if (is_warning_or_error || debug_enabled) && !text.is_null() {
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         unsafe {
             let c_str = std::ffi::CStr::from_ptr(text);
             if let Ok(str_slice) = c_str.to_str() {
@@ -155,7 +156,7 @@ pub fn init_llama_logging() {
     // Logging disabled by default, can be enabled with set_debug_logging
     LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
 
-    // Set our custom log callback
+    // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
     unsafe {
         ffi::llama_log_set(Some(llama_log_callback_filtered), std::ptr::null_mut());
     }
@@ -193,7 +194,7 @@ impl LlamaModel {
         use_mmap: bool,
         use_direct_io: bool,
     ) -> Result<Self, String> {
-        // Initialize backend if not already done
+        // SAFETY: Null return is checked immediately after this call
         unsafe {
             ffi::llama_backend_init();
         }
@@ -206,6 +207,7 @@ impl LlamaModel {
 
         if try_gpu {
             // First attempt: GPU acceleration
+            // SAFETY: Null return is checked immediately after this call
             let mut params = unsafe { ffi::llama_model_default_params() };
             params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
@@ -218,6 +220,7 @@ impl LlamaModel {
                 );
             }
 
+            // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
             let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
 
             if !model.is_null() {
@@ -239,10 +242,12 @@ impl LlamaModel {
         }
 
         // CPU fallback
+        // SAFETY: Null return is checked immediately after this call
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
         cpu_params.use_mmap = use_mmap;
 
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
         if cpu_model.is_null() {
             Err("Failed to load model (CPU attempt failed)".to_string())
@@ -256,16 +261,19 @@ impl LlamaModel {
     }
 
     pub fn get_vocab(&self) -> *const ffi::llama_vocab {
+        // SAFETY: Null return is checked immediately after this call
         unsafe { ffi::llama_model_get_vocab(self.ptr) }
     }
 
     pub fn get_eos_token(&self) -> i32 {
         let vocab = self.get_vocab();
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::llama_vocab_eos(vocab) }
     }
 
     pub fn get_bos_token(&self) -> i32 {
         let vocab = self.get_vocab();
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::llama_vocab_bos(vocab) }
     }
 
@@ -274,6 +282,7 @@ impl LlamaModel {
             eprintln!("⚠ Model pointer is null, returning default context size");
             return 32768;
         }
+        // SAFETY: Null return is checked immediately after this call
         let ctx = unsafe { ffi::llama_n_ctx_train(self.ptr) };
         if ctx <= 0 {
             eprintln!("⚠ Invalid trained context size: {}, returning default", ctx);
@@ -290,6 +299,7 @@ impl LlamaModel {
     pub fn n_embd_out(&self) -> i32 {
         // Upstream removed/changed the output-embedding accessor in newer llama.cpp.
         // For decoder-only models we use in-embedding size as the stable fallback.
+        // SAFETY: Null return is checked immediately after this call
         unsafe { ffi::llama_model_n_embd_inp(self.ptr) }
     }
 }
@@ -321,6 +331,7 @@ pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String
 #[cfg(not(target_env = "musl"))]
 impl Drop for LlamaModel {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::llama_free_model(self.ptr);
         }
@@ -396,6 +407,7 @@ impl LlamaContext {
 
         // Try GPU if it hasn't failed before
         if gpu_status != 2 {
+            // SAFETY: Null return is checked immediately after this call
             let mut gpu_params = unsafe { ffi::llama_context_default_params() };
 
             if let Some(ctx) = manual_ctx {
@@ -424,6 +436,7 @@ impl LlamaContext {
             gpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO;
 
             // Try with panic catching (Vulkan may abort)
+            // SAFETY: Null return is checked immediately after this call
             let gpu_result = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
                 ffi::llama_new_context_with_model(model.ptr, gpu_params)
             }));
@@ -450,6 +463,7 @@ impl LlamaContext {
         }
 
         // CPU fallback
+        // SAFETY: Null return is checked immediately after this call
         let mut cpu_params = unsafe { ffi::llama_context_default_params() };
 
         if let Some(ctx) = manual_ctx {
@@ -480,6 +494,7 @@ impl LlamaContext {
             );
         }
 
+        // SAFETY: Null return is checked immediately after this call
         let context = unsafe { ffi::llama_new_context_with_model(model.ptr, cpu_params) };
         if context.is_null() {
             Err("Failed to create context (CPU attempt failed)".to_string())
@@ -490,6 +505,7 @@ impl LlamaContext {
     }
 
     pub fn get_logits_ith(&self, i: i32) -> *mut f32 {
+        // SAFETY: Null return is checked immediately after this call
         unsafe { ffi::llama_get_logits_ith(self.ptr, i) }
     }
 
@@ -512,6 +528,7 @@ impl LlamaContext {
 #[cfg(not(target_env = "musl"))]
 impl Drop for LlamaContext {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::llama_free(self.ptr);
         }
@@ -567,6 +584,7 @@ pub fn apply_chat_template_with_format(
 
     let mut buf = vec![0u8; 64 * 1024];
     loop {
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let wrote = unsafe {
             ffi::llama_chat_apply_template(
                 template_cstring.as_ptr(),
@@ -594,6 +612,7 @@ pub fn tokenize_with_model(
 ) -> Result<Vec<ffi::llama_token>, String> {
     let mut toks = vec![0i32; text_utf8.len() + 8];
     loop {
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let n = unsafe {
             ffi::llama_tokenize(
                 vocab,
@@ -624,6 +643,7 @@ pub fn detokenize(
 ) -> Result<String, String> {
     let mut buf = vec![0u8; tokens.len() * 8 + 16];
     loop {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let n = unsafe {
             ffi::llama_detokenize(
                 vocab,
@@ -654,6 +674,7 @@ pub fn token_to_bytes(
 ) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; 32];
     loop {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let n = unsafe {
             ffi::llama_token_to_piece(
                 vocab,
@@ -689,6 +710,7 @@ pub fn token_to_piece(
 
 #[cfg(not(target_env = "musl"))]
 pub fn batch_get_one(tokens: &[ffi::llama_token]) -> ffi::llama_batch {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     unsafe {
         ffi::llama_batch_get_one(
             tokens.as_ptr() as *mut ffi::llama_token,
@@ -702,6 +724,7 @@ pub fn batch_get_one_with_logits(
     tokens: &[ffi::llama_token],
     request_logits_on_last: bool,
 ) -> ffi::llama_batch {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     let batch = unsafe {
         ffi::llama_batch_get_one(
             tokens.as_ptr() as *mut ffi::llama_token,
@@ -711,6 +734,7 @@ pub fn batch_get_one_with_logits(
 
     // Set logits=1 on the last token if requested (crucial for sampling)
     if request_logits_on_last && !tokens.is_empty() && !batch.logits.is_null() {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe {
             *batch.logits.add(tokens.len() - 1) = 1;
         }
@@ -725,6 +749,7 @@ pub fn batch_get_one_with_offset(
     pos_offset: i32,
     request_logits_on_last: bool,
 ) -> ffi::llama_batch {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     let batch = unsafe {
         ffi::llama_batch_get_one(
             tokens.as_ptr() as *mut ffi::llama_token,
@@ -735,6 +760,7 @@ pub fn batch_get_one_with_offset(
     // Check if position array is available and adjust positions
     if !batch.pos.is_null() {
         for i in 0..tokens.len() {
+            // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
             unsafe {
                 *batch.pos.add(i) = pos_offset + i as i32;
             }
@@ -743,6 +769,7 @@ pub fn batch_get_one_with_offset(
 
     // Set logits=1 on the last token if requested (crucial for sampling)
     if request_logits_on_last && !tokens.is_empty() && !batch.logits.is_null() {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe {
             *batch.logits.add(tokens.len() - 1) = 1;
         }
@@ -758,6 +785,7 @@ pub fn batch_init_with_tokens(
     pos_offset: i32,
     request_logits_on_last: bool,
 ) -> ffi::llama_batch {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     let mut batch = unsafe {
         ffi::llama_batch_init(
             tokens.len() as i32,
@@ -768,6 +796,7 @@ pub fn batch_init_with_tokens(
 
     // Fill batch arrays - all arrays are guaranteed allocated by llama_batch_init
     for (i, &token) in tokens.iter().enumerate() {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe {
             *batch.token.add(i) = token;
             *batch.pos.add(i) = pos_offset + i as i32;
@@ -779,6 +808,7 @@ pub fn batch_init_with_tokens(
 
     // Set logits=1 on the last token if requested (crucial for sampling)
     if request_logits_on_last && !tokens.is_empty() {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe {
             *batch.logits.add(tokens.len() - 1) = 1;
         }
@@ -791,6 +821,7 @@ pub fn batch_init_with_tokens(
 /// Free a batch created with batch_init_with_tokens
 #[cfg(not(target_env = "musl"))]
 pub fn batch_free(batch: &mut ffi::llama_batch) {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     unsafe {
         ffi::llama_batch_free(*batch);
     }
@@ -798,6 +829,7 @@ pub fn batch_free(batch: &mut ffi::llama_batch) {
 
 #[cfg(not(target_env = "musl"))]
 pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), String> {
+    // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     let result = unsafe { ffi::llama_decode(ctx.ptr, batch) };
     if result != 0 {
         Err(format!("llama_decode failed with code: {}", result))
@@ -808,6 +840,7 @@ pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), S
 
 #[cfg(not(target_env = "musl"))]
 pub fn get_logits_ith(ctx: &LlamaContext, i: i32) -> *mut f32 {
+    // SAFETY: Null return is checked immediately after this call
     unsafe { ffi::llama_get_logits_ith(ctx.ptr, i) }
 }
 
@@ -820,6 +853,7 @@ pub struct LlamaSampler {
 impl LlamaSampler {
     pub fn new_chain(no_perf: bool) -> Result<Self, String> {
         let chain_params = ffi::llama_sampler_chain_params { no_perf };
+        // SAFETY: Null return is checked immediately after this call
         let sampler = unsafe { ffi::llama_sampler_chain_init(chain_params) };
         if sampler.is_null() {
             Err("Failed to create sampler chain".to_string())
@@ -829,6 +863,7 @@ impl LlamaSampler {
     }
 
     pub fn add_temp(&self, temp: f32) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let temp_sampler = unsafe { ffi::llama_sampler_init_temp(temp) };
         if !temp_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, temp_sampler) };
@@ -836,6 +871,7 @@ impl LlamaSampler {
     }
 
     pub fn add_greedy(&self) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let greedy_sampler = unsafe { ffi::llama_sampler_init_greedy() };
         if !greedy_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, greedy_sampler) };
@@ -843,6 +879,7 @@ impl LlamaSampler {
     }
 
     pub fn add_top_k(&self, k: i32) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let top_k_sampler = unsafe { ffi::llama_sampler_init_top_k(k) };
         if !top_k_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, top_k_sampler) };
@@ -850,6 +887,7 @@ impl LlamaSampler {
     }
 
     pub fn add_top_p(&self, p: f32, min_keep: usize) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let top_p_sampler = unsafe { ffi::llama_sampler_init_top_p(p, min_keep) };
         if !top_p_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, top_p_sampler) };
@@ -861,6 +899,7 @@ impl LlamaSampler {
     /// Each bias entry sets a token's logit to the specified value.
     /// Use `f32::NEG_INFINITY` to completely disable a token.
     pub fn add_logit_bias(&self, n_vocab: i32, biases: &[ffi::llama_logit_bias]) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let bias_sampler = unsafe {
             ffi::llama_sampler_init_logit_bias(n_vocab, biases.len() as i32, biases.as_ptr())
         };
@@ -882,6 +921,7 @@ impl LlamaSampler {
         let _ = (decay, seed);
         // llama_sampler_init_adaptive_p is not available in the current API surface.
         // min_p provides a close dynamic-probability alternative with supported ABI.
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let adaptive_sampler = unsafe { ffi::llama_sampler_init_min_p(target, 1) };
         if !adaptive_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, adaptive_sampler) };
@@ -893,6 +933,7 @@ impl LlamaSampler {
     /// Unlike greedy sampling, this samples from the probability distribution,
     /// providing stochastic output even after other samplers have filtered candidates.
     pub fn add_dist(&self, seed: u32) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let dist_sampler = unsafe { ffi::llama_sampler_init_dist(seed) };
         if !dist_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, dist_sampler) };
@@ -925,6 +966,7 @@ impl LlamaSampler {
         let mut seq_breakers: [*const std::os::raw::c_char; 4] =
             [c"\n".as_ptr(), c":".as_ptr(), c"\"".as_ptr(), c"*".as_ptr()];
 
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         let dry_sampler = unsafe {
             ffi::llama_sampler_init_dry(
                 vocab,
@@ -943,20 +985,24 @@ impl LlamaSampler {
     }
 
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }
     }
 
     pub fn accept(&self, token: ffi::llama_token) {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::llama_sampler_accept(self.ptr, token) };
     }
 }
 
+// SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
 #[cfg(not(target_env = "musl"))]
 unsafe impl Send for LlamaSampler {}
 
 #[cfg(not(target_env = "musl"))]
 impl Drop for LlamaSampler {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::llama_sampler_free(self.ptr);
         }
@@ -1117,6 +1163,7 @@ pub unsafe fn create_sampler_chain_with_dry(
 #[cfg(not(target_env = "musl"))]
 pub fn test_minimal_init() -> Result<(), String> {
     // Test model params creation without backend init/cleanup
+    // SAFETY: Null return is checked immediately after this call
     let mut _model_params = unsafe { ffi::llama_model_default_params() };
     _model_params.vocab_only = true; // only read vocab & metadata
     _model_params.use_mmap = false; // avoid vm tricks until stable

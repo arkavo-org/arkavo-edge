@@ -18,6 +18,7 @@ pub(crate) fn load_test_env() {
             if let Some(eq_pos) = line.find('=') {
                 let key = line[..eq_pos].trim();
                 let value = line[eq_pos + 1..].trim();
+                // SAFETY: Test setup; runs before async runtime under #[serial]
                 unsafe {
                     env::set_var(key, value);
                 }

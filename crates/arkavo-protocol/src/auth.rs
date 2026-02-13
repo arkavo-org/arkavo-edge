@@ -4,7 +4,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionAuth {
@@ -87,12 +87,12 @@ impl AuthBackend for JwtAuthBackend {
     async fn validate_token(&self, token: &str) -> Result<SessionAuth> {
         let token_data =
             decode::<JwtClaims>(token, &self.decoding_key, &self.validation).map_err(|e| {
-                warn!("JWT validation failed: {}", e);
+                info!(event = "auth_decision", action = "deny", resource = "jwt", reason = %e, "JWT validation failed");
                 A2aError::Auth(format!("Invalid JWT: {e}"))
             })?;
 
         let claims = token_data.claims;
-        debug!("JWT validated for subject: {}", claims.sub);
+        info!(event = "auth_decision", action = "permit", subject = %claims.sub, resource = "jwt", "JWT validated");
 
         Ok(SessionAuth {
             sub: claims.sub,

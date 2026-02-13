@@ -1,5 +1,10 @@
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::RwLock;
+
+/// Thread-safe store for API keys set at runtime.
+/// Readers should check this store first, then fall back to `std::env::var`.
+static API_KEY_STORE: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
 
 /// Extract API keys from text and return (cleaned_text, extracted_keys)
 pub fn extract_api_keys(text: &str) -> (String, HashMap<String, String>) {
@@ -28,18 +33,29 @@ pub fn extract_api_keys(text: &str) -> (String, HashMap<String, String>) {
     (cleaned_text, keys)
 }
 
-/// Set API keys in the environment
+/// Store API keys in thread-safe global store and set in environment.
+/// Uses a RwLock store so concurrent readers never race with writers.
 pub fn set_api_keys(keys: &HashMap<String, String>) {
+    let mut store = API_KEY_STORE.write().unwrap();
+    let map = store.get_or_insert_with(HashMap::new);
     for (key, value) in keys {
         println!("AG-UI: Setting {} (value hidden)", key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
+        map.insert(key.clone(), value.clone());
     }
 }
 
+/// Retrieve an API key: checks the thread-safe store first, then falls back to env.
+pub fn get_api_key(name: &str) -> Option<String> {
+    if let Ok(store) = API_KEY_STORE.read()
+        && let Some(map) = store.as_ref()
+        && let Some(val) = map.get(name)
+    {
+        return Some(val.clone());
+    }
+    std::env::var(name).ok()
+}
+
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -81,5 +97,13 @@ mod tests {
             keys.get("GEMINI_API_KEY"),
             Some(&"AIza-SyB18-nz_J7f".to_string())
         );
+    }
+
+    #[test]
+    fn test_store_and_retrieve() {
+        let mut keys = HashMap::new();
+        keys.insert("TEST_API_KEY".to_string(), "secret123".to_string());
+        set_api_keys(&keys);
+        assert_eq!(get_api_key("TEST_API_KEY"), Some("secret123".to_string()));
     }
 }

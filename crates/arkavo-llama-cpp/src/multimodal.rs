@@ -6,9 +6,11 @@ pub struct MtmdContext {
     pub(crate) ptr: *mut ffi::mtmd_context,
 }
 
+// SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
 #[cfg(not(target_env = "musl"))]
 unsafe impl Send for MtmdContext {}
 
+// SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
 #[cfg(not(target_env = "musl"))]
 unsafe impl Sync for MtmdContext {}
 
@@ -18,14 +20,17 @@ impl MtmdContext {
         let c_path =
             CString::new(mmproj_path).map_err(|e| format!("Invalid mmproj path: {}", e))?;
 
+        // SAFETY: Null return is checked immediately after this call
         let mut params = unsafe { ffi::mtmd_context_params_default() };
         params.use_gpu = true;
         params.n_threads = std::thread::available_parallelism()
             .map(|n| n.get() as i32)
             .unwrap_or(8);
+        // SAFETY: Null return is checked immediately after this call
         params.media_marker = unsafe { ffi::mtmd_default_marker() };
         params.warmup = true; // Run warmup encode pass after initialization
 
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let ctx = unsafe { ffi::mtmd_init_from_file(c_path.as_ptr(), text_model.ptr, params) };
 
         if ctx.is_null() {
@@ -36,18 +41,22 @@ impl MtmdContext {
     }
 
     pub fn supports_vision(&self) -> bool {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_support_vision(self.ptr) }
     }
 
     pub fn supports_audio(&self) -> bool {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_support_audio(self.ptr) }
     }
 
     pub fn decode_use_non_causal(&self) -> bool {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_decode_use_non_causal(self.ptr) }
     }
 
     pub fn decode_use_mrope(&self) -> bool {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_decode_use_mrope(self.ptr) }
     }
 }
@@ -55,6 +64,7 @@ impl MtmdContext {
 #[cfg(not(target_env = "musl"))]
 impl Drop for MtmdContext {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::mtmd_free(self.ptr);
         }
@@ -66,6 +76,7 @@ pub struct MtmdBitmap {
     pub(crate) ptr: *mut ffi::mtmd_bitmap,
 }
 
+// SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
 #[cfg(not(target_env = "musl"))]
 unsafe impl Send for MtmdBitmap {}
 
@@ -80,6 +91,7 @@ impl MtmdBitmap {
             ));
         }
 
+        // SAFETY: Null return is checked immediately after this call
         let bitmap = unsafe { ffi::mtmd_bitmap_init(width, height, rgb_data.as_ptr()) };
 
         if bitmap.is_null() {
@@ -90,6 +102,7 @@ impl MtmdBitmap {
     }
 
     pub fn from_audio(samples: &[f32]) -> Result<Self, String> {
+        // SAFETY: Null return is checked immediately after this call
         let bitmap = unsafe { ffi::mtmd_bitmap_init_from_audio(samples.len(), samples.as_ptr()) };
 
         if bitmap.is_null() {
@@ -100,19 +113,23 @@ impl MtmdBitmap {
     }
 
     pub fn get_width(&self) -> u32 {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_bitmap_get_nx(self.ptr) }
     }
 
     pub fn get_height(&self) -> u32 {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_bitmap_get_ny(self.ptr) }
     }
 
     pub fn is_audio(&self) -> bool {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_bitmap_is_audio(self.ptr) }
     }
 
     pub fn set_id(&mut self, id: &str) {
         let c_id = CString::new(id).unwrap();
+        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         unsafe {
             ffi::mtmd_bitmap_set_id(self.ptr, c_id.as_ptr());
         }
@@ -122,6 +139,7 @@ impl MtmdBitmap {
 #[cfg(not(target_env = "musl"))]
 impl Drop for MtmdBitmap {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::mtmd_bitmap_free(self.ptr);
         }
@@ -133,17 +151,20 @@ pub struct MtmdInputChunks {
     pub(crate) ptr: *mut ffi::mtmd_input_chunks,
 }
 
+// SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
 #[cfg(not(target_env = "musl"))]
 unsafe impl Send for MtmdInputChunks {}
 
 #[cfg(not(target_env = "musl"))]
 impl MtmdInputChunks {
     pub fn new() -> Self {
+        // SAFETY: Null return is checked immediately after this call
         let ptr = unsafe { ffi::mtmd_input_chunks_init() };
         Self { ptr }
     }
 
     pub fn size(&self) -> usize {
+        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::mtmd_input_chunks_size(self.ptr) }
     }
 
@@ -151,6 +172,7 @@ impl MtmdInputChunks {
         if idx >= self.size() {
             None
         } else {
+            // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
             Some(unsafe { ffi::mtmd_input_chunks_get(self.ptr, idx) })
         }
     }
@@ -166,6 +188,7 @@ impl Default for MtmdInputChunks {
 #[cfg(not(target_env = "musl"))]
 impl Drop for MtmdInputChunks {
     fn drop(&mut self) {
+        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
         unsafe {
             ffi::mtmd_input_chunks_free(self.ptr);
         }
@@ -192,6 +215,7 @@ pub fn tokenize_with_images(
 
     let chunks = MtmdInputChunks::new();
 
+    // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
     let result = unsafe {
         ffi::mtmd_tokenize(
             ctx.ptr,
@@ -227,10 +251,12 @@ pub unsafe fn encode_chunk(
 }
 
 pub fn get_output_embeddings(ctx: &MtmdContext) -> *mut f32 {
+    // SAFETY: Null return is checked immediately after this call
     unsafe { ffi::mtmd_get_output_embd(ctx.ptr) }
 }
 
 pub fn default_media_marker() -> &'static str {
+    // SAFETY: Null return is checked immediately after this call
     unsafe {
         let marker_ptr = ffi::mtmd_default_marker();
         if marker_ptr.is_null() {

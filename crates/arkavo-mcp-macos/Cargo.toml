@@ -35,6 +35,7 @@ arkavo-memory = { path = "../arkavo-memory", features = ["vector-search"], optio
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
+arkavo-validation = { path = "../arkavo-validation" }
 
 # Gherkin parsing
 gherkin = "0.14"
