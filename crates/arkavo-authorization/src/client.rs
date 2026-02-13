@@ -10,7 +10,7 @@ use base64::{Engine as _, engine::general_purpose};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, warn};
+use tracing::{error, info, warn};
 
 pub struct AuthorizationClient {
     config: AuthorizationConfig,
@@ -38,7 +38,12 @@ impl AuthorizationClient {
     pub async fn authorize_mcp_tool(&self, token: &str, tool_name: &str) -> Result<Decision> {
         // Check if it's a safe diagnostic tool
         if McpToolMapping::is_safe_diagnostic(tool_name) {
-            debug!("Tool {} is safe diagnostic, allowing", tool_name);
+            info!(
+                event = "auth_decision",
+                action = "permit",
+                resource = tool_name,
+                "Safe diagnostic tool allowed"
+            );
             return Ok(Decision::Permit);
         }
 
@@ -51,7 +56,7 @@ impl AuthorizationClient {
 
         // Check cache first
         if let Some(cached) = self.cache.get(&entity, &action, &resource) {
-            debug!("Cache hit for tool {}: {:?}", tool_name, cached);
+            info!(event = "auth_decision", action = ?cached, resource = tool_name, "Authorization cache hit");
             return Ok(cached);
         }
 
@@ -226,9 +231,21 @@ impl AuthorizationClient {
             match response {
                 Ok(resp) if resp.status().is_success() => return Ok(resp),
                 Ok(resp) if resp.status() == StatusCode::UNAUTHORIZED => {
+                    info!(
+                        event = "auth_decision",
+                        action = "deny",
+                        reason = "unauthorized",
+                        "Authorization denied: 401"
+                    );
                     return Err(AuthorizationError::InvalidToken("Unauthorized".to_string()));
                 }
                 Ok(resp) if resp.status() == StatusCode::FORBIDDEN => {
+                    info!(
+                        event = "auth_decision",
+                        action = "deny",
+                        reason = "forbidden",
+                        "Authorization denied: 403"
+                    );
                     return Err(AuthorizationError::Denied);
                 }
                 Ok(resp)

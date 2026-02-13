@@ -29,6 +29,7 @@ fn find_and_load_library() -> Result<Library> {
         let lib_path = path.join("libSNPE.so");
         if lib_path.exists() {
             tracing::info!("Found SNPE library at: {}", lib_path.display());
+            // SAFETY: lib_path existence is verified above; libloading handles symbol resolution
             return unsafe { Library::new(&lib_path) }
                 .map_err(|e| SnpeError::LibraryLoadFailed(e.to_string()));
         }

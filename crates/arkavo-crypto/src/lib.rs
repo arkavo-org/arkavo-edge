@@ -189,7 +189,7 @@ pub struct KasEcKeypair {
 impl KasEcKeypair {
     /// Generate a new random EC P-256 keypair.
     pub fn generate() -> Self {
-        let secret_key = P256SecretKey::random(&mut rand::thread_rng());
+        let secret_key = P256SecretKey::random(&mut rand::rngs::OsRng);
         let public_key = secret_key.public_key();
         Self {
             secret_key,
@@ -306,7 +306,7 @@ pub struct P256SigningKeypair {
 impl P256SigningKeypair {
     /// Generate a new random P-256 signing keypair.
     pub fn generate() -> Self {
-        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
         Self { signing_key }
     }
 

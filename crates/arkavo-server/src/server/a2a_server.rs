@@ -915,6 +915,9 @@ impl A2aServer {
             agent_metadata: self.agent_metadata.clone(),
             mcp_registry: self.mcp_registry.clone(),
             rpc_port,
+            rate_limiter: Arc::new(arkavo_protocol::IpRateLimiter::new(
+                arkavo_protocol::RateLimitConfig::default(),
+            )),
             #[cfg(feature = "kas")]
             kas_enabled: true,
         };

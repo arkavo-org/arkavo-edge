@@ -25,7 +25,7 @@ pub async fn static_file_handler(AxumPath(path): AxumPath<String>) -> Response {
         _ => Response::builder()
             .status(404)
             .body(Body::from("Not Found"))
-            .unwrap()
+            .expect("valid response")
             .into_response(),
     }
 }
@@ -34,7 +34,7 @@ fn serve_js(content: &'static str) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, "application/javascript")
         .body(Body::from(content))
-        .unwrap()
+        .expect("valid response")
         .into_response()
 }
 
@@ -42,6 +42,6 @@ fn serve_css(content: &'static str) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, "text/css")
         .body(Body::from(content))
-        .unwrap()
+        .expect("valid response")
         .into_response()
 }

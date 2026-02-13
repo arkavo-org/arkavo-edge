@@ -2,6 +2,19 @@
 //!
 //! These tests verify fixes for vulnerabilities identified in security review.
 //! Run with: cargo test -p arkavo-protocol --test security_vulnerabilities
+//!
+//! ## Spec Coverage
+//!
+//! | Vulnerability | Spec ID | Description |
+//! |--------------|---------|-------------|
+//! | CRI-001 | [specs/arkavo-edge/network-security.spec.yaml](NET-004) | NoOpAuthBackend removed - authentication always required |
+//! | CRI-002 | [specs/arkavo-edge/network-security.spec.yaml](CRI-002) | Token revocation and replay protection |
+//! | CRI-003 | [specs/arkavo-edge/network-security.spec.yaml](NET-007) | Egress filtering (SSRF prevention) |
+//! | HIGH-001 | [specs/arkavo-edge/network-security.spec.yaml](HIGH-001) | Secure RNG for key generation |
+//! | HIGH-002 | [specs/arkavo-edge/network-security.spec.yaml](HIGH-002) | DID:key length validation |
+//! | HIGH-003 | [specs/arkavo-edge/network-security.spec.yaml](NET-010) | Rate limiting |
+//! | HIGH-004 | [specs/arkavo-edge/network-security.spec.yaml](NET-006) | Host header validation (DNS rebinding) |
+//! | HIGH-005 | [specs/arkavo-edge/network-security.spec.yaml](HIGH-005) | Timing attack resistance (constant-time crypto) |
 
 use arkavo_protocol::security_fixes::{
     DidKeyError, EgressError, EgressFilter, HostValidationError, HostValidator, RateLimiter,
@@ -11,8 +24,12 @@ use std::time::{Duration, Instant};
 
 // ============================================================================
 // CRI-001: NoOpAuthBackend Authentication Bypass
+// Spec: NET-004 - No localhost trust exemption
 // ============================================================================
 
+/// Test: NoOpAuthBackend must not exist (authentication bypass vector)
+/// Spec: NET-004 - No localhost trust exemption
+/// Vulnerability: CRI-001 - Authentication bypass via NoOpAuthBackend
 #[test]
 fn test_noop_auth_backend_is_disabled() {
     // SECURITY: NoOpAuthBackend must not be available in production
@@ -29,6 +46,9 @@ fn test_noop_auth_backend_is_disabled() {
     );
 }
 
+/// Test: All requests require authentication, including from localhost
+/// Spec: NET-004 - No localhost trust exemption
+/// Vulnerability: CRI-001 - Authentication bypass
 #[test]
 fn test_authentication_is_always_required() {
     // SECURITY: All requests must require valid authentication
@@ -48,8 +68,11 @@ fn test_authentication_is_always_required() {
 
 // ============================================================================
 // CRI-002: Token Revocation and Replay Protection
+// Spec: CRI-002 (documented in security_fixes.rs)
 // ============================================================================
 
+/// Test: Revoked tokens are rejected immediately
+/// Vulnerability: CRI-002 - Token revocation
 #[test]
 fn test_token_revocation_works() {
     // SECURITY: Revoked tokens must be rejected
@@ -75,6 +98,8 @@ fn test_token_revocation_works() {
     );
 }
 
+/// Test: Same token (JTI) cannot be used twice (replay protection)
+/// Vulnerability: CRI-002 - Token replay protection
 #[test]
 fn test_token_replay_protection() {
     // SECURITY: Same token (jti) cannot be replayed
@@ -95,8 +120,12 @@ fn test_token_replay_protection() {
 
 // ============================================================================
 // CRI-003: Egress Filtering (SSRF Prevention)
+// Spec: NET-007 - Block cloud metadata and internal network access
 // ============================================================================
 
+/// Test: AWS metadata endpoint is blocked (SSRF prevention)
+/// Spec: NET-007 - Block cloud metadata and internal network access
+/// Vulnerability: CRI-003 - SSRF via cloud metadata endpoint
 #[test]
 fn test_ssrf_blocked_aws_metadata() {
     // SECURITY: Block access to cloud metadata endpoints
@@ -117,6 +146,9 @@ fn test_ssrf_blocked_aws_metadata() {
     }
 }
 
+/// Test: Private IP ranges are blocked (SSRF prevention)
+/// Spec: NET-007 - Block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8)
+/// Vulnerability: CRI-003 - SSRF via private IPs
 #[test]
 fn test_ssrf_blocked_private_ips() {
     // SECURITY: Block access to private network ranges
@@ -139,6 +171,8 @@ fn test_ssrf_blocked_private_ips() {
     }
 }
 
+/// Test: Public IP access is allowed (sanity check)
+/// Spec: NET-007 - Public IPs allowed (allowlist override capability)
 #[test]
 fn test_egress_allowed_public_ips() {
     // SECURITY: Public IPs should be allowed (sanity check)
@@ -160,8 +194,12 @@ fn test_egress_allowed_public_ips() {
 
 // ============================================================================
 // HIGH-001: Cryptographic Random Number Generation
+// Spec: HIGH-001 - Secure RNG for key generation
 // ============================================================================
 
+/// Test: Key generation uses cryptographically secure RNG
+/// Spec: HIGH-001 - Secure RNG for key generation
+/// Vulnerability: HIGH-001 - Weak/predictable key generation
 #[test]
 fn test_key_generation_uses_secure_rng() {
     // SECURITY: Key generation must use cryptographically secure RNG
@@ -191,8 +229,12 @@ fn test_key_generation_uses_secure_rng() {
 
 // ============================================================================
 // HIGH-002: DID:key Parsing Length Validation
+// Spec: HIGH-002 - DID:key length validation
 // ============================================================================
 
+/// Test: DID:key parsing rejects invalid length inputs
+/// Spec: HIGH-002 - DID:key length validation
+/// Vulnerability: HIGH-002 - Out-of-bounds access in DID parsing
 #[test]
 fn test_did_key_parsing_rejects_invalid_length() {
     // SECURITY: DID:key parsing must validate length before accessing bytes
@@ -215,6 +257,8 @@ fn test_did_key_parsing_rejects_invalid_length() {
     }
 }
 
+/// Test: Valid 34-byte DID:key parses correctly
+/// Spec: HIGH-002 - DID:key length validation (valid case)
 #[test]
 fn test_did_key_parsing_accepts_valid_length() {
     // SECURITY: Valid 34-byte DID:key should parse correctly
@@ -230,8 +274,12 @@ fn test_did_key_parsing_accepts_valid_length() {
 
 // ============================================================================
 // HIGH-003: Rate Limiting
+// Spec: NET-010 - Rate limiting per IP
 // ============================================================================
 
+/// Test: Rate limiting prevents DoS via excessive requests
+/// Spec: NET-010 - Rate limiting per IP
+/// Vulnerability: HIGH-003 - DoS via resource exhaustion
 #[test]
 fn test_rate_limiting_blocks_excessive_requests() {
     // SECURITY: Rate limiting must prevent DoS attacks
@@ -257,8 +305,12 @@ fn test_rate_limiting_blocks_excessive_requests() {
 
 // ============================================================================
 // HIGH-004: Host Header Validation (DNS Rebinding)
+// Spec: NET-006 - Host header validation (anti-rebinding)
 // ============================================================================
 
+/// Test: Host header validation prevents DNS rebinding attacks
+/// Spec: NET-006 - Host header validation (anti-rebinding)
+/// Vulnerability: HIGH-004 - DNS rebinding via malicious Host header
 #[test]
 fn test_host_header_validation_blocks_rebinding() {
     // SECURITY: Host header must be validated to prevent DNS rebinding
@@ -293,8 +345,14 @@ fn test_host_header_validation_blocks_rebinding() {
 
 // ============================================================================
 // HIGH-005: Timing Attack Resistance
+// Spec: HIGH-005 - Constant-time crypto operations
+// Status: KNOWN LIMITATION - Documented vulnerability
 // ============================================================================
 
+/// Test: Signature verification timing is constant (prevents timing attacks)
+/// Spec: HIGH-005 - Constant-time crypto operations
+/// Vulnerability: HIGH-005 - Timing side channel in signature verification
+/// Status: IGNORED - Known limitation, requires constant-time crypto implementation
 #[test]
 #[ignore = "Known vulnerability HIGH-005: Timing side channel in signature verification needs constant-time implementation"]
 fn test_signature_verification_is_constant_time() {

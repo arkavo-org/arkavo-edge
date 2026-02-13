@@ -188,7 +188,7 @@ impl OAuth2Provider {
         let mut codes = self.authorization_codes.write().await;
         codes.insert(code.clone(), auth_code);
 
-        info!("Generated authorization code for client: {}", client_id);
+        info!(event = "auth_decision", action = "permit", subject = %client_id, resource = "oauth2_authz", "Generated authorization code");
         Ok(code)
     }
 
@@ -332,13 +332,23 @@ impl OAuth2Provider {
     pub async fn revoke_token(&self, token: &str) -> Result<()> {
         let mut access_tokens = self.access_tokens.write().await;
         if access_tokens.remove(token).is_some() {
-            info!("Revoked access token");
+            info!(
+                event = "auth_decision",
+                action = "deny",
+                resource = "oauth2_access_token",
+                "Revoked access token"
+            );
             return Ok(());
         }
 
         let mut refresh_tokens = self.refresh_tokens.write().await;
         if refresh_tokens.remove(token).is_some() {
-            info!("Revoked refresh token");
+            info!(
+                event = "auth_decision",
+                action = "deny",
+                resource = "oauth2_refresh_token",
+                "Revoked refresh token"
+            );
             return Ok(());
         }
 

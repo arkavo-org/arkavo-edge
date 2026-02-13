@@ -53,9 +53,7 @@ rand = { workspace = true }
 uuid = { workspace = true }
 regex = { workspace = true }
 
-# For security_fixes.rs
-ipnet = "2"
-bs58 = "0.5"
+# Rate limiting
 crossbeam-queue = "0.3"
 
 [dev-dependencies]

@@ -241,6 +241,7 @@ pub fn get_available_disk_space() -> f64 {
         Err(_) => return 0.0,
     };
 
+    // SAFETY: path_cstr is a valid CString; statvfs writes to MaybeUninit; return value checked
     unsafe {
         let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
         if libc::statvfs(path_cstr.as_ptr(), stat.as_mut_ptr()) == 0 {

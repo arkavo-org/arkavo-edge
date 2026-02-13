@@ -1,0 +1,11 @@
+[package]
+name = "arkavo-validation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Centralized input validation for Arkavo Edge"
+
+[dependencies]
+ipnet = "2.9"
+serde_json = { workspace = true }

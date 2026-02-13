@@ -498,9 +498,8 @@ impl AuthManager {
     /// Generate a secure random key
     fn generate_secure_key(&self) -> String {
         use rand::RngCore;
-        let mut rng = rand::thread_rng();
         let mut key = vec![0u8; 32];
-        rng.fill_bytes(&mut key);
+        rand::rngs::OsRng.fill_bytes(&mut key);
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(&key)
     }

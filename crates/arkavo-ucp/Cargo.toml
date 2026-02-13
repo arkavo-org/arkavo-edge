@@ -20,7 +20,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 uuid.workspace = true
-alloy-primitives = "0.8"
+alloy-primitives = "1"
 hex.workspace = true
 
 [dev-dependencies]

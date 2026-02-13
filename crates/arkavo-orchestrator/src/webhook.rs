@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -64,7 +64,15 @@ impl WebhookServer {
                 state.clone(),
                 verify_signature,
             ))
-            .layer(CorsLayer::permissive())
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::list([
+                        "https://github.com".parse().expect("valid origin"),
+                        "https://api.github.com".parse().expect("valid origin"),
+                    ]))
+                    .allow_methods([axum::http::Method::POST, axum::http::Method::GET])
+                    .allow_headers([axum::http::header::CONTENT_TYPE]),
+            )
             .with_state(state)
     }
 
@@ -138,12 +146,24 @@ async fn verify_signature(
         Some(sig) => match sig.to_str() {
             Ok(s) => s,
             Err(_) => {
-                warn!("Invalid signature header encoding");
+                info!(
+                    event = "auth_decision",
+                    action = "deny",
+                    resource = "webhook",
+                    reason = "invalid_header",
+                    "Invalid signature header encoding"
+                );
                 return (StatusCode::BAD_REQUEST, "Invalid signature header").into_response();
             }
         },
         None => {
-            warn!("Missing X-Hub-Signature-256 header");
+            info!(
+                event = "auth_decision",
+                action = "deny",
+                resource = "webhook",
+                reason = "missing_signature",
+                "Missing X-Hub-Signature-256 header"
+            );
             return (StatusCode::UNAUTHORIZED, "Missing signature").into_response();
         }
     };
@@ -158,10 +178,16 @@ async fn verify_signature(
     };
 
     if let Err(e) = server.verify_signature(signature, &bytes) {
-        warn!("Signature verification failed: {e}");
+        info!(event = "auth_decision", action = "deny", resource = "webhook", reason = %e, "Signature verification failed");
         return (StatusCode::UNAUTHORIZED, "Invalid signature").into_response();
     }
 
+    info!(
+        event = "auth_decision",
+        action = "permit",
+        resource = "webhook",
+        "Webhook signature verified"
+    );
     let request = Request::from_parts(parts, axum::body::Body::from(bytes));
     next.run(request).await
 }

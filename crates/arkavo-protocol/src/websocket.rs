@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use std::fs;
-use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -57,10 +57,9 @@ impl WebSocketTransport {
         // Add custom CA certificate if provided
         if let Some(ca_path) = &self.config.tls_config.ca_cert_path {
             debug!("Loading CA certificate from: {}", ca_path);
-            let ca_pem = fs::read(ca_path)
+            let ca_file = fs::File::open(ca_path)
                 .map_err(|e| A2aError::Tls(format!("Failed to read CA certificate: {e}")))?;
-            let mut ca_reader = BufReader::new(&ca_pem[..]);
-            let ca_certs = rustls_pemfile::certs(&mut ca_reader)
+            let ca_certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(ca_file)
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| A2aError::Tls(format!("Failed to parse CA certificate: {e}")))?;
 
@@ -80,20 +79,17 @@ impl WebSocketTransport {
             debug!("Loading client certificate from: {}", cert_path);
             debug!("Loading client key from: {}", key_path);
 
-            let cert_pem = fs::read(cert_path)
+            let cert_file = fs::File::open(cert_path)
                 .map_err(|e| A2aError::Tls(format!("Failed to read client certificate: {e}")))?;
-            let key_pem = fs::read(key_path)
+            let key_file = fs::File::open(key_path)
                 .map_err(|e| A2aError::Tls(format!("Failed to read client key: {e}")))?;
 
-            let mut cert_reader = BufReader::new(&cert_pem[..]);
-            let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
+            let certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(cert_file)
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| A2aError::Tls(format!("Failed to parse client certificate: {e}")))?;
 
-            let mut key_reader = BufReader::new(&key_pem[..]);
-            let key = rustls_pemfile::private_key(&mut key_reader)
-                .map_err(|e| A2aError::Tls(format!("Failed to parse client key: {e}")))?
-                .ok_or_else(|| A2aError::Tls("No private key found in file".to_string()))?;
+            let key: PrivateKeyDer = PrivateKeyDer::from_pem_reader(key_file)
+                .map_err(|e| A2aError::Tls(format!("Failed to parse client key: {e}")))?;
 
             info!("Client certificate configured for mTLS");
 

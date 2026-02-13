@@ -285,6 +285,8 @@ fn main() {
         .define("GGML_OPENCL", "OFF") // Mesa OpenCL doesn't support Adreno GPUs
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
         .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
+        .define("LLAMA_HTTPLIB", "OFF") // Disable httplib (not needed without server)
+        .define("LLAMA_OPENSSL", "OFF") // Disable OpenSSL (project uses rustls exclusively)
         .define("LLAMA_BUILD_MTMD", "ON") // Enable multimodal support
         .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
         .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples

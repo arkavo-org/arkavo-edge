@@ -13,6 +13,7 @@ categories = ["network-programming", "asynchronous"]
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-validation = { path = "../arkavo-validation" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 anyhow.workspace = true
 serde.workspace = true

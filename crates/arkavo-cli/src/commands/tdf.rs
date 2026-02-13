@@ -146,12 +146,19 @@ async fn handle_encrypt(
         .await
         .context("Encryption failed")?;
 
-    let output_path = output.unwrap_or_else(|| {
-        let mut p = input.clone();
-        let name = p.file_name().unwrap().to_string_lossy().to_string();
-        p.set_file_name(format!("{name}.tdf.json"));
-        p
-    });
+    let output_path = match output {
+        Some(p) => p,
+        None => {
+            let mut p = input.clone();
+            let name = p
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("path has no filename"))?
+                .to_string_lossy()
+                .to_string();
+            p.set_file_name(format!("{name}.tdf.json"));
+            p
+        }
+    };
 
     let json = serde_json::to_string_pretty(&manifest)?;
     fs::write(&output_path, json)
@@ -202,16 +209,23 @@ async fn handle_decrypt(
             .await
             .context("Decryption failed")?;
 
-        let output_path = output.unwrap_or_else(|| {
-            let mut p = input.clone();
-            let name = p.file_name().unwrap().to_string_lossy().to_string();
-            let stripped = name
-                .strip_suffix(".tdf.json")
-                .or_else(|| name.strip_suffix(".tdf"))
-                .unwrap_or(&name);
-            p.set_file_name(format!("{stripped}.decrypted"));
-            p
-        });
+        let output_path = match output {
+            Some(p) => p,
+            None => {
+                let mut p = input.clone();
+                let name = p
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("path has no filename"))?
+                    .to_string_lossy()
+                    .to_string();
+                let stripped = name
+                    .strip_suffix(".tdf.json")
+                    .or_else(|| name.strip_suffix(".tdf"))
+                    .unwrap_or(&name);
+                p.set_file_name(format!("{stripped}.decrypted"));
+                p
+            }
+        };
 
         fs::write(&output_path, &plaintext)
             .await

@@ -17,7 +17,6 @@ serde_json = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
-bincode = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

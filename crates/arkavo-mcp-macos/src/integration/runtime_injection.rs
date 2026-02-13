@@ -19,7 +19,8 @@ impl RuntimeInjector {
     pub const fn inject_ios(&self) -> Result<()> {
         #[cfg(target_os = "ios")]
         {
-            // Use Objective-C runtime to swizzle methods
+            // SAFETY: Swizzling runs at startup before UI event loop; Obj-C runtime
+            // calls use valid class/selector names from constants
             unsafe {
                 self.swizzle_ios_methods()?;
             }

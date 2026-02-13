@@ -7,7 +7,6 @@
 //! - **`auth`** - Core authentication primitives and utilities
 //! - **`oauth2`** - OAuth2 client implementation for third-party integrations
 //! - **`security`** - General security utilities, token management, and validation
-//! - **`security_fixes`** - Patches and mitigations for known security vulnerabilities
 //! - **`rate_limit`** - Rate limiting implementation for API protection
 //! - **`data_classification`** - Data classification and PII detection for DLP
 //!
@@ -17,7 +16,7 @@
 //! - OAuth2 flow handling
 //! - Configurable rate limiting with token bucket algorithm
 //! - Data classification for sensitive information detection
-//! - Security vulnerability patches and mitigations
+//! - Centralized input validation via `arkavo-validation`
 //!
 //! ## Security
 //!
@@ -36,7 +35,6 @@ pub mod error;
 pub mod oauth2;
 pub mod rate_limit;
 pub mod security;
-pub mod security_fixes;
 
 /// Re-export common types for convenience.
 pub mod prelude {

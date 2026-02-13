@@ -25,6 +25,8 @@ futures = { workspace = true }
 
 # Web server and WebSocket
 axum = { workspace = true, features = ["ws"] }
+tower.workspace = true
+tower-http.workspace = true
 reqwest = { workspace = true }
 
 # Protocol dependencies

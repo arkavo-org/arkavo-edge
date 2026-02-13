@@ -24,7 +24,6 @@ reqwest = { workspace = true, features = ["stream"] }
 # WebSocket with TLS support
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
-rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 
 # Server dependencies
@@ -51,6 +50,7 @@ thiserror = { workspace = true }
 lru = { workspace = true }
 ipnet = "2.9"
 bs58 = "0.5"
+arkavo-validation = { path = "../arkavo-validation" }
 
 # Logging
 tracing = { workspace = true }

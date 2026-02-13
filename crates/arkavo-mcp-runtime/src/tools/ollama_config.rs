@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::net::IpAddr;
 use std::sync::Arc;
 
 const OLLAMA_SERVER_CONFIG_TYPE: &str = "arkavo_ollama_server_config";
@@ -36,17 +35,6 @@ fn normalize_server_url(server_url: &str) -> String {
     }
 }
 
-fn is_loopback_ollama_host(url: &Url) -> bool {
-    match url.host_str() {
-        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
-        Some(host) => match host.parse::<IpAddr>() {
-            Ok(ip) => ip.is_loopback(),
-            Err(_) => false,
-        },
-        None => false,
-    }
-}
-
 fn validate_ollama_server_url(server_url: &str) -> Result<String, String> {
     let normalized = normalize_server_url(server_url);
     let parsed = Url::parse(&normalized)
@@ -56,14 +44,14 @@ fn validate_ollama_server_url(server_url: &str) -> Result<String, String> {
         return Err("Ollama server URL must use http:// or https://".to_string());
     }
 
-    if !is_loopback_ollama_host(&parsed) {
-        return Err(
+    match parsed.host_str() {
+        Some(host) if arkavo_validation::is_loopback_host(host) => Ok(normalized),
+        Some(_) => Err(
             "Remote Ollama server URLs are blocked for security. Use localhost or loopback IP."
                 .to_string(),
-        );
+        ),
+        None => Err("Invalid Ollama server URL: missing host".to_string()),
     }
-
-    Ok(normalized)
 }
 
 fn is_ollama_config(memory: &Memory) -> bool {
@@ -211,15 +199,6 @@ impl Tool for OllamaConfigTool {
                 } else {
                     "default"
                 };
-
-                // Mark the server as CLEARED in environment
-                let server_key = format!(
-                    "OLLAMA_SERVER_{}",
-                    server_name.to_uppercase().replace('.', "_")
-                );
-                unsafe {
-                    std::env::set_var(&server_key, "CLEARED");
-                }
 
                 Ok(json!({
                     "success": true,

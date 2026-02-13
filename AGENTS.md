@@ -11,7 +11,7 @@
   - Minimal dependencies (prefer `std`).
   - Clear interfaces between components.
 - **Code Standards**:
-  - **Size**: Max 400 lines per file. Split larger files immediately.
+  - **Size**: Implementation code (excluding `#[cfg(test)]` modules) should stay under 400 lines. Split when a file has multiple distinct responsibilities, not to hit a line count.
   - **Style**: `cargo fmt` required. No dead code (`#[allow(dead_code)]` forbidden).
   - **Comments**: Explain *why*, not *what*. No TODOs or status tracking.
   - **Safety**: No hardcoded responses. LLM handles generation.

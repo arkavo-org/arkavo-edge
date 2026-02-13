@@ -1,4 +1,5 @@
 #![allow(clippy::disallowed_methods)]
+// SAFETY: All set_var/remove_var calls are in #[ignore]d tests; no concurrent env access
 
 use arkavo_events::{Event, EventPayload};
 use arkavo_memory::event_store::SerializedEvent;
