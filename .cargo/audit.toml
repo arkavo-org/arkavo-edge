@@ -1,0 +1,15 @@
+# cargo-audit configuration
+# See: https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+ignore = [
+    # rsa timing sidechannel (Marvin Attack) — no fixed version available.
+    # Pulled in unconditionally by sqlx-macros-core -> sqlx-mysql (compile-time only).
+    # Not used at runtime; project only uses sqlite backend.
+    # Tracked upstream: https://github.com/RustCrypto/RSA/issues/19
+    "RUSTSEC-2023-0071",
+    # derivative unmaintained — transitive via alloy-primitives -> ruint -> ark-ff
+    "RUSTSEC-2024-0388",
+    # number_prefix unmaintained — transitive via fastembed -> hf-hub -> indicatif
+    "RUSTSEC-2025-0119",
+]

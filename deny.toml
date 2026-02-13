@@ -5,17 +5,21 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
-    # External dependencies requiring upstream fixes
-    # opentdf transitive - tracked in arkavo-org/opentdf-rs#51
-    { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in opentdf" },
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in opentdf" },
-    { id = "RUSTSEC-2023-0071", reason = "rsa timing in opentdf" },
-    # iroh P2P library
-    { id = "RUSTSEC-2024-0384", reason = "instant in iroh" },
-    # paste unmaintained - transitive via tokenizers, ratatui, iroh, image
-    { id = "RUSTSEC-2024-0436", reason = "paste in tokenizers/ratatui/iroh/image transitive deps" },
-    # bincode unmaintained - used by arkavo-debugger and arkavo-events
-    { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 considered complete by maintainers - no action needed" },
+    # rsa timing sidechannel — no fixed version available.
+    # Transitive: sqlx-macros-core unconditionally pulls in sqlx-mysql which depends on rsa.
+    # Project only uses sqlite; rsa is compile-time only, not used at runtime.
+    { id = "RUSTSEC-2023-0071", reason = "sqlx-macros-core unconditionally includes sqlx-mysql; compile-time only" },
+    # iroh P2P library transitive deps (no alternatives available)
+    { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in iroh -> postcard -> heapless" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in iroh transitive deps" },
+    { id = "RUSTSEC-2024-0384", reason = "instant in iroh transitive deps" },
+    # Transitive unmaintained crates with no alternatives
+    { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
+    # alloy-primitives -> ruint -> ark-ff -> derivative
+    { id = "RUSTSEC-2024-0388", reason = "derivative in alloy-primitives transitive deps" },
+    # fastembed -> hf-hub -> indicatif -> number_prefix
+    { id = "RUSTSEC-2025-0119", reason = "number_prefix in fastembed transitive deps" },
 ]
 
 [bans]

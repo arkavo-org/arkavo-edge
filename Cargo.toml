@@ -195,7 +195,7 @@ glob = "0.3.1"
 ignore = "0.4.23"
 
 # Database
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
 
 # HTTP and networking
 jsonrpsee = { version = "0.25", features = ["client", "server", "ws-client", "macros"] }
