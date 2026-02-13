@@ -27,7 +27,6 @@ tower-http = { workspace = true, features = ["cors"] }
 reqwest = { workspace = true, features = ["stream"] }
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
-rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 
 # Server dependencies

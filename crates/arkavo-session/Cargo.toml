@@ -19,7 +19,6 @@ tokio-stream = { workspace = true }
 # WebSocket with TLS support
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
-rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 
 # HTTP server

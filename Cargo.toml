@@ -203,7 +203,6 @@ jsonrpsee = { version = "0.25", features = ["client", "server", "ws-client", "ma
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false }
-rustls-pemfile = "2.0"
 webpki-roots = "0.26"
 governor = "0.6"
 dashmap = "5.5"
