@@ -32,10 +32,10 @@ impl Default for TimeoutConfig {
 
 impl TimeoutConfig {
     /// Creates a new timeout config with validation
-    /// 
+    ///
     /// ## Errors
     /// Returns `TimeoutConfigError` if invalid values are provided
-    /// 
+    ///
     /// ## Validation Rules (SESS-003)
     /// - absolute_timeout must be >= 60 seconds and <= 86400 seconds (24 hours)
     /// - idle_timeout must be >= 60 seconds
@@ -49,27 +49,27 @@ impl TimeoutConfig {
         if absolute_timeout_secs < 60 {
             return Err(TimeoutConfigError::AbsoluteTimeoutTooShort);
         }
-        
+
         // SESS-003: Validate absolute timeout <= 24 hours
         if absolute_timeout_secs > 86400 {
             return Err(TimeoutConfigError::AbsoluteTimeoutTooLong);
         }
-        
+
         // SESS-003: Validate idle timeout >= 1 minute
         if idle_timeout_secs < 60 {
             return Err(TimeoutConfigError::IdleTimeoutTooShort);
         }
-        
+
         // SESS-003: Validate idle timeout <= absolute timeout
         if idle_timeout_secs > absolute_timeout_secs {
             return Err(TimeoutConfigError::IdleTimeoutExceedsAbsolute);
         }
-        
+
         // SESS-003: Security policy - idle timeout should not exceed 4 hours
         if idle_timeout_secs > 14400 {
             return Err(TimeoutConfigError::IdleTimeoutTooLong);
         }
-        
+
         Ok(Self {
             absolute_timeout: Duration::from_secs(absolute_timeout_secs),
             idle_timeout: Duration::from_secs(idle_timeout_secs),
@@ -136,30 +136,30 @@ impl TimeoutTracker {
     }
 
     /// Checks if the session has timed out (absolute or idle)
-    /// 
+    ///
     /// ## Spec
     /// SESS-001: Absolute session timeout enforced
     /// SESS-002: Idle session timeout enforced
-    /// 
+    ///
     /// ## Returns
     /// - `TimeoutStatus::Active` if session is still valid
     /// - `TimeoutStatus::AbsoluteExpired` if absolute timeout exceeded
     /// - `TimeoutStatus::IdleExpired` if idle timeout exceeded
     pub fn check_timeout(&self) -> TimeoutStatus {
         let now = Instant::now();
-        
+
         // SESS-001: Check absolute timeout (session lifetime)
         let absolute_elapsed = now.duration_since(self.created_at);
         if absolute_elapsed >= self.config.absolute_timeout {
             return TimeoutStatus::AbsoluteExpired;
         }
-        
+
         // SESS-002: Check idle timeout (inactivity)
         let idle_elapsed = now.duration_since(self.last_activity);
         if idle_elapsed >= self.config.idle_timeout {
             return TimeoutStatus::IdleExpired;
         }
-        
+
         TimeoutStatus::Active
     }
 
@@ -186,7 +186,7 @@ pub enum TimeoutStatus {
 #[cfg(test)]
 mod tests {
     //! TDD Tests for Session Timeout Enforcement
-    //! 
+    //!
     //! ## RED Phase - These tests will fail until implemented
 
     use super::*;
@@ -289,7 +289,10 @@ mod tests {
     #[test]
     fn test_zero_absolute_timeout_rejected() {
         let result = TimeoutConfig::new(0, 900);
-        assert!(matches!(result, Err(TimeoutConfigError::AbsoluteTimeoutTooShort)));
+        assert!(matches!(
+            result,
+            Err(TimeoutConfigError::AbsoluteTimeoutTooShort)
+        ));
     }
 
     /// Test: Absolute timeout > 24 hours is rejected
@@ -297,7 +300,10 @@ mod tests {
     #[test]
     fn test_absolute_timeout_too_long_rejected() {
         let result = TimeoutConfig::new(90000, 900); // > 24 hours
-        assert!(matches!(result, Err(TimeoutConfigError::AbsoluteTimeoutTooLong)));
+        assert!(matches!(
+            result,
+            Err(TimeoutConfigError::AbsoluteTimeoutTooLong)
+        ));
     }
 
     /// Test: Zero idle timeout is rejected
@@ -305,7 +311,10 @@ mod tests {
     #[test]
     fn test_zero_idle_timeout_rejected() {
         let result = TimeoutConfig::new(3600, 0);
-        assert!(matches!(result, Err(TimeoutConfigError::IdleTimeoutTooShort)));
+        assert!(matches!(
+            result,
+            Err(TimeoutConfigError::IdleTimeoutTooShort)
+        ));
     }
 
     /// Test: Idle timeout > absolute timeout is rejected
@@ -313,7 +322,10 @@ mod tests {
     #[test]
     fn test_idle_timeout_exceeds_absolute_rejected() {
         let result = TimeoutConfig::new(600, 3600); // idle > absolute
-        assert!(matches!(result, Err(TimeoutConfigError::IdleTimeoutExceedsAbsolute)));
+        assert!(matches!(
+            result,
+            Err(TimeoutConfigError::IdleTimeoutExceedsAbsolute)
+        ));
     }
 
     /// Test: Idle timeout > 4 hours is rejected (security policy)
@@ -321,7 +333,10 @@ mod tests {
     #[test]
     fn test_idle_timeout_too_long_rejected() {
         let result = TimeoutConfig::new(86400, 18000); // idle > 4 hours
-        assert!(matches!(result, Err(TimeoutConfigError::IdleTimeoutTooLong)));
+        assert!(matches!(
+            result,
+            Err(TimeoutConfigError::IdleTimeoutTooLong)
+        ));
     }
 
     /// Test: Valid configuration is accepted

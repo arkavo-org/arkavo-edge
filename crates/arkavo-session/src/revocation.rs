@@ -86,21 +86,26 @@ impl RevocationList {
     }
 
     /// Revokes a single session
-    /// 
+    ///
     /// ## Spec
     /// SESS-007: Immediate session revocation by admin
     /// SESS-008: User-initiated session revocation
-    /// 
+    ///
     /// ## Returns
     /// `true` if session was newly revoked, `false` if already revoked
-    pub fn revoke(&self, session_id: &str, source: RevocationSource, reason: Option<String>) -> bool {
+    pub fn revoke(
+        &self,
+        session_id: &str,
+        source: RevocationSource,
+        reason: Option<String>,
+    ) -> bool {
         let mut revoked = self.revoked.write().unwrap();
-        
+
         // Check if already revoked
         if revoked.contains_key(session_id) {
             return false;
         }
-        
+
         // Create revocation record
         let info = RevokedSession {
             session_id: session_id.to_string(),
@@ -108,13 +113,13 @@ impl RevocationList {
             revoked_by: source,
             reason,
         };
-        
+
         // Store and notify
         revoked.insert(session_id.to_string(), info.clone());
         drop(revoked); // Release lock before callback
-        
+
         self.notify_revocation(&info);
-        
+
         true
     }
 
@@ -133,10 +138,10 @@ impl RevocationList {
     }
 
     /// Revokes multiple sessions matching criteria
-    /// 
+    ///
     /// ## Spec
     /// SESS-009: Bulk revocation by criteria
-    /// 
+    ///
     /// ## Returns
     /// Number of sessions revoked
     pub fn revoke_bulk<F>(
@@ -151,19 +156,19 @@ impl RevocationList {
         // For bulk revocation, we need to collect matching session IDs first
         // In a real implementation, this would query a session store
         // For this implementation, we simulate with criteria-based revocation
-        
+
         // Note: This is a simplified implementation. In production, this would:
         // 1. Query session store for all active sessions
         // 2. Filter by criteria
         // 3. Revoke each matching session
-        
+
         let now = SystemTime::now();
         let mut revoked = self.revoked.write().unwrap();
-        
+
         // Simulate finding and revoking sessions
         // In reality, this would iterate over actual session store
         let sessions_to_revoke: Vec<String> = vec![]; // Would be populated from session store
-        
+
         let mut count = 0;
         for session_id in sessions_to_revoke {
             if criteria(&session_id) && !revoked.contains_key(&session_id) {
@@ -177,7 +182,7 @@ impl RevocationList {
                 count += 1;
             }
         }
-        
+
         count
     }
 
@@ -199,7 +204,7 @@ impl RevocationList {
     }
 
     /// Cleans up old revocation entries (for memory management)
-    /// 
+    ///
     /// ## Arguments
     /// * `older_than` - Remove entries older than this duration
     pub fn cleanup_old(&self, older_than: std::time::Duration) -> usize {
@@ -210,11 +215,11 @@ impl RevocationList {
             .filter(|(_, info)| info.revoked_at < cutoff)
             .map(|(id, _)| id.clone())
             .collect();
-        
+
         for id in &to_remove {
             revoked.remove(id);
         }
-        
+
         to_remove.len()
     }
 
@@ -239,10 +244,10 @@ impl Default for RevocationList {
 pub trait Revocable {
     /// Returns the session ID
     fn session_id(&self) -> &str;
-    
+
     /// Returns true if the session is currently active
     fn is_active(&self) -> bool;
-    
+
     /// Marks the session as revoked
     fn revoke(&mut self);
 }
@@ -254,8 +259,8 @@ mod tests {
     //! ## RED Phase - These tests will fail until implemented
 
     use super::*;
-    use std::thread;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
 
     // ============================================================================
     // SESS-007: Immediate session revocation by admin
@@ -268,13 +273,14 @@ mod tests {
         // Arrange
         let revocation_list = RevocationList::new();
         let session_id = "session-123";
-        let source = RevocationSource::Admin { 
-            admin_id: "admin-1".to_string() 
+        let source = RevocationSource::Admin {
+            admin_id: "admin-1".to_string(),
         };
-        
+
         // Act
-        let was_revoked = revocation_list.revoke(session_id, source, Some("security concern".to_string()));
-        
+        let was_revoked =
+            revocation_list.revoke(session_id, source, Some("security concern".to_string()));
+
         // Assert
         assert!(was_revoked, "Session should be newly revoked");
         assert!(revocation_list.is_revoked(session_id).is_some());
@@ -287,17 +293,19 @@ mod tests {
         // Arrange
         let revocation_list = RevocationList::new();
         let session_id = "session-123";
-        
+
         // Pre-check: should be active
         assert_eq!(revocation_list.status(session_id), RevocationStatus::Active);
-        
+
         // Act
         revocation_list.revoke(
-            session_id, 
-            RevocationSource::Admin { admin_id: "admin-1".to_string() },
-            None
+            session_id,
+            RevocationSource::Admin {
+                admin_id: "admin-1".to_string(),
+            },
+            None,
         );
-        
+
         // Assert
         match revocation_list.status(session_id) {
             RevocationStatus::Revoked(info) => {
@@ -315,17 +323,20 @@ mod tests {
         // Arrange
         let revocation_list = RevocationList::new();
         let session_id = "session-123";
-        let source = RevocationSource::Admin { 
-            admin_id: "admin-1".to_string() 
+        let source = RevocationSource::Admin {
+            admin_id: "admin-1".to_string(),
         };
-        
+
         // Act
         let first = revocation_list.revoke(session_id, source.clone(), None);
         let second = revocation_list.revoke(session_id, source, None);
-        
+
         // Assert
         assert!(first, "First revoke should succeed");
-        assert!(!second, "Second revoke should return false (already revoked)");
+        assert!(
+            !second,
+            "Second revoke should return false (already revoked)"
+        );
     }
 
     /// Test: Revocation callback is invoked
@@ -336,21 +347,26 @@ mod tests {
         let revocation_list = RevocationList::new();
         let callback_invoked = Arc::new(AtomicBool::new(false));
         let callback_invoked_clone = callback_invoked.clone();
-        
+
         revocation_list.on_revoke(move |revoked| {
             assert_eq!(revoked.session_id, "session-123");
             callback_invoked_clone.store(true, Ordering::SeqCst);
         });
-        
+
         // Act
         revocation_list.revoke(
             "session-123",
-            RevocationSource::System { reason: "timeout".to_string() },
-            None
+            RevocationSource::System {
+                reason: "timeout".to_string(),
+            },
+            None,
         );
-        
+
         // Assert
-        assert!(callback_invoked.load(Ordering::SeqCst), "Callback should be invoked");
+        assert!(
+            callback_invoked.load(Ordering::SeqCst),
+            "Callback should be invoked"
+        );
     }
 
     // ============================================================================
@@ -363,13 +379,14 @@ mod tests {
     fn test_user_revokes_own_session() {
         // Arrange
         let revocation_list = RevocationList::new();
-        let source = RevocationSource::User { 
-            user_id: "user-456".to_string() 
+        let source = RevocationSource::User {
+            user_id: "user-456".to_string(),
         };
-        
+
         // Act
-        let was_revoked = revocation_list.revoke("session-user", source.clone(), Some("logout".to_string()));
-        
+        let was_revoked =
+            revocation_list.revoke("session-user", source.clone(), Some("logout".to_string()));
+
         // Assert
         assert!(was_revoked);
         let info = revocation_list.is_revoked("session-user").unwrap();
@@ -384,14 +401,16 @@ mod tests {
     fn test_multiple_user_sessions_revoked_independently() {
         // Arrange
         let revocation_list = RevocationList::new();
-        
+
         // Act: Revoke one of two sessions
         revocation_list.revoke(
             "session-1",
-            RevocationSource::User { user_id: "user-1".to_string() },
-            None
+            RevocationSource::User {
+                user_id: "user-1".to_string(),
+            },
+            None,
         );
-        
+
         // Assert: Only session-1 is revoked
         assert!(revocation_list.is_revoked("session-1").is_some());
         assert!(!revocation_list.is_revoked("session-2").is_some());
@@ -407,41 +426,47 @@ mod tests {
     fn test_bulk_revocation_by_user_pattern() {
         // Arrange
         let revocation_list = RevocationList::new();
-        
+
         // Create sessions for different users
         let user_a_sessions = vec!["user-a-session-1", "user-a-session-2", "user-a-session-3"];
         let user_b_sessions = vec!["user-b-session-1"];
-        
+
         for id in &user_a_sessions {
             revocation_list.revoke(
                 id,
-                RevocationSource::System { reason: "test".to_string() },
-                None
+                RevocationSource::System {
+                    reason: "test".to_string(),
+                },
+                None,
             );
         }
         for id in &user_b_sessions {
             revocation_list.revoke(
                 id,
-                RevocationSource::System { reason: "test".to_string() },
-                None
+                RevocationSource::System {
+                    reason: "test".to_string(),
+                },
+                None,
             );
         }
-        
+
         // Clear the list to test bulk revocation
         let revocation_list = RevocationList::new();
-        
+
         // First create sessions
         for id in user_a_sessions.iter().chain(user_b_sessions.iter()) {
             // These would be created elsewhere, but for test we just check bulk works
         }
-        
+
         // Act: Bulk revoke all user-a sessions
         let count = revocation_list.revoke_bulk(
             |session_id| session_id.starts_with("user-a"),
-            RevocationSource::Admin { admin_id: "admin-1".to_string() },
-            Some("security incident".to_string())
+            RevocationSource::Admin {
+                admin_id: "admin-1".to_string(),
+            },
+            Some("security incident".to_string()),
         );
-        
+
         // For now, this will fail with todo!()
         // After implementation:
         // assert_eq!(count, 3);
@@ -452,14 +477,16 @@ mod tests {
     #[test]
     fn test_bulk_revocation_count() {
         let revocation_list = RevocationList::new();
-        
+
         // Act: Bulk revoke sessions matching pattern
         let count = revocation_list.revoke_bulk(
             |_session_id| true, // Match all
-            RevocationSource::System { reason: "maintenance".to_string() },
-            None
+            RevocationSource::System {
+                reason: "maintenance".to_string(),
+            },
+            None,
         );
-        
+
         // Will be implemented in GREEN phase
     }
 
@@ -472,17 +499,19 @@ mod tests {
     fn test_cleanup_old_entries() {
         // Arrange
         let revocation_list = RevocationList::new();
-        
+
         // Add some entries (in real impl, would manipulate timestamps)
         revocation_list.revoke(
             "old-session",
-            RevocationSource::System { reason: "test".to_string() },
-            None
+            RevocationSource::System {
+                reason: "test".to_string(),
+            },
+            None,
         );
-        
+
         // Act: Cleanup entries older than 0 seconds (all entries)
         let cleaned = revocation_list.cleanup_old(std::time::Duration::from_secs(0));
-        
+
         // Assert
         assert_eq!(cleaned, 1);
         assert!(revocation_list.is_empty());
@@ -491,13 +520,19 @@ mod tests {
     /// Test: Revocation source formatting
     #[test]
     fn test_revocation_source_display() {
-        let admin = RevocationSource::Admin { admin_id: "admin-1".to_string() };
+        let admin = RevocationSource::Admin {
+            admin_id: "admin-1".to_string(),
+        };
         assert_eq!(admin.to_string(), "admin:admin-1");
-        
-        let user = RevocationSource::User { user_id: "user-1".to_string() };
+
+        let user = RevocationSource::User {
+            user_id: "user-1".to_string(),
+        };
         assert_eq!(user.to_string(), "user:user-1");
-        
-        let system = RevocationSource::System { reason: "timeout".to_string() };
+
+        let system = RevocationSource::System {
+            reason: "timeout".to_string(),
+        };
         assert_eq!(system.to_string(), "system:timeout");
     }
 }

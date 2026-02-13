@@ -25,8 +25,10 @@
 #![warn(unreachable_pub)]
 
 pub mod conversation;
+pub mod crypto_config;
 pub mod device_binding;
 pub mod error;
+pub mod error_sanitizer;
 pub mod log_sanitizer;
 pub mod revocation;
 pub mod timeout;

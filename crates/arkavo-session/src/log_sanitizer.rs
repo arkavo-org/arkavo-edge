@@ -50,20 +50,24 @@ pub const REDACTED_SESSION_TOKEN: &str = "[REDACTED:session_token]";
 /// Checks if a key matches any sensitive pattern
 fn is_sensitive_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
-    SENSITIVE_KEY_PATTERNS.iter().any(|pattern| lower.contains(pattern))
+    SENSITIVE_KEY_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(pattern))
 }
 
 /// Checks if a key matches any PII pattern
 fn is_pii_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
-    PII_KEY_PATTERNS.iter().any(|pattern| lower.contains(pattern))
+    PII_KEY_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(pattern))
 }
 
 /// Sanitizes a JSON value for safe logging
-/// 
+///
 /// ## Spec
 /// SESS-012: Structured log sanitization
-/// 
+///
 /// ## Behavior
 /// - Recursively traverses JSON objects and arrays
 /// - Replaces sensitive values with `[REDACTED]`
@@ -98,7 +102,7 @@ pub fn sanitize_json_value(value: &Value) -> Value {
 }
 
 /// Sanitizes a JSON string for safe logging
-/// 
+///
 /// ## Spec
 /// SESS-010: Session tokens redacted in logs
 /// SESS-011: PII redacted in session logs
@@ -119,72 +123,75 @@ pub fn sanitize_json_line(line: &str) -> String {
 }
 
 /// Redacts session tokens from text
-/// 
+///
 /// ## Spec
 /// SESS-010: Session tokens redacted in logs
-/// 
+///
 /// ## Heuristics
 /// - Looks for common token patterns (JWT, API keys, etc.)
 /// - Replaces them with `[REDACTED:session_token]`
 pub fn redact_session_tokens(text: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
-    
+
     // JWT pattern: three base64url sections separated by dots
-    static JWT_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+").unwrap()
-    });
-    
+    static JWT_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+").unwrap());
+
     // Generic token pattern: "token: <alphanumeric>", "Token <value>", "Token1: <value>"
-    static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)(token\d*[:\s]+)([a-z0-9_-]{3,})").unwrap()
-    });
-    
+    static TOKEN_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(token\d*[:\s]+)([a-z0-9_-]{3,})").unwrap());
+
     // Bearer token pattern
-    static BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)(bearer\s+)([a-z0-9_-]{8,})").unwrap()
-    });
-    
+    static BEARER_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(bearer\s+)([a-z0-9_-]{8,})").unwrap());
+
     let mut result = text.to_string();
-    
+
     // Redact JWTs
-    result = JWT_RE.replace_all(&result, REDACTED_SESSION_TOKEN).to_string();
-    
+    result = JWT_RE
+        .replace_all(&result, REDACTED_SESSION_TOKEN)
+        .to_string();
+
     // Redact explicit tokens
-    result = TOKEN_RE.replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN)).to_string();
-    
+    result = TOKEN_RE
+        .replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN))
+        .to_string();
+
     // Redact bearer tokens
-    result = BEARER_RE.replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN)).to_string();
-    
+    result = BEARER_RE
+        .replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN))
+        .to_string();
+
     result
 }
 
 /// Hashes PII for safe logging (deterministic, irreversible)
-/// 
+///
 /// ## Spec
 /// SESS-011: PII redacted in session logs
-/// 
+///
 /// ## Algorithm
 /// Uses SHA-256 truncated to 16 characters for log readability.
 /// The hash is deterministic - same input always produces same output.
 pub fn hash_pii(value: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
     let hash = hasher.finish();
-    
+
     // Format as hex string
     format!("[HASH:{:016x}]", hash)
 }
 
 /// Sanitizes a log message with mixed content
-/// 
+///
 /// ## Example
 /// ```
 /// use arkavo_session::log_sanitizer::sanitize_log_message;
-/// 
+///
 /// let message = "User user@example.com logged in with token abc123";
 /// let safe = sanitize_log_message(message);
 /// assert!(!safe.contains("abc123"));
@@ -192,32 +199,30 @@ pub fn hash_pii(value: &str) -> String {
 pub fn sanitize_log_message(message: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
-    
+
     // Email pattern
-    static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap()
-    });
-    
+    static EMAIL_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
+
     // IP address pattern
-    static IP_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap()
-    });
-    
+    static IP_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap());
+
     let mut result = message.to_string();
-    
+
     // Redact tokens
     result = redact_session_tokens(&result);
-    
+
     // Hash emails
-    result = EMAIL_RE.replace_all(&result, |caps: &regex::Captures| {
-        hash_pii(&caps[0])
-    }).to_string();
-    
+    result = EMAIL_RE
+        .replace_all(&result, |caps: &regex::Captures| hash_pii(&caps[0]))
+        .to_string();
+
     // Hash IP addresses
-    result = IP_RE.replace_all(&result, |caps: &regex::Captures| {
-        hash_pii(&caps[0])
-    }).to_string();
-    
+    result = IP_RE
+        .replace_all(&result, |caps: &regex::Captures| hash_pii(&caps[0]))
+        .to_string();
+
     result
 }
 
@@ -240,10 +245,10 @@ mod tests {
     fn test_session_token_redaction() {
         // Arrange
         let log_with_token = "Session token: eyJhbGciOiJIUzI1NiIs...";
-        
+
         // Act
         let sanitized = redact_session_tokens(log_with_token);
-        
+
         // Assert
         assert!(!sanitized.contains("eyJhbGci"));
         assert!(sanitized.contains(REDACTED_SESSION_TOKEN) || sanitized.contains(REDACTED_MARKER));
@@ -255,10 +260,10 @@ mod tests {
     fn test_multiple_tokens_redacted() {
         // Arrange
         let log = "Token1: abc123, Token2: def456, Token3: ghi789";
-        
+
         // Act
         let sanitized = redact_session_tokens(log);
-        
+
         // Assert
         assert!(!sanitized.contains("abc123"));
         assert!(!sanitized.contains("def456"));
@@ -279,10 +284,10 @@ mod tests {
             "email": "user@example.com",
             "status": "success"
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         let sanitized_str = sanitized.to_string();
         assert!(!sanitized_str.contains("user@example.com"));
@@ -299,10 +304,10 @@ mod tests {
             "user_phone": "+1-555-123-4567",
             "action": "verification"
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         let sanitized_str = sanitized.to_string();
         assert!(!sanitized_str.contains("555-123-4567"));
@@ -315,11 +320,11 @@ mod tests {
     fn test_pii_hashing_deterministic() {
         // Arrange
         let email = "user@example.com";
-        
+
         // Act
         let hash1 = hash_pii(email);
         let hash2 = hash_pii(email);
-        
+
         // Assert
         assert_eq!(hash1, hash2);
         assert!(!hash1.contains(email));
@@ -333,11 +338,11 @@ mod tests {
         // Arrange
         let email1 = "user1@example.com";
         let email2 = "user2@example.com";
-        
+
         // Act
         let hash1 = hash_pii(email1);
         let hash2 = hash_pii(email2);
-        
+
         // Assert
         assert_ne!(hash1, hash2);
     }
@@ -359,10 +364,10 @@ mod tests {
             },
             "action": "update_profile"
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         let sanitized_str = sanitized.to_string();
         assert!(!sanitized_str.contains("John Doe"));
@@ -382,10 +387,10 @@ mod tests {
                 {"email": "user2@example.com", "id": 2}
             ]
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         let sanitized_str = sanitized.to_string();
         assert!(!sanitized_str.contains("user1@example.com"));
@@ -404,10 +409,10 @@ mod tests {
             "BearerToken": "token456",
             "sessionId": "session789"
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         let sanitized_str = sanitized.to_string();
         assert!(!sanitized_str.contains("secret123"));
@@ -424,10 +429,10 @@ mod tests {
     fn test_json_line_sanitization() {
         // Arrange
         let line = r#"{"timestamp":"2024-01-01","token":"secret","event":"login"}"#;
-        
+
         // Act
         let sanitized = sanitize_json_line(line);
-        
+
         // Assert
         assert!(!sanitized.contains("secret"));
         assert!(sanitized.contains("timestamp"));
@@ -439,10 +444,10 @@ mod tests {
     fn test_invalid_json_handling() {
         // Arrange
         let invalid = "not valid json {token: secret}";
-        
+
         // Act - should not panic
         let sanitized = sanitize_json_line(invalid);
-        
+
         // Assert - returns redacted or original
         assert!(!sanitized.is_empty());
     }
@@ -452,10 +457,10 @@ mod tests {
     fn test_log_message_sanitization() {
         // Arrange
         let message = "User user@example.com with token abc123 made request from 192.168.1.1";
-        
+
         // Act
         let sanitized = sanitize_log_message(message);
-        
+
         // Assert
         assert!(!sanitized.contains("user@example.com"));
         assert!(!sanitized.contains("abc123"));
@@ -472,10 +477,10 @@ mod tests {
             "component": "session_manager",
             "token": "secret123"
         });
-        
+
         // Act
         let sanitized = sanitize_json_value(&log);
-        
+
         // Assert
         assert!(sanitized.to_string().contains("timestamp"));
         assert!(sanitized.to_string().contains("INFO"));
