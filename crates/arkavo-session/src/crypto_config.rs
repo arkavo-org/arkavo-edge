@@ -10,9 +10,10 @@
 use std::collections::HashSet;
 
 /// Supported signature algorithms
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum SignatureAlgorithm {
     /// Ed25519 (default)
+    #[default]
     Ed25519,
     /// ECDSA P-256
     P256,
@@ -53,22 +54,16 @@ impl SignatureAlgorithm {
         )
     }
 
-    /// Parses algorithm from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parses algorithm from string identifier
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "Ed25519" => Some(SignatureAlgorithm::Ed25519),
             "P-256" | "P256" => Some(SignatureAlgorithm::P256),
             "P-384" | "P384" => Some(SignatureAlgorithm::P384),
-            "ML-DSA-65" | "ML-DSA-65" => Some(SignatureAlgorithm::MlDsa65),
-            "ML-DSA-87" | "ML-DSA-87" => Some(SignatureAlgorithm::MlDsa87),
+            "ML-DSA-65" => Some(SignatureAlgorithm::MlDsa65),
+            "ML-DSA-87" => Some(SignatureAlgorithm::MlDsa87),
             _ => None,
         }
-    }
-}
-
-impl Default for SignatureAlgorithm {
-    fn default() -> Self {
-        SignatureAlgorithm::Ed25519
     }
 }
 
@@ -153,18 +148,14 @@ impl CryptoConfig {
         signature: SignatureAlgorithm,
         kem: KemAlgorithm,
     ) -> Result<Self, CryptoConfigError> {
-        let mut config = Self::default();
-        config.signature_algorithm = signature;
-        config.kem_algorithm = kem;
+        let mut config = CryptoConfig {
+            signature_algorithm: signature,
+            kem_algorithm: kem,
+            ..Self::default()
+        };
         config.allowed_signatures.insert(signature);
         config.allowed_kems.insert(kem);
-        
-        // Validate combination
-        if signature.is_pqc() && !kem.is_pqc() && !config.hybrid_mode {
-            // PQC signature with classical KEM without hybrid is suspicious
-            // but we'll allow it for now
-        }
-        
+
         Ok(config)
     }
 
@@ -175,13 +166,13 @@ impl CryptoConfig {
     pub fn enable_pqc(&mut self) {
         self.hybrid_mode = true;
         self.max_version = 2;
-        
+
         // Add PQC algorithms
         self.allowed_signatures.insert(SignatureAlgorithm::MlDsa65);
         self.allowed_signatures.insert(SignatureAlgorithm::MlDsa87);
         self.allowed_kems.insert(KemAlgorithm::MlKem768);
         self.allowed_kems.insert(KemAlgorithm::MlKem1024);
-        
+
         // Prefer PQC
         self.signature_algorithm = SignatureAlgorithm::MlDsa65;
         self.kem_algorithm = KemAlgorithm::MlKem768;
@@ -197,21 +188,17 @@ impl CryptoConfig {
         peer_capabilities: &[SignatureAlgorithm],
     ) -> Option<SignatureAlgorithm> {
         // Priority order: PQC (strongest), then Ed25519, then P-384, P-256
-        let priority_order = vec![
+        let priority_order = [
             SignatureAlgorithm::MlDsa87,
             SignatureAlgorithm::MlDsa65,
             SignatureAlgorithm::Ed25519,
             SignatureAlgorithm::P384,
             SignatureAlgorithm::P256,
         ];
-        
-        for alg in priority_order {
-            if self.allowed_signatures.contains(&alg) && peer_capabilities.contains(&alg) {
-                return Some(alg);
-            }
-        }
-        
-        None
+
+        priority_order
+            .into_iter()
+            .find(|alg| self.allowed_signatures.contains(alg) && peer_capabilities.contains(alg))
     }
 
     /// Validates that an algorithm is allowed
@@ -237,23 +224,23 @@ impl CryptoConfig {
         if peer_version < self.min_version {
             return true;
         }
-        
+
         // Check if peer offers only weak algorithms when we support strong ones
         if peer_algorithms.is_empty() {
             return true;
         }
-        
+
         // If we support PQC but peer only offers classical without good reason
         if self.allowed_signatures.iter().any(|a| a.is_pqc()) {
             let peer_has_pqc = peer_algorithms.iter().any(|a| a.is_pqc());
             let peer_has_strong_classical = peer_algorithms.contains(&SignatureAlgorithm::Ed25519);
-            
+
             if !peer_has_pqc && !peer_has_strong_classical {
                 // Peer only offers weak classical algorithms
                 return true;
             }
         }
-        
+
         false
     }
 }
@@ -275,10 +262,10 @@ impl std::fmt::Display for CryptoConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CryptoConfigError::InvalidCombination(msg) => {
-                write!(f, "invalid algorithm combination: {}", msg)
+                write!(f, "invalid algorithm combination: {msg}")
             }
             CryptoConfigError::AlgorithmNotSupported(alg) => {
-                write!(f, "algorithm not supported: {}", alg)
+                write!(f, "algorithm not supported: {alg}")
             }
             CryptoConfigError::PqcNotAvailable => {
                 write!(f, "PQC algorithms not available")
@@ -325,38 +312,21 @@ impl ProtocolCapabilities {
 
 #[cfg(test)]
 mod tests {
-    //! TDD Tests for Cryptographic Agility
-
     use super::*;
 
-    // ============================================================================
     // SESS-016: Algorithm configuration
-    // ============================================================================
 
-    /// Test: Ed25519 is default signature algorithm
-    /// Spec: SESS-016 - Ed25519 is default
     #[test]
     fn test_ed25519_is_default() {
         let config = CryptoConfig::default();
         assert_eq!(config.signature_algorithm, SignatureAlgorithm::Ed25519);
     }
 
-    /// Test: Invalid algorithm combination rejected
-    /// Spec: SESS-016 - Invalid algorithms rejected at startup
     #[test]
     fn test_invalid_algorithm_rejected() {
-        // Try to create config with invalid combination
-        // In practice, this might be an unsupported combination
-        let result = CryptoConfig::new(
-            SignatureAlgorithm::MlDsa65, // PQC without hybrid
-            KemAlgorithm::EcdhP256,      // Classical KEM
-        );
-
-        // May fail depending on policy - for now just ensure it compiles
+        let _result = CryptoConfig::new(SignatureAlgorithm::MlDsa65, KemAlgorithm::EcdhP256);
     }
 
-    /// Test: Algorithm can be converted to/from string
-    /// Spec: SESS-016 - Algorithm identifiers
     #[test]
     fn test_algorithm_string_roundtrip() {
         let algs = vec![
@@ -365,43 +335,32 @@ mod tests {
             SignatureAlgorithm::P384,
             SignatureAlgorithm::MlDsa65,
         ];
-
         for alg in algs {
             let s = alg.as_str();
-            let parsed = SignatureAlgorithm::from_str(s);
-            assert!(parsed.is_some(), "Failed to parse: {}", s);
+            let parsed = SignatureAlgorithm::parse(s);
+            assert!(parsed.is_some(), "Failed to parse: {s}");
             assert_eq!(parsed.unwrap(), alg);
         }
     }
 
-    /// Test: PQC algorithms identified correctly
-    /// Spec: SESS-016 - PQC algorithm identification
     #[test]
     fn test_pqc_identification() {
         assert!(!SignatureAlgorithm::Ed25519.is_pqc());
         assert!(!SignatureAlgorithm::P256.is_pqc());
         assert!(SignatureAlgorithm::MlDsa65.is_pqc());
         assert!(SignatureAlgorithm::MlDsa87.is_pqc());
-
         assert!(!KemAlgorithm::X25519.is_pqc());
         assert!(!KemAlgorithm::EcdhP256.is_pqc());
         assert!(KemAlgorithm::MlKem768.is_pqc());
     }
 
-    // ============================================================================
     // SESS-017: PQC-ready algorithm negotiation
-    // ============================================================================
 
-    /// Test: PQC mode enables hybrid algorithms
-    /// Spec: SESS-017 - Hybrid classical/PQC supported
     #[test]
     fn test_pqc_mode_enables_hybrid() {
         let mut config = CryptoConfig::default();
         assert!(!config.hybrid_mode);
-
         config.enable_pqc();
-
-        // After enabling PQC, should have hybrid capability
         assert!(config.hybrid_mode);
         assert!(
             config
@@ -410,104 +369,63 @@ mod tests {
         );
     }
 
-    /// Test: Fallback to classical when PQC unavailable
-    /// Spec: SESS-017 - Fallback to classical if PQC unavailable
     #[test]
     fn test_pqc_fallback_to_classical() {
         let config = CryptoConfig::default();
-        let peer_caps = vec![SignatureAlgorithm::Ed25519]; // No PQC
-
+        let peer_caps = vec![SignatureAlgorithm::Ed25519];
         let negotiated = config.negotiate_signature(&peer_caps);
-
-        // Should negotiate Ed25519, not fail
         assert_eq!(negotiated, Some(SignatureAlgorithm::Ed25519));
     }
 
-    /// Test: PQC negotiated when both support it
-    /// Spec: SESS-017 - ML-DSA used when both support it
     #[test]
     fn test_pqc_negotiated_when_both_support() {
         let mut config = CryptoConfig::default();
         config.enable_pqc();
         config.allow_signature(SignatureAlgorithm::MlDsa65);
-
         let peer_caps = vec![SignatureAlgorithm::Ed25519, SignatureAlgorithm::MlDsa65];
-
         let negotiated = config.negotiate_signature(&peer_caps);
-
-        // Should prefer PQC when both support it
         assert_eq!(negotiated, Some(SignatureAlgorithm::MlDsa65));
     }
 
-    // ============================================================================
     // SESS-018: Crypto agility version negotiation
-    // ============================================================================
 
-    /// Test: Best mutual algorithm selected
-    /// Spec: SESS-018 - Best mutual algorithm is selected
     #[test]
     fn test_best_mutual_algorithm_selected() {
         let mut config = CryptoConfig::default();
         config.signature_algorithm = SignatureAlgorithm::Ed25519;
         config.allow_signature(SignatureAlgorithm::P256);
         config.allow_signature(SignatureAlgorithm::P384);
-
-        // Peer supports P-256 and P-384, we prefer Ed25519
         let peer_caps = vec![SignatureAlgorithm::P384, SignatureAlgorithm::P256];
-
         let negotiated = config.negotiate_signature(&peer_caps);
-
-        // Should pick best available (P-384 > P-256)
         assert_eq!(negotiated, Some(SignatureAlgorithm::P384));
     }
 
-    /// Test: No common algorithm returns None
-    /// Spec: SESS-018 - Failed negotiation when no common algorithms
     #[test]
     fn test_no_common_algorithm_fails() {
         let mut config = CryptoConfig::default();
         config.allowed_signatures.clear();
         config.allow_signature(SignatureAlgorithm::Ed25519);
-
         let peer_caps = vec![SignatureAlgorithm::P384];
-
         let negotiated = config.negotiate_signature(&peer_caps);
-
         assert_eq!(negotiated, None);
     }
 
-    /// Test: Downgrade attack detected
-    /// Spec: SESS-018 - Downgrade attacks detected
     #[test]
     fn test_downgrade_attack_detected() {
         let config = CryptoConfig::default();
-
-        // Peer claims very old version and weak algorithms
-        let peer_version = 0u16;
-        let peer_algs = vec![];
-
-        let is_downgrade = config.detect_downgrade(peer_version, &peer_algs);
-
+        let is_downgrade = config.detect_downgrade(0u16, &[]);
         assert!(is_downgrade);
     }
 
-    /// Test: Valid negotiation not flagged as downgrade
-    /// Spec: SESS-018 - Valid negotiations pass
     #[test]
     fn test_valid_negotiation_not_downgrade() {
         let config = CryptoConfig::default();
-
-        let peer_version = 1u16;
         let peer_algs = vec![SignatureAlgorithm::Ed25519];
-
-        let is_downgrade = config.detect_downgrade(peer_version, &peer_algs);
-
+        let is_downgrade = config.detect_downgrade(1u16, &peer_algs);
         assert!(!is_downgrade);
     }
 
-    // ============================================================================
-    // Protocol capabilities tests
-    // ============================================================================
+    // Protocol capabilities
 
     #[test]
     fn test_current_capabilities() {

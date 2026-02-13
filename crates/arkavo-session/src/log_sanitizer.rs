@@ -155,12 +155,12 @@ pub fn redact_session_tokens(text: &str) -> String {
 
     // Redact explicit tokens
     result = TOKEN_RE
-        .replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN))
+        .replace_all(&result, format!("${{1}}{REDACTED_SESSION_TOKEN}"))
         .to_string();
 
     // Redact bearer tokens
     result = BEARER_RE
-        .replace_all(&result, format!("${{1}}{}", REDACTED_SESSION_TOKEN))
+        .replace_all(&result, format!("${{1}}{REDACTED_SESSION_TOKEN}"))
         .to_string();
 
     result
@@ -183,7 +183,7 @@ pub fn hash_pii(value: &str) -> String {
     let hash = hasher.finish();
 
     // Format as hex string
-    format!("[HASH:{:016x}]", hash)
+    format!("[HASH:{hash:016x}]")
 }
 
 /// Sanitizes a log message with mixed content
@@ -228,134 +228,77 @@ pub fn sanitize_log_message(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! TDD Tests for Log Sanitization
-    //!
-    //! ## RED Phase - These tests will fail until implemented
-
     use super::*;
     use serde_json::json;
 
-    // ============================================================================
     // SESS-010: Session tokens redacted in logs
-    // ============================================================================
 
-    /// Test: Session tokens are redacted in log output
-    /// Spec: SESS-010 - Session tokens redacted in logs
     #[test]
     fn test_session_token_redaction() {
-        // Arrange
         let log_with_token = "Session token: eyJhbGciOiJIUzI1NiIs...";
-
-        // Act
         let sanitized = redact_session_tokens(log_with_token);
-
-        // Assert
         assert!(!sanitized.contains("eyJhbGci"));
         assert!(sanitized.contains(REDACTED_SESSION_TOKEN) || sanitized.contains(REDACTED_MARKER));
     }
 
-    /// Test: Multiple session tokens are all redacted
-    /// Spec: SESS-010 - All tokens redacted
     #[test]
     fn test_multiple_tokens_redacted() {
-        // Arrange
         let log = "Token1: abc123, Token2: def456, Token3: ghi789";
-
-        // Act
         let sanitized = redact_session_tokens(log);
-
-        // Assert
         assert!(!sanitized.contains("abc123"));
         assert!(!sanitized.contains("def456"));
         assert!(!sanitized.contains("ghi789"));
     }
 
-    // ============================================================================
     // SESS-011: PII redacted in session logs
-    // ============================================================================
 
-    /// Test: Email addresses are redacted/hashed
-    /// Spec: SESS-011 - PII redacted in session logs
     #[test]
     fn test_email_redaction() {
-        // Arrange
         let log = json!({
             "event": "login",
             "email": "user@example.com",
             "status": "success"
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        let sanitized_str = sanitized.to_string();
-        assert!(!sanitized_str.contains("user@example.com"));
-        assert!(sanitized_str.contains("\"event\":\"login\""));
-        assert!(sanitized_str.contains("\"status\":\"success\""));
+        let s = sanitized.to_string();
+        assert!(!s.contains("user@example.com"));
+        assert!(s.contains("\"event\":\"login\""));
+        assert!(s.contains("\"status\":\"success\""));
     }
 
-    /// Test: Phone numbers are redacted
-    /// Spec: SESS-011 - PII redacted
     #[test]
     fn test_phone_redaction() {
-        // Arrange
         let log = json!({
             "user_phone": "+1-555-123-4567",
             "action": "verification"
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        let sanitized_str = sanitized.to_string();
-        assert!(!sanitized_str.contains("555-123-4567"));
-        assert!(sanitized_str.contains("\"action\":\"verification\""));
+        let s = sanitized.to_string();
+        assert!(!s.contains("555-123-4567"));
+        assert!(s.contains("\"action\":\"verification\""));
     }
 
-    /// Test: PII hashing is deterministic
-    /// Spec: SESS-011 - Same PII produces same hash
     #[test]
     fn test_pii_hashing_deterministic() {
-        // Arrange
         let email = "user@example.com";
-
-        // Act
         let hash1 = hash_pii(email);
         let hash2 = hash_pii(email);
-
-        // Assert
         assert_eq!(hash1, hash2);
         assert!(!hash1.contains(email));
-        assert!(hash1.len() > 0);
+        assert!(!hash1.is_empty());
     }
 
-    /// Test: Different PII produces different hashes
-    /// Spec: SESS-011 - Hash collision resistance
     #[test]
     fn test_pii_hashing_unique() {
-        // Arrange
-        let email1 = "user1@example.com";
-        let email2 = "user2@example.com";
-
-        // Act
-        let hash1 = hash_pii(email1);
-        let hash2 = hash_pii(email2);
-
-        // Assert
+        let hash1 = hash_pii("user1@example.com");
+        let hash2 = hash_pii("user2@example.com");
         assert_ne!(hash1, hash2);
     }
 
-    // ============================================================================
     // SESS-012: Structured log sanitization
-    // ============================================================================
 
-    /// Test: Nested JSON objects are recursively sanitized
-    /// Spec: SESS-012 - Recursive sanitization
     #[test]
     fn test_nested_json_sanitization() {
-        // Arrange
         let log = json!({
             "user": {
                 "name": "John Doe",
@@ -364,127 +307,84 @@ mod tests {
             },
             "action": "update_profile"
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        let sanitized_str = sanitized.to_string();
-        assert!(!sanitized_str.contains("John Doe"));
-        assert!(!sanitized_str.contains("john@example.com"));
-        assert!(!sanitized_str.contains("secret_token_123"));
-        assert!(sanitized_str.contains("\"action\":\"update_profile\""));
+        let s = sanitized.to_string();
+        assert!(!s.contains("John Doe"));
+        assert!(!s.contains("john@example.com"));
+        assert!(!s.contains("secret_token_123"));
+        assert!(s.contains("\"action\":\"update_profile\""));
     }
 
-    /// Test: Arrays are sanitized
-    /// Spec: SESS-012 - Array sanitization
     #[test]
     fn test_array_sanitization() {
-        // Arrange
         let log = json!({
             "users": [
                 {"email": "user1@example.com", "id": 1},
                 {"email": "user2@example.com", "id": 2}
             ]
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        let sanitized_str = sanitized.to_string();
-        assert!(!sanitized_str.contains("user1@example.com"));
-        assert!(!sanitized_str.contains("user2@example.com"));
-        assert!(sanitized_str.contains("\"id\":1"));
-        assert!(sanitized_str.contains("\"id\":2"));
+        let s = sanitized.to_string();
+        assert!(!s.contains("user1@example.com"));
+        assert!(!s.contains("user2@example.com"));
+        assert!(s.contains("\"id\":1"));
+        assert!(s.contains("\"id\":2"));
     }
 
-    /// Test: Sensitive keys are detected case-insensitively
-    /// Spec: SESS-012 - Case-insensitive pattern matching
     #[test]
     fn test_case_insensitive_key_matching() {
-        // Arrange
         let log = json!({
             "API_KEY": "secret123",
             "BearerToken": "token456",
             "sessionId": "session789"
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        let sanitized_str = sanitized.to_string();
-        assert!(!sanitized_str.contains("secret123"));
-        assert!(!sanitized_str.contains("token456"));
-        assert!(!sanitized_str.contains("session789"));
+        let s = sanitized.to_string();
+        assert!(!s.contains("secret123"));
+        assert!(!s.contains("token456"));
+        assert!(!s.contains("session789"));
     }
 
-    // ============================================================================
-    // General sanitization tests
-    // ============================================================================
+    // General sanitization
 
-    /// Test: JSON line sanitization preserves structure
     #[test]
     fn test_json_line_sanitization() {
-        // Arrange
         let line = r#"{"timestamp":"2024-01-01","token":"secret","event":"login"}"#;
-
-        // Act
         let sanitized = sanitize_json_line(line);
-
-        // Assert
         assert!(!sanitized.contains("secret"));
         assert!(sanitized.contains("timestamp"));
         assert!(sanitized.contains("event"));
     }
 
-    /// Test: Invalid JSON is handled gracefully
     #[test]
     fn test_invalid_json_handling() {
-        // Arrange
         let invalid = "not valid json {token: secret}";
-
-        // Act - should not panic
         let sanitized = sanitize_json_line(invalid);
-
-        // Assert - returns redacted or original
         assert!(!sanitized.is_empty());
     }
 
-    /// Test: Log message sanitization
     #[test]
     fn test_log_message_sanitization() {
-        // Arrange
         let message = "User user@example.com with token abc123 made request from 192.168.1.1";
-
-        // Act
         let sanitized = sanitize_log_message(message);
-
-        // Assert
         assert!(!sanitized.contains("user@example.com"));
         assert!(!sanitized.contains("abc123"));
         assert!(!sanitized.contains("192.168.1.1"));
     }
 
-    /// Test: Non-sensitive data is preserved
     #[test]
     fn test_non_sensitive_data_preserved() {
-        // Arrange
         let log = json!({
             "timestamp": "2024-01-01T00:00:00Z",
             "level": "INFO",
             "component": "session_manager",
             "token": "secret123"
         });
-
-        // Act
         let sanitized = sanitize_json_value(&log);
-
-        // Assert
-        assert!(sanitized.to_string().contains("timestamp"));
-        assert!(sanitized.to_string().contains("INFO"));
-        assert!(sanitized.to_string().contains("session_manager"));
-        assert!(!sanitized.to_string().contains("secret123"));
+        let s = sanitized.to_string();
+        assert!(s.contains("timestamp"));
+        assert!(s.contains("INFO"));
+        assert!(s.contains("session_manager"));
+        assert!(!s.contains("secret123"));
     }
 }

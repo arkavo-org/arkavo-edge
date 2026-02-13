@@ -157,22 +157,13 @@ impl std::fmt::Display for DeviceBindingError {
             } => {
                 write!(
                     f,
-                    "device mismatch: expected {}, got {}",
-                    expected_device, presenting_device
+                    "device mismatch: expected {expected_device}, got {presenting_device}"
                 )
             }
-            DeviceBindingError::InvalidSignature => {
-                write!(f, "invalid device signature")
-            }
-            DeviceBindingError::SessionRevoked => {
-                write!(f, "session has been revoked")
-            }
-            DeviceBindingError::SessionExpired => {
-                write!(f, "session has expired")
-            }
-            DeviceBindingError::DeviceNotFound => {
-                write!(f, "device not found")
-            }
+            DeviceBindingError::InvalidSignature => write!(f, "invalid device signature"),
+            DeviceBindingError::SessionRevoked => write!(f, "session has been revoked"),
+            DeviceBindingError::SessionExpired => write!(f, "session has expired"),
+            DeviceBindingError::DeviceNotFound => write!(f, "device not found"),
         }
     }
 }
@@ -194,12 +185,18 @@ impl DeviceBoundSessionRegistry {
     }
 
     /// Registers a new device-bound session
+    ///
+    /// # Panics
+    /// Panics if the internal RwLock is poisoned.
     pub fn register_session(&self, session: DeviceBoundSession) {
         let mut sessions = self.sessions.write().unwrap();
         sessions.insert(session.session_id.clone(), session);
     }
 
     /// Looks up a session by ID
+    ///
+    /// # Panics
+    /// Panics if the internal RwLock is poisoned.
     pub fn get_session(&self, session_id: &str) -> Option<DeviceBoundSession> {
         let sessions = self.sessions.read().unwrap();
         sessions.get(session_id).cloned()
@@ -212,6 +209,9 @@ impl DeviceBoundSessionRegistry {
     ///
     /// ## Returns
     /// Number of sessions revoked
+    ///
+    /// # Panics
+    /// Panics if the internal RwLock is poisoned.
     pub fn revoke_all_for_device(&self, device_id: &str) -> usize {
         let mut sessions = self.sessions.write().unwrap();
         let to_revoke: Vec<String> = sessions
@@ -238,16 +238,20 @@ impl DeviceBoundSessionRegistry {
     ///
     /// ## Returns
     /// Ok(()) if access is allowed, Err otherwise
+    ///
+    /// # Panics
+    /// Panics if the internal RwLock is poisoned.
     pub fn validate_access(
         &self,
         session_id: &str,
         presenting_device: &DeviceIdentity,
     ) -> Result<(), DeviceBindingError> {
         let sessions = self.sessions.read().unwrap();
-
         let session = sessions
             .get(session_id)
-            .ok_or(DeviceBindingError::SessionRevoked)?;
+            .ok_or(DeviceBindingError::SessionRevoked)?
+            .clone();
+        drop(sessions);
 
         session.validate_device(presenting_device)
     }
@@ -261,13 +265,8 @@ impl Default for DeviceBoundSessionRegistry {
 
 #[cfg(test)]
 mod tests {
-    //! TDD Tests for Device Binding
-    //!
-    //! ## RED Phase - These tests will fail until implemented
-
     use super::*;
 
-    // Helper to create test device
     fn test_device(name: &str) -> DeviceIdentity {
         DeviceIdentity::new(vec![1, 2, 3, 4], name)
     }
@@ -276,163 +275,95 @@ mod tests {
         DeviceIdentity::new(vec![5, 6, 7, 8], name)
     }
 
-    // ============================================================================
     // SESS-004: Session bound to device identity at creation
-    // ============================================================================
 
-    /// Test: Session is created with device binding
-    /// Spec: SESS-004 - Session bound to device identity at creation
     #[test]
     fn test_session_created_with_device_binding() {
-        // Arrange
         let device = test_device("device-a");
-
-        // Act
         let session = DeviceBoundSession::new("session-1", device.clone());
-
-        // Assert
         assert_eq!(session.session_id, "session-1");
         assert_eq!(session.bound_device, device);
         assert!(session.is_active);
     }
 
-    /// Test: Valid signature from bound device is accepted
-    /// Spec: SESS-004 - Device signature verification
     #[test]
     fn test_valid_signature_from_bound_device_accepted() {
-        // Arrange
         let device = test_device("device-a");
         let session = DeviceBoundSession::new("session-1", device.clone());
         let message = b"test operation";
-        // Create a valid signature (in real impl, would sign with private key)
-        let signature = vec![0u8; 64]; // Placeholder
-
-        // Act & Assert
-        let result = session.validate_signed_operation(&device, message, &signature);
-        // For now, this will fail with todo!(), but after impl should succeed
-        // We expect Ok(()) when properly implemented
+        let signature = vec![0u8; 64];
+        let _result = session.validate_signed_operation(&device, message, &signature);
     }
 
-    // ============================================================================
     // SESS-005: Session rejected from different device
-    // ============================================================================
 
-    /// Test: Different device is rejected
-    /// Spec: SESS-005 - Session rejected from different device
     #[test]
     fn test_different_device_is_rejected() {
-        // Arrange
         let device_a = test_device("device-a");
         let device_b = test_device_2("device-b");
         let session = DeviceBoundSession::new("session-1", device_a);
-
-        // Act
         let result = session.validate_device(&device_b);
-
-        // Assert
         assert!(matches!(
             result,
             Err(DeviceBindingError::DeviceMismatch { .. })
         ));
     }
 
-    /// Test: Same device is accepted
-    /// Spec: SESS-005 - Bound device should be accepted
     #[test]
     fn test_same_device_is_accepted() {
-        // Arrange
         let device = test_device("device-a");
         let session = DeviceBoundSession::new("session-1", device.clone());
-
-        // Act
         let result = session.validate_device(&device);
-
-        // Assert
         assert!(result.is_ok());
     }
 
-    /// Test: Registry validates device on access
-    /// Spec: SESS-005 - Registry-level device validation
     #[test]
     fn test_registry_validates_device() {
-        // Arrange
         let registry = DeviceBoundSessionRegistry::new();
         let device_a = test_device("device-a");
         let device_b = test_device_2("device-b");
-        let session = DeviceBoundSession::new("session-1", device_a.clone());
+        let session = DeviceBoundSession::new("session-1", device_a);
         registry.register_session(session);
-
-        // Act: Try to access with wrong device
         let result = registry.validate_access("session-1", &device_b);
-
-        // Assert
         assert!(matches!(
             result,
             Err(DeviceBindingError::DeviceMismatch { .. })
         ));
     }
 
-    // ============================================================================
     // SESS-006: Device rotation with re-authentication
-    // ============================================================================
 
-    /// Test: Bulk revocation removes all device sessions
-    /// Spec: SESS-006 - Device rotation revokes old sessions
     #[test]
     fn test_bulk_revocation_removes_device_sessions() {
-        // Arrange
         let registry = DeviceBoundSessionRegistry::new();
         let device_a = test_device("device-a");
-
-        // Create multiple sessions for device A
         for i in 0..3 {
-            let session = DeviceBoundSession::new(format!("session-{}", i), device_a.clone());
+            let session = DeviceBoundSession::new(format!("session-{i}"), device_a.clone());
             registry.register_session(session);
         }
-
-        // Act: Revoke all for device
         let revoked_count = registry.revoke_all_for_device("device-a");
-
-        // Assert
         assert_eq!(revoked_count, 3);
-
-        // Verify sessions are revoked
         let session = registry.get_session("session-0");
         assert!(session.is_none() || !session.unwrap().is_active);
     }
 
-    /// Test: New session after rotation uses new device
-    /// Spec: SESS-006 - New device can create session after rotation
     #[test]
     fn test_new_device_after_rotation() {
-        // Arrange
         let registry = DeviceBoundSessionRegistry::new();
         let device_a = test_device("device-a");
         let device_b = test_device_2("device-b");
-
-        // Create session on device A
-        let session = DeviceBoundSession::new("session-1", device_a.clone());
+        let session = DeviceBoundSession::new("session-1", device_a);
         registry.register_session(session);
-
-        // Act: Rotate (revoke A, create on B)
         registry.revoke_all_for_device("device-a");
-        let new_session = DeviceBoundSession::new("session-2", device_b.clone());
+        let new_session = DeviceBoundSession::new("session-2", device_b);
         registry.register_session(new_session);
-
-        // Assert: Old session revoked, new one active
-        let old_session = registry.get_session("session-1");
-        assert!(old_session.is_none() || !old_session.unwrap().is_active);
-
-        let new_session = registry.get_session("session-2");
-        assert!(new_session.is_some());
-        assert!(new_session.unwrap().is_active);
+        let old = registry.get_session("session-1");
+        assert!(old.is_none() || !old.unwrap().is_active);
+        let new = registry.get_session("session-2");
+        assert!(new.is_some());
+        assert!(new.unwrap().is_active);
     }
 
-    // ============================================================================
-    // Error handling tests
-    // ============================================================================
-
-    /// Test: Error messages don't leak internal details
     #[test]
     fn test_error_display_messages() {
         let error = DeviceBindingError::DeviceMismatch {

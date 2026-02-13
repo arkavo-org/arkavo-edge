@@ -558,10 +558,10 @@ impl ConversationManager {
             .current_session_id
             .ok_or_else(|| anyhow::anyhow!("No active conversation session"))?;
 
-        let query = format!("session_id:{session_id}");
+        let session_str = session_id.to_string().replace('-', " ");
         let results = self
             .memory_storage
-            .search(&query, 100, Some("conversation"))
+            .search(&session_str, 100, Some("conversation"))
             .await?;
 
         let messages: Vec<ConversationMessage> = results
