@@ -41,6 +41,12 @@ pub fn validate_str_size(
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for size validation to prevent DoS via resource exhaustion.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-010): Rate limiting per IP (related resource control)
+    //! - [specs/arkavo-edge/protocol.spec.yaml](PROTO-007): Rate limiting enforcement
+
     use super::*;
 
     #[test]

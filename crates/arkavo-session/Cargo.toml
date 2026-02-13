@@ -47,6 +47,7 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 dashmap = { workspace = true }
+regex = { workspace = true }
 
 # Token counting
 tiktoken-rs = { workspace = true }

@@ -14,6 +14,9 @@ const SENSITIVE_KEY_PATTERNS: &[&str] = &[
     "session",
     "private_key",
     "bearer",
+    "credential",
+    "access_key",
+    "secret_key",
 ];
 
 fn is_sensitive_key(key: &str) -> bool {
@@ -67,6 +70,15 @@ pub fn sanitize_json_value_for_log(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for log sanitization and PII redaction.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-017): Egress audit logging with redaction
+    //! - [specs/arkavo-edge/tdf-security.spec.yaml](TDFS-002): Configuration bundle TDF encryption - secrets handling
+    //!
+    //! ## Security Principle
+    //! Sensitive data must never appear in logs, even in encrypted/debug contexts.
+
     use super::*;
     use serde_json::json;
 
@@ -98,6 +110,9 @@ mod tests {
         assert!(is_sensitive_key("api_key"));
         assert!(is_sensitive_key("Authorization"));
         assert!(is_sensitive_key("x-auth-token"));
+        assert!(is_sensitive_key("aws_credential"));
+        assert!(is_sensitive_key("access_key_id"));
+        assert!(is_sensitive_key("secret_key"));
         assert!(!is_sensitive_key("name"));
         assert!(!is_sensitive_key("data"));
     }

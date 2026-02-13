@@ -1,0 +1,323 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Session Security Hardening
+module: arkavo_session::security
+description: |
+  Security hardening for IssueActionEffortSession including timeouts, device binding,
+  session revocation, log sanitization, error sanitization, cryptographic agility,
+  and FFI fuzzing capabilities.
+version: 1.0.0
+
+invariants:
+  - Sessions have mandatory timeouts (absolute and idle)
+  - Sessions are cryptographically bound to device identity
+  - Sessions can be revoked immediately (admin and user-initiated)
+  - Logs never contain secrets, PII, or session tokens
+  - Errors distinguish internal details from external messages
+  - Cryptographic algorithms are configurable with PQC migration path
+  - FFI boundaries are fuzz-tested for memory safety
+
+scenarios:
+  # ============================================================================
+  # Session Timeout Enforcement
+  # ============================================================================
+  - id: SESS-001
+    name: Absolute session timeout enforced
+    criticality: critical
+    given:
+      - Session is created with absolute_timeout of 3600 seconds
+      - Session is active and being used
+    when: Absolute timeout expires
+    then:
+      - Session is terminated immediately
+      - All operations return SessionError::Expired
+      - Cleanup callbacks are invoked
+      - Audit log entry created (without session secrets)
+    refs: [crates/arkavo-session/src/timeout.rs]
+    tdd_phase: red
+
+  - id: SESS-002
+    name: Idle session timeout enforced
+    criticality: critical
+    given:
+      - Session is created with idle_timeout of 900 seconds
+      - Session was last active 900+ seconds ago
+    when: Idle timeout check runs
+    then:
+      - Session is terminated
+      - In-flight operations complete but new ones are rejected
+      - Metrics recorded for idle timeout
+    refs: [crates/arkavo-session/src/timeout.rs]
+    tdd_phase: red
+
+  - id: SESS-003
+    name: Timeout configuration validation
+    criticality: high
+    given:
+      - Admin attempts to configure session timeouts
+    when: Invalid timeout values provided (e.g., 0, >24h for idle)
+    then:
+      - Configuration is rejected
+      - Default secure values are used
+      - Warning is logged
+    refs: [crates/arkavo-session/src/timeout.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # Device Binding
+  # ============================================================================
+  - id: SESS-004
+    name: Session bound to device identity at creation
+    criticality: critical
+    given:
+      - Device has a valid identity key
+      - Session creation is requested
+    when: Session is created
+    then:
+      - Device public key is recorded in session
+      - Session token is cryptographically bound to device key
+      - Any operation requires device key verification
+    refs: [crates/arkavo-session/src/device_binding.rs]
+    tdd_phase: red
+
+  - id: SESS-005
+    name: Session rejected from different device
+    criticality: critical
+    given:
+      - Session was created on Device A
+      - Device B attempts to use the session
+    when: Device B presents session token
+    then:
+      - Request is rejected with DeviceBindingError
+      - Security event is logged
+      - Optional: Session is revoked (configurable)
+    refs: [crates/arkavo-session/src/device_binding.rs]
+    tdd_phase: red
+
+  - id: SESS-006
+    name: Device rotation with re-authentication
+    criticality: high
+    given:
+      - User has valid session on Device A
+      - User wants to migrate to Device B
+    when: User re-authenticates on Device B with valid credentials
+    then:
+      - New session is created on Device B
+      - Old session on Device A is revoked
+      - Audit trail records the rotation
+    refs: [crates/arkavo-session/src/device_binding.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # Session Revocation
+  # ============================================================================
+  - id: SESS-007
+    name: Immediate session revocation by admin
+    criticality: critical
+    given:
+      - Admin has revocation capability
+      - Target session is active
+    when: Admin revokes session
+    then:
+      - Session is immediately marked revoked
+      - All subsequent operations fail
+      - In-flight operations are notified
+      - Cleanup completes within 100ms
+    refs: [crates/arkavo-session/src/revocation.rs]
+    tdd_phase: red
+
+  - id: SESS-008
+    name: User-initiated session revocation (logout)
+    criticality: high
+    given:
+      - User has active session
+    when: User requests logout
+    then:
+      - Session is revoked
+      - Client is notified
+      - All tokens are invalidated
+    refs: [crates/arkavo-session/src/revocation.rs]
+    tdd_phase: red
+
+  - id: SESS-009
+    name: Bulk revocation by criteria
+    criticality: high
+    given:
+      - Admin needs to revoke all sessions for user/device/time range
+    when: Bulk revocation is executed
+    then:
+      - All matching sessions are revoked
+      - Operation is atomic (all or none)
+      - Audit log records bulk action
+    refs: [crates/arkavo-session/src/revocation.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # Log Sanitization
+  # ============================================================================
+  - id: SESS-010
+    name: Session tokens redacted in logs
+    criticality: critical
+    given:
+      - Session token is present in log context
+    when: Log entry is written
+    then:
+      - Session token is replaced with [REDACTED:session_token]
+      - Log structure is preserved
+      - No partial token leakage
+    refs: [crates/arkavo-session/src/log_sanitizer.rs]
+    tdd_phase: red
+
+  - id: SESS-011
+    name: PII redacted in session logs
+    criticality: critical
+    given:
+      - Session context contains PII (email, phone, etc.)
+    when: Log entry is written
+    then:
+      - PII fields are hashed or redacted
+      - Non-PII context is preserved
+      - Redaction is consistent across log levels
+    refs: [crates/arkavo-session/src/log_sanitizer.rs]
+    tdd_phase: red
+
+  - id: SESS-012
+    name: Structured log sanitization
+    criticality: high
+    given:
+      - JSON structured logs are used
+    when: Sensitive fields are present
+    then:
+      - Sensitive keys are automatically detected
+      - Values are replaced with type-preserving masks
+      - Arrays and nested objects are recursively sanitized
+    refs: [crates/arkavo-session/src/log_sanitizer.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # Error Sanitization
+  # ============================================================================
+  - id: SESS-013
+    name: Internal errors not exposed externally
+    criticality: critical
+    given:
+      - Internal error occurs (DB connection failure, etc.)
+    when: Error is returned to client
+    then:
+      - Client receives generic error message
+      - Internal details are logged internally
+      - Error correlation ID is provided
+    refs: [crates/arkavo-session/src/error.rs]
+    tdd_phase: red
+
+  - id: SESS-014
+    name: Security errors have appropriate detail levels
+    criticality: high
+    given:
+      - Authentication/authorization error occurs
+    when: Error is processed
+    then:
+      - External: Generic "authentication failed"
+      - Internal: Specific reason (expired, revoked, invalid signature)
+      - Admin audit: Full details with timestamps
+    refs: [crates/arkavo-session/src/error.rs]
+    tdd_phase: red
+
+  - id: SESS-015
+    name: Error chain preserves security context
+    criticality: medium
+    given:
+      - Multiple error types in chain (validation → auth → session)
+    when: Error is converted for external response
+    then:
+      - Most specific security error determines external message
+      - Internal error chain is preserved for logging
+      - Source error classification is maintained
+    refs: [crates/arkavo-session/src/error.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # Cryptographic Agility
+  # ============================================================================
+  - id: SESS-016
+    name: Algorithm configuration for session tokens
+    criticality: high
+    given:
+      - Session tokens are created
+    when: Algorithm configuration is specified
+    then:
+      - Ed25519 is default
+      - P-256, P-384 are supported
+      - Invalid algorithms are rejected at startup
+    refs: [crates/arkavo-session/src/crypto_config.rs]
+    tdd_phase: red
+
+  - id: SESS-017
+    name: PQC-ready algorithm negotiation
+    criticality: high
+    given:
+      - Both parties support PQC algorithms
+    when: Session handshake occurs
+    then:
+      - ML-DSA-65 or ML-KEM can be negotiated
+      - Hybrid classical/PQC is supported
+      - Fallback to classical if PQC unavailable
+    refs: [crates/arkavo-session/src/crypto_config.rs]
+    tdd_phase: red
+
+  - id: SESS-018
+    name: Crypto agility version negotiation
+    criticality: medium
+    given:
+      - Client and server may have different crypto support
+    when: Session is established
+    then:
+      - Version/capabilities are exchanged
+      - Best mutual algorithm is selected
+      - Downgrade attacks are detected
+    refs: [crates/arkavo-session/src/crypto_config.rs]
+    tdd_phase: red
+
+  # ============================================================================
+  # FFI Fuzzing
+  # ============================================================================
+  - id: SESS-019
+    name: FFI boundary fuzzing harness
+    criticality: high
+    given:
+      - FFI functions exist for session operations
+    when: Fuzzing is executed
+    then:
+      - Arbitrary inputs are generated
+      - Memory safety is verified (no crashes, use-after-free)
+      - Return values are validated
+    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    tdd_phase: red
+
+  - id: SESS-020
+    name: Fuzzing corpus generation from valid inputs
+    criticality: medium
+    given:
+      - Valid session tokens and messages exist
+    when: Fuzzing corpus is built
+    then:
+      - Seed corpus is generated from valid inputs
+      - Edge cases are included (empty, max size, boundary values)
+      - Mutation strategies target session-specific fields
+    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    tdd_phase: red
+
+  - id: SESS-021
+    name: Continuous fuzzing integration
+    criticality: medium
+    given:
+      - Fuzzing harness exists
+    when: CI runs or scheduled fuzzing executes
+    then:
+      - Fuzzing runs for minimum duration (5 minutes)
+      - New crashes are reported immediately
+      - Coverage reports are generated
+    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    tdd_phase: red
+
+changed: "2026-02-12"

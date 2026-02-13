@@ -248,6 +248,25 @@ impl std::error::Error for DidKeyError {}
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for security vulnerability fixes.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-004): No localhost trust exemption (CRI-001)
+    //! - [specs/arkavo-edge/network-security.spec.yaml](CRI-002): Token revocation and replay protection
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-007): SSRF prevention via egress filter (CRI-003)
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-010): Rate limiting (HIGH-003)
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-006): Host header validation (HIGH-004)
+    //!
+    //! ## Vulnerability IDs
+    //! - CRI-001: Authentication bypass (NoOpAuthBackend removed)
+    //! - CRI-002: Token revocation and replay protection
+    //! - CRI-003: Egress filtering (SSRF prevention)
+    //! - HIGH-001: Secure RNG for key generation (tested in security_vulnerabilities.rs)
+    //! - HIGH-002: DID:key length validation
+    //! - HIGH-003: Rate limiting
+    //! - HIGH-004: Host header validation
+    //! - HIGH-005: Constant-time crypto operations (known limitation, test ignored)
+
     use super::*;
 
     #[test]

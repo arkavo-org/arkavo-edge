@@ -1647,6 +1647,7 @@ dependencies = [
  "futures",
  "http",
  "indicatif 0.18.3",
+ "regex",
  "reqwest",
  "rustls",
  "rustls-pemfile",

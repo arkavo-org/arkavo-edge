@@ -37,6 +37,17 @@ impl EgressFilter {
         self.blocked_ranges.push("fc00::/7".parse().unwrap());
         self.blocked_ranges.push("fe80::/10".parse().unwrap());
         self.blocked_ranges.push("::1/128".parse().unwrap());
+        // IPv4-mapped IPv6 addresses (e.g. ::ffff:169.254.169.254)
+        self.blocked_ranges
+            .push("::ffff:10.0.0.0/104".parse().unwrap());
+        self.blocked_ranges
+            .push("::ffff:172.16.0.0/108".parse().unwrap());
+        self.blocked_ranges
+            .push("::ffff:192.168.0.0/112".parse().unwrap());
+        self.blocked_ranges
+            .push("::ffff:127.0.0.0/104".parse().unwrap());
+        self.blocked_ranges
+            .push("::ffff:169.254.0.0/112".parse().unwrap());
     }
 
     pub fn allow(&mut self, url: impl Into<String>) {
@@ -109,7 +120,18 @@ pub fn extract_host_from_url(url: &str) -> Option<String> {
         .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))?;
     let host_part = without_protocol.split('/').next()?;
-    let host = host_part.split(':').next()?;
+    // Strip userinfo@ (RFC 3986 §3.2.1) to prevent SSRF bypass
+    let host_part = host_part.rsplit('@').next().unwrap_or(host_part);
+    // Handle IPv6 bracket notation before stripping port
+    let host = if host_part.starts_with('[') {
+        host_part
+            .split(']')
+            .next()
+            .map(|h| h.trim_start_matches('['))
+            .unwrap_or(host_part)
+    } else {
+        host_part.split(':').next().unwrap_or(host_part)
+    };
     Some(host.to_string())
 }
 
@@ -215,8 +237,20 @@ pub fn is_loopback_host(host: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for URL validation and egress filtering.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-007): Block cloud metadata and internal network access
+    //! - [specs/arkavo-edge/network-security.spec.yaml](HIGH-004): Host header validation (DNS rebinding)
+    //!
+    //! ## Vulnerability IDs
+    //! - CRI-003: Egress filtering (SSRF prevention)
+
     use super::*;
 
+    /// Test: Egress filter blocks access to private IP ranges and cloud metadata
+    /// Spec: NET-007 - Block cloud metadata and internal network access
+    /// Vulnerability: CRI-003 - SSRF Prevention
     #[test]
     fn test_egress_filter_blocks_private_ips() {
         let filter = EgressFilter::new();
@@ -231,6 +265,8 @@ mod tests {
         assert!(filter.is_allowed("http://localhost/api").is_err());
     }
 
+    /// Test: Egress filter allows legitimate public URLs
+    /// Spec: NET-007 - Public IPs should be accessible
     #[test]
     fn test_egress_filter_allows_public_urls() {
         let filter = EgressFilter::new();
@@ -238,6 +274,8 @@ mod tests {
         assert!(filter.is_allowed("https://github.com/repo").is_ok());
     }
 
+    /// Test: Allowlist can bypass egress filter for specific URLs
+    /// Spec: NET-007 - Explicit allowlist can override for known-safe internal services
     #[test]
     fn test_egress_filter_allowlist() {
         let mut filter = EgressFilter::new();
@@ -245,6 +283,9 @@ mod tests {
         assert!(filter.is_allowed("http://localhost/api").is_ok());
     }
 
+    /// Test: Host validator prevents DNS rebinding attacks
+    /// Spec: NET-006 - Host header validation (anti-rebinding)
+    /// Spec: HIGH-004 - Host header validation
     #[test]
     fn test_host_validator() {
         let validator = HostValidator::new();
@@ -255,6 +296,8 @@ mod tests {
         assert!(validator.validate("evil.com").is_err());
     }
 
+    /// Test: Loopback host detection for local binding validation
+    /// Spec: NET-002 - Localhost-only binding by default
     #[test]
     fn test_is_loopback_host() {
         assert!(is_loopback_host("localhost"));
@@ -271,5 +314,37 @@ mod tests {
             Some("example.com".to_string())
         );
         assert_eq!(extract_host_from_url("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_userinfo_bypass_blocked() {
+        assert_eq!(
+            extract_host_from_url("http://evil@169.254.169.254/meta"),
+            Some("169.254.169.254".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ipv6_url_extraction() {
+        assert_eq!(
+            extract_host_from_url("http://[::1]:8080/path"),
+            Some("::1".to_string())
+        );
+        assert_eq!(
+            extract_host_from_url("http://[::ffff:169.254.169.254]/"),
+            Some("::ffff:169.254.169.254".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ipv6_mapped_v4_blocked() {
+        let filter = EgressFilter::new();
+        assert!(
+            filter
+                .is_allowed("http://[::ffff:169.254.169.254]/")
+                .is_err()
+        );
+        assert!(filter.is_allowed("http://[::ffff:10.0.0.1]/").is_err());
+        assert!(filter.is_allowed("http://[::ffff:192.168.1.1]/").is_err());
     }
 }

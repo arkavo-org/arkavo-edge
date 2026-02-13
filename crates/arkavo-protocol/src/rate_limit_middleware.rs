@@ -13,6 +13,11 @@ use tracing::warn;
 use crate::rate_limit::IpRateLimiter;
 
 /// Extract the real client IP, honoring proxy headers only from trusted sources.
+///
+/// Assumes a single trusted proxy layer. Takes the first (leftmost) IP from
+/// X-Forwarded-For when the connection originates from a trusted proxy.
+/// For multi-proxy chains, this should be changed to walk right-to-left
+/// and take the first non-trusted IP.
 pub fn extract_client_ip(
     headers: &HeaderMap,
     socket_addr: SocketAddr,
@@ -65,6 +70,12 @@ pub async fn ip_rate_limit_middleware(
             );
             return Err(StatusCode::TOO_MANY_REQUESTS);
         }
+    } else {
+        tracing::debug!(
+            event = "rate_limit",
+            action = "skip",
+            "Rate limiter extension not configured"
+        );
     }
 
     Ok(next.run(request).await)
@@ -72,6 +83,13 @@ pub async fn ip_rate_limit_middleware(
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for IP-based rate limiting middleware.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-010): Rate limiting per IP
+    //! - [specs/arkavo-edge/protocol.spec.yaml](PROTO-007): Rate limiting enforcement
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-005): Reverse proxy header validation (X-Forwarded-For handling)
+
     use super::*;
 
     #[test]

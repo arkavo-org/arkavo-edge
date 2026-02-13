@@ -31,6 +31,7 @@ impl std::error::Error for PathValidationError {}
 /// Validate that a path has no traversal patterns (`..` or `~`).
 /// Resolves relative paths against the given base directory.
 /// Does NOT enforce containment within the base — use `validate_path_within_root` for that.
+/// Suitable when the caller intentionally allows access to any absolute path.
 pub fn validate_no_traversal(base: &Path, path: &str) -> Result<PathBuf, PathValidationError> {
     let path_obj = Path::new(path);
     let path_str = path_obj.to_string_lossy();
@@ -51,6 +52,10 @@ pub fn validate_no_traversal(base: &Path, path: &str) -> Result<PathBuf, PathVal
 
 /// Validate that a path stays within the given root directory.
 /// Rejects `..` components, `~`, and paths that resolve outside root.
+///
+/// NOTE: This is pattern-based and does NOT resolve symlinks. If the
+/// filesystem may contain attacker-controlled symlinks, call
+/// `std::fs::canonicalize()` on the result before accessing the file.
 pub fn validate_path_within_root(root: &Path, path: &str) -> Result<PathBuf, PathValidationError> {
     let path_obj = Path::new(path);
 
@@ -83,6 +88,12 @@ pub fn validate_path_within_root(root: &Path, path: &str) -> Result<PathBuf, Pat
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for path validation and traversal prevention.
+    //!
+    //! ## Spec Coverage
+    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-016): Command injection via LLM output prevention
+    //! - [specs/arkavo-edge/mcp-tools.spec.yaml](MCP-003): Filesystem tool security - path traversal prevention
+
     use super::*;
 
     #[test]
