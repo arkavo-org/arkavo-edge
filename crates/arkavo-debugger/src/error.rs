@@ -32,12 +32,6 @@ pub type Result<T> = std::result::Result<T, DebuggerError>;
 /// Alias for compatibility with SessionManager
 pub type DebugError = DebuggerError;
 
-impl From<bincode::Error> for DebuggerError {
-    fn from(err: bincode::Error) -> Self {
-        DebuggerError::Serialization(err.to_string())
-    }
-}
-
 impl From<uuid::Error> for DebuggerError {
     fn from(err: uuid::Error) -> Self {
         DebuggerError::Parse(err.to_string())

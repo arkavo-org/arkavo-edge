@@ -18,12 +18,6 @@ pub enum EventError {
     BufferFull,
 }
 
-impl From<bincode::Error> for EventError {
-    fn from(e: bincode::Error) -> Self {
-        EventError::Serialization(e.to_string())
-    }
-}
-
 impl From<serde_json::Error> for EventError {
     fn from(e: serde_json::Error) -> Self {
         EventError::Serialization(e.to_string())

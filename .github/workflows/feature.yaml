@@ -917,6 +917,25 @@ jobs:
           
           echo "✅ Dependency check complete"
 
+  e2e-kimi-remote:
+    name: E2E KIMI Remote API
+    needs: [build-linux]
+    runs-on: ubuntu-22.04
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: arkavo-x86_64-linux
+          path: ./
+      - name: Run KIMI e2e tests
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: |
+          chmod +x tests/e2e_kimi_remote_test.sh
+          ./tests/e2e_kimi_remote_test.sh ./arkavo-x86_64-linux
+
   # Schema validation jobs
   validate-openrpc:
     name: Validate OpenRPC Schema
