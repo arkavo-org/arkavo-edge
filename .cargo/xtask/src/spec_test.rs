@@ -141,7 +141,9 @@ impl SpecParser {
         let mut specs = Vec::new();
         for entry in std::fs::read_dir(specs_dir)? {
             let path = entry?.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+            if path.extension().and_then(|s| s.to_str()) == Some("yaml")
+                && path.file_name().and_then(|s| s.to_str()) != Some("index.yaml")
+            {
                 match Self::parse_file(&path) {
                     Ok(spec) => specs.push((path, spec)),
                     Err(e) => eprintln!("Warning: skipping {}: {e}", path.display()),
