@@ -236,8 +236,14 @@ async fn process_stream(
                         } else {
                             // Still inside think block — keep buffering
                             // Truncate to avoid unbounded growth, keep tail for partial tag match
+                            // Tail must be >= len("</think>") - 1 = 7 to detect tags across chunks
                             if buf.len() > 1024 {
-                                buf = buf[buf.len() - 16..].to_string();
+                                let mut tail_start = buf.len() - 16;
+                                // Find nearest char boundary to avoid panic on multi-byte UTF-8
+                                while !buf.is_char_boundary(tail_start) {
+                                    tail_start += 1;
+                                }
+                                buf = buf[tail_start..].to_string();
                             }
                             break;
                         }

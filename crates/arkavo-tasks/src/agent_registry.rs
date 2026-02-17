@@ -233,7 +233,9 @@ impl AgentRegistry {
     pub async fn update_agent_load(&self, agent_id: &str, load: f32) -> Result<(), String> {
         let mut agents = self.agents.write().await;
         if let Some(agent) = agents.get_mut(agent_id) {
-            agent.load = load.clamp(0.0, 1.0);
+            // Normalize non-finite values before clamping (clamp preserves NaN)
+            let safe_load = if load.is_finite() { load } else { 1.0 };
+            agent.load = safe_load.clamp(0.0, 1.0);
             agent.last_seen = Utc::now();
             Ok(())
         } else {
@@ -424,16 +426,15 @@ mod tests {
             .await
             .unwrap();
 
-        // Update one agent with NaN load (edge case)
+        // NaN load is normalized to 1.0 (max load) at the source
         registry
             .update_agent_load("agent_1", f32::NAN)
             .await
             .unwrap();
         registry.update_agent_load("agent_2", 0.5).await.unwrap();
 
-        // Should not panic - should return the valid agent
+        // agent_1 has load 1.0 (normalized from NaN), agent_2 has load 0.5
         let best = registry.find_best_agent("search").await;
-        // NaN comparisons always return false, so agent_2 should be selected
         assert_eq!(best, Some("agent_2".to_string()));
     }
 

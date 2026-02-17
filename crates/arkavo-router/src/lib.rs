@@ -1433,11 +1433,16 @@ impl Router {
 
                 if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
                     // This is a language fence, try to extract nested tool calls
-                    let content = serde_json::to_string(&call.arguments)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .replace("\\n", "\n")
-                        .replace("\\\"", "\"");
+                    let content = match serde_json::to_string(&call.arguments) {
+                        Ok(s) => s.trim_matches('"').replace("\\n", "\n").replace("\\\"", "\""),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to serialize arguments for language fence '{}': {e}",
+                                call.tool_name
+                            );
+                            return vec![];
+                        }
+                    };
 
                     tracing::debug!(
                         "Found language fence '{}', extracting nested calls from: {}",
@@ -1455,7 +1460,10 @@ impl Router {
                         return extracted;
                     }
 
-                    // No valid tool calls found in language fence
+                    tracing::debug!(
+                        "No tool calls extracted from language fence '{}'",
+                        call.tool_name
+                    );
                     vec![]
                 } else {
                     // Keep non-language tool calls as-is
@@ -1508,7 +1516,13 @@ impl Router {
 
                     if tool_lower == "json" {
                         // The content is JSON, try to extract tool call from it
-                        let json_str = serde_json::to_string(&call.arguments).unwrap_or_default();
+                        let json_str = match serde_json::to_string(&call.arguments) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::warn!("Failed to serialize JSON fence arguments: {e}");
+                                return vec![call];
+                            }
+                        };
                         if let Some(extracted) = Self::extract_json_tool_calls(&json_str) {
                             return extracted;
                         }
@@ -1517,10 +1531,16 @@ impl Router {
                         // Fence is a language identifier (e.g., ```python)
                         // Try to extract tool calls from the content
                         // First, try Python function-call syntax
-                        let fence_content = serde_json::to_string(&call.arguments)
-                            .unwrap_or_default()
-                            .trim_matches('"')
-                            .to_string();
+                        let fence_content = match serde_json::to_string(&call.arguments) {
+                            Ok(s) => s.trim_matches('"').to_string(),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to serialize language fence '{}' arguments: {e}",
+                                    call.tool_name
+                                );
+                                return vec![];
+                            }
+                        };
                         if let Some(extracted) = Self::extract_python_function_calls(&fence_content)
                         {
                             return extracted;
