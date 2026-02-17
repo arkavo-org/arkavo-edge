@@ -314,7 +314,7 @@ async fn test_kimi_budget_model_selection() -> Result<(), Box<dyn std::error::Er
     // Create budget manager
     let budget_config = BudgetConfig {
         limits: BudgetLimits {
-            session_limit: Some(TokenCost::from_cents(50)), // 50 cents limit
+            session_limit: Some(TokenCost::from_dollars(10.0)), // $10 limit
             ..Default::default()
         },
         ..Default::default()
@@ -383,16 +383,18 @@ async fn test_kimi_budget_model_selection() -> Result<(), Box<dyn std::error::Er
     ];
 
     // Test 1: Select cheapest model
+    // moonshot-v1-32k pricing: $2/1K input, $6/1K output
+    // 1000 input + 500 output = $2.00 + $3.00 = $5.00 (500 cents)
     let criteria = SelectionCriteria {
         required_capabilities: vec!["streaming".to_string()],
         preferred_providers: vec!["kimi".to_string()],
-        max_acceptable_cost: Some(TokenCost::from_cents(20)),
+        max_acceptable_cost: Some(TokenCost::from_dollars(10.0)),
         estimated_input_tokens: 1000,
         estimated_output_tokens: 500,
         priority: SelectionPriority::LowestCost,
     };
 
-    let selected = policy.select_model(&criteria, TokenCost::from_cents(50), &models)?;
+    let selected = policy.select_model(&criteria, TokenCost::from_dollars(10.0), &models)?;
 
     assert!(selected.is_some(), "Should select a model");
     let candidate = selected.unwrap();
@@ -416,7 +418,9 @@ async fn test_kimi_budget_model_selection() -> Result<(), Box<dyn std::error::Er
         priority: SelectionPriority::BestPerformance,
     };
 
-    let selected = policy.select_model(&criteria, TokenCost::from_cents(100), &models)?;
+    // moonshot-v1-128k pricing: $6/1K input, $12/1K output
+    // 50000 input + 2000 output = $300 + $24 = $324
+    let selected = policy.select_model(&criteria, TokenCost::from_dollars(500.0), &models)?;
 
     assert!(selected.is_some(), "Should select a model");
     let candidate = selected.unwrap();

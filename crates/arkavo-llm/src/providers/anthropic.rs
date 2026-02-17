@@ -75,7 +75,7 @@ struct MessageResponse {
     usage: Usage,
 }
 
-/// Content block in response - can be text or tool_use
+/// Content block in response - can be text, tool_use, or thinking
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 enum ResponseContentBlock {
@@ -87,6 +87,10 @@ enum ResponseContentBlock {
         name: String,
         input: Value,
     },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +146,10 @@ enum ContentBlockStartData {
     Text { text: String },
     #[serde(rename = "tool_use")]
     ToolUse { id: String, name: String },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
+    #[serde(other)]
+    Other,
 }
 
 /// Delta data for streaming content blocks
@@ -153,6 +161,10 @@ enum DeltaData {
     TextDelta { text: String },
     #[serde(rename = "input_json_delta")]
     InputJsonDelta { partial_json: String },
+    #[serde(rename = "thinking_delta")]
+    ThinkingDelta { thinking: String },
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Deserialize)]
@@ -468,7 +480,7 @@ impl Provider for AnthropicProvider {
                             .iter()
                             .filter_map(|block| match block {
                                 ResponseContentBlock::Text { text } => Some(text.clone()),
-                                ResponseContentBlock::ToolUse { .. } => None,
+                                _ => None,
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
@@ -677,6 +689,7 @@ impl Provider for AnthropicProvider {
 
         // Extract text content and tool calls from response
         let mut text_content = String::new();
+        let mut reasoning = String::new();
         let mut tool_calls = Vec::new();
 
         for block in message.content {
@@ -694,12 +707,20 @@ impl Provider for AnthropicProvider {
                         call_id: Some(id),
                     });
                 }
+                ResponseContentBlock::Thinking { thinking } => {
+                    reasoning.push_str(&thinking);
+                }
+                ResponseContentBlock::Other => {}
             }
         }
 
         Ok(ProviderResponse {
             content: text_content,
-            reasoning_content: None,
+            reasoning_content: if reasoning.is_empty() {
+                None
+            } else {
+                Some(reasoning)
+            },
             tool_calls,
             finish_reason: message.stop_reason,
         })
@@ -841,5 +862,101 @@ mod tests {
         let config = AnthropicConfig::default();
         let provider = AnthropicProvider::new(config).unwrap();
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn test_thinking_content_block_deserialization() {
+        use serde_json::json;
+
+        // Simulate response with thinking + text content blocks (Kimi K2.5 via Anthropic API)
+        let response_json = json!({
+            "id": "msg_123",
+            "type": "message",
+            "role": "assistant",
+            "model": "kimi-k2.5",
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "Let me reason about 2+2. It equals 4."
+                },
+                {
+                    "type": "text",
+                    "text": "4"
+                }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 20
+            }
+        });
+
+        let message: MessageResponse = serde_json::from_value(response_json).unwrap();
+        assert_eq!(message.content.len(), 2);
+
+        // Extract text (should skip thinking blocks)
+        let text: String = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ResponseContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(text, "4");
+
+        // Extract reasoning
+        let reasoning: String = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ResponseContentBlock::Thinking { thinking } => Some(thinking.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(reasoning, "Let me reason about 2+2. It equals 4.");
+    }
+
+    #[test]
+    fn test_streaming_thinking_delta_deserialization() {
+        // Thinking delta events should deserialize without error
+        let thinking_delta_json =
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Step 1..."}}"#;
+        let event: StreamEvent = serde_json::from_str(thinking_delta_json).unwrap();
+        assert!(matches!(
+            event,
+            StreamEvent::ContentBlockDelta {
+                delta: DeltaData::ThinkingDelta { .. },
+                ..
+            }
+        ));
+
+        // Text delta still works
+        let text_delta_json =
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        let event: StreamEvent = serde_json::from_str(text_delta_json).unwrap();
+        assert!(matches!(
+            event,
+            StreamEvent::ContentBlockDelta {
+                delta: DeltaData::TextDelta { .. },
+                ..
+            }
+        ));
+
+        // Unknown delta types are handled gracefully
+        let unknown_delta_json =
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"future_delta","data":"..."}}"#;
+        let event: StreamEvent = serde_json::from_str(unknown_delta_json).unwrap();
+        assert!(matches!(
+            event,
+            StreamEvent::ContentBlockDelta {
+                delta: DeltaData::Other,
+                ..
+            }
+        ));
     }
 }
