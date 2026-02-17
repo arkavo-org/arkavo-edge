@@ -464,7 +464,6 @@ struct Entity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::DevicePlatform;
 
     #[tokio::test]
     async fn test_intent_analysis() {
@@ -481,16 +480,17 @@ mod tests {
         let planner = create_test_planner().await;
 
         let task_offer = TaskOffer {
+            task_id: Uuid::new_v4(),
+            agent_id: "test-agent".to_string(),
+            price: Some(1.0),
+            time_estimate_seconds: Some(60),
             intent_id: Uuid::new_v4().to_string(),
             intent: "Find nearby coffee shops".to_string(),
-            capabilities_hint: Some(vec!["location".to_string(), "search".to_string()]),
             device_caps: DeviceCapabilities {
-                ai_capabilities: vec![],
-                sensors: vec![],
-                platform: DevicePlatform::Ios,
-                os_version: "test".to_string(),
+                can_execute_code: false,
+                can_access_files: true,
+                can_make_http_requests: true,
             },
-            context: None,
         };
 
         let plan = planner.plan_task(task_offer).await.unwrap();

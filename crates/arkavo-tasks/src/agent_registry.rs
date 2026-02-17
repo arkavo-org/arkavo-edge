@@ -186,7 +186,19 @@ impl AgentRegistry {
         }
 
         // Sort by load (ascending) to get least loaded agent
-        available_agents.sort_by(|a, b| a.load.partial_cmp(&b.load).unwrap());
+        // Handle NaN values by treating them as greater than any valid load
+        available_agents.sort_by(|a, b| {
+            a.load.partial_cmp(&b.load).unwrap_or_else(|| {
+                // If either is NaN, sort NaN values to the end
+                if a.load.is_nan() && b.load.is_nan() {
+                    std::cmp::Ordering::Equal
+                } else if a.load.is_nan() {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                }
+            })
+        });
 
         let best_agent = available_agents[0].agent_id.clone();
         debug!(
@@ -376,6 +388,94 @@ mod tests {
         registry.update_agent_load("agent_2", 0.2).await.unwrap();
 
         // Best agent should be agent_2 (lower load)
+        let best = registry.find_best_agent("search").await;
+        assert_eq!(best, Some("agent_2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_find_best_agent_with_nan_load() {
+        // This test verifies that NaN load values don't cause a panic
+        let registry = AgentRegistry::new();
+
+        // Register two agents with same capability
+        registry
+            .register_agent(
+                "agent_1".to_string(),
+                "Agent 1".to_string(),
+                "Test".to_string(),
+                vec!["search".to_string()],
+                None,
+                HashMap::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        registry
+            .register_agent(
+                "agent_2".to_string(),
+                "Agent 2".to_string(),
+                "Test".to_string(),
+                vec!["search".to_string()],
+                None,
+                HashMap::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Update one agent with NaN load (edge case)
+        registry
+            .update_agent_load("agent_1", f32::NAN)
+            .await
+            .unwrap();
+        registry.update_agent_load("agent_2", 0.5).await.unwrap();
+
+        // Should not panic - should return the valid agent
+        let best = registry.find_best_agent("search").await;
+        // NaN comparisons always return false, so agent_2 should be selected
+        assert_eq!(best, Some("agent_2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_find_best_agent_with_infinite_load() {
+        // This test verifies that infinite load values are handled correctly
+        let registry = AgentRegistry::new();
+
+        registry
+            .register_agent(
+                "agent_1".to_string(),
+                "Agent 1".to_string(),
+                "Test".to_string(),
+                vec!["search".to_string()],
+                None,
+                HashMap::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        registry
+            .register_agent(
+                "agent_2".to_string(),
+                "Agent 2".to_string(),
+                "Test".to_string(),
+                vec!["search".to_string()],
+                None,
+                HashMap::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Update loads with infinity
+        registry
+            .update_agent_load("agent_1", f32::INFINITY)
+            .await
+            .unwrap();
+        registry.update_agent_load("agent_2", 0.5).await.unwrap();
+
+        // Best agent should be agent_2 (finite load is less than infinity)
         let best = registry.find_best_agent("search").await;
         assert_eq!(best, Some("agent_2".to_string()));
     }

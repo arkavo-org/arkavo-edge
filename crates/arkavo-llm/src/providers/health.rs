@@ -197,7 +197,10 @@ impl ProviderHealthMonitor {
 
                 // Calculate percentiles
                 let mut sorted_latencies = latencies.clone();
-                sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                // Filter out any NaN values that might have been recorded
+                sorted_latencies.retain(|&x| !x.is_nan());
+                sorted_latencies
+                    .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
                 let p95_index = ((latencies.len() as f64 * 0.95).round() as usize)
                     .min(latencies.len().saturating_sub(1));

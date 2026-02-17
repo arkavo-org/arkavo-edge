@@ -63,5 +63,8 @@ arkavo-llm = { path = "../arkavo-llm" }
 # Memory storage
 arkavo-memory = { path = "../arkavo-memory" }
 
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 [lints]
 workspace = true

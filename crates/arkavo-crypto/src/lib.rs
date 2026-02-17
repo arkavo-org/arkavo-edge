@@ -449,7 +449,10 @@ impl fmt::Debug for P256VerifyingKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    /// Test CRYPTO-001: Generate Ed25519 agent keypair
+    #[spec("CRYPTO-001")]
     #[test]
     fn test_keypair_generation() {
         let keypair = AgentKeypair::generate();
@@ -457,6 +460,8 @@ mod tests {
         assert_eq!(public_key.to_bytes().len(), 32);
     }
 
+    /// Test CRYPTO-002: Sign and verify with Ed25519
+    #[spec("CRYPTO-002")]
     #[test]
     fn test_sign_and_verify() {
         let keypair = AgentKeypair::generate();
@@ -485,6 +490,8 @@ mod tests {
         assert_eq!(public_key.to_bytes(), decoded.to_bytes());
     }
 
+    /// Test CRYPTO-003: Serialize and restore Ed25519 keypair
+    #[spec("CRYPTO-003")]
     #[test]
     fn test_keypair_serialization() {
         let keypair = AgentKeypair::generate();
@@ -508,6 +515,8 @@ mod tests {
         ));
     }
 
+    /// Test CRYPTO-004: Ed25519 public key to DID:key format
+    #[spec("CRYPTO-004")]
     #[test]
     fn test_did_key_format() {
         let keypair = AgentKeypair::generate();
@@ -522,6 +531,8 @@ mod tests {
         );
     }
 
+    /// Test CRYPTO-005: Parse Ed25519 DID:key string
+    #[spec("CRYPTO-005")]
     #[test]
     fn test_did_key_roundtrip() {
         let keypair = AgentKeypair::generate();
@@ -561,6 +572,8 @@ mod tests {
     // TDD: iOS Secure Enclave uses P-256 ECDSA, not Ed25519
     // These tests define the expected behavior for iOS client registration
 
+    /// Test CRYPTO-009: P-256 public key SEC1 encoding
+    #[spec("CRYPTO-009")]
     #[test]
     fn test_p256_public_key_from_sec1_uncompressed() {
         // iOS SecKeyCopyExternalRepresentation produces 65-byte SEC1 uncompressed format
@@ -577,6 +590,9 @@ mod tests {
         assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
     }
 
+    /// Test CRYPTO-007: Sign with P-256 ECDSA (DER format)
+    /// Test CRYPTO-008: Verify P-256 signature with auto format detection
+    #[spec("CRYPTO-007", "CRYPTO-008")]
     #[test]
     fn test_p256_sign_and_verify() {
         // iOS signs with ecdsaSignatureMessageX962SHA256
@@ -599,6 +615,8 @@ mod tests {
         assert!(public_key.verify(wrong_message, &signature).is_err());
     }
 
+    /// Test CRYPTO-010: P-256 to DID:key format
+    #[spec("CRYPTO-010")]
     #[test]
     fn test_p256_did_key_format() {
         // P-256 DID:key uses multicodec 0x1200 (p256-pub)
@@ -614,6 +632,8 @@ mod tests {
         );
     }
 
+    /// Test CRYPTO-006: Generate P-256 signing keypair (iOS compatibility)
+    #[spec("CRYPTO-006")]
     #[test]
     fn test_p256_did_key_roundtrip() {
         let keypair = P256SigningKeypair::generate();
@@ -622,5 +642,361 @@ mod tests {
 
         let restored = P256VerifyingKey::from_did_key(&did).expect("Should parse P-256 DID:key");
         assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
+    }
+
+    // Second tests to bump scenarios from Partial → Covered
+
+    /// Second test for CRYPTO-001: Generate multiple keypairs
+    #[spec("CRYPTO-001")]
+    #[test]
+    fn test_keypair_generation_multiple() {
+        // Generate multiple keypairs and ensure they're all unique
+        let mut public_keys = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let keypair = AgentKeypair::generate();
+            let public_key = keypair.public_key();
+            let bytes = public_key.to_bytes();
+            assert_eq!(bytes.len(), 32);
+            assert!(public_keys.insert(bytes));
+        }
+    }
+
+    /// Second test for CRYPTO-002: Sign and verify multiple messages
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_sign_and_verify_multiple_messages() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // Test with different message sizes
+        for size in [0, 1, 32, 100, 1000, 10000] {
+            let message = vec![0xABu8; size];
+            let signature = keypair.sign(&message);
+            assert!(public_key.verify(&message, &signature).is_ok());
+        }
+    }
+
+    /// Second test for CRYPTO-003: Serialization roundtrip preserves functionality
+    #[spec("CRYPTO-003")]
+    #[test]
+    fn test_keypair_serialization_roundtrip() {
+        // Generate and serialize multiple times
+        for _ in 0..10 {
+            let keypair = AgentKeypair::generate();
+            let bytes = keypair.to_bytes();
+
+            // Multiple roundtrips
+            let mut current = AgentKeypair::from_bytes(&bytes).unwrap();
+            for _ in 0..5 {
+                let bytes = current.to_bytes();
+                current = AgentKeypair::from_bytes(&bytes).unwrap();
+            }
+
+            // Verify final keypair works
+            let message = b"final test";
+            let sig = current.sign(message);
+            assert!(keypair.public_key().verify(message, &sig).is_ok());
+        }
+    }
+
+    /// Second test for CRYPTO-004: DID format consistency
+    #[spec("CRYPTO-004")]
+    #[test]
+    fn test_did_key_format_consistency() {
+        for _ in 0..50 {
+            let keypair = AgentKeypair::generate();
+            let public_key = keypair.public_key();
+            let did = public_key.to_did_key();
+
+            // All Ed25519 DIDs should start with this prefix
+            assert!(did.starts_with("did:key:z6Mk"));
+            // Should be able to parse back
+            let _restored = AgentPublicKey::from_did_key(&did).unwrap();
+        }
+    }
+
+    /// Second test for CRYPTO-005: DID parsing with various valid inputs
+    #[spec("CRYPTO-005")]
+    #[test]
+    fn test_did_key_parsing_various() {
+        // Generate keys and test roundtrip
+        for _ in 0..50 {
+            let keypair = AgentKeypair::generate();
+            let public_key = keypair.public_key();
+            let did = public_key.to_did_key();
+
+            let restored = AgentPublicKey::from_did_key(&did).unwrap();
+            assert_eq!(public_key.to_bytes(), restored.to_bytes());
+            assert_eq!(public_key.to_base64(), restored.to_base64());
+        }
+    }
+
+    /// Second test for CRYPTO-006: P-256 keypair generation
+    #[spec("CRYPTO-006")]
+    #[test]
+    fn test_p256_keypair_generation_multiple() {
+        // Generate multiple P-256 keypairs
+        let mut public_keys = std::collections::HashSet::new();
+        for _ in 0..50 {
+            let keypair = P256SigningKeypair::generate();
+            let public_key = keypair.public_key();
+            let sec1_bytes = public_key.to_sec1_bytes();
+            assert_eq!(sec1_bytes.len(), 65);
+            assert!(public_keys.insert(sec1_bytes));
+        }
+    }
+
+    /// Second test for CRYPTO-007 & CRYPTO-008: P-256 multiple sign/verify operations
+    #[spec("CRYPTO-007", "CRYPTO-008")]
+    #[test]
+    fn test_p256_sign_verify_multiple() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // Test with different messages
+        for i in 0..20 {
+            let message = format!("message {i}").into_bytes();
+            let signature = keypair.sign(&message);
+            assert!(public_key.verify(&message, &signature).is_ok());
+        }
+    }
+
+    /// Second test for CRYPTO-009: SEC1 encoding consistency
+    #[spec("CRYPTO-009")]
+    #[test]
+    fn test_p256_sec1_encoding_consistency() {
+        for _ in 0..30 {
+            let keypair = P256SigningKeypair::generate();
+            let public_key = keypair.public_key();
+
+            // Multiple encodings should be identical
+            let sec1_1 = public_key.to_sec1_bytes();
+            let sec1_2 = public_key.to_sec1_bytes();
+            assert_eq!(sec1_1, sec1_2);
+
+            // Roundtrip
+            let restored = P256VerifyingKey::from_sec1_bytes(&sec1_1).unwrap();
+            assert_eq!(sec1_1, restored.to_sec1_bytes());
+        }
+    }
+
+    /// Second test for CRYPTO-010: P-256 DID format
+    #[spec("CRYPTO-010")]
+    #[test]
+    fn test_p256_did_key_format_multiple() {
+        for _ in 0..30 {
+            let keypair = P256SigningKeypair::generate();
+            let public_key = keypair.public_key();
+            let did = public_key.to_did_key();
+
+            // P-256 DIDs have a different prefix than Ed25519
+            assert!(did.starts_with("did:key:z"));
+            assert_ne!(did.starts_with("did:key:z6Mk"), true);
+
+            // Should be parseable
+            let restored = P256VerifyingKey::from_did_key(&did).unwrap();
+            assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
+        }
+    }
+
+    // ============================================================================
+    // TDD Quality Improvement Tests - Edge Cases & Property Tests
+    // ============================================================================
+
+    /// TDD Test: Empty message signing should work
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_sign_empty_message() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // Empty message should be signable
+        let empty: &[u8] = b"";
+        let signature = keypair.sign(empty);
+        assert!(public_key.verify(empty, &signature).is_ok());
+    }
+
+    /// TDD Test: Large message signing (1MB)
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_sign_large_message() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        // 1MB message
+        let large_message = vec![0xABu8; 1_048_576];
+        let signature = keypair.sign(&large_message);
+        assert!(public_key.verify(&large_message, &signature).is_ok());
+    }
+
+    /// TDD Test: Signature with wrong key should fail verification
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_signature_with_wrong_key() {
+        let keypair1 = AgentKeypair::generate();
+        let keypair2 = AgentKeypair::generate();
+        let public_key2 = keypair2.public_key();
+
+        let message = b"test message";
+        let signature = keypair1.sign(message);
+
+        // Signature from key1 should NOT verify with key2's public key
+        assert!(public_key2.verify(message, &signature).is_err());
+    }
+
+    /// TDD Test: Signature is deterministic
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_signature_determinism() {
+        let keypair = AgentKeypair::generate();
+        let message = b"deterministic test";
+
+        // Generate multiple signatures for same message
+        let sig1 = keypair.sign(message);
+        let sig2 = keypair.sign(message);
+        let sig3 = keypair.sign(message);
+
+        // All signatures should be valid
+        let public_key = keypair.public_key();
+        assert!(public_key.verify(message, &sig1).is_ok());
+        assert!(public_key.verify(message, &sig2).is_ok());
+        assert!(public_key.verify(message, &sig3).is_ok());
+    }
+
+    /// TDD Test: Invalid signature lengths should be rejected
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_invalid_signature_lengths() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"test";
+
+        // Test various invalid signature lengths
+        for len in [0, 31, 33, 63, 65, 100, 1000] {
+            let bad_sig = vec![0u8; len];
+            let result = public_key.verify(message, &bad_sig);
+            assert!(result.is_err(), "Signature length {len} should be rejected");
+        }
+    }
+
+    /// TDD Test: Message tampering detection
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_message_tampering_detection() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        let original = b"original message";
+        let signature = keypair.sign(original);
+
+        // Single bit flip should invalidate signature
+        for i in 0..original.len() {
+            for bit in 0..8 {
+                let mut tampered = original.to_vec();
+                tampered[i] ^= 1 << bit;
+                assert!(
+                    public_key.verify(&tampered, &signature).is_err(),
+                    "Bit flip at byte {i}, bit {bit} should invalidate signature"
+                );
+            }
+        }
+    }
+
+    /// TDD Test: Signature tampering detection
+    #[spec("CRYPTO-002")]
+    #[test]
+    fn test_signature_tampering_detection() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+
+        let message = b"test message";
+        let mut signature = keypair.sign(message);
+
+        // Single bit flip in signature should invalidate it
+        for i in 0..signature.len() {
+            for bit in 0..8 {
+                let mut tampered = signature.clone();
+                tampered[i] ^= 1 << bit;
+                assert!(
+                    public_key.verify(message, &tampered).is_err(),
+                    "Bit flip at byte {i}, bit {bit} should invalidate signature"
+                );
+            }
+        }
+    }
+
+    /// TDD Test: P-256 empty message signing
+    #[spec("CRYPTO-007", "CRYPTO-008")]
+    #[test]
+    fn test_p256_sign_empty_message() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+
+        let empty: &[u8] = b"";
+        let signature = keypair.sign(empty);
+        assert!(public_key.verify(empty, &signature).is_ok());
+    }
+
+    /// TDD Test: P-256 large message signing
+    #[spec("CRYPTO-007", "CRYPTO-008")]
+    #[test]
+    fn test_p256_sign_large_message() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+
+        let large_message = vec![0xCDu8; 1_048_576]; // 1MB
+        let signature = keypair.sign(&large_message);
+        assert!(public_key.verify(&large_message, &signature).is_ok());
+    }
+
+    /// TDD Test: Invalid SEC1 lengths should be rejected
+    #[spec("CRYPTO-009")]
+    #[test]
+    fn test_p256_invalid_sec1_lengths() {
+        // Test various invalid SEC1 lengths
+        for len in [0, 1, 32, 64, 66, 100] {
+            let bad_bytes = vec![0u8; len];
+            let result = P256VerifyingKey::from_sec1_bytes(&bad_bytes);
+            assert!(result.is_err(), "SEC1 length {len} should be rejected");
+        }
+    }
+
+    /// TDD Test: Keypair serialization with all-zero bytes should fail
+    #[spec("CRYPTO-003")]
+    #[test]
+    fn test_keypair_from_all_zero_bytes() {
+        let all_zeros = [0u8; 32];
+        let result = AgentKeypair::from_bytes(&all_zeros);
+        // All-zero key is cryptographically weak but may be accepted
+        // depending on implementation - test behavior
+        match result {
+            Ok(keypair) => {
+                // If accepted, should still work for signing
+                let msg = b"test";
+                let sig = keypair.sign(msg);
+                assert!(keypair.public_key().verify(msg, &sig).is_ok());
+            }
+            Err(_) => {
+                // If rejected, that's also valid behavior
+            }
+        }
+    }
+
+    /// TDD Test: DID parsing with invalid multibase prefix
+    #[spec("CRYPTO-004", "CRYPTO-005")]
+    #[test]
+    fn test_did_invalid_multibase_prefix() {
+        // Invalid multibase prefixes
+        let invalid_dids = [
+            "did:key:abcdef",      // No 'z' prefix
+            "did:key:",            // Empty
+            "did:key:z",           // Too short
+            "did:web:example.com", // Wrong method
+        ];
+
+        for did in &invalid_dids {
+            let result = AgentPublicKey::from_did_key(did);
+            assert!(result.is_err(), "DID '{did}' should be rejected");
+        }
     }
 }

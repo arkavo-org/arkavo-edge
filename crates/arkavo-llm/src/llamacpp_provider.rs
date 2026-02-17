@@ -539,11 +539,7 @@ impl Provider for LlamaCppProvider {
             // (e.g. ```python``` code fences matching as tool calls)
             let registered_names: std::collections::HashSet<&str> = tools_value
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|t| t.get("name")?.as_str())
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|t| t.get("name")?.as_str()).collect())
                 .unwrap_or_default();
 
             // Try configured format first, then fallback chain

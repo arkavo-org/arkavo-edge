@@ -955,4 +955,56 @@ mod tests {
             "Expected SignatureVerification error for wrong-key, got: {err:?}"
         );
     }
+
+    // Second tests to bump scenarios from Partial → Covered
+
+    /// Second test for GOSSIP-001: Fanout with many peers
+    #[spec("GOSSIP-001")]
+    #[tokio::test]
+    async fn test_fanout_with_many_peers() {
+        let protocol = create_test_protocol("agent-many");
+
+        // Add 100 peers
+        for i in 0..100 {
+            protocol.add_peer(format!("peer-{i}")).await;
+        }
+
+        // Should always return DEFAULT_FANOUT peers
+        for _ in 0..10 {
+            let peers = protocol.select_propagation_peers(None).await;
+            assert_eq!(peers.len(), DEFAULT_FANOUT);
+        }
+
+        // Exclusion should work with many peers
+        let excluded = "peer-50";
+        for _ in 0..10 {
+            let peers = protocol.select_propagation_peers(Some(excluded)).await;
+            assert_eq!(peers.len(), DEFAULT_FANOUT);
+            assert!(!peers.contains(&excluded.to_string()));
+        }
+    }
+
+    /// Second test for GOSSIP-002: Signed announcement accepted
+    #[spec("GOSSIP-002")]
+    #[tokio::test]
+    async fn test_signed_announcement_accepted() {
+        let protocol = create_test_protocol("agent-2");
+
+        // Register a key
+        let keypair = AgentKeypair::generate();
+        protocol
+            .register_key("known-agent".into(), keypair.public_key().clone())
+            .await;
+
+        // Create signed announcement
+        let mut announcement =
+            PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "known-agent".into(), vec![]);
+        sign_announcement(&mut announcement, &keypair).unwrap();
+
+        // Should succeed with valid signature
+        let result = protocol
+            .handle_message(GossipMessage::PatchAnnounce(announcement))
+            .await;
+        assert!(result.is_ok());
+    }
 }

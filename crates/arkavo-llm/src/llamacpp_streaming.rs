@@ -1,12 +1,12 @@
 #![allow(clippy::redundant_pub_crate)]
 
 use crate::{Error, Message, Result, StreamResponse, decode_image};
+use arkavo_llama_cpp::ModelFormat;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::{
     MtmdBitmap, MtmdContext, default_media_marker, encode_chunk, get_output_embeddings,
     preprocess_image_for_clip, tokenize_with_images,
 };
-use arkavo_llama_cpp::ModelFormat;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
@@ -195,6 +195,7 @@ pub(crate) async fn generate_tokens_with_context(
         let sampler = if config.use_dry_sampling {
             let dry_config = DrySamplingConfig::for_glm(); // multiplier 1.1 works well across models
             let vocab = model.get_vocab();
+            #[allow(clippy::cast_possible_wrap)]
             let n_ctx_train = model.get_trained_context_size() as i32;
             unsafe {
                 create_sampler_chain_with_dry(
@@ -266,11 +267,11 @@ pub(crate) async fn generate_tokens_with_context(
             // Decode with special=true for stop-sequence detection
             // Special tokens like <|im_start|> are only visible in this representation
             let mut special_text = String::new();
-            if let Ok(special_bytes) = token_to_bytes(vocab, token, true) {
-                if let Ok(s) = std::str::from_utf8(&special_bytes) {
-                    special_text = s.to_string();
-                    detection_buffer.push_str(s);
-                }
+            if let Ok(special_bytes) = token_to_bytes(vocab, token, true)
+                && let Ok(s) = std::str::from_utf8(&special_bytes)
+            {
+                special_text = s.to_string();
+                detection_buffer.push_str(s);
             }
 
             // Inject think markers that are special tokens into the user-facing stream
@@ -287,8 +288,7 @@ pub(crate) async fn generate_tokens_with_context(
             if let Some(stop_pos) = detect_self_prompting(&detection_buffer, config.model_format) {
                 if is_debug() {
                     eprintln!(
-                        "⛔ Stop-sequence detected: model self-prompting at byte {} in detection buffer",
-                        stop_pos
+                        "⛔ Stop-sequence detected: model self-prompting at byte {stop_pos} in detection buffer"
                     );
                 }
                 tracing::info!("Generation stopped: self-prompting detected");

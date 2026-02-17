@@ -206,7 +206,19 @@ impl AgentRegistry {
         }
 
         // Sort by load (ascending) to get least loaded agent
-        available_agents.sort_by(|a, b| a.load.partial_cmp(&b.load).unwrap());
+        // Handle NaN values by treating them as greater than any valid load
+        available_agents.sort_by(|a, b| {
+            a.load.partial_cmp(&b.load).unwrap_or_else(|| {
+                // If comparison fails (NaN), sort NaN values to the end
+                if a.load.is_nan() && b.load.is_nan() {
+                    std::cmp::Ordering::Equal
+                } else if a.load.is_nan() {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                }
+            })
+        });
 
         let best_agent = available_agents[0].agent_id.clone();
         debug!(

@@ -269,10 +269,10 @@ async fn process_stream(
                 }
             }
             MessageDeltaContent::ToolCall { name, .. } => {
-                if let Some(name) = name {
-                    if debug {
-                        eprintln!("\n[Tool: {name}]");
-                    }
+                if let Some(name) = name
+                    && debug
+                {
+                    eprintln!("\n[Tool: {name}]");
                 }
             }
             MessageDeltaContent::ToolResult {

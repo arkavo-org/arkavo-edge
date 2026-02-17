@@ -92,7 +92,7 @@ pub enum DevicePlatform {
 }
 
 /// Agent capabilities for A2A protocol
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentCapabilities {
     pub name: String,
     pub version: String,

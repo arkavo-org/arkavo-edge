@@ -190,6 +190,7 @@ mod tests {
     //! ## RED Phase - These tests will fail until implemented
 
     use super::*;
+    use arkavo_test_macros::spec;
 
     // ============================================================================
     // SESS-001: Absolute session timeout enforced
@@ -197,6 +198,7 @@ mod tests {
 
     /// Test: Session expires after absolute timeout
     /// Spec: SESS-001 - Absolute session timeout enforced
+    #[spec("SESS-001")]
     #[test]
     fn test_absolute_timeout_expires_session() {
         // Arrange: Create tracker with very short absolute timeout
@@ -217,6 +219,7 @@ mod tests {
 
     /// Test: Session is active before absolute timeout
     /// Spec: SESS-001 - Absolute timeout should not trigger early
+    #[spec("SESS-001")]
     #[test]
     fn test_absolute_timeout_not_expired_yet() {
         // Arrange: Create tracker with long absolute timeout
@@ -240,6 +243,7 @@ mod tests {
 
     /// Test: Session expires after idle timeout
     /// Spec: SESS-002 - Idle session timeout enforced
+    #[spec("SESS-002")]
     #[test]
     fn test_idle_timeout_expires_session() {
         // Arrange: Create tracker with short idle timeout
@@ -260,6 +264,7 @@ mod tests {
 
     /// Test: Activity prevents idle timeout
     /// Spec: SESS-002 - Activity resets idle timer
+    #[spec("SESS-002")]
     #[test]
     fn test_activity_prevents_idle_timeout() {
         // Arrange: Create tracker with short idle timeout

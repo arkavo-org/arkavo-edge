@@ -86,9 +86,12 @@ impl UiGeneratorHealthReporter {
 
             // Calculate p95
             let mut sorted = history.clone();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let p95_index = ((history.len() as f64 * 0.95).round() as usize).min(history.len() - 1);
-            metrics.p95_latency_ms = sorted[p95_index];
+            // Filter out any NaN values that might have been recorded
+            sorted.retain(|&x| !x.is_nan());
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let p95_index =
+                ((sorted.len() as f64 * 0.95).round() as usize).min(sorted.len().saturating_sub(1));
+            metrics.p95_latency_ms = sorted.get(p95_index).copied().unwrap_or(0.0);
         }
     }
 

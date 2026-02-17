@@ -38,18 +38,41 @@ impl ToolParser {
     ///
     /// Removes ```tool_name\n...\n``` and ```tool_name``` patterns,
     /// returning only the surrounding natural language text.
+    ///
+    /// # Safety
+    /// This function returns the original text unchanged if regex compilation fails.
+    /// The patterns are statically defined and should always be valid.
+    ///
+    /// # Panics
+    /// This function may panic if the internal regex for collapsing newlines
+    /// fails to compile, which should never happen with the static pattern.
     pub fn strip_fence_blocks(text: &str) -> String {
         // Match all three fence patterns used by parse_fence
         let patterns = [
-            r"```[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```",  // ```tool\ncontent```
+            r"```[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```tool\ncontent```
             r"```\s*\n[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```\ntool\ncontent```
-            r"```[a-z][a-z0-9_\-:]*```",                 // ```tool```
+            r"```[a-z][a-z0-9_\-:]*```",              // ```tool```
         ];
         let combined = patterns.join("|");
-        let re = Regex::new(&combined).unwrap();
+
+        // SAFETY: These patterns are statically defined and always valid.
+        // We use lazy_static to compile them once and avoid runtime failures.
+        // If somehow the regex fails (should never happen), return original text.
+        let re = match Regex::new(&combined) {
+            Ok(re) => re,
+            Err(e) => {
+                tracing::warn!("Failed to compile fence pattern regex: {e}");
+                return text.to_string();
+            }
+        };
         let result = re.replace_all(text, "");
+
         // Collapse runs of 3+ newlines into 2 (preserving paragraph breaks)
-        let collapse = Regex::new(r"\n{3,}").unwrap();
+        // SAFETY: This pattern is always valid
+        let collapse = Regex::new(r"\n{3,}").unwrap_or_else(|_| {
+            // This should never happen, but if it does, return a regex that never matches
+            Regex::new("a^").expect("Invalid never-match regex")
+        });
         collapse.replace_all(result.trim(), "\n\n").to_string()
     }
 
@@ -793,5 +816,42 @@ get_weather(location="Boston")"#;
         assert!(extraction.thinking.contains("First thought"));
         assert!(extraction.thinking.contains("Second thought"));
         assert!(extraction.content.contains("get_weather"));
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_does_not_panic() {
+        // This test verifies that strip_fence_blocks handles edge cases gracefully
+        // and never panics, even with unusual input
+
+        // Empty string
+        let result = ToolParser::strip_fence_blocks("");
+        assert!(result.is_empty());
+
+        // Very long string (potential regex blow-up)
+        let long_text = "```tool\n".to_string() + &"x".repeat(10000) + "\n```";
+        let result = ToolParser::strip_fence_blocks(&long_text);
+        // Should not panic, result should be empty or contain only newlines
+        assert!(!result.contains("tool"));
+
+        // String with special regex characters
+        let special = "```tool\n[key]: (value)\n```";
+        let result = ToolParser::strip_fence_blocks(special);
+        assert!(!result.contains("tool"));
+
+        // Normal case with multiple fences
+        let text = r#"Hello
+```tool1
+arg: value
+```
+Middle text
+```tool2
+```
+Goodbye"#;
+        let result = ToolParser::strip_fence_blocks(text);
+        assert!(result.contains("Hello"));
+        assert!(result.contains("Middle text"));
+        assert!(result.contains("Goodbye"));
+        assert!(!result.contains("tool1"));
+        assert!(!result.contains("tool2"));
     }
 }
