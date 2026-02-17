@@ -924,8 +924,7 @@ mod tests {
     #[test]
     fn test_streaming_thinking_delta_deserialization() {
         // Thinking delta events should deserialize without error
-        let thinking_delta_json =
-            r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Step 1..."}}"#;
+        let thinking_delta_json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Step 1..."}}"#;
         let event: StreamEvent = serde_json::from_str(thinking_delta_json).unwrap();
         assert!(matches!(
             event,
@@ -936,8 +935,7 @@ mod tests {
         ));
 
         // Text delta still works
-        let text_delta_json =
-            r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        let text_delta_json = r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello"}}"#;
         let event: StreamEvent = serde_json::from_str(text_delta_json).unwrap();
         assert!(matches!(
             event,
@@ -948,8 +946,7 @@ mod tests {
         ));
 
         // Unknown delta types are handled gracefully
-        let unknown_delta_json =
-            r#"{"type":"content_block_delta","index":0,"delta":{"type":"future_delta","data":"..."}}"#;
+        let unknown_delta_json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"future_delta","data":"..."}}"#;
         let event: StreamEvent = serde_json::from_str(unknown_delta_json).unwrap();
         assert!(matches!(
             event,
