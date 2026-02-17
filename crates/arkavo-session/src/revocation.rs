@@ -277,10 +277,12 @@ pub trait Revocable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     // SESS-007: Immediate session revocation by admin
 
+    #[spec("SESS-007")]
     #[test]
     fn test_admin_revokes_session_immediately() {
         let revocation_list = RevocationList::new();
@@ -293,6 +295,7 @@ mod tests {
         assert!(revocation_list.is_revoked("session-123").is_some());
     }
 
+    #[spec("SESS-007")]
     #[test]
     fn test_revoked_session_status() {
         let revocation_list = RevocationList::new();

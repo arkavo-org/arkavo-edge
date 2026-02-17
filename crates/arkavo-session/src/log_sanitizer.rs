@@ -229,10 +229,12 @@ pub fn sanitize_log_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     // SESS-010: Session tokens redacted in logs
 
+    #[spec("SESS-010")]
     #[test]
     fn test_session_token_redaction() {
         let log_with_token = "Session token: eyJhbGciOiJIUzI1NiIs...";
@@ -241,6 +243,7 @@ mod tests {
         assert!(sanitized.contains(REDACTED_SESSION_TOKEN) || sanitized.contains(REDACTED_MARKER));
     }
 
+    #[spec("SESS-010")]
     #[test]
     fn test_multiple_tokens_redacted() {
         let log = "Token1: abc123, Token2: def456, Token3: ghi789";
@@ -252,6 +255,7 @@ mod tests {
 
     // SESS-011: PII redacted in session logs
 
+    #[spec("SESS-011")]
     #[test]
     fn test_email_redaction() {
         let log = json!({
@@ -266,6 +270,7 @@ mod tests {
         assert!(s.contains("\"status\":\"success\""));
     }
 
+    #[spec("SESS-011")]
     #[test]
     fn test_phone_redaction() {
         let log = json!({

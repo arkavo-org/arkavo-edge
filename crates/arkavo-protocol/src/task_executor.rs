@@ -477,7 +477,10 @@ mod tests {
     use super::*;
     use crate::task_store::SqliteTaskStore;
     use crate::types::MessagePart;
+    use arkavo_test_macros::spec;
 
+    /// Test PROTO-006: Execute task with persistence
+    #[spec("PROTO-006")]
     #[tokio::test]
     async fn test_task_executor_lifecycle() -> Result<()> {
         let store = Arc::new(SqliteTaskStore::new_in_memory().await?);
@@ -524,6 +527,8 @@ mod tests {
         Ok(())
     }
 
+    /// Test PROTO-006: Task state transitions
+    #[spec("PROTO-006")]
     #[test]
     fn test_valid_transitions() {
         use TaskStatus::*;
@@ -535,5 +540,42 @@ mod tests {
 
         assert!(!TaskExecutor::is_valid_transition(Completed, Working));
         assert!(!TaskExecutor::is_valid_transition(Failed, Completed));
+    }
+
+    /// Second test for PROTO-006: Task persistence across operations
+    #[spec("PROTO-006")]
+    #[tokio::test]
+    async fn test_task_persistence() -> Result<()> {
+        let store = Arc::new(SqliteTaskStore::new_in_memory().await?);
+        let executor = TaskExecutor::new(store.clone(), TaskExecutorConfig::default());
+
+        executor.start()?;
+
+        // Submit multiple tasks
+        let mut task_ids = vec![];
+        for i in 0..5 {
+            let message = Message {
+                parts: vec![MessagePart::Text {
+                    content: format!("Task {i}"),
+                }],
+                metadata: None,
+            };
+            let task_id = executor.submit_task(message).await?;
+            task_ids.push(task_id);
+        }
+
+        // Verify all tasks are persisted (status may be Submitted or Working)
+        for task_id in &task_ids {
+            let task = store.get_task(task_id).await?;
+            assert!(task.is_some(), "Task should be persisted");
+            let status = task.unwrap().status;
+            assert!(
+                status == TaskStatus::Submitted || status == TaskStatus::Working,
+                "Task should be in initial state"
+            );
+        }
+
+        executor.stop()?;
+        Ok(())
     }
 }

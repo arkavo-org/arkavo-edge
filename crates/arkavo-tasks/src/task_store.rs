@@ -369,71 +369,508 @@ impl TaskStore for SqliteTaskStore {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
-    use crate::types::{AgentCapabilities, AgentCard, Message, MessagePart};
+    use crate::types::{AgentCard, Message, MessagePart, TaskPriority, TaskProgress};
     use chrono::Utc;
 
-    #[tokio::test]
-    async fn test_task_store_crud() -> anyhow::Result<()> {
-        let store = SqliteTaskStore::new_in_memory().await?;
-
-        let task = Task {
+    /// Helper function to create a test task with all required fields
+    fn create_test_task(title: &str, status: TaskStatus) -> Task {
+        Task {
             id: Uuid::new_v4(),
-            status: TaskStatus::Submitted,
+            title: title.to_string(),
+            description: Some(format!("Description for {title}")),
+            status,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            assigned_agent: None,
+            parent_task: None,
+            progress: None,
+            error: None,
+            priority: TaskPriority::Normal,
             message: Message {
                 parts: vec![MessagePart::Text {
-                    content: "Test task".to_string(),
+                    content: title.to_string(),
+                }],
+                metadata: None,
+            },
+            agent_card: None,
+            result: None,
+        }
+    }
+
+    /// Helper function to create a test task with an agent card
+    fn create_test_task_with_agent(title: &str, agent_id: &str, endpoint: &str) -> Task {
+        Task {
+            id: Uuid::new_v4(),
+            title: title.to_string(),
+            description: Some(format!("Description for {title}")),
+            status: TaskStatus::Submitted,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            assigned_agent: Some(agent_id.to_string()),
+            parent_task: None,
+            progress: None,
+            error: None,
+            priority: TaskPriority::High,
+            message: Message {
+                parts: vec![MessagePart::Text {
+                    content: title.to_string(),
                 }],
                 metadata: None,
             },
             agent_card: Some(AgentCard {
+                id: agent_id.to_string(),
                 name: "Test Agent".to_string(),
-                description: Some("A test agent".to_string()),
-                url: "http://localhost:8080".to_string(),
-                provider: None,
-                version: "1.0.0".to_string(),
-                protocol_versions: vec!["0.3".to_string()],
-                default_input_modes: vec!["text/plain".to_string()],
-                default_output_modes: vec!["text/plain".to_string()],
-                capabilities: AgentCapabilities::default(),
-                skills: vec![],
-                security_schemes: vec![],
-                security: vec![],
-                extensions: vec![],
-                signature: None,
+                capabilities: vec!["text-generation".to_string()],
+                endpoint: endpoint.to_string(),
             }),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
             result: None,
-            error: None,
-            progress: None,
-        };
+        }
+    }
 
+    #[tokio::test]
+    async fn test_task_store_create_and_retrieve() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Create Test", TaskStatus::Submitted);
+
+        // Act
+        store.create_task(task.clone()).await?;
+        let retrieved = store.get_task(&task.id).await?;
+
+        // Assert
+        assert!(
+            retrieved.is_some(),
+            "Task should be retrievable after creation"
+        );
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.id, task.id);
+        assert_eq!(retrieved.title, task.title);
+        assert_eq!(retrieved.status, TaskStatus::Submitted);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_update_status() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Update Test", TaskStatus::Submitted);
         store.create_task(task.clone()).await?;
 
-        let retrieved = store.get_task(&task.id).await?;
-        assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().id, task.id);
-
+        // Act
         store
             .update_task_status(&task.id, TaskStatus::Working)
             .await?;
         let updated = store.get_task(&task.id).await?.unwrap();
+
+        // Assert
         assert_eq!(updated.status, TaskStatus::Working);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_list_tasks() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task1 = create_test_task("Task 1", TaskStatus::Submitted);
+        let task2 = create_test_task("Task 2", TaskStatus::Working);
+        store.create_task(task1.clone()).await?;
+        store.create_task(task2.clone()).await?;
+
+        // Act
         let tasks = store.list_tasks(Some(10)).await?;
-        assert!(!tasks.is_empty());
 
+        // Assert
+        assert_eq!(tasks.len(), 2, "Should list all tasks");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_list_tasks_with_limit() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        for i in 0..5 {
+            let task = create_test_task(&format!("Task {i}"), TaskStatus::Submitted);
+            store.create_task(task).await?;
+        }
+
+        // Act
+        let tasks = store.list_tasks(Some(3)).await?;
+
+        // Assert
+        assert_eq!(tasks.len(), 3, "Should respect the limit");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_get_by_status() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task1 = create_test_task("Working Task", TaskStatus::Working);
+        let task2 = create_test_task("Submitted Task", TaskStatus::Submitted);
+        store.create_task(task1.clone()).await?;
+        store.create_task(task2.clone()).await?;
+
+        // Act
         let working_tasks = store.get_tasks_by_status(TaskStatus::Working).await?;
-        assert_eq!(working_tasks.len(), 1);
 
+        // Assert
+        assert_eq!(working_tasks.len(), 1);
+        assert_eq!(working_tasks[0].id, task1.id);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_store_and_retrieve_result() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Result Test", TaskStatus::Working);
+        store.create_task(task.clone()).await?;
         let result = serde_json::json!({"output": "Task completed successfully"});
+
+        // Act
         store.store_task_result(&task.id, result.clone()).await?;
         let retrieved_result = store.get_task_result(&task.id).await?;
+
+        // Assert
         assert_eq!(retrieved_result, Some(result));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_delete() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Delete Test", TaskStatus::Submitted);
+        store.create_task(task.clone()).await?;
+
+        // Act
         store.delete_task(&task.id).await?;
         let deleted = store.get_task(&task.id).await?;
-        assert!(deleted.is_none());
+
+        // Assert
+        assert!(deleted.is_none(), "Task should be deleted");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_with_agent_card() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task_with_agent("Agent Task", "agent-123", "http://localhost:8080");
+
+        // Act
+        store.create_task(task.clone()).await?;
+        let retrieved = store.get_task(&task.id).await?.unwrap();
+
+        // Assert
+        assert!(retrieved.agent_card.is_some());
+        let agent = retrieved.agent_card.unwrap();
+        assert_eq!(agent.id, "agent-123");
+        assert_eq!(agent.endpoint, "http://localhost:8080");
+        assert_eq!(retrieved.assigned_agent, Some("agent-123".to_string()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_update_nonexistent_task() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let nonexistent_id = Uuid::new_v4();
+
+        // Act
+        let result = store
+            .update_task_status(&nonexistent_id, TaskStatus::Working)
+            .await;
+
+        // Assert - should return NotFound error
+        assert!(
+            result.is_err(),
+            "Updating non-existent task should return error"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, TaskError::NotFound(_)),
+            "Error should be NotFound"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_empty_list() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+
+        // Act
+        let tasks = store.list_tasks(Some(10)).await?;
+
+        // Assert
+        assert!(tasks.is_empty(), "Empty store should return empty list");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_result_for_nonexistent_task() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let nonexistent_id = Uuid::new_v4();
+
+        // Act
+        let result = store.get_task_result(&nonexistent_id).await?;
+
+        // Assert
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_priority_levels() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let mut low_priority = create_test_task("Low Priority", TaskStatus::Submitted);
+        low_priority.priority = TaskPriority::Low;
+        let mut critical_priority = create_test_task("Critical Priority", TaskStatus::Submitted);
+        critical_priority.priority = TaskPriority::Critical;
+
+        // Act
+        store.create_task(low_priority.clone()).await?;
+        store.create_task(critical_priority.clone()).await?;
+
+        let tasks = store.list_tasks(Some(10)).await?;
+
+        // Assert
+        assert_eq!(tasks.len(), 2);
+        let priorities: Vec<_> = tasks.iter().map(|t| &t.priority).collect();
+        assert!(priorities.contains(&&TaskPriority::Low));
+        assert!(priorities.contains(&&TaskPriority::Critical));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_parent_child_relationship() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let parent_task = create_test_task("Parent Task", TaskStatus::Working);
+        store.create_task(parent_task.clone()).await?;
+
+        let mut child_task = create_test_task("Child Task", TaskStatus::Submitted);
+        child_task.parent_task = Some(parent_task.id);
+
+        // Act
+        store.create_task(child_task.clone()).await?;
+        let retrieved_child = store.get_task(&child_task.id).await?.unwrap();
+
+        // Assert
+        assert_eq!(retrieved_child.parent_task, Some(parent_task.id));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_all_status_transitions() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Status Test", TaskStatus::Submitted);
+        store.create_task(task.clone()).await?;
+
+        // Act & Assert - Test all valid status transitions
+        let statuses = vec![
+            TaskStatus::Working,
+            TaskStatus::InputRequired,
+            TaskStatus::Completed,
+        ];
+
+        for status in statuses {
+            store.update_task_status(&task.id, status).await?;
+            let updated = store.get_task(&task.id).await?.unwrap();
+            assert_eq!(updated.status, status, "Failed to transition to {status:?}");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_error_handling() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Error Test", TaskStatus::Working);
+        store.create_task(task.clone()).await?;
+
+        // Act - Update status to Failed
+        store
+            .update_task_status(&task.id, TaskStatus::Failed)
+            .await?;
+
+        // Note: Status update is verified
+        let updated = store.get_task(&task.id).await?.unwrap();
+
+        // Assert
+        assert_eq!(updated.status, TaskStatus::Failed);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_delete_nonexistent() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let nonexistent_id = Uuid::new_v4();
+
+        // Act - Should return NotFound error when deleting non-existent task
+        let result = store.delete_task(&nonexistent_id).await;
+
+        // Assert
+        assert!(
+            result.is_err(),
+            "Deleting non-existent task should return error"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, TaskError::NotFound(_)),
+            "Error should be NotFound"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_complex_result() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = create_test_task("Complex Result Test", TaskStatus::Working);
+        store.create_task(task.clone()).await?;
+
+        let complex_result = serde_json::json!({
+            "output": "Task completed",
+            "metadata": {
+                "tokens_used": 150,
+                "model": "gpt-4",
+                "finish_reason": "stop"
+            },
+            "artifacts": [
+                {"type": "text", "content": "Result text"},
+                {"type": "code", "language": "python", "content": "print('hello')"}
+            ]
+        });
+
+        // Act
+        store
+            .store_task_result(&task.id, complex_result.clone())
+            .await?;
+        let retrieved = store.get_task_result(&task.id).await?;
+
+        // Assert
+        assert_eq!(retrieved, Some(complex_result));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_agent_with_multiple_capabilities() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let agent_card = AgentCard {
+            id: "multi-cap-agent".to_string(),
+            name: "Multi-Capability Agent".to_string(),
+            capabilities: vec![
+                "text-generation".to_string(),
+                "code-execution".to_string(),
+                "file-access".to_string(),
+                "web-search".to_string(),
+            ],
+            endpoint: "http://localhost:8080".to_string(),
+        };
+
+        let task = Task {
+            id: Uuid::new_v4(),
+            title: "Multi-Capability Test".to_string(),
+            description: Some("Test with multi-capability agent".to_string()),
+            status: TaskStatus::Submitted,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            assigned_agent: Some("multi-cap-agent".to_string()),
+            parent_task: None,
+            progress: None,
+            error: None,
+            priority: TaskPriority::High,
+            message: Message {
+                parts: vec![MessagePart::Text {
+                    content: "Test message".to_string(),
+                }],
+                metadata: None,
+            },
+            agent_card: Some(agent_card),
+            result: None,
+        };
+
+        // Act
+        store.create_task(task.clone()).await?;
+        let retrieved = store.get_task(&task.id).await?.unwrap();
+
+        // Assert
+        assert!(retrieved.agent_card.is_some());
+        let retrieved_agent = retrieved.agent_card.unwrap();
+        assert_eq!(retrieved_agent.capabilities.len(), 4);
+        assert!(
+            retrieved_agent
+                .capabilities
+                .contains(&"code-execution".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_task_store_task_with_progress() -> anyhow::Result<()> {
+        // Arrange
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let task = Task {
+            id: Uuid::new_v4(),
+            title: "Progress Test".to_string(),
+            description: Some("Test with progress".to_string()),
+            status: TaskStatus::Working,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            assigned_agent: None,
+            parent_task: None,
+            progress: Some(TaskProgress {
+                percentage: Some(50),
+                message: Some("Processing...".to_string()),
+                eta_seconds: Some(30),
+            }),
+            error: None,
+            priority: TaskPriority::Normal,
+            message: Message {
+                parts: vec![MessagePart::Text {
+                    content: "Test".to_string(),
+                }],
+                metadata: None,
+            },
+            agent_card: None,
+            result: None,
+        };
+
+        // Act
+        store.create_task(task.clone()).await?;
+        let retrieved = store.get_task(&task.id).await?.unwrap();
+
+        // Assert
+        assert!(retrieved.progress.is_some());
+        let progress = retrieved.progress.unwrap();
+        assert_eq!(progress.percentage, Some(50));
+        assert_eq!(progress.message, Some("Processing...".to_string()));
+        assert_eq!(progress.eta_seconds, Some(30));
 
         Ok(())
     }

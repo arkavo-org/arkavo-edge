@@ -292,9 +292,8 @@ impl LlamaCppProvider {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.get_model()?;
 
-        // Dry sampling for GLM - disabled due to crash issues
-        // TODO: Investigate dry sampling crash with GLM model
-        let use_dry_sampling = false;
+        // Enable dry sampling for repetition prevention (all models can loop)
+        let use_dry_sampling = true;
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -303,6 +302,7 @@ impl LlamaCppProvider {
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
             use_dry_sampling,
+            model_format: format,
         };
 
         tokio::spawn(async move {
@@ -336,6 +336,7 @@ impl LlamaCppProvider {
             max_tokens: self.config.max_tokens,
             seed: self.config.seed,
             use_dry_sampling,
+            model_format: format,
         };
 
         tokio::spawn(async move {
@@ -533,9 +534,16 @@ impl Provider for LlamaCppProvider {
             (raw_content, None)
         };
 
-        let tool_calls = if tools.is_some() {
+        let tool_calls = if let Some(ref tools_value) = tools {
+            // Collect registered tool names to filter false positives
+            // (e.g. ```python``` code fences matching as tool calls)
+            let registered_names: std::collections::HashSet<&str> = tools_value
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|t| t.get("name")?.as_str()).collect())
+                .unwrap_or_default();
+
             // Try configured format first, then fallback chain
-            match self.config.tool_format {
+            let parsed = match self.config.tool_format {
                 LocalToolFormat::Fence => ToolParser::parse_fence(&content)
                     .or_else(|_| ToolParser::parse_xml(&content))
                     .unwrap_or_default(),
@@ -545,13 +553,26 @@ impl Provider for LlamaCppProvider {
                 LocalToolFormat::Json => ToolParser::parse_json(&content)
                     .or_else(|_| ToolParser::parse_fence(&content))
                     .unwrap_or_default(),
-            }
+            };
+
+            // Only keep calls that match actual registered tools
+            parsed
+                .into_iter()
+                .filter(|c| registered_names.contains(c.tool_name.as_str()))
+                .collect()
         } else {
             Vec::new()
         };
 
+        // Strip tool call syntax from displayed content when tools were parsed
+        let display_content = if !tool_calls.is_empty() {
+            ToolParser::strip_fence_blocks(&content)
+        } else {
+            content
+        };
+
         Ok(ProviderResponse {
-            content,
+            content: display_content,
             reasoning_content,
             tool_calls,
             finish_reason: None,

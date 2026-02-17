@@ -162,12 +162,24 @@ impl RegretAccumulator {
 
     /// Expire outcomes outside the attribution window
     fn expire_old_outcomes(&mut self) {
-        let cutoff = Instant::now() - self.attribution_window;
-        while let Some(oldest) = self.outcomes.front() {
-            if oldest.timestamp < cutoff {
-                self.outcomes.pop_front();
-            } else {
-                break;
+        let now = Instant::now();
+        // Use checked_sub to handle edge case where attribution_window exceeds elapsed time
+        let cutoff = now.checked_sub(self.attribution_window);
+
+        match cutoff {
+            Some(cutoff) => {
+                // Normal case: expire outcomes older than cutoff
+                while let Some(oldest) = self.outcomes.front() {
+                    if oldest.timestamp < cutoff {
+                        self.outcomes.pop_front();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            None => {
+                // Edge case: attribution_window exceeds elapsed time
+                // All outcomes are within the window, nothing to expire
             }
         }
     }

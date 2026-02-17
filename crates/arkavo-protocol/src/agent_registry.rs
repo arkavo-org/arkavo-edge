@@ -206,7 +206,19 @@ impl AgentRegistry {
         }
 
         // Sort by load (ascending) to get least loaded agent
-        available_agents.sort_by(|a, b| a.load.partial_cmp(&b.load).unwrap());
+        // Handle NaN values by treating them as greater than any valid load
+        available_agents.sort_by(|a, b| {
+            a.load.partial_cmp(&b.load).unwrap_or_else(|| {
+                // If comparison fails (NaN), sort NaN values to the end
+                if a.load.is_nan() && b.load.is_nan() {
+                    std::cmp::Ordering::Equal
+                } else if a.load.is_nan() {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                }
+            })
+        });
 
         let best_agent = available_agents[0].agent_id.clone();
         debug!(
@@ -241,7 +253,9 @@ impl AgentRegistry {
     pub async fn update_agent_load(&self, agent_id: &str, load: f32) -> Result<(), String> {
         let mut agents = self.agents.write().await;
         if let Some(agent) = agents.get_mut(agent_id) {
-            agent.load = load.clamp(0.0, 1.0);
+            // Normalize non-finite values before clamping (clamp preserves NaN)
+            let safe_load = if load.is_finite() { load } else { 1.0 };
+            agent.load = safe_load.clamp(0.0, 1.0);
             agent.last_seen = Utc::now();
             Ok(())
         } else {

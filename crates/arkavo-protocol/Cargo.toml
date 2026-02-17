@@ -84,6 +84,9 @@ arkavo-events = { path = "../arkavo-events" }
 # Crypto for registration
 arkavo-crypto = { path = "../arkavo-crypto" }
 
+# Test macros for spec attributes
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 # HRM for task orchestration
 arkavo-hrm = { path = "../arkavo-hrm" }
 
@@ -128,6 +131,7 @@ tracing-subscriber = { workspace = true }
 tempfile = { workspace = true }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [[bin]]
 name = "export-schema"

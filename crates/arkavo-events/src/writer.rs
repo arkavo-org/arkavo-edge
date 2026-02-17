@@ -339,4 +339,38 @@ mod tests {
             "Only the else-branch final flush could have delivered these events"
         );
     }
+
+    /// Second test for EVENT-005: Event writer with multiple handlers
+    #[spec("EVENT-005")]
+    #[tokio::test]
+    async fn test_event_writer_multiple_handlers() {
+        let counter1 = Arc::new(AtomicUsize::new(0));
+        let counter2 = Arc::new(AtomicUsize::new(0));
+        let c1 = counter1.clone();
+        let c2 = counter2.clone();
+
+        let writer = EventWriterBuilder::new()
+            .with_config(EventWriterConfig {
+                buffer_size: 1000,
+                flush_interval: Duration::from_millis(50),
+                batch_size: 10,
+            })
+            .add_handler(move |events| {
+                c1.fetch_add(events.len(), Ordering::SeqCst);
+            })
+            .add_handler(move |events| {
+                c2.fetch_add(events.len(), Ordering::SeqCst);
+            })
+            .build();
+
+        for i in 0..20 {
+            writer.write(make_event(i)).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // Both handlers should receive all events
+        assert_eq!(counter1.load(Ordering::SeqCst), 20);
+        assert_eq!(counter2.load(Ordering::SeqCst), 20);
+    }
 }

@@ -197,17 +197,21 @@ impl ProviderHealthMonitor {
 
                 // Calculate percentiles
                 let mut sorted_latencies = latencies.clone();
-                sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                // Filter out any NaN values that might have been recorded
+                sorted_latencies.retain(|&x| !x.is_nan());
+                sorted_latencies
+                    .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-                let p95_index = ((latencies.len() as f64 * 0.95).round() as usize)
-                    .min(latencies.len().saturating_sub(1));
-                let p99_index = ((latencies.len() as f64 * 0.99).round() as usize)
-                    .min(latencies.len().saturating_sub(1));
+                if !sorted_latencies.is_empty() {
+                    let count = sorted_latencies.len();
+                    let p95_index =
+                        ((count as f64 * 0.95).round() as usize).min(count.saturating_sub(1));
+                    let p99_index =
+                        ((count as f64 * 0.99).round() as usize).min(count.saturating_sub(1));
 
-                provider_metrics.p95_latency_ms =
-                    sorted_latencies[p95_index.min(latencies.len() - 1)];
-                provider_metrics.p99_latency_ms =
-                    sorted_latencies[p99_index.min(latencies.len() - 1)];
+                    provider_metrics.p95_latency_ms = sorted_latencies[p95_index];
+                    provider_metrics.p99_latency_ms = sorted_latencies[p99_index];
+                }
             }
         }
 

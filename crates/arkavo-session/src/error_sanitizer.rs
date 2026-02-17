@@ -176,9 +176,11 @@ pub trait SanitizableError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     // SESS-013: Internal errors not exposed externally
 
+    #[spec("SESS-013")]
     #[test]
     fn test_database_error_not_exposed() {
         let sanitizer = ErrorSanitizer::new();
@@ -198,6 +200,7 @@ mod tests {
         assert!(!external.correlation_id.is_empty());
     }
 
+    #[spec("SESS-013")]
     #[test]
     fn test_stack_trace_not_exposed() {
         let sanitizer = ErrorSanitizer::new();

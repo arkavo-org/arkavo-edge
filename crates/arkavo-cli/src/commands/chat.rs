@@ -210,14 +210,74 @@ async fn process_stream(
 ) {
     use arkavo_protocol::types::MessageDeltaContent;
 
+    let debug = std::env::var("ARKAVO_DEBUG").is_ok();
+    let mut buf = String::new();
+    let mut in_think = false;
+
     while let Some(delta) = rx.recv().await {
         match &delta.delta {
             MessageDeltaContent::Text { text } => {
-                print!("{text}");
-                let _ = io::stdout().flush();
+                if debug {
+                    // Debug mode: show everything including think blocks
+                    print!("{text}");
+                    let _ = io::stdout().flush();
+                    continue;
+                }
+
+                buf.push_str(text);
+
+                // Process buffer for think block boundaries
+                loop {
+                    if in_think {
+                        if let Some(end) = buf.find("</think>") {
+                            // Discard think content, resume after closing tag
+                            buf = buf[end + "</think>".len()..].to_string();
+                            in_think = false;
+                        } else {
+                            // Still inside think block — keep buffering
+                            // Truncate to avoid unbounded growth, keep tail for partial tag match
+                            // Tail must be >= len("</think>") - 1 = 7 to detect tags across chunks
+                            if buf.len() > 1024 {
+                                let mut tail_start = buf.len() - 16;
+                                // Find nearest char boundary to avoid panic on multi-byte UTF-8
+                                while !buf.is_char_boundary(tail_start) {
+                                    tail_start += 1;
+                                }
+                                buf = buf[tail_start..].to_string();
+                            }
+                            break;
+                        }
+                    } else if let Some(start) = buf.find("<think>") {
+                        // Print everything before the tag
+                        let before = &buf[..start];
+                        if !before.is_empty() {
+                            print!("{before}");
+                            let _ = io::stdout().flush();
+                        }
+                        buf = buf[start + "<think>".len()..].to_string();
+                        in_think = true;
+                    } else if let Some(end) = buf.find("</think>") {
+                        // Fallback: model emitted <think> as a special token (now injected
+                        // by the streaming layer), but in case it was missed, discard
+                        // everything before the closing tag
+                        buf = buf[end + "</think>".len()..].to_string();
+                    } else {
+                        // No tag found — flush safe portion, keep tail for partial tag match
+                        // len("</think>") = 8, which is longer than "<think>" = 7
+                        let safe_len = buf.len().saturating_sub(8);
+                        if safe_len > 0 {
+                            print!("{}", &buf[..safe_len]);
+                            let _ = io::stdout().flush();
+                            buf = buf[safe_len..].to_string();
+                        }
+                        break;
+                    }
+                }
             }
             MessageDeltaContent::ToolCall { name, .. } => {
-                if let Some(name) = name {
+                if let Some(name) = name
+                    && debug
+                {
                     eprintln!("\n[Tool: {name}]");
                 }
             }
@@ -229,6 +289,10 @@ async fn process_stream(
                 }
             }
             MessageDeltaContent::StreamEnd { .. } => {
+                // Flush remaining buffer (only if not inside a think block)
+                if !in_think && !buf.is_empty() {
+                    print!("{buf}");
+                }
                 println!();
                 break;
             }

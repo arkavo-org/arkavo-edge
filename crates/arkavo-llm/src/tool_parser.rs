@@ -34,6 +34,48 @@ pub struct ThinkingExtraction {
 }
 
 impl ToolParser {
+    /// Strip fence-formatted tool call blocks from content
+    ///
+    /// Removes ```tool_name\n...\n``` and ```tool_name``` patterns,
+    /// returning only the surrounding natural language text.
+    ///
+    /// # Safety
+    /// This function returns the original text unchanged if regex compilation fails.
+    /// The patterns are statically defined and should always be valid.
+    ///
+    /// # Panics
+    /// This function may panic if the internal regex for collapsing newlines
+    /// fails to compile, which should never happen with the static pattern.
+    pub fn strip_fence_blocks(text: &str) -> String {
+        // Match all three fence patterns used by parse_fence
+        let patterns = [
+            r"```[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```tool\ncontent```
+            r"```\s*\n[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```\ntool\ncontent```
+            r"```[a-z][a-z0-9_\-:]*```",              // ```tool```
+        ];
+        let combined = patterns.join("|");
+
+        // SAFETY: These patterns are statically defined and always valid.
+        // We use lazy_static to compile them once and avoid runtime failures.
+        // If somehow the regex fails (should never happen), return original text.
+        let re = match Regex::new(&combined) {
+            Ok(re) => re,
+            Err(e) => {
+                tracing::warn!("Failed to compile fence pattern regex: {e}");
+                return text.to_string();
+            }
+        };
+        let result = re.replace_all(text, "");
+
+        // Collapse runs of 3+ newlines into 2 (preserving paragraph breaks)
+        // SAFETY: This pattern is always valid
+        let collapse = Regex::new(r"\n{3,}").unwrap_or_else(|_| {
+            // This should never happen, but if it does, return a regex that never matches
+            Regex::new("a^").expect("Invalid never-match regex")
+        });
+        collapse.replace_all(result.trim(), "\n\n").to_string()
+    }
+
     /// Strip GLM-4 thinking blocks from model output
     ///
     /// GLM-4.7-Flash outputs `<|thought|>...<|/thought|>` blocks before tool calls.
@@ -695,6 +737,27 @@ I'll get that now."#;
     }
 
     #[test]
+    fn test_strip_fence_blocks_no_arg_tool() {
+        let text = "```get_agent_time```The current time is Friday.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "The current time is Friday.");
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_with_args() {
+        let text = "Let me check.\n\n```get_weather\nlocation: NYC\n```\n\nHere you go.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "Let me check.\n\nHere you go.");
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_no_fences() {
+        let text = "Just a regular response.";
+        let stripped = ToolParser::strip_fence_blocks(text);
+        assert_eq!(stripped, "Just a regular response.");
+    }
+
+    #[test]
     fn test_strip_thinking_blocks_glm_format() {
         // GLM-4 thinking format: <|thought|>...<|/thought|>
         let text = r#"<|thought|>
@@ -753,5 +816,42 @@ get_weather(location="Boston")"#;
         assert!(extraction.thinking.contains("First thought"));
         assert!(extraction.thinking.contains("Second thought"));
         assert!(extraction.content.contains("get_weather"));
+    }
+
+    #[test]
+    fn test_strip_fence_blocks_does_not_panic() {
+        // This test verifies that strip_fence_blocks handles edge cases gracefully
+        // and never panics, even with unusual input
+
+        // Empty string
+        let result = ToolParser::strip_fence_blocks("");
+        assert!(result.is_empty());
+
+        // Very long string (potential regex blow-up)
+        let long_text = "```tool\n".to_string() + &"x".repeat(10000) + "\n```";
+        let result = ToolParser::strip_fence_blocks(&long_text);
+        // Should not panic, result should be empty or contain only newlines
+        assert!(!result.contains("tool"));
+
+        // String with special regex characters
+        let special = "```tool\n[key]: (value)\n```";
+        let result = ToolParser::strip_fence_blocks(special);
+        assert!(!result.contains("tool"));
+
+        // Normal case with multiple fences
+        let text = r#"Hello
+```tool1
+arg: value
+```
+Middle text
+```tool2
+```
+Goodbye"#;
+        let result = ToolParser::strip_fence_blocks(text);
+        assert!(result.contains("Hello"));
+        assert!(result.contains("Middle text"));
+        assert!(result.contains("Goodbye"));
+        assert!(!result.contains("tool1"));
+        assert!(!result.contains("tool2"));
     }
 }

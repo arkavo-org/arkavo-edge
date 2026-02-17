@@ -266,6 +266,7 @@ impl Default for DeviceBoundSessionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn test_device(name: &str) -> DeviceIdentity {
         DeviceIdentity::new(vec![1, 2, 3, 4], name)
@@ -277,6 +278,7 @@ mod tests {
 
     // SESS-004: Session bound to device identity at creation
 
+    #[spec("SESS-004")]
     #[test]
     fn test_session_created_with_device_binding() {
         let device = test_device("device-a");
@@ -286,6 +288,7 @@ mod tests {
         assert!(session.is_active);
     }
 
+    #[spec("SESS-004")]
     #[test]
     fn test_valid_signature_from_bound_device_accepted() {
         let device = test_device("device-a");
@@ -297,6 +300,7 @@ mod tests {
 
     // SESS-005: Session rejected from different device
 
+    #[spec("SESS-005")]
     #[test]
     fn test_different_device_is_rejected() {
         let device_a = test_device("device-a");
@@ -309,6 +313,7 @@ mod tests {
         ));
     }
 
+    #[spec("SESS-005")]
     #[test]
     fn test_same_device_is_accepted() {
         let device = test_device("device-a");

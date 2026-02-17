@@ -17,3 +17,4 @@ p256 = { version = "0.13", features = ["ecdh", "pem"] }
 [dev-dependencies]
 hex = { workspace = true }
 proptest = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }

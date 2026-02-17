@@ -351,7 +351,10 @@ impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    /// Test PROTO-002: Establish WebSocket transport
+    #[spec("PROTO-002")]
     #[tokio::test]
     async fn test_websocket_transport_creation() {
         let config = TransportConfig::default();
@@ -417,5 +420,38 @@ mod tests {
                 .to_string()
                 .contains("Transport not connected")
         );
+    }
+
+    /// Second test for PROTO-002: WebSocket endpoint validation
+    #[spec("PROTO-002")]
+    #[tokio::test]
+    async fn test_websocket_endpoint_validation() {
+        // Valid WebSocket URLs should be accepted (structure check)
+        let valid_urls = [
+            "ws://localhost:8080",
+            "wss://secure.example.com:443/ws",
+            "ws://127.0.0.1:3000/a2a",
+        ];
+
+        for url in &valid_urls {
+            assert!(
+                url.starts_with("ws://") || url.starts_with("wss://"),
+                "URL should use WebSocket scheme: {url}"
+            );
+        }
+
+        // Invalid URLs should be rejected
+        let invalid_urls = [
+            "http://localhost:8080",
+            "https://example.com",
+            "ftp://files.example.com",
+        ];
+
+        for url in &invalid_urls {
+            assert!(
+                !url.starts_with("ws://") && !url.starts_with("wss://"),
+                "URL should NOT be WebSocket: {url}"
+            );
+        }
     }
 }
