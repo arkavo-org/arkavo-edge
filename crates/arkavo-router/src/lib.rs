@@ -1434,7 +1434,10 @@ impl Router {
                 if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
                     // This is a language fence, try to extract nested tool calls
                     let content = match serde_json::to_string(&call.arguments) {
-                        Ok(s) => s.trim_matches('"').replace("\\n", "\n").replace("\\\"", "\""),
+                        Ok(s) => s
+                            .trim_matches('"')
+                            .replace("\\n", "\n")
+                            .replace("\\\"", "\""),
                         Err(e) => {
                             tracing::warn!(
                                 "Failed to serialize arguments for language fence '{}': {e}",

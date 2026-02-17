@@ -55,6 +55,7 @@ impl StreamLlmModel for LlmClientAdapter {
             let mut control_rx = control_rx;
             let mut response_stream = response_stream;
             let mut is_paused = false;
+            let mut in_reasoning = false;
 
             loop {
                 tokio::select! {
@@ -89,10 +90,34 @@ impl StreamLlmModel for LlmClientAdapter {
                     Some(chunk_result) = response_stream.next(), if !is_paused => {
                         match chunk_result {
                             Ok(response) => {
+                                // Build content with reasoning wrapped in <think> tags
+                                // so downstream consumers (CLI) can strip it properly
+                                let mut text = String::new();
+
+                                let has_reasoning = response.reasoning_content
+                                    .as_ref()
+                                    .map(|r| !r.is_empty())
+                                    .unwrap_or(false);
+
+                                if has_reasoning {
+                                    if !in_reasoning {
+                                        text.push_str("<think>");
+                                        in_reasoning = true;
+                                    }
+                                    if let Some(reasoning) = &response.reasoning_content {
+                                        text.push_str(reasoning);
+                                    }
+                                } else if in_reasoning {
+                                    text.push_str("</think>");
+                                    in_reasoning = false;
+                                }
+
+                                text.push_str(&response.content);
+
                                 let delta = StreamDelta {
                                     stream_id: stream_id_clone.clone(),
                                     sequence,
-                                    delta: DeltaType::Text { content: response.content },
+                                    delta: DeltaType::Text { content: text },
                                     trace_id: trace_id_clone.clone(),
                                     timestamp: chrono::Utc::now(),
                                 };
@@ -104,6 +129,18 @@ impl StreamLlmModel for LlmClientAdapter {
                                 }
 
                                 if response.done {
+                                    // Close unclosed think tag before ending
+                                    if in_reasoning {
+                                        let close_delta = StreamDelta {
+                                            stream_id: stream_id_clone.clone(),
+                                            sequence,
+                                            delta: DeltaType::Text { content: "</think>".to_string() },
+                                            trace_id: trace_id_clone.clone(),
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        sequence += 1;
+                                        let _ = delta_tx.send(Ok(close_delta)).await;
+                                    }
                                     // Send completion delta
                                     let end_delta = StreamDelta {
                                         stream_id: stream_id_clone.clone(),
