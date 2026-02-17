@@ -823,11 +823,13 @@ mod tests {
 
         // Verify challenge was consumed (removed) after successful verification
         // This prevents replay attacks
-        let challenges = service.challenges.read().await;
-        assert!(
-            !challenges.contains_key(&challenge_response.challenge_id),
-            "Challenge should be consumed after successful verification"
-        );
+        {
+            let challenges = service.challenges.read().await;
+            assert!(
+                !challenges.contains_key(&challenge_response.challenge_id),
+                "Challenge should be consumed after successful verification"
+            );
+        }
 
         // Attempting to verify again should fail (challenge not found)
         let verify_request2 = VerifyRequest {
