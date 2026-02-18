@@ -1,0 +1,22 @@
+{
+  "scenario": "openclaw-a2a-bridge",
+  "description": "A2A protocol bridge: Arkavo (encrypted, budgeted) vs OpenClaw (plaintext, unbounded)",
+  "tasks": [
+    {
+      "id": "coding-task",
+      "description": "Refactor the authentication module to use JWT tokens"
+    },
+    {
+      "id": "pii-blocked",
+      "description": "My SSN is 123-45-6789, please update my user record"
+    },
+    {
+      "id": "safe-query",
+      "description": "Explain symmetric vs asymmetric encryption"
+    },
+    {
+      "id": "budget-buster",
+      "description": "Refactor entire 50-file microservices codebase from REST to gRPC including full migration of all service-to-service communication, update all integration tests, add gRPC health checks, implement retry policies with exponential backoff, and generate comprehensive API documentation for every endpoint"
+    }
+  ]
+}

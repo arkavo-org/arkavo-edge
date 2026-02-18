@@ -31,6 +31,7 @@ Each example demonstrates specific Arkavo capabilities. Find by use case:
 | Add learning to agents | [fleet-immunity](fleet-immunity/) | Gossip Learning |
 | Use external tools | [minecraft](minecraft/) | MCP Tools |
 | Secure my agents | [secure-agent](secure-agent/) | Preflight Policies |
+| Bridge to external AI | [openclaw-a2a-bridge](openclaw-a2a-bridge/) | A2A Protocol, TDF, Preflight, Budget |
 | Build production system | [software-development-lifecycle](software-development-lifecycle/) | HRM, Orchestrator |
 
 See [CAPABILITIES.md](../CAPABILITIES.md) for the full capability matrix.
@@ -81,6 +82,7 @@ Advanced orchestration and learning patterns.
 | `fleet-immunity` | Gossip | Peer-to-peer learning between rovers |
 | `hyperforum-council` | Discourse | AI-powered discussion management |
 | `autonomous_refactor` | Ledger | Context tracking for code refactoring |
+| `openclaw-a2a-bridge` | Bridge | A2A protocol bridge with security comparison |
 
 ### 05-production
 Production-ready multi-agent systems.
@@ -189,6 +191,7 @@ Or run a specific scenario:
 | 8342-8353 | SDLC specialists | software-development-* |
 | 8401-8412 | HRM mesh | family-travel-mesh |
 | Dynamic | Fleet/mesh | fleet-immunity, mesh.sh |
+| 8360-8361 | A2A Bridge | openclaw-a2a-bridge |
 
 Use `lsof -i :PORT` to check if a port is in use.
 
