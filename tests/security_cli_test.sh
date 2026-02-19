@@ -251,7 +251,7 @@ echo "--------------------------------"
 
 # Test that help doesn't expose sensitive info
 echo -n "Testing: Help output doesn't expose sensitive paths ... "
-if $ARKAVO_BIN --help 2>&1 | grep -qE "/home/|/Users/|\.ssh|\.aws|\.config"; then
+if $ARKAVO_BIN --help 2>&1 | grep -qE "/home/|/Users/|/\.ssh|/\.aws|/\.config"; then
     echo -e "${RED}❌ FAIL${NC} (sensitive paths exposed)"
     ((TESTS_FAILED++))
 else
