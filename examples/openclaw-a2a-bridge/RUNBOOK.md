@@ -6,6 +6,7 @@ Step-by-step walkthrough with expected terminal output for each act.
 
 ```
 $ make build
+cargo build -p arkavo --features kas --manifest-path ../../Cargo.toml
    Compiling arkavo v0.x.x
     Finished `debug` profile target(s)
 ```
@@ -250,7 +251,7 @@ pkill -f "arkavo agent"
 Ensure the binary was built with KAS feature:
 
 ```bash
-cargo build --features kas
+cargo build -p arkavo --features kas
 ```
 
 ### OpenClaw not detected

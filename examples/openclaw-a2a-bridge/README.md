@@ -74,7 +74,7 @@ Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
 
 ## Prerequisites
 
-- Arkavo binary built with KAS feature: `cargo build --features kas`
+- Arkavo binary built with KAS feature: `cargo build -p arkavo --features kas`
 - `curl` and `jq` installed
 - OpenClaw installed (optional; demo uses simulated output if not present)
 
@@ -103,9 +103,10 @@ curl -X POST http://localhost:8360 \
     "jsonrpc":"2.0","id":2,
     "method":"message/send",
     "params":{
-      "message":{
-        "role":"user",
-        "parts":[{"text":"Explain TDF encryption"}]
+      "request":{
+        "message":{
+          "parts":[{"type":"text","content":"Explain TDF encryption"}]
+        }
       }
     }
   }'

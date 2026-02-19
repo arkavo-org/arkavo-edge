@@ -72,7 +72,7 @@ echo ""
 
 START_TIME=$(python3 -c 'import time; print(int(time.time() * 1000))')
 
-# Build JSON-RPC request
+# Build JSON-RPC request (jsonrpsee maps named params, so message/send expects params.request)
 REQUEST=$(jq -n \
     --arg task "$TASK_TEXT" \
     '{
@@ -80,9 +80,10 @@ REQUEST=$(jq -n \
         id: 2,
         method: "message/send",
         params: {
-            message: {
-                role: "user",
-                parts: [{ text: $task }]
+            request: {
+                message: {
+                    parts: [{ type: "text", content: $task }]
+                }
             }
         }
     }')
@@ -109,12 +110,9 @@ if echo "$RESPONSE" | jq -e '.error' >/dev/null 2>&1; then
     ERROR_CODE=$(echo "$RESPONSE" | jq -r '.error.code // -1')
     prefix_arkavo "Task blocked: ${ERROR_MSG} (code: ${ERROR_CODE})"
 else
-    RESULT=$(echo "$RESPONSE" | jq -r '.result // empty')
-    if [ -n "$RESULT" ]; then
-        echo "$RESULT" | jq . 2>/dev/null || echo "$RESULT"
-    else
-        echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
-    fi
+    TASK_ID=$(echo "$RESPONSE" | jq -r '.result.task_id // "unknown"')
+    STATUS=$(echo "$RESPONSE" | jq -r '.result.status // "unknown"')
+    prefix_arkavo "Task ${TASK_ID}: ${STATUS}"
 fi
 
 echo ""
@@ -135,10 +133,8 @@ if echo "$RESPONSE" | jq -e '.error.code == -32001' >/dev/null 2>&1; then
 fi
 prefix_security "Preflight  : ${PREFLIGHT_STATUS}"
 
-# Budget tracking
-BUDGET_USED=$(echo "$RESPONSE" | jq -r '.result.metadata.budget_used // "0.000"' 2>/dev/null)
-BUDGET_REMAINING=$(echo "$RESPONSE" | jq -r '.result.metadata.budget_remaining // "1.000"' 2>/dev/null)
-prefix_security "Budget     : \$${BUDGET_USED} used / \$${BUDGET_REMAINING} remaining"
+# Budget tracking (session cap enforced by BudgetTracker)
+prefix_security "Budget     : \$1.00 session cap (local model = \$0.00 per request)"
 
 # Model
 prefix_security "Model      : ministral-3b (local, \$0.00)"

@@ -3,7 +3,7 @@
 BINARY ?= ../../target/debug/arkavo
 
 build:
-	cargo build --features kas --manifest-path ../../Cargo.toml
+	cargo build -p arkavo --features kas --manifest-path ../../Cargo.toml
 
 demo: build launch
 	./demo.sh

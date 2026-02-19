@@ -20,7 +20,7 @@ echo ""
 # Check binary
 if [ ! -f "$BINARY" ]; then
     echo -e "${RED}Error: Arkavo binary not found${NC}"
-    echo "Build with: cargo build --features kas"
+    echo "Build with: cargo build -p arkavo --features kas"
     exit 1
 fi
 
