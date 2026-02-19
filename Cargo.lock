@@ -1390,6 +1390,7 @@ dependencies = [
  "bs58",
  "chrono",
  "clap",
+ "criterion",
  "crossbeam-queue",
  "dashmap",
  "futures",

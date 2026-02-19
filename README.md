@@ -38,7 +38,7 @@ That's it. No configuration files, no setup. Agents auto-discover via mDNS and f
 
 ## Why Arkavo?
 - **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, auto-discovery.
-- **Fast:** ≤ 2ms agent-to-agent latency on commodity hardware.
+- **Fast:** Low-latency agent-to-agent communication. Run `cargo bench -p arkavo-protocol --bench a2a_latency` to measure.
 - **Visual:** See live agent communication flows in real-time.
 
 ## Features
