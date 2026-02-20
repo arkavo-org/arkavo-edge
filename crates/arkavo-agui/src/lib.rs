@@ -22,6 +22,7 @@ pub mod health_monitor;
 pub mod mdns_impl;
 pub mod renderer;
 pub mod roi_metrics;
+pub mod security_handler;
 pub mod streaming;
 pub mod timeout_handler;
 pub mod types;

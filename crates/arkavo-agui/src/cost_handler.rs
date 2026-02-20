@@ -7,6 +7,7 @@ use tokio::sync::{RwLock, mpsc};
 pub struct CostHandler {
     orchestrator: Option<Arc<RwLock<CostOrchestrator>>>,
     event_tx: Option<mpsc::Sender<AgUiEvent>>,
+    budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
 }
 
 impl Default for CostHandler {
@@ -20,7 +21,12 @@ impl CostHandler {
         Self {
             orchestrator: None,
             event_tx: None,
+            budget_manager: None,
         }
+    }
+
+    pub fn set_budget_manager(&mut self, manager: Arc<arkavo_budget::BudgetManager>) {
+        self.budget_manager = Some(manager);
     }
 
     pub fn with_orchestrator(
@@ -110,11 +116,21 @@ impl CostHandler {
         let routing_metrics = orch_guard.get_routing_metrics().await;
         let orch_metrics = orch_guard.get_orchestrator_metrics().await;
 
+        // Query actual budget limits and spending from the budget manager
+        let (session_limit, session_spent) = if let Some(ref manager) = self.budget_manager {
+            let config = manager.get_config().await;
+            let tracker = manager.tracker();
+            let status = tracker.get_status().await;
+            (config.limits.session_limit, status.session_spent)
+        } else {
+            (None, arkavo_budget::TokenCost::ZERO)
+        };
+
         let dashboard = ROICalculator::calculate_dashboard(
             &routing_metrics,
             &orch_metrics,
-            None,
-            arkavo_budget::TokenCost::ZERO,
+            session_limit,
+            session_spent,
         );
 
         Ok(dashboard)

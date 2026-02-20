@@ -151,7 +151,7 @@ fn build_allow_circuit(num_inputs: usize) -> Graph {
     }
 }
 
-/// AGENTS.md configuration with preflight policies
+/// AGENTS.md configuration with preflight, budget, and KAS policies
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
     /// Agent name
@@ -160,6 +160,33 @@ pub struct AgentConfig {
     /// Preflight policies
     #[serde(default)]
     pub preflight: Option<PreflightConfig>,
+    /// Budget enforcement
+    #[serde(default)]
+    pub budget: Option<BudgetYamlConfig>,
+    /// KAS (Key Access Service) for TDF encryption
+    #[serde(default)]
+    pub kas: Option<KasYamlConfig>,
+}
+
+/// Budget section in AGENTS.md YAML frontmatter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetYamlConfig {
+    /// Maximum token cost per session in dollars
+    pub max_cost_per_session: Option<f64>,
+    /// Maximum token cost per day in dollars
+    pub max_cost_per_day: Option<f64>,
+}
+
+/// KAS section in AGENTS.md YAML frontmatter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KasYamlConfig {
+    /// Whether KAS is enabled
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// Key identifier
+    pub key_id: Option<String>,
+    /// Cryptographic algorithm (e.g., "ec:secp256r1")
+    pub algorithm: Option<String>,
 }
 
 /// Preflight section in AGENTS.md
@@ -276,6 +303,106 @@ pub fn load_policies_from_agents_md(
     );
 
     Ok(moderator)
+}
+
+/// Load full agent config from AGENTS.md (includes preflight, budget, KAS)
+///
+/// Searches for AGENTS.md in the current directory and parent directories.
+/// Returns default config if no AGENTS.md is found.
+pub fn load_agent_config() -> Result<AgentConfig, Box<dyn std::error::Error>> {
+    let mut current = std::env::current_dir()?;
+
+    loop {
+        let agents_md = current.join("AGENTS.md");
+        if agents_md.exists() {
+            return load_agent_config_from_agents_md(&agents_md);
+        }
+
+        if !current.pop() {
+            break;
+        }
+    }
+
+    tracing::debug!("No AGENTS.md found, using default agent config");
+    Ok(AgentConfig::default())
+}
+
+/// Load full agent config from a specific AGENTS.md file
+pub fn load_agent_config_from_agents_md(
+    path: &Path,
+) -> Result<AgentConfig, Box<dyn std::error::Error>> {
+    if !path.exists() {
+        tracing::debug!(
+            path = %path.display(),
+            "AGENTS.md not found, using default agent config"
+        );
+        return Ok(AgentConfig::default());
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let yaml_content = extract_yaml_from_markdown(&content);
+    let config: AgentConfig = serde_yaml::from_str(&yaml_content).unwrap_or_default();
+
+    tracing::info!(
+        path = %path.display(),
+        has_preflight = config.preflight.is_some(),
+        has_budget = config.budget.is_some(),
+        has_kas = config.kas.is_some(),
+        "Loaded agent config from AGENTS.md"
+    );
+
+    Ok(config)
+}
+
+/// Build a PreflightModerator from a PreflightConfig
+pub fn build_moderator_from_config(config: &PreflightConfig) -> PreflightModerator {
+    let moderator = PreflightModerator::new();
+
+    for policy in &config.policies {
+        if !policy.enabled {
+            tracing::debug!(policy_id = %policy.id, "Skipping disabled policy");
+            continue;
+        }
+
+        let features: Vec<PreflightFeature> = policy
+            .features
+            .iter()
+            .filter_map(|f| {
+                let parsed = parse_feature(f);
+                if parsed.is_none() {
+                    tracing::warn!(
+                        policy_id = %policy.id,
+                        feature = %f,
+                        "Unknown feature, skipping"
+                    );
+                }
+                parsed
+            })
+            .collect();
+
+        if features.is_empty() {
+            tracing::warn!(
+                policy_id = %policy.id,
+                "Policy has no valid features, skipping"
+            );
+            continue;
+        }
+
+        let graph = match policy.action {
+            PolicyAction::Block => build_block_circuit(features.len()),
+            PolicyAction::Allow => build_allow_circuit(features.len()),
+        };
+
+        moderator.register_graph(PolicyId::new(&policy.id), graph, features);
+
+        tracing::info!(
+            policy_id = %policy.id,
+            action = ?policy.action,
+            "Loaded preflight policy from config"
+        );
+    }
+
+    moderator
 }
 
 /// Extract YAML content from markdown file
@@ -408,6 +535,139 @@ preflight:
         let path = PathBuf::from("/nonexistent/path/AGENTS.md");
         let moderator = load_policies_from_agents_md(&path).unwrap();
         assert!(moderator.is_empty());
+    }
+
+    #[test]
+    fn test_load_agents_md_with_budget() {
+        let mut file = NamedTempFile::with_suffix(".md").unwrap();
+        writeln!(
+            file,
+            r#"---
+name: budget-agent
+budget:
+  max_cost_per_session: 5.0
+  max_cost_per_day: 25.0
+---
+"#
+        )
+        .unwrap();
+
+        let path = file.path().to_path_buf();
+        let config = load_agent_config_from_agents_md(&path).unwrap();
+        assert_eq!(config.name.as_deref(), Some("budget-agent"));
+        let budget = config.budget.unwrap();
+        assert!((budget.max_cost_per_session.unwrap() - 5.0).abs() < f64::EPSILON);
+        assert!((budget.max_cost_per_day.unwrap() - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_load_agents_md_with_kas() {
+        let mut file = NamedTempFile::with_suffix(".md").unwrap();
+        writeln!(
+            file,
+            r#"---
+name: encrypted-agent
+kas:
+  enabled: true
+  key_id: my-key-42
+  algorithm: ec:secp256r1
+---
+"#
+        )
+        .unwrap();
+
+        let path = file.path().to_path_buf();
+        let config = load_agent_config_from_agents_md(&path).unwrap();
+        assert_eq!(config.name.as_deref(), Some("encrypted-agent"));
+        let kas = config.kas.unwrap();
+        assert!(kas.enabled);
+        assert_eq!(kas.key_id.as_deref(), Some("my-key-42"));
+        assert_eq!(kas.algorithm.as_deref(), Some("ec:secp256r1"));
+    }
+
+    #[test]
+    fn test_load_agents_md_full_config() {
+        let mut file = NamedTempFile::with_suffix(".md").unwrap();
+        writeln!(
+            file,
+            r#"---
+name: full-agent
+preflight:
+  policies:
+    - id: block_pii
+      features:
+        - InputContainsPII
+      action: block
+budget:
+  max_cost_per_session: 10.0
+  max_cost_per_day: 50.0
+kas:
+  enabled: true
+  key_id: kas-key-1
+  algorithm: ec:secp256r1
+---
+"#
+        )
+        .unwrap();
+
+        let path = file.path().to_path_buf();
+        let config = load_agent_config_from_agents_md(&path).unwrap();
+        assert!(config.preflight.is_some());
+        assert!(config.budget.is_some());
+        assert!(config.kas.is_some());
+
+        // Verify preflight can build a moderator
+        let moderator = build_moderator_from_config(config.preflight.as_ref().unwrap());
+        assert_eq!(moderator.len(), 1);
+    }
+
+    #[test]
+    fn test_build_moderator_from_config() {
+        let config = PreflightConfig {
+            policies: vec![
+                PolicyConfig {
+                    id: "block_pii".to_string(),
+                    features: vec!["InputContainsPII".to_string()],
+                    action: PolicyAction::Block,
+                    description: None,
+                    enabled: true,
+                },
+                PolicyConfig {
+                    id: "disabled".to_string(),
+                    features: vec!["InputContainsURL".to_string()],
+                    action: PolicyAction::Block,
+                    description: None,
+                    enabled: false,
+                },
+            ],
+        };
+
+        let moderator = build_moderator_from_config(&config);
+        assert_eq!(moderator.len(), 1);
+
+        let result = moderator.check("My SSN is 123-45-6789");
+        assert!(result.is_blocked());
+    }
+
+    #[test]
+    fn test_kas_disabled_by_default() {
+        let mut file = NamedTempFile::with_suffix(".md").unwrap();
+        writeln!(
+            file,
+            r#"---
+name: minimal-kas
+kas:
+  enabled: false
+---
+"#
+        )
+        .unwrap();
+
+        let path = file.path().to_path_buf();
+        let config = load_agent_config_from_agents_md(&path).unwrap();
+        let kas = config.kas.unwrap();
+        assert!(!kas.enabled);
+        assert!(kas.key_id.is_none());
     }
 
     #[test]

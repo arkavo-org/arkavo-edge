@@ -3,6 +3,7 @@ use crate::budget_handler::BudgetHandler;
 use crate::cost_handler::CostHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
+use crate::security_handler::SecurityHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
@@ -30,6 +31,7 @@ pub struct AppState {
     pub agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     pub budget_handler: Arc<RwLock<BudgetHandler>>,
     pub cost_handler: Arc<RwLock<CostHandler>>,
+    pub security_handler: Arc<RwLock<SecurityHandler>>,
     pub initial_prompt: Arc<RwLock<Option<String>>>,
     pub dataflow_handler: Arc<DataflowHandler>,
     pub telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
@@ -46,6 +48,7 @@ pub struct AgUiGateway {
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
+    security_handler: Arc<RwLock<SecurityHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
     initial_prompt: Option<String>,
 }
@@ -62,6 +65,7 @@ impl AgUiGateway {
             telemetry_rx: Some(telemetry_rx),
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
+            security_handler: Arc::new(RwLock::new(SecurityHandler::new())),
             debug_handler: None,
             initial_prompt: None,
         }
@@ -83,9 +87,15 @@ impl AgUiGateway {
         let discovered_agents = self.discovered_agents.clone();
         let agents_clone = discovered_agents.clone();
 
-        // Initialize budget handler
+        // Initialize security handler from AGENTS.md config
         {
-            let budget_config = arkavo_budget::BudgetConfig::default();
+            let mut sec = self.security_handler.write().await;
+            sec.configure_from_agents_md();
+        }
+
+        // Initialize budget handler with AGENTS.md config
+        {
+            let budget_config = load_budget_config_from_agents_md();
             let (budget_tx, mut budget_rx) = mpsc::channel::<AgUiEvent>(100);
             let mut handler = self.budget_handler.write().await;
             handler.initialize(budget_config, budget_tx).await?;
@@ -208,12 +218,23 @@ impl AgUiGateway {
             .expect("telemetry_rx already taken");
 
         let rate_limiter = Arc::new(IpRateLimiter::new(RateLimitConfig::default()));
+        // Wire budget manager into cost handler for ROI dashboard
+        let cost_handler = {
+            let mut handler = CostHandler::new();
+            let budget_guard = self.budget_handler.read().await;
+            if let Some(manager) = budget_guard.manager() {
+                handler.set_budget_manager(manager);
+            }
+            Arc::new(RwLock::new(handler))
+        };
+
         let state = AppState {
             connections: self.connections.clone(),
             agents: discovered_agents.clone(),
             agent_connections: self.agent_connections.clone(),
             budget_handler: self.budget_handler.clone(),
-            cost_handler: Arc::new(RwLock::new(CostHandler::new())),
+            cost_handler,
+            security_handler: self.security_handler.clone(),
             initial_prompt: Arc::new(RwLock::new(self.initial_prompt.clone())),
             dataflow_handler: self.dataflow_handler.clone(),
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
@@ -221,12 +242,8 @@ impl AgUiGateway {
             rate_limiter: rate_limiter.clone(),
         };
 
-        let app = Router::new()
-            .route("/", get(crate::gateway_static::index_handler))
-            .route(
-                "/static/*path",
-                get(crate::gateway_static::static_file_handler),
-            )
+        // Rate-limited API routes
+        let api_routes = Router::new()
             .route("/ws", get(crate::gateway_ws::websocket_handler))
             .route(
                 "/agent/:id",
@@ -244,11 +261,22 @@ impl AgUiGateway {
                 "/debug",
                 get(crate::gateway_status::debug_websocket_handler),
             )
-            .layer(crate::gateway_security::security_headers())
             .layer(middleware::from_fn(
                 arkavo_protocol::ip_rate_limit_middleware,
             ))
-            .layer(axum::Extension(rate_limiter))
+            .layer(axum::Extension(rate_limiter));
+
+        // Static file routes (no rate limiting — browser loads many files at once)
+        let static_routes = Router::new()
+            .route("/", get(crate::gateway_static::index_handler))
+            .route(
+                "/static/*path",
+                get(crate::gateway_static::static_file_handler),
+            );
+
+        let app = static_routes
+            .merge(api_routes)
+            .layer(crate::gateway_security::security_headers())
             .with_state(state);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
@@ -262,5 +290,31 @@ impl AgUiGateway {
         )
         .await?;
         Ok(())
+    }
+}
+
+/// Load budget config from AGENTS.md, falling back to defaults
+fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
+    let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
+
+    match agent_config.budget {
+        Some(ref budget_yaml) => {
+            let mut config = arkavo_budget::BudgetConfig::default();
+            if let Some(session_cost) = budget_yaml.max_cost_per_session {
+                config.limits.session_limit =
+                    Some(arkavo_budget::TokenCost::from_dollars(session_cost));
+            }
+            if let Some(daily_cost) = budget_yaml.max_cost_per_day {
+                config.limits.daily_limit =
+                    Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
+            }
+            tracing::info!(
+                "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",
+                budget_yaml.max_cost_per_session,
+                budget_yaml.max_cost_per_day
+            );
+            config
+        }
+        None => arkavo_budget::BudgetConfig::default(),
     }
 }

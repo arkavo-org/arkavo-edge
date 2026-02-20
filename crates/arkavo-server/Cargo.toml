@@ -82,7 +82,8 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
-arkavo-router = { path = "../arkavo-router" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-router = { path = "../arkavo-router", features = ["advisor-persistence"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
@@ -99,7 +100,7 @@ demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
-kas = ["dep:arkavo-tdf"]
+kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 
 [dev-dependencies]

@@ -1,0 +1,4 @@
+logs/
+results/*.md
+!results/.gitkeep
+.agent_pids

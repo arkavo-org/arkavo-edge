@@ -19,6 +19,7 @@ pub async fn static_file_handler(AxumPath(path): AxumPath<String>) -> Response {
         "js/panels/telemetry.js" => serve_js(include_str!("../static/js/panels/telemetry.js")),
         "js/panels/budget.js" => serve_js(include_str!("../static/js/panels/budget.js")),
         "js/panels/health.js" => serve_js(include_str!("../static/js/panels/health.js")),
+        "js/panels/security.js" => serve_js(include_str!("../static/js/panels/security.js")),
         "js/panels/router.js" => serve_js(include_str!("../static/js/panels/router.js")),
         "js/chat.js" => serve_js(include_str!("../static/js/chat.js")),
         "js/app.js" => serve_js(include_str!("../static/js/app.js")),

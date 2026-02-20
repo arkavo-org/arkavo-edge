@@ -21,10 +21,12 @@ pub async fn websocket_handler(
             state.budget_handler,
             state.initial_prompt,
             state.cost_handler,
+            state.security_handler,
         )
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_websocket(
     ws: WebSocket,
     connections: Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
@@ -33,6 +35,7 @@ async fn handle_websocket(
     budget_handler: Arc<RwLock<BudgetHandler>>,
     initial_prompt: Arc<RwLock<Option<String>>>,
     cost_handler: Arc<RwLock<crate::cost_handler::CostHandler>>,
+    security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -82,6 +85,7 @@ async fn handle_websocket(
             &agent_connections,
             &budget_handler,
             &cost_handler,
+            &security_handler,
             &tx,
         )
         .await
@@ -103,6 +107,7 @@ async fn handle_websocket(
                         &agent_connections,
                         &budget_handler,
                         &cost_handler,
+                        &security_handler,
                         &tx,
                     )
                     .await
@@ -147,6 +152,7 @@ async fn dispatch_event(
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     budget_handler: &Arc<RwLock<BudgetHandler>>,
     cost_handler: &Arc<RwLock<crate::cost_handler::CostHandler>>,
+    security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -203,6 +209,13 @@ async fn dispatch_event(
         | AgUiEvent::GetROIDashboard
         | AgUiEvent::GetCostPrediction { .. } => {
             cost_handler.read().await.handle_event(&event, tx).await?;
+        }
+        AgUiEvent::GetSecurityStatus => {
+            security_handler
+                .read()
+                .await
+                .handle_event(&event, tx)
+                .await?;
         }
         AgUiEvent::GetAgentConfig {
             agent_id,

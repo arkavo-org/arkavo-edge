@@ -58,6 +58,10 @@ pub struct A2aServer {
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
     /// Handle for the well-known HTTP server
     well_known_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    /// Budget manager loaded from AGENTS.md config
+    budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
+    /// Cached AGENTS.md config to avoid repeated file reads
+    agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
 }
 
 impl A2aServer {
@@ -90,6 +94,10 @@ impl A2aServer {
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
             well_known_handle: Arc::new(tokio::sync::RwLock::new(None)),
+            budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
+            agent_config: Arc::new(tokio::sync::RwLock::new(
+                arkavo_router::load_agent_config().unwrap_or_default(),
+            )),
         }
     }
 
@@ -442,6 +450,9 @@ impl A2aServer {
             info!("Initializing router for dynamic model selection");
         }
 
+        // Use cached AGENTS.md config for preflight, budget, KAS
+        let agent_config = self.agent_config.read().await.clone();
+
         let router_result = if offline_mode {
             arkavo_router::Router::new_offline().await
         } else {
@@ -450,12 +461,75 @@ impl A2aServer {
 
         match router_result {
             Ok(router) => {
+                // Wire preflight from AGENTS.md
+                let router = if let Some(ref pf) = agent_config.preflight {
+                    let moderator = arkavo_router::build_moderator_from_config(pf);
+                    let count = moderator.len();
+                    if count > 0 {
+                        info!("Preflight: {} policies loaded from AGENTS.md", count);
+                    }
+                    router.with_preflight(moderator)
+                } else {
+                    router
+                };
+
+                // Attach advisor persistence (SQLite-backed learned adjustments)
+                let router = match Self::create_advisor_store().await {
+                    Some(store) => {
+                        info!("✓ Advisor persistence enabled");
+                        router.with_advisor_store(store).await
+                    }
+                    None => router,
+                };
+
+                // Wire TDF audit encryption from AGENTS.md
+                #[cfg(feature = "kas")]
+                let router = if let Some(ref kas) = agent_config.kas {
+                    if kas.enabled {
+                        // Each agent is its own KAS -- use local endpoint, not cloud SaaS
+                        let local_kas_url =
+                            format!("http://{}:{}", self.config.bind_address, self.config.port);
+                        let tdf_config = arkavo_router::TdfAuditConfig {
+                            kas_url: local_kas_url,
+                            agent_id: agent_config
+                                .name
+                                .clone()
+                                .unwrap_or_else(|| "unknown-agent".to_string()),
+                            key_id: kas
+                                .key_id
+                                .clone()
+                                .unwrap_or_else(|| "kas-key-1".to_string()),
+                        };
+                        let encryptor = arkavo_router::MessageEncryptor::new(tdf_config);
+                        info!("TDF audit encryption enabled for cloud-bound prompts");
+                        router.with_tdf_encryptor(encryptor)
+                    } else {
+                        router
+                    }
+                } else {
+                    router
+                };
+
                 let router = Arc::new(router);
                 *self.router.write().await = Some(router.clone());
                 info!(
                     "✓ Successfully initialized router (offline={})",
                     offline_mode
                 );
+
+                // Wire budget from AGENTS.md
+                if let Some(ref budget_yaml) = agent_config.budget {
+                    let budget_config = build_budget_config(budget_yaml);
+                    match arkavo_budget::BudgetManager::new(budget_config).await {
+                        Ok(manager) => {
+                            *self.budget_manager.write().await = Some(Arc::new(manager));
+                            info!("Budget enforcement loaded from AGENTS.md");
+                        }
+                        Err(e) => {
+                            warn!("Failed to initialize budget manager: {}", e);
+                        }
+                    }
+                }
 
                 // Set router on learning bus for LLM-based synthesis
                 if let Some(bus) = self.learning_bus.read().await.as_ref() {
@@ -465,6 +539,23 @@ impl A2aServer {
             }
             Err(e) => {
                 error!(error = %e, "✗ Failed to initialize router");
+            }
+        }
+    }
+
+    /// Create the advisor state store alongside the workspace memory DB.
+    async fn create_advisor_store() -> Option<arkavo_memory::AdvisorStateStore> {
+        let db_path = if std::path::Path::new(".arkavo").exists() {
+            std::path::PathBuf::from(".arkavo/memory_server/advisor.db")
+        } else {
+            return None;
+        };
+
+        match arkavo_memory::AdvisorStateStore::new(&db_path).await {
+            Ok(store) => Some(store),
+            Err(e) => {
+                tracing::warn!("Advisor persistence unavailable: {e}");
+                None
             }
         }
     }
@@ -877,8 +968,18 @@ impl A2aServer {
             router,
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
+            budget_manager: self.budget_manager.read().await.clone(),
             #[cfg(feature = "kas")]
-            kas_handler: Some(Arc::new(KasA2aHandler::with_defaults())),
+            kas_handler: {
+                let agent_config = self.agent_config.read().await;
+                let kas_config = agent_config.kas.clone().map(|k| arkavo_tdf::KasA2aConfig {
+                    key_id: k.key_id.unwrap_or_else(|| "kas-key-1".to_string()),
+                    algorithm: k.algorithm.unwrap_or_else(|| "ec:secp256r1".to_string()),
+                });
+                let mut handler = KasA2aHandler::new(vec![], kas_config.unwrap_or_default());
+                handler.set_keypair(arkavo_tdf::KasKeypair::generate());
+                Some(Arc::new(handler))
+            },
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -988,4 +1089,18 @@ impl A2aServer {
 
         info!("GPU resources released");
     }
+}
+
+/// Convert AGENTS.md budget YAML to BudgetConfig for the budget manager
+fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget::BudgetConfig {
+    let mut config = arkavo_budget::BudgetConfig::default();
+
+    if let Some(session_cost) = yaml.max_cost_per_session {
+        config.limits.session_limit = Some(arkavo_budget::TokenCost::from_dollars(session_cost));
+    }
+    if let Some(daily_cost) = yaml.max_cost_per_day {
+        config.limits.daily_limit = Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
+    }
+
+    config
 }

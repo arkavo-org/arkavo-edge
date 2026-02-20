@@ -261,6 +261,8 @@ pub struct A2aRpcImpl {
     pub(crate) learning_bus: Option<Arc<LearningBus>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     pub(crate) public_key: Option<String>,
+    /// Budget manager for cost enforcement
+    pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -410,6 +412,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.conductor,
             self.router.as_ref(),
             self.learning_bus.as_ref(),
+            self.budget_manager.as_ref(),
             request,
         )
         .await
@@ -452,6 +455,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.metrics,
             &self.rate_limiter,
             &self.chat_sessions,
+            self.router.as_ref(),
             session_id,
             message,
         )

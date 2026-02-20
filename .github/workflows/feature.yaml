@@ -223,6 +223,9 @@ jobs:
             cargo test --locked -p arkavo-workspace
             cargo test --locked -p arkavo-session --lib
             cargo test --locked -p arkavo-critic
+            # Compile-check benchmarks to prevent bitrot (no execution)
+            cargo bench --locked -p arkavo-protocol --no-run
+            cargo bench --locked -p arkavo-critic --no-run
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
           elif [ "${{ matrix.group }}" = "routing" ]; then

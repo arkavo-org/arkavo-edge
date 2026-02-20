@@ -27,6 +27,7 @@ pub async fn handle_message_send(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: Option<&Arc<arkavo_router::Router>>,
     learning_bus: Option<&Arc<LearningBus>>,
+    budget_manager: Option<&Arc<arkavo_budget::BudgetManager>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -48,6 +49,58 @@ pub async fn handle_message_send(
         })
         .collect::<Vec<_>>()
         .join("\n");
+
+    // Preflight moderation: reject policy-violating requests before task submission
+    if let Some(router) = router
+        && let Some(arkavo_router::ModerationResult::Block {
+            policy_id, reason, ..
+        }) = router.check_preflight(&task_content)
+    {
+        info!(policy_id = %policy_id, "Message blocked by preflight policy");
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32001,
+            format!("Blocked by policy: {policy_id}"),
+            Some(reason),
+        ));
+    }
+
+    // Budget enforcement: reject if session budget exhausted
+    if let Some(manager) = budget_manager {
+        let tracker = manager.tracker();
+        let status = tracker.get_status().await;
+        let config = manager.get_config().await;
+        if let Some(limit) = config.limits.session_limit
+            && status.session_spent >= limit
+        {
+            info!("Message rejected: session budget exhausted");
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                -32002,
+                "Session budget exhausted",
+                Some(format!(
+                    "Spent ${:.2} of ${:.2} session limit",
+                    status.session_spent.as_dollars(),
+                    limit.as_dollars()
+                )),
+            ));
+        }
+        if let Some(limit) = config.limits.daily_limit
+            && status.daily_spent >= limit
+        {
+            info!("Message rejected: daily budget exhausted");
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                -32002,
+                "Daily budget exhausted",
+                Some(format!(
+                    "Spent ${:.2} of ${:.2} daily limit",
+                    status.daily_spent.as_dollars(),
+                    limit.as_dollars()
+                )),
+            ));
+        }
+    }
 
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {

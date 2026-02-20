@@ -62,6 +62,20 @@ impl ModelChoice {
         }
     }
 
+    /// Model family identifier for prompt advisor lookups
+    pub fn family(&self) -> &str {
+        match self {
+            Self::LocalQwen3 => "qwen",
+            Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
+            Self::LocalGlm47Flash => "glm",
+            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "gemma",
+            Self::LocalDeepSeekCoder | Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
+            Self::GeminiFlash | Self::GeminiPro => "google",
+            Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
+            Self::KimiK2 => "kimi",
+        }
+    }
+
     pub fn is_local(&self) -> bool {
         matches!(
             self,
@@ -366,6 +380,20 @@ mod tests {
         assert!(ModelChoice::DeepSeekV32Speciale.is_deepseek());
         assert!(ModelChoice::DeepSeekV32.is_cloud());
         assert!(!ModelChoice::DeepSeekV32.is_local());
+    }
+
+    #[test]
+    fn test_model_choice_family() {
+        assert_eq!(ModelChoice::LocalQwen3.family(), "qwen");
+        assert_eq!(ModelChoice::LocalMinistral3B.family(), "mistral");
+        assert_eq!(ModelChoice::LocalMinistral8B.family(), "mistral");
+        assert_eq!(ModelChoice::LocalGlm47Flash.family(), "glm");
+        assert_eq!(ModelChoice::LocalGemma270M.family(), "gemma");
+        assert_eq!(ModelChoice::LocalGemma4B.family(), "gemma");
+        assert_eq!(ModelChoice::GeminiFlash.family(), "google");
+        assert_eq!(ModelChoice::ClaudeSonnet.family(), "anthropic");
+        assert_eq!(ModelChoice::DeepSeekV32.family(), "deepseek");
+        assert_eq!(ModelChoice::KimiK2.family(), "kimi");
     }
 
     #[test]

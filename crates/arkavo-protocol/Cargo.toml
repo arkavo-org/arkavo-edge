@@ -132,6 +132,12 @@ tempfile = { workspace = true }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+# For benchmarks
+criterion = { workspace = true }
+
+[[bench]]
+name = "a2a_latency"
+harness = false
 
 [[bin]]
 name = "export-schema"

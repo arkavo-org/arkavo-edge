@@ -1,3 +1,4 @@
+pub mod advisor_state;
 pub mod embeddings;
 pub mod error;
 pub mod event_store;
@@ -11,6 +12,7 @@ pub mod plan_state;
 pub mod storage;
 pub mod workspace_config;
 
+pub use advisor_state::{AdvisorStateStore, PersistedAdjustment};
 pub use ledger::ContextLedger;
 pub use models::{AgentConversation, AgentDomain, CreateMemoryRequest, Memory, SearchResult};
 pub use orchestrator_state::{
