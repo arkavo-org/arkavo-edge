@@ -1,7 +1,7 @@
 use crate::agent_connection::AgentConnection;
 use crate::budget_handler::BudgetHandler;
 use crate::types::*;
-use crate::{gateway_config, gateway_events};
+use crate::{gateway_config, gateway_events, gateway_routing};
 use arkavo_router::learning::LearningModule;
 use axum::extract::ws::{Message, WebSocket};
 use axum::{extract::State, response::Response};
@@ -26,6 +26,7 @@ pub async fn websocket_handler(
             state.task_store,
             state.learning_module,
             state.routing_history,
+            state.lesson_tx,
         )
     })
 }
@@ -43,6 +44,7 @@ async fn handle_websocket(
     task_store: Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     learning_module: Arc<RwLock<LearningModule>>,
     routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
+    lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -96,6 +98,7 @@ async fn handle_websocket(
             &task_store,
             &learning_module,
             &routing_history,
+            &lesson_tx,
             &tx,
         )
         .await
@@ -121,6 +124,7 @@ async fn handle_websocket(
                         &task_store,
                         &learning_module,
                         &routing_history,
+                        &lesson_tx,
                         &tx,
                     )
                     .await
@@ -169,6 +173,7 @@ async fn dispatch_event(
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
+    lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -295,12 +300,13 @@ async fn dispatch_event(
                 connections,
                 learning_module,
                 routing_history,
+                lesson_tx,
                 tx,
             )
             .await?;
         }
         AgUiEvent::RequestLearningStatus => {
-            gateway_events::handle_request_learning_status(learning_module, routing_history, tx)
+            gateway_routing::handle_request_learning_status(learning_module, routing_history, tx)
                 .await?;
         }
         _ => {

@@ -396,6 +396,8 @@ pub enum AgUiEvent {
         selected_agent: String,
         #[serde(rename = "wasExploration")]
         was_exploration: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
         timestamp: String,
     },
     RoutingOutcome {
@@ -484,6 +486,17 @@ pub struct RoutingCandidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryStat {
+    pub category: String,
+    pub alpha: f64,
+    #[serde(rename = "betaParam")]
+    pub beta_param: f64,
+    #[serde(rename = "expectedValue")]
+    pub expected_value: f64,
+    pub observations: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentLearningInfo {
     #[serde(rename = "agentId")]
     pub agent_id: String,
@@ -499,6 +512,12 @@ pub struct AgentLearningInfo {
     #[serde(rename = "successRate")]
     pub success_rate: f64,
     pub probationary: bool,
+    #[serde(
+        rename = "categoryStats",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub category_stats: Vec<CategoryStat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -519,6 +538,8 @@ pub struct RoutingRecord {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub quality_issues: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub timestamp: String,
 }
 

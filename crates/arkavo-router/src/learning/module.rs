@@ -322,6 +322,32 @@ impl LearningModule {
         (best_format, best_score)
     }
 
+    /// Get per-category statistics for an agent
+    ///
+    /// Returns `(category, alpha, beta, expected_value, observations)` tuples,
+    /// filtering out `"format:"` keys which are used for tool format learning.
+    pub async fn get_category_stats(&self, agent_id: &str) -> Vec<(String, f64, f64, f64, u64)> {
+        let agents = self.agents.read().await;
+        let Some(utility) = agents.get(agent_id) else {
+            return vec![];
+        };
+
+        utility
+            .category_priors
+            .iter()
+            .filter(|(k, _)| !k.starts_with("format:"))
+            .map(|(k, prior)| {
+                (
+                    k.clone(),
+                    prior.alpha,
+                    prior.beta,
+                    prior.expected_value(),
+                    prior.total_observations() as u64,
+                )
+            })
+            .collect()
+    }
+
     /// Get format statistics for an agent
     ///
     /// Returns a map of format -> (expected_value, observations) for analysis.

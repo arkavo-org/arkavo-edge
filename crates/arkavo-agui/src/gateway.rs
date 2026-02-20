@@ -36,6 +36,7 @@ pub struct TrackedTask {
     pub result: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub task_category: Option<String>,
 }
 
 #[derive(Clone)]
@@ -54,6 +55,7 @@ pub struct AppState {
     pub task_store: Arc<RwLock<HashMap<String, TrackedTask>>>,
     pub learning_module: Arc<RwLock<LearningModule>>,
     pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
+    pub lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
 }
 
 pub struct AgUiGateway {
@@ -260,6 +262,7 @@ impl AgUiGateway {
             task_store: Arc::new(RwLock::new(HashMap::new())),
             learning_module: Arc::new(RwLock::new(LearningModule::new())),
             routing_history: Arc::new(RwLock::new(VecDeque::new())),
+            lesson_tx: None,
         };
 
         // Rate-limited API routes

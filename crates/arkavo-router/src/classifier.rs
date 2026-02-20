@@ -226,6 +226,65 @@ impl Classification {
     }
 }
 
+/// Rule-based task classification from description keywords (no LLM required)
+pub fn classify_task_keywords(description: &str) -> TaskCategory {
+    let lower = description.to_lowercase();
+
+    if lower.contains("react")
+        || lower.contains("vue")
+        || lower.contains("svelte")
+        || lower.contains("tailwind")
+        || lower.contains("component")
+        || lower.contains("frontend")
+        || lower.contains("ui")
+    {
+        TaskCategory::FrontendUI
+    } else if lower.contains("api")
+        || lower.contains("endpoint")
+        || lower.contains("backend")
+        || lower.contains("database")
+        || lower.contains("auth")
+    {
+        TaskCategory::BackendAPI
+    } else if lower.contains("search")
+        || lower.contains("find")
+        || lower.contains("grep")
+        || lower.contains("locate")
+    {
+        TaskCategory::CodeSearch
+    } else if lower.contains("security")
+        || lower.contains("vulnerability")
+        || lower.contains("audit")
+        || lower.contains("scan")
+    {
+        TaskCategory::SecurityScan
+    } else if lower.contains("test")
+        || lower.contains("jest")
+        || lower.contains("pytest")
+        || lower.contains("unit")
+    {
+        TaskCategory::TestGeneration
+    } else if lower.contains("document")
+        || lower.contains("readme")
+        || lower.contains("comment")
+        || lower.contains("docs")
+    {
+        TaskCategory::Documentation
+    } else if lower.contains("refactor") || lower.contains("cleanup") || lower.contains("optimize")
+    {
+        TaskCategory::Refactoring
+    } else if lower.contains("screenshot")
+        || lower.contains("image")
+        || lower.contains("vision")
+        || lower.contains("analyze ui")
+        || lower.contains("ui from")
+    {
+        TaskCategory::VisionAnalysis
+    } else {
+        TaskCategory::General
+    }
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct TaskClassifier {
     provider: Arc<Mutex<LlamaCppProvider>>,
@@ -700,6 +759,35 @@ mod tests {
     fn test_token_estimation() {
         let estimate = TaskCategory::FrontendUI.estimated_tokens();
         assert!(estimate.output > estimate.input);
+    }
+
+    #[test]
+    fn test_classify_task_keywords() {
+        assert_eq!(
+            classify_task_keywords("Build a React component with Tailwind CSS"),
+            TaskCategory::FrontendUI
+        );
+        assert_eq!(
+            classify_task_keywords("Create a REST API endpoint for authentication"),
+            TaskCategory::BackendAPI
+        );
+        assert_eq!(
+            classify_task_keywords("Scan for security vulnerabilities"),
+            TaskCategory::SecurityScan
+        );
+        assert_eq!(
+            classify_task_keywords("Generate unit tests for the parser"),
+            TaskCategory::TestGeneration
+        );
+        assert_eq!(
+            classify_task_keywords("Write documentation for the module"),
+            TaskCategory::Documentation
+        );
+        assert_eq!(
+            classify_task_keywords("Refactor the error handling"),
+            TaskCategory::Refactoring
+        );
+        assert_eq!(classify_task_keywords("Hello world"), TaskCategory::General);
     }
 
     #[tokio::test]

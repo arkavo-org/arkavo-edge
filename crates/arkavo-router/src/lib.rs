@@ -30,7 +30,7 @@ pub use architect::{
     ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
     ComplexityScorer, Subtask, SubtaskResult,
 };
-pub use classifier::{TaskCategory, TaskClassifier};
+pub use classifier::{TaskCategory, TaskClassifier, classify_task_keywords};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, PlannerTier, RoutingDecision};
 pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};

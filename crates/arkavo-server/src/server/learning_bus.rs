@@ -11,7 +11,9 @@ use arkavo_gossip::{
     sign_lesson_announcement,
 };
 use arkavo_router::Router;
-use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
+use arkavo_router::learning::{
+    AgentContribution, BurstFeedback, Episode, LearningModule, Lesson, ToolCallFormat,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
@@ -518,6 +520,83 @@ impl LearningBus {
     pub async fn set_model_name(&self, model_name: String) {
         let mut observer = self.tool_pattern_observer.write().await;
         observer.set_model_name(model_name);
+    }
+
+    /// Start receiving lessons from the gateway and propagating via gossip
+    ///
+    /// Signs each lesson as an announcement and sends to the gossip network.
+    pub fn start_lesson_receiver(&self, mut rx: mpsc::Receiver<Lesson>) {
+        let gossip = self.gossip.clone();
+        let keypair = self.keypair.clone();
+        let gossip_out_tx = self.gossip_out_tx.clone();
+        let learning = self.learning.clone();
+        let swarm_id = self.swarm_id.clone();
+
+        tokio::spawn(async move {
+            while let Some(lesson) = rx.recv().await {
+                tracing::info!(
+                    "Learning bus received lesson: {} (category={})",
+                    lesson.pattern.condition,
+                    lesson.category
+                );
+
+                // Apply locally: inject negative feedback for the originator+category
+                Self::apply_lesson_to_local_routing(&learning, &lesson).await;
+
+                // Create and sign announcement for gossip propagation
+                let mut announcement = LessonAnnouncement::new(
+                    lesson.id,
+                    lesson.compute_hash(),
+                    lesson.agent_id.clone(),
+                    swarm_id.clone(),
+                    lesson.category.clone(),
+                    lesson.confidence,
+                );
+
+                if let Err(e) = sign_lesson_announcement(&mut announcement, &keypair) {
+                    tracing::warn!("Failed to sign lesson announcement: {}", e);
+                    continue;
+                }
+
+                let g = gossip.read().await;
+                let peers = g.select_propagation_peers(None).await;
+                drop(g);
+
+                let peer_count = peers.len();
+                for peer_id in peers {
+                    let _ = gossip_out_tx
+                        .send((peer_id, GossipMessage::LessonAnnounce(announcement.clone())));
+                }
+
+                tracing::info!(
+                    "Propagated lesson {} to {} peers",
+                    announcement.lesson_id,
+                    peer_count
+                );
+            }
+        });
+    }
+
+    /// Apply a received gossip lesson to local routing by injecting synthetic feedback
+    async fn apply_lesson_to_local_routing(
+        learning: &Arc<RwLock<LearningModule>>,
+        lesson: &Lesson,
+    ) {
+        let feedback = BurstFeedback::failure(Uuid::new_v4(), lesson.category.clone(), 0)
+            .with_quality(1.0 - lesson.confidence);
+
+        learning
+            .write()
+            .await
+            .immediate_update(&lesson.agent_id, &feedback)
+            .await;
+
+        tracing::debug!(
+            "Applied lesson locally: agent={}, category={}, confidence={}",
+            lesson.agent_id,
+            lesson.category,
+            lesson.confidence
+        );
     }
 
     /// Check if there are patterns ready for lesson synthesis

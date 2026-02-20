@@ -5,6 +5,22 @@
 //! scores back into Thompson Sampling so the mesh learns to route around
 //! agents that produce poor results.
 
+/// Structured failure mode detected by the judge
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailureMode {
+    Empty,
+    Generic,
+    TooShort,
+    ToolError {
+        error_count: usize,
+        total_count: usize,
+    },
+    HallucinatedTool {
+        count: usize,
+    },
+    OutputLoop,
+}
+
 /// Quality judgment for a task result
 #[derive(Debug, Clone)]
 pub struct TaskJudgment {
@@ -12,6 +28,8 @@ pub struct TaskJudgment {
     pub quality_score: f64,
     /// Human-readable issues detected
     pub issues: Vec<String>,
+    /// Machine-actionable failure modes
+    pub failure_modes: Vec<FailureMode>,
 }
 
 /// Judge a task result against its description
@@ -25,12 +43,14 @@ pub struct TaskJudgment {
 pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
     let mut score = 1.0;
     let mut issues = Vec::new();
+    let mut failure_modes = Vec::new();
 
     // Empty response = total failure
     if result.is_empty() || result.trim().is_empty() {
         return TaskJudgment {
             quality_score: 0.0,
             issues: vec!["Empty response".into()],
+            failure_modes: vec![FailureMode::Empty],
         };
     }
 
@@ -40,6 +60,7 @@ pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
     // Generic non-answer detection
     if is_generic_response(&lower) {
         issues.push("Generic response with no substantive content".into());
+        failure_modes.push(FailureMode::Generic);
         score -= 0.8;
     }
 
@@ -51,6 +72,7 @@ pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
             "Response too short: {} words for a {}-word task",
             result_words, task_words
         ));
+        failure_modes.push(FailureMode::TooShort);
         score -= 0.3;
     }
 
@@ -64,6 +86,10 @@ pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
             tool_total,
             error_ratio * 100.0
         ));
+        failure_modes.push(FailureMode::ToolError {
+            error_count: tool_errors,
+            total_count: tool_total,
+        });
         // Scale penalty by error ratio: all failures = -0.6, half = -0.3
         score -= error_ratio * 0.6;
     }
@@ -75,18 +101,23 @@ pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
             "{} tool hallucinations (non-existent tools called)",
             hallucination_count
         ));
+        failure_modes.push(FailureMode::HallucinatedTool {
+            count: hallucination_count,
+        });
         score -= (hallucination_count as f64 * 0.1).min(0.4);
     }
 
     // Output loop detection
     if has_repetition(trimmed) {
         issues.push("Output loop detected (repeated content)".into());
+        failure_modes.push(FailureMode::OutputLoop);
         score -= 0.4;
     }
 
     TaskJudgment {
         quality_score: score.clamp(0.0, 1.0),
         issues,
+        failure_modes,
     }
 }
 
@@ -191,6 +222,7 @@ mod tests {
         let j = judge("Analyze main.rs", "");
         assert_eq!(j.quality_score, 0.0);
         assert!(j.issues[0].contains("Empty"));
+        assert_eq!(j.failure_modes, vec![FailureMode::Empty]);
     }
 
     #[test]
@@ -205,6 +237,7 @@ mod tests {
             j.quality_score
         );
         assert!(j.issues.iter().any(|i| i.contains("Generic")));
+        assert!(j.failure_modes.contains(&FailureMode::Generic));
     }
 
     #[test]
@@ -228,6 +261,7 @@ mod tests {
             j.quality_score
         );
         assert!(j.issues.is_empty());
+        assert!(j.failure_modes.is_empty());
     }
 
     #[test]
@@ -240,6 +274,13 @@ mod tests {
             j.quality_score
         );
         assert!(j.issues.iter().any(|i| i.contains("tool calls failed")));
+        assert!(j.failure_modes.iter().any(|f| matches!(
+            f,
+            FailureMode::ToolError {
+                error_count: 2,
+                total_count: 3
+            }
+        )));
     }
 
     #[test]
@@ -266,6 +307,7 @@ mod tests {
         let j = judge("What is the meaning of life?", result);
         assert!(j.quality_score < 0.7);
         assert!(j.issues.iter().any(|i| i.contains("loop")));
+        assert!(j.failure_modes.contains(&FailureMode::OutputLoop));
     }
 
     #[test]
@@ -287,6 +329,7 @@ mod tests {
         let j = judge("What is 2+2?", "The result of 2+2 is 4.");
         assert_eq!(j.quality_score, 1.0);
         assert!(j.issues.is_empty());
+        assert!(j.failure_modes.is_empty());
     }
 
     #[test]
