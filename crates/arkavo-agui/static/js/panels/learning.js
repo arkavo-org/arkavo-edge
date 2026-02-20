@@ -47,6 +47,7 @@ function handleRoutingEvaluation(event) {
         selectedAgent: sel,
         wasExploration: event.wasExploration,
         outcome: null,
+        category: event.category || null,
         timestamp: event.timestamp
     });
     while (AppState.routingHistory.length > MAX_ROUTING_HISTORY) {
@@ -295,6 +296,12 @@ function renderTimeline() {
             qualityBadge = ' <span class="quality-badge ' + qClass + '">' + (r.qualityScore * 100).toFixed(0) + '%</span>';
         }
 
+        // Category badge
+        var categoryBadge = '';
+        if (r.category) {
+            categoryBadge = ' <span class="category-badge">' + escapeHtml(shortCategory(r.category)) + '</span>';
+        }
+
         // Quality issues tooltip
         var issueText = '';
         if (r.qualityIssues && r.qualityIssues.length > 0) {
@@ -304,6 +311,7 @@ function renderTimeline() {
         html += '<div class="route-entry"' + issueText + '>' +
             '<span class="' + dotClass + '"></span>' +
             '<span class="route-agent">' + escapeHtml(shortAgentName(r.selectedAgent)) + '</span>' +
+            categoryBadge +
             qualityBadge +
             '<span class="route-time">' + formatTime(r.timestamp) + '</span>' +
             '</div>';
@@ -350,6 +358,22 @@ function renderBetaCard(agentId) {
 
     var color = successRateColor(a.successRate || 0);
 
+    // Per-category stats table
+    var catHtml = '';
+    var catStats = a.categoryStats || [];
+    if (catStats.length > 0) {
+        catHtml = '<div class="category-breakdown"><div class="category-breakdown-title">Per-Category</div>' +
+            '<table class="category-table"><thead><tr><th>Category</th><th>E[V]</th><th>Obs</th></tr></thead><tbody>';
+        for (var ci = 0; ci < catStats.length; ci++) {
+            var cs = catStats[ci];
+            var evColor = cs.expectedValue > 0.7 ? 'var(--success)' : (cs.expectedValue > 0.4 ? 'var(--warning)' : 'var(--error)');
+            catHtml += '<tr><td>' + escapeHtml(shortCategory(cs.category)) + '</td>' +
+                '<td style="color:' + evColor + '">' + cs.expectedValue.toFixed(3) + '</td>' +
+                '<td>' + cs.observations + '</td></tr>';
+        }
+        catHtml += '</tbody></table></div>';
+    }
+
     return '<div class="beta-card">' +
         '<div class="beta-card-title">' + escapeHtml(shortAgentName(agentId)) + '</div>' +
         '<svg class="beta-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
@@ -366,6 +390,7 @@ function renderBetaCard(agentId) {
             '<div class="beta-stat"><span class="beta-stat-label">Success</span><span class="beta-stat-value">' + ((a.successRate || 0) * 100).toFixed(0) + '%</span></div>' +
             (a.probationary ? '<div class="beta-probation">Probationary</div>' : '<div class="beta-graduated">Graduated</div>') +
         '</div>' +
+        catHtml +
     '</div>';
 }
 
@@ -425,4 +450,22 @@ function shortAgentName(id) {
     var name = id.replace(/^arkavo-/, '').replace(/-agent$/, '');
     if (name.length > 16) name = name.substring(0, 14) + '..';
     return name;
+}
+
+function shortCategory(cat) {
+    if (!cat) return '';
+    // Convert snake_case to short display name
+    var map = {
+        'frontend_ui': 'frontend',
+        'backend_api': 'backend',
+        'code_search': 'search',
+        'security_scan': 'security',
+        'test_generation': 'tests',
+        'documentation': 'docs',
+        'refactoring': 'refactor',
+        'code_generation': 'codegen',
+        'vision_analysis': 'vision',
+        'general': 'general'
+    };
+    return map[cat] || cat;
 }
