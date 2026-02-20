@@ -301,9 +301,10 @@ fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
                 config.limits.daily_limit =
                     Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
             }
-            println!(
+            tracing::info!(
                 "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",
-                budget_yaml.max_cost_per_session, budget_yaml.max_cost_per_day
+                budget_yaml.max_cost_per_session,
+                budget_yaml.max_cost_per_day
             );
             config
         }

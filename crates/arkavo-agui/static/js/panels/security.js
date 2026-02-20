@@ -41,34 +41,34 @@ function renderSecurity() {
     // KAS Status card
     html += '<div class="section-title">KAS Status</div>';
     html += '<div class="stats-grid">';
-    html += renderStatCard('KAS', ss.kas_enabled ? 'Enabled' : 'Disabled', '');
-    html += renderStatCard('Agent', ss.agent_id || 'unknown', '');
-    html += renderStatCard('Key ID', ss.key_id || 'none', '');
-    html += renderStatCard('Algorithm', ss.encryption_algorithm || 'N/A', '');
+    html += renderStatCard('KAS', ss.kasEnabled ? 'Enabled' : 'Disabled', '');
+    html += renderStatCard('Agent', ss.agentId || 'unknown', '');
+    html += renderStatCard('Key ID', ss.keyId || 'none', '');
+    html += renderStatCard('Algorithm', ss.encryptionAlgorithm || 'N/A', '');
     html += '</div>';
 
     // KAS URL
-    if (ss.kas_url) {
+    if (ss.kasUrl) {
         html += '<div class="sys-info">';
         html += '<div class="sys-info-label">KAS Endpoint</div>';
-        html += '<div class="sys-info-value mono">' + escapeHtml(ss.kas_url) + '</div>';
+        html += '<div class="sys-info-value mono">' + escapeHtml(ss.kasUrl) + '</div>';
         html += '</div>';
     }
 
     // Encryption posture
     html += '<div class="section-title">Encryption Posture</div>';
-    var auditCount = ss.audit_count || 0;
+    var auditCount = ss.auditCount || 0;
     html += '<div class="stats-grid">';
     html += renderStatCard('Audit Count', auditCount, '');
-    html += renderStatCard('Preflight', ss.preflight_enabled ? 'Active' : 'Inactive', '');
-    html += renderStatCard('Policies', ss.preflight_policies || 0, '');
+    html += renderStatCard('Preflight', ss.preflightEnabled ? 'Active' : 'Inactive', '');
+    html += renderStatCard('Policies', ss.preflightPolicies || 0, '');
     html += '</div>';
 
     // Posture indicator
-    var postureClass = ss.kas_enabled ? 'healthy' : 'warning';
-    var postureText = ss.kas_enabled ? 'TDF encryption active' : 'KAS not enabled';
-    if (ss.preflight_enabled) {
-        postureText += ' | Preflight active (' + ss.preflight_policies + ' policies)';
+    var postureClass = ss.kasEnabled ? 'healthy' : 'warning';
+    var postureText = ss.kasEnabled ? 'TDF encryption active' : 'KAS not enabled';
+    if (ss.preflightEnabled) {
+        postureText += ' | Preflight active (' + ss.preflightPolicies + ' policies)';
     }
     html += '<div class="budget-alert ' + postureClass + '">' + escapeHtml(postureText) + '</div>';
 
@@ -84,10 +84,10 @@ function renderSecurity() {
             html += '<tr>' +
                 '<td>' + formatTime(entry.timestamp) + '</td>' +
                 '<td>' + escapeHtml(entry.model) + '</td>' +
-                '<td class="mono">' + entry.message_index + '</td>' +
+                '<td class="mono">' + entry.messageIndex + '</td>' +
                 '<td class="mono">' + escapeHtml(entry.algorithm) + '</td>' +
-                '<td class="mono">' + formatBytes(entry.ciphertext_bytes) + '</td>' +
-                '<td>' + (entry.policy_attributes ? entry.policy_attributes.length : 0) + '</td>' +
+                '<td class="mono">' + formatBytes(entry.ciphertextBytes) + '</td>' +
+                '<td>' + (entry.policyAttributes ? entry.policyAttributes.length : 0) + '</td>' +
                 '</tr>';
         });
         html += '</tbody></table>';
@@ -104,10 +104,10 @@ function renderSecurity() {
         AppState.policyLog.forEach(function(entry) {
             html += '<tr>' +
                 '<td>' + formatTime(entry.timestamp) + '</td>' +
-                '<td>' + escapeHtml(entry.policy_id) + '</td>' +
+                '<td>' + escapeHtml(entry.policyId) + '</td>' +
                 '<td>' + escapeHtml(entry.action) + '</td>' +
                 '<td>' + escapeHtml(entry.target) + '</td>' +
-                '<td class="mono">' + entry.attribute_count + '</td>' +
+                '<td class="mono">' + entry.attributeCount + '</td>' +
                 '</tr>';
         });
         html += '</tbody></table>';

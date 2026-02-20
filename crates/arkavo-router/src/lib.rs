@@ -43,7 +43,7 @@ pub use orchestrator::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
-    BudgetYamlConfig, KasYamlConfig, ModerationResult, PolicyId, PreflightFeature,
+    AgentConfig, BudgetYamlConfig, KasYamlConfig, ModerationResult, PolicyId, PreflightFeature,
     PreflightModerator, build_moderator_from_config, load_agent_config,
 };
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};

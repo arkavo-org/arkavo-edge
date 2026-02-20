@@ -60,6 +60,8 @@ pub struct A2aServer {
     well_known_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Budget manager loaded from AGENTS.md config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
+    /// Cached AGENTS.md config to avoid repeated file reads
+    agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
 }
 
 impl A2aServer {
@@ -93,6 +95,9 @@ impl A2aServer {
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
             well_known_handle: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
+            agent_config: Arc::new(tokio::sync::RwLock::new(
+                arkavo_router::load_agent_config().unwrap_or_default(),
+            )),
         }
     }
 
@@ -445,8 +450,8 @@ impl A2aServer {
             info!("Initializing router for dynamic model selection");
         }
 
-        // Load AGENTS.md config for preflight, budget, KAS
-        let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
+        // Use cached AGENTS.md config for preflight, budget, KAS
+        let agent_config = self.agent_config.read().await.clone();
 
         let router_result = if offline_mode {
             arkavo_router::Router::new_offline().await
@@ -966,8 +971,8 @@ impl A2aServer {
             budget_manager: self.budget_manager.read().await.clone(),
             #[cfg(feature = "kas")]
             kas_handler: {
-                let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
-                let kas_config = agent_config.kas.map(|k| arkavo_tdf::KasA2aConfig {
+                let agent_config = self.agent_config.read().await;
+                let kas_config = agent_config.kas.clone().map(|k| arkavo_tdf::KasA2aConfig {
                     key_id: k.key_id.unwrap_or_else(|| "kas-key-1".to_string()),
                     algorithm: k.algorithm.unwrap_or_else(|| "ec:secp256r1".to_string()),
                 });

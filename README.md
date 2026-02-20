@@ -36,6 +36,10 @@ arkavo ui
 
 That's it. No configuration files, no setup. Agents auto-discover via mDNS and form a mesh.
 
+## Coming from OpenClaw?
+
+See the [migration guide](docs/openclaw-migration-guide.md) for a full comparison: what you gain (budget controls, TDF encryption, PII preflight, offline operation), what's different, and step-by-step setup.
+
 ## Why Arkavo?
 - **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, auto-discovery.
 - **Fast:** Low-latency agent-to-agent communication. Run `cargo bench -p arkavo-protocol --bench a2a_latency` to measure.
