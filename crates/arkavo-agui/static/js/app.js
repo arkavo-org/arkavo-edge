@@ -50,6 +50,15 @@ function routeEvent(event) {
         case 'costMetricsUpdate':
             handleCostMetricsUpdate(event);
             break;
+        case 'securityStatusUpdate':
+            handleSecurityStatusUpdate(event);
+            break;
+        case 'tdfAuditEvent':
+            handleTdfAuditEvent(event);
+            break;
+        case 'policyApplied':
+            handlePolicyApplied(event);
+            break;
         case 'modelSelected':
             handleModelSelected(event);
             break;
@@ -91,6 +100,8 @@ function switchView(viewId) {
     // Request data for panels that need it
     if (viewId === 'budget') {
         requestBudgetData();
+    } else if (viewId === 'security') {
+        requestSecurityData();
     }
 }
 

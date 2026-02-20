@@ -3,6 +3,7 @@ use crate::budget_handler::BudgetHandler;
 use crate::cost_handler::CostHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
+use crate::security_handler::SecurityHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
@@ -30,6 +31,7 @@ pub struct AppState {
     pub agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     pub budget_handler: Arc<RwLock<BudgetHandler>>,
     pub cost_handler: Arc<RwLock<CostHandler>>,
+    pub security_handler: Arc<RwLock<SecurityHandler>>,
     pub initial_prompt: Arc<RwLock<Option<String>>>,
     pub dataflow_handler: Arc<DataflowHandler>,
     pub telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
@@ -46,6 +48,7 @@ pub struct AgUiGateway {
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
+    security_handler: Arc<RwLock<SecurityHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
     initial_prompt: Option<String>,
 }
@@ -62,6 +65,7 @@ impl AgUiGateway {
             telemetry_rx: Some(telemetry_rx),
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
+            security_handler: Arc::new(RwLock::new(SecurityHandler::new())),
             debug_handler: None,
             initial_prompt: None,
         }
@@ -82,6 +86,12 @@ impl AgUiGateway {
     pub async fn start(mut self) -> Result<(), Box<dyn std::error::Error>> {
         let discovered_agents = self.discovered_agents.clone();
         let agents_clone = discovered_agents.clone();
+
+        // Initialize security handler from AGENTS.md config
+        {
+            let mut sec = self.security_handler.write().await;
+            sec.configure_from_agents_md();
+        }
 
         // Initialize budget handler with AGENTS.md config
         {
@@ -224,6 +234,7 @@ impl AgUiGateway {
             agent_connections: self.agent_connections.clone(),
             budget_handler: self.budget_handler.clone(),
             cost_handler,
+            security_handler: self.security_handler.clone(),
             initial_prompt: Arc::new(RwLock::new(self.initial_prompt.clone())),
             dataflow_handler: self.dataflow_handler.clone(),
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),

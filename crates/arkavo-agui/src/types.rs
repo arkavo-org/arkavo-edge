@@ -334,6 +334,50 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Security / TDF audit events
+    GetSecurityStatus,
+    SecurityStatusUpdate {
+        #[serde(rename = "kasEnabled")]
+        kas_enabled: bool,
+        #[serde(rename = "kasUrl")]
+        kas_url: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "keyId")]
+        key_id: String,
+        #[serde(rename = "encryptionAlgorithm")]
+        encryption_algorithm: String,
+        #[serde(rename = "auditCount")]
+        audit_count: u64,
+        #[serde(rename = "preflightEnabled")]
+        preflight_enabled: bool,
+        #[serde(rename = "preflightPolicies")]
+        preflight_policies: u32,
+        timestamp: String,
+    },
+    TdfAuditEvent {
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
+        model: String,
+        #[serde(rename = "manifestVersion")]
+        manifest_version: String,
+        algorithm: String,
+        #[serde(rename = "ciphertextBytes")]
+        ciphertext_bytes: usize,
+        #[serde(rename = "policyAttributes")]
+        policy_attributes: Vec<String>,
+        timestamp: String,
+    },
+    PolicyApplied {
+        #[serde(rename = "policyId")]
+        policy_id: String,
+        action: String,
+        target: String,
+        #[serde(rename = "attributeCount")]
+        attribute_count: usize,
+        timestamp: String,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
