@@ -15,6 +15,7 @@ pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod preflight;
+pub mod prompt_advisor;
 pub mod response;
 pub mod rlm;
 pub mod selector;
@@ -40,6 +41,7 @@ pub use orchestrator::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
+pub use prompt_advisor::{AdvisorIssue, PromptAdvice, PromptAdvisor};
 pub use rlm::{
     RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
     RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,
@@ -75,6 +77,7 @@ pub struct Router {
     connectivity: Arc<ConnectivityChecker>,
     offline_mode: bool,
     preflight: Option<Arc<preflight::PreflightModerator>>,
+    advisor: Arc<PromptAdvisor>,
     #[cfg(feature = "critic")]
     critic: Option<Arc<arkavo_critic::CriticPipeline>>,
 }
@@ -88,6 +91,7 @@ impl Router {
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: false,
             preflight: None,
+            advisor: Arc::new(PromptAdvisor::new()),
             #[cfg(feature = "critic")]
             critic: None,
         })
@@ -101,6 +105,7 @@ impl Router {
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: true,
             preflight: None,
+            advisor: Arc::new(PromptAdvisor::new()),
             #[cfg(feature = "critic")]
             critic: None,
         })
@@ -125,6 +130,11 @@ impl Router {
     pub fn with_critic(mut self, pipeline: arkavo_critic::CriticPipeline) -> Self {
         self.critic = Some(Arc::new(pipeline));
         self
+    }
+
+    /// Get a reference to the prompt advisor
+    pub fn advisor(&self) -> &PromptAdvisor {
+        &self.advisor
     }
 
     pub fn set_offline_mode(&mut self, offline: bool) {
@@ -385,6 +395,7 @@ impl Router {
 
         // Estimate input tokens for context-aware tool discovery
         let input_tokens = Self::estimate_tokens(task_description);
+        let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
 
         for attempt in 0..MAX_RETRIES {
             let tools_json = match tool_registry {
@@ -409,14 +420,39 @@ impl Router {
                 None => None,
             };
 
+            // Inject prompt advisor system message if applicable
+            let (advised_messages, advice_labels) = if let Some(advice) = self
+                .advisor
+                .advise(current_decision.recommended_model.family(), is_simple)
+            {
+                tracing::debug!(
+                    adjustments = ?advice.applied_labels,
+                    "Prompt advisor: {} adjustments for {}",
+                    advice.applied_labels.len(),
+                    current_decision.recommended_model.family()
+                );
+                let mut msgs = vec![Message::system(advice.system_text)];
+                msgs.extend(messages.clone());
+                (msgs, Some(advice.applied_labels))
+            } else {
+                (messages.clone(), None)
+            };
+
             let provider = self
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
             let mut response = provider
-                .complete_with_tools(messages.clone(), tools_json, None)
+                .complete_with_tools(advised_messages, tools_json, None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Observe response for style issues (auto-learn)
+            self.advisor.observe(
+                current_decision.recommended_model.family(),
+                task_description,
+                &response.content,
+            );
 
             // Post-process tool calls to handle language identifier fences (e.g., ```python)
             // The provider may return these as tool calls, but they contain nested tool calls
@@ -454,6 +490,10 @@ impl Router {
                         MAX_RETRIES,
                         validation_error
                     );
+
+                    if let Some(ref labels) = advice_labels {
+                        self.advisor.record_feedback(labels, false);
+                    }
 
                     if attempt + 1 < MAX_RETRIES
                         && let Some(upgraded) =
@@ -493,6 +533,10 @@ impl Router {
                                     judgment.issue_type,
                                     judgment.reason.as_deref().unwrap_or("No reason provided")
                                 );
+
+                                if let Some(ref labels) = advice_labels {
+                                    self.advisor.record_feedback(labels, false);
+                                }
 
                                 // Special handling for MissingToolUse
                                 if judgment.issue_type == IssueType::MissingToolUse
@@ -535,6 +579,9 @@ impl Router {
                 }
             }
 
+            if let Some(ref labels) = advice_labels {
+                self.advisor.record_feedback(labels, true);
+            }
             return Ok(response);
         }
 
@@ -625,6 +672,7 @@ impl Router {
 
         // Estimate input tokens for context-aware tool discovery
         let input_tokens = Self::estimate_tokens(task_description);
+        let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
 
         for attempt in 0..max_retries {
             let tools_json = match tool_registry {
@@ -654,14 +702,39 @@ impl Router {
                 None => None,
             };
 
+            // Inject prompt advisor system message if applicable
+            let (advised_messages, advice_labels) = if let Some(advice) = self
+                .advisor
+                .advise(current_decision.recommended_model.family(), is_simple)
+            {
+                tracing::debug!(
+                    adjustments = ?advice.applied_labels,
+                    "Prompt advisor: {} adjustments for {}",
+                    advice.applied_labels.len(),
+                    current_decision.recommended_model.family()
+                );
+                let mut msgs = vec![Message::system(advice.system_text)];
+                msgs.extend(messages.clone());
+                (msgs, Some(advice.applied_labels))
+            } else {
+                (messages.clone(), None)
+            };
+
             let provider = self
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
             let mut response = provider
-                .complete_with_tools(messages.clone(), tools_json.clone(), None)
+                .complete_with_tools(advised_messages, tools_json.clone(), None)
                 .await
                 .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+            // Observe response for style issues (auto-learn)
+            self.advisor.observe(
+                current_decision.recommended_model.family(),
+                task_description,
+                &response.content,
+            );
 
             // For local models, extract tool calls from text content if structured tool_calls is empty
             if response.tool_calls.is_empty() && !response.content.is_empty() {
@@ -718,6 +791,10 @@ impl Router {
                         validation_error
                     );
 
+                    if let Some(ref labels) = advice_labels {
+                        self.advisor.record_feedback(labels, false);
+                    }
+
                     if attempt + 1 < max_retries {
                         current_decision.recommended_model =
                             self.upgrade_model(&current_decision.recommended_model);
@@ -752,6 +829,10 @@ impl Router {
                                     judgment.issue_type,
                                     judgment.reason.as_deref().unwrap_or("No reason provided")
                                 );
+
+                                if let Some(ref labels) = advice_labels {
+                                    self.advisor.record_feedback(labels, false);
+                                }
 
                                 // Special handling for MissingToolUse - search for tools instead of upgrading model
                                 if judgment.issue_type == IssueType::MissingToolUse
@@ -795,6 +876,9 @@ impl Router {
                 }
             }
 
+            if let Some(ref labels) = advice_labels {
+                self.advisor.record_feedback(labels, true);
+            }
             return Ok(response);
         }
 
@@ -985,6 +1069,7 @@ impl Router {
             connectivity: self.connectivity.clone(),
             offline_mode: self.offline_mode,
             preflight: self.preflight.clone(),
+            advisor: self.advisor.clone(),
             #[cfg(feature = "critic")]
             critic: self.critic.clone(),
         })
