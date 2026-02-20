@@ -1,5 +1,7 @@
 "use strict";
 
+var _pendingTaskDescription = null;
+
 function handleTaskList(event) {
     AppState.tasks = {};
     if (event.tasks) {
@@ -13,10 +15,11 @@ function handleTaskList(event) {
 function handleTaskSubmitted(event) {
     var task = {
         id: event.taskId || event.task_id,
-        description: 'New task',
+        description: _pendingTaskDescription || 'Task',
         status: event.status || 'submitted',
         created_at: event.timestamp
     };
+    _pendingTaskDescription = null;
     AppState.tasks[task.id] = task;
     AppState.taskCount++;
     renderTasks();
@@ -109,6 +112,7 @@ function submitTask() {
         alert('Please enter a task description');
         return;
     }
+    _pendingTaskDescription = description;
     wsSend({ type: 'submitTask', description: description });
     hideAddTaskModal();
 }

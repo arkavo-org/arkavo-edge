@@ -22,6 +22,7 @@ pub async fn websocket_handler(
             state.initial_prompt,
             state.cost_handler,
             state.security_handler,
+            state.task_store,
         )
     })
 }
@@ -36,6 +37,7 @@ async fn handle_websocket(
     initial_prompt: Arc<RwLock<Option<String>>>,
     cost_handler: Arc<RwLock<crate::cost_handler::CostHandler>>,
     security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    task_store: Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -86,6 +88,7 @@ async fn handle_websocket(
             &budget_handler,
             &cost_handler,
             &security_handler,
+            &task_store,
             &tx,
         )
         .await
@@ -108,6 +111,7 @@ async fn handle_websocket(
                         &budget_handler,
                         &cost_handler,
                         &security_handler,
+                        &task_store,
                         &tx,
                     )
                     .await
@@ -153,6 +157,7 @@ async fn dispatch_event(
     budget_handler: &Arc<RwLock<BudgetHandler>>,
     cost_handler: &Arc<RwLock<crate::cost_handler::CostHandler>>,
     security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -264,13 +269,22 @@ async fn dispatch_event(
             gateway_events::handle_apply_part(part_id, session_id, connections, tx).await?;
         }
         AgUiEvent::RequestTaskList => {
-            gateway_events::handle_request_task_list(session_id, connections, tx).await?;
+            gateway_events::handle_request_task_list(task_store, tx).await?;
         }
         AgUiEvent::SubmitTask {
             description,
-            target_agent: _,
+            target_agent,
         } => {
-            gateway_events::handle_submit_task(description, agents, connections, tx).await?;
+            gateway_events::handle_submit_task(
+                description,
+                target_agent,
+                agents,
+                agent_connections,
+                task_store,
+                connections,
+                tx,
+            )
+            .await?;
         }
         _ => {
             println!("AG-UI: Received event: {event:?}");

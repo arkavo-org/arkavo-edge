@@ -24,6 +24,19 @@ pub struct ConnectionInfo {
     pub current_prompt: Option<String>,
 }
 
+/// Tracks a task submitted via the UI and delegated to an agent
+#[derive(Debug, Clone)]
+pub struct TrackedTask {
+    pub id: String,
+    pub description: String,
+    pub target_agent: Option<String>,
+    pub status: String,
+    pub progress: Option<f32>,
+    pub result: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
@@ -37,6 +50,7 @@ pub struct AppState {
     pub telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
     pub debug_handler: Option<Arc<DebugHandler>>,
     pub rate_limiter: Arc<IpRateLimiter>,
+    pub task_store: Arc<RwLock<HashMap<String, TrackedTask>>>,
 }
 
 pub struct AgUiGateway {
@@ -240,6 +254,7 @@ impl AgUiGateway {
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
             debug_handler: self.debug_handler.clone(),
             rate_limiter: rate_limiter.clone(),
+            task_store: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // Rate-limited API routes
