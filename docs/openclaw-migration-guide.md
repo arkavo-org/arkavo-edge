@@ -23,13 +23,13 @@ Arkavo Edge has budget tracking built in. You set a ceiling, the system enforces
 | **Offline operation** | Requires internet. Cloud API failure = total failure | Local models work air-gapped on a Raspberry Pi |
 | **CVEs** | CVE-2026-25253 (CVSS 8.8): unauthenticated WebSocket RCE | Rust memory safety, no unauthenticated endpoints |
 | **Binary size** | Node.js ≥22 + npm dependency tree | < 60MB single binary, no runtime dependencies |
-| **Credential storage** | Plaintext JSON/Markdown files, targeted by infostealers | Software-encrypted credential vault (hardware attestation planned) |
+| **Credential storage** | Plaintext JSON/Markdown files, targeted by infostealers | AES-256-GCM encrypted credential vault with OS keychain integration (macOS Keychain, Linux SecretService, Windows Credential Manager) |
 
 ## What you're giving up (for now)
 
 Be honest with yourself about the tradeoffs:
 
-- **50+ messaging integrations.** OpenClaw connects to WhatsApp, Telegram, Discord, Signal, iMessage, Slack, and more out of the box. Arkavo currently supports direct chat (iOS app), web UI, and A2A protocol. If your primary use case was "AI assistant in my Telegram," you'll need to adapt your workflow.
+- **50+ messaging integrations.** OpenClaw connects to WhatsApp, Telegram, Discord, Signal, iMessage, Slack, and more out of the box. Arkavo supports direct chat (iOS app), web UI, A2A protocol, and social network publishing via ArkavoCreator (Twitch, YouTube, Reddit, Bluesky, Patreon, Micro.blog). If your primary use case was "AI assistant in my Telegram," you'll need to adapt your workflow — but if it was content creation and social publishing, ArkavoCreator covers that today.
 - **ClawHub skill marketplace.** OpenClaw has a large community-contributed skill ecosystem. Arkavo uses agent configurations (AGENTS.md with YAML frontmatter) and is building its own capability ecosystem, but it's earlier stage.
 - **The specific UX of OpenClaw's gateway model.** OpenClaw's always-on daemon with a web dashboard is polished. Arkavo's interface is different — native iOS app, CLI, and agent mesh. Some people will prefer it; some won't.
 
@@ -48,7 +48,7 @@ OpenClaw and Arkavo use different terminology for similar concepts. This table h
 | `openclaw.json` (config) | Agent YAML frontmatter + CLI flags | Arkavo configuration is per-agent rather than global |
 | ClawHub skills | Arkavo capabilities (KAS, preflight, A2A) | Arkavo's capabilities are built into the binary, not downloaded scripts |
 | `openclaw gateway start` | `./launch.sh` or `arkavo agent run --port 8360` | Arkavo is a single binary, no npm/Node.js required |
-| Channel integrations (Telegram, WhatsApp) | A2A protocol + iOS app | Arkavo uses A2A JSON-RPC for inter-agent communication |
+| Channel integrations (Telegram, WhatsApp) | A2A protocol + iOS app + ArkavoCreator | A2A JSON-RPC for agents; ArkavoCreator adds Twitch, YouTube, Reddit, Bluesky, Patreon, Micro.blog |
 | Model config in `openclaw.json` | `model:` field in AGENTS.md | Arkavo defaults to local models (ministral-3b via Ollama) |
 | No budget controls | `arkavo-budget` crate | Budget enforcement via `budget:` block in AGENTS.md |
 | No encryption | `arkavo-tdf` crate with KAS feature | TDF encryption via `kas:` block in AGENTS.md; each agent is its own KAS for local audit |
@@ -197,11 +197,15 @@ Preflight policies (PII blocking, shell injection blocking) are active by defaul
 
 ### "I used OpenClaw for email/calendar automation"
 
-This is where the tradeoff is real. OpenClaw's 50+ channel integrations include Gmail, Google Calendar, and similar services. Arkavo doesn't replicate this today. Your options:
+This is where the tradeoff is real. OpenClaw's 50+ channel integrations include Gmail, Google Calendar, and similar services. Arkavo doesn't replicate all of these today. Your options:
 
-1. **A2A bridge**: Use Arkavo's A2A protocol to connect to other agent systems that handle email/calendar. Your sensitive reasoning stays encrypted on Arkavo's side.
-2. **ArkavoCreator**: If your automation was content-focused (drafting, scheduling, publishing), ArkavoCreator with C2PA provenance may cover your needs.
-3. **Wait**: Messaging integrations are on the roadmap, and unlike OpenClaw, every channel Arkavo adds will be encrypted end-to-end.
+1. **ArkavoCreator**: A native macOS app for content creators that integrates directly with Arkavo Edge agents via A2A protocol and mDNS discovery. Supports streaming to Twitch and YouTube, social posting to Bluesky and Reddit, community management via Patreon, and micropublishing via Micro.blog. AI-powered tools (draft posts, generate titles, analyze content) run through your local Arkavo agent — your content never touches a third-party AI service unless you choose a cloud model.
+2. **A2A bridge**: Use Arkavo's A2A protocol to connect to other agent systems that handle email/calendar. Your sensitive reasoning stays encrypted on Arkavo's side.
+3. **Wait**: Additional messaging integrations are on the roadmap, and unlike OpenClaw, every channel Arkavo adds will be encrypted end-to-end.
+
+### "I used OpenClaw for social media content"
+
+ArkavoCreator is a native macOS screen recording and streaming app that discovers Arkavo Edge agents on your local network via mDNS. It connects to your agent over A2A protocol, giving you AI-powered content tools (draft social posts, generate stream titles with tags, write SEO-optimized video descriptions, analyze sentiment) that run through your local agent. Supports publishing to Twitch, YouTube, Reddit, Bluesky, Patreon, and Micro.blog — with C2PA provenance tracking on recordings.
 
 ### "I used OpenClaw on my phone via Telegram"
 
@@ -244,7 +248,7 @@ These aren't bolt-on features. They're architectural decisions that OpenClaw can
 
 **OpenClaw**: API keys, OAuth tokens, and service credentials stored in plaintext under `~/.openclaw/`. Security researchers have confirmed this directory structure is already targeted by commodity infostealers (RedLine, Lumma). Deleted keys were found in `.bak` files.
 
-**Arkavo**: Software-encrypted credential vault using AES-256-GCM. Hardware-backed key storage via platform secure enclaves is planned. Even today, credentials are encrypted at rest — not stored as plaintext JSON.
+**Arkavo**: Encrypted credential vault using AES-256-GCM with PBKDF2 key derivation (100,000 iterations). The master key is stored in the OS keychain (macOS Keychain, Linux SecretService, Windows Credential Manager) — not in a file. Each credential gets a unique random salt and nonce. TPM integration for hardware-attested key storage is planned.
 
 ### Network exposure
 
@@ -267,8 +271,8 @@ These aren't bolt-on features. They're architectural decisions that OpenClaw can
 ## What's coming
 
 - **KAS encrypted-in-transit mode**: Cloud-bound prompts are TDF-encrypted for local audit today (each agent is its own KAS). Sending only ciphertext to the provider (requiring a TDF-aware proxy) is next.
-- **Hardware-backed key storage**: Credentials are encrypted with software AES-256-GCM today. Platform secure enclave integration (Apple Keychain, TPM) is planned.
-- **Additional messaging integrations**: A2A protocol and iOS app today. More channels coming, each with end-to-end encryption.
+- **TPM hardware attestation**: OS keychain integration (macOS Keychain, Linux SecretService, Windows Credential Manager) is live today. TPM-backed key attestation for enterprise deployments is planned.
+- **Additional messaging integrations**: A2A protocol, iOS app, and ArkavoCreator (Twitch, YouTube, Reddit, Bluesky, Patreon, Micro.blog) today. More channels coming, each with end-to-end encryption.
 
 ## FAQ
 
