@@ -20,6 +20,8 @@ pub mod response;
 pub mod rlm;
 pub mod selector;
 pub mod stream;
+#[cfg(feature = "tdf-encrypt")]
+pub mod tdf_audit;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
@@ -40,7 +42,10 @@ pub use orchestrator::{
     ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
-pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
+pub use preflight::{
+    BudgetYamlConfig, KasYamlConfig, ModerationResult, PolicyId, PreflightFeature,
+    PreflightModerator, build_moderator_from_config, load_agent_config,
+};
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
 pub use rlm::{
     RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
@@ -49,6 +54,9 @@ pub use rlm::{
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
+
+#[cfg(feature = "tdf-encrypt")]
+pub use tdf_audit::{MessageEncryptor, TdfAuditConfig};
 
 // Re-export response processing types
 pub use response::{sanitize_response, strip_think_blocks, strip_tool_blocks};
@@ -82,6 +90,8 @@ pub struct Router {
     critic: Option<Arc<arkavo_critic::CriticPipeline>>,
     #[cfg(feature = "advisor-persistence")]
     advisor_store: Option<Arc<arkavo_memory::AdvisorStateStore>>,
+    #[cfg(feature = "tdf-encrypt")]
+    tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
 }
 
 impl Router {
@@ -98,6 +108,8 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_encryptor: None,
         })
     }
 
@@ -114,6 +126,8 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_encryptor: None,
         })
     }
 
@@ -125,6 +139,14 @@ impl Router {
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
         self
+    }
+
+    /// Run preflight moderation check without full classification.
+    ///
+    /// Returns `None` if no preflight moderator is configured (allows all).
+    /// Returns `Some(result)` with the moderation outcome otherwise.
+    pub fn check_preflight(&self, input: &str) -> Option<preflight::ModerationResult> {
+        self.preflight.as_ref().map(|pf| pf.check(input))
     }
 
     /// Add post-LLM critic validation to the router
@@ -175,6 +197,14 @@ impl Router {
         }
 
         self.advisor_store = Some(Arc::new(store));
+        self
+    }
+
+    /// Attach a TDF encryptor for cloud-bound prompt audit.
+    #[cfg(feature = "tdf-encrypt")]
+    #[must_use]
+    pub fn with_tdf_encryptor(mut self, encryptor: tdf_audit::MessageEncryptor) -> Self {
+        self.tdf_encryptor = Some(Arc::new(encryptor));
         self
     }
 
@@ -511,6 +541,24 @@ impl Router {
             } else {
                 (messages.clone(), None)
             };
+
+            // TDF audit: encrypt cloud-bound messages for local audit trail
+            #[cfg(feature = "tdf-encrypt")]
+            if current_decision.recommended_model.is_cloud()
+                && let Some(ref encryptor) = self.tdf_encryptor
+            {
+                let manifests = encryptor.encrypt_messages(&advised_messages).await;
+                if !manifests.is_empty() {
+                    tracing::info!(
+                        "TDF audit: encrypted {} cloud-bound messages ({} bytes ciphertext)",
+                        manifests.len(),
+                        manifests
+                            .iter()
+                            .map(|(_, m)| m.payload.value.len())
+                            .sum::<usize>()
+                    );
+                }
+            }
 
             let provider = self
                 .instantiate_provider(&current_decision.recommended_model)
@@ -1152,6 +1200,8 @@ impl Router {
             critic: self.critic.clone(),
             #[cfg(feature = "advisor-persistence")]
             advisor_store: self.advisor_store.clone(),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_encryptor: self.tdf_encryptor.clone(),
         })
     }
 

@@ -1486,6 +1486,7 @@ dependencies = [
  "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
+ "arkavo-tdf",
  "arkavo-torg-circuits",
  "async-trait",
  "chrono",
@@ -1580,6 +1581,7 @@ version = "0.58.1"
 dependencies = [
  "anyhow",
  "arkavo-agent",
+ "arkavo-budget",
  "arkavo-crypto",
  "arkavo-events",
  "arkavo-gossip",

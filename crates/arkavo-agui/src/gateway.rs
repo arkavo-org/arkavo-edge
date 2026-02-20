@@ -83,9 +83,9 @@ impl AgUiGateway {
         let discovered_agents = self.discovered_agents.clone();
         let agents_clone = discovered_agents.clone();
 
-        // Initialize budget handler
+        // Initialize budget handler with AGENTS.md config
         {
-            let budget_config = arkavo_budget::BudgetConfig::default();
+            let budget_config = load_budget_config_from_agents_md();
             let (budget_tx, mut budget_rx) = mpsc::channel::<AgUiEvent>(100);
             let mut handler = self.budget_handler.write().await;
             handler.initialize(budget_config, budget_tx).await?;
@@ -208,12 +208,22 @@ impl AgUiGateway {
             .expect("telemetry_rx already taken");
 
         let rate_limiter = Arc::new(IpRateLimiter::new(RateLimitConfig::default()));
+        // Wire budget manager into cost handler for ROI dashboard
+        let cost_handler = {
+            let mut handler = CostHandler::new();
+            let budget_guard = self.budget_handler.read().await;
+            if let Some(manager) = budget_guard.manager() {
+                handler.set_budget_manager(manager);
+            }
+            Arc::new(RwLock::new(handler))
+        };
+
         let state = AppState {
             connections: self.connections.clone(),
             agents: discovered_agents.clone(),
             agent_connections: self.agent_connections.clone(),
             budget_handler: self.budget_handler.clone(),
-            cost_handler: Arc::new(RwLock::new(CostHandler::new())),
+            cost_handler,
             initial_prompt: Arc::new(RwLock::new(self.initial_prompt.clone())),
             dataflow_handler: self.dataflow_handler.clone(),
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
@@ -262,5 +272,30 @@ impl AgUiGateway {
         )
         .await?;
         Ok(())
+    }
+}
+
+/// Load budget config from AGENTS.md, falling back to defaults
+fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
+    let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
+
+    match agent_config.budget {
+        Some(ref budget_yaml) => {
+            let mut config = arkavo_budget::BudgetConfig::default();
+            if let Some(session_cost) = budget_yaml.max_cost_per_session {
+                config.limits.session_limit =
+                    Some(arkavo_budget::TokenCost::from_dollars(session_cost));
+            }
+            if let Some(daily_cost) = budget_yaml.max_cost_per_day {
+                config.limits.daily_limit =
+                    Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
+            }
+            println!(
+                "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",
+                budget_yaml.max_cost_per_session, budget_yaml.max_cost_per_day
+            );
+            config
+        }
+        None => arkavo_budget::BudgetConfig::default(),
     }
 }

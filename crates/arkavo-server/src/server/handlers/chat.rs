@@ -48,6 +48,7 @@ pub async fn handle_chat_send(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
     chat_sessions: &Arc<ChatSessionManager>,
+    router: Option<&Arc<arkavo_router::Router>>,
     session_id: String,
     message: UserMessage,
 ) -> Result<(), ErrorObjectOwned> {
@@ -59,6 +60,25 @@ pub async fn handle_chat_send(
         metrics.record_rate_limit_blocked(None);
         timer.error();
         return Err(e);
+    }
+
+    // Preflight moderation: reject policy-violating messages before processing
+    if let Some(router) = router
+        && let Some(arkavo_router::ModerationResult::Block {
+            policy_id, reason, ..
+        }) = router.check_preflight(&message.content)
+    {
+        info!(
+            session.id = %session_id,
+            policy_id = %policy_id,
+            "Chat message blocked by preflight policy"
+        );
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32001,
+            format!("Blocked by policy: {policy_id}"),
+            Some(reason),
+        ));
     }
 
     info!(session.id = %session_id, "Forwarding message to chat session manager");
