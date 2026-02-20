@@ -55,7 +55,7 @@ gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
 kimi = ["arkavo-llm/kimi"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
-tdf-encrypt = ["dep:arkavo-tdf"]
+tdf-encrypt = ["dep:arkavo-tdf", "dep:arkavo-memory"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
 windows = ["gemini", "llm-remote", "deepseek", "kimi"]

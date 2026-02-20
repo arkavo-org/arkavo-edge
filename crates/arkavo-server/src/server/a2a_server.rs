@@ -502,7 +502,13 @@ impl A2aServer {
                         };
                         let encryptor = arkavo_router::MessageEncryptor::new(tdf_config);
                         info!("TDF audit encryption enabled for cloud-bound prompts");
-                        router.with_tdf_encryptor(encryptor)
+                        let router = router.with_tdf_encryptor(encryptor);
+                        if let Some(store) = Self::create_tdf_audit_store().await {
+                            info!("✓ TDF audit persistence enabled");
+                            router.with_tdf_audit_store(store)
+                        } else {
+                            router
+                        }
                     } else {
                         router
                     }
@@ -555,6 +561,24 @@ impl A2aServer {
             Ok(store) => Some(store),
             Err(e) => {
                 tracing::warn!("Advisor persistence unavailable: {e}");
+                None
+            }
+        }
+    }
+
+    /// Create the TDF audit store for persisting encryption manifests.
+    #[cfg(feature = "kas")]
+    async fn create_tdf_audit_store() -> Option<arkavo_memory::TdfAuditStore> {
+        let db_path = if std::path::Path::new(".arkavo").exists() {
+            std::path::PathBuf::from(".arkavo/memory_server/tdf_audit.db")
+        } else {
+            return None;
+        };
+
+        match arkavo_memory::TdfAuditStore::new(&db_path).await {
+            Ok(store) => Some(store),
+            Err(e) => {
+                tracing::warn!("TDF audit persistence unavailable: {e}");
                 None
             }
         }

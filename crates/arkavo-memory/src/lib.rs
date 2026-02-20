@@ -10,6 +10,7 @@ pub mod orchestrator_state;
 pub mod plan_state;
 #[cfg(feature = "vector-search")]
 pub mod storage;
+pub mod tdf_audit_store;
 pub mod workspace_config;
 
 pub use advisor_state::{AdvisorStateStore, PersistedAdjustment};
@@ -21,4 +22,5 @@ pub use orchestrator_state::{
 pub use plan_state::{PersistedPlan, PlanStateStore, PlanStatus};
 #[cfg(feature = "vector-search")]
 pub use storage::{HnswConfig, MemoryStorage};
+pub use tdf_audit_store::{AuditRecord, TdfAuditStore};
 pub use workspace_config::WorkspaceConfig;
