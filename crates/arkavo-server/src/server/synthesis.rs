@@ -249,10 +249,11 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
         content
     };
 
-    // Strip control characters that LLMs sometimes emit (breaks JSON parsing)
+    // Replace control characters that LLMs sometimes emit (breaks JSON parsing).
+    // Raw \n inside JSON string values is illegal — replace all control chars with spaces.
     let sanitized: String = json_str
         .chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
+        .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
 
     let json: serde_json::Value =
@@ -320,6 +321,17 @@ mod tests {
         assert_eq!(result.0, "high_load");
         assert_eq!(result.1, "throttle");
         assert_eq!(result.2, 0.85);
+        assert_eq!(result.3, "stable");
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_with_raw_newlines() {
+        // Raw \n inside JSON string values is illegal but LLMs emit it
+        let content = "{\n\"condition\": \"when load\nis high\",\n\"action\": \"throttle\nrequests\",\n\"confidence\": 0.9,\n\"expected_outcome\": \"stable\"\n}";
+        let result = parse_lesson_pattern(content).unwrap();
+        assert_eq!(result.0, "when load is high");
+        assert_eq!(result.1, "throttle requests");
+        assert_eq!(result.2, 0.9);
         assert_eq!(result.3, "stable");
     }
 }
