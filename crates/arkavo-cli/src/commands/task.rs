@@ -360,13 +360,19 @@ fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> 
     let receiver = mdns.browse("_a2a._tcp.local.")?;
 
     let mut agents = Vec::new();
-    let timeout = Duration::from_secs(3);
+    let timeout = Duration::from_secs(5);
     let start = std::time::Instant::now();
+    let mut last_discovery = std::time::Instant::now();
 
     while start.elapsed() < timeout {
+        // Exit early once we've seen agents and had a quiet period
+        if !agents.is_empty() && last_discovery.elapsed() > Duration::from_millis(500) {
+            break;
+        }
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => {
                 if let ServiceEvent::ServiceResolved(info) = event {
+                    last_discovery = std::time::Instant::now();
                     let agent_id = info
                         .get_property_val_str("agent_id")
                         .unwrap_or("unknown")
