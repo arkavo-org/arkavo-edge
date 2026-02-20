@@ -189,14 +189,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             arg => {
                 // First non-flag argument is the task description
-                if !arg.starts_with('-') {
+                if !arg.starts_with('-') && task_description.is_none() {
                     task_description = Some(arg.to_string());
-                    // Collect remaining args as part of task description
-                    if i + 1 < args.len() {
-                        let remaining: Vec<String> = args[i + 1..].to_vec();
-                        task_description = Some(format!("{} {}", arg, remaining.join(" ")));
-                        break;
-                    }
+                } else if !arg.starts_with('-') {
+                    // Additional non-flag words extend the task description
+                    let existing = task_description.as_deref().unwrap_or("");
+                    task_description = Some(format!("{existing} {arg}"));
                 } else {
                     return Err(format!("Unknown argument: {arg}").into());
                 }

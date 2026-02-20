@@ -249,8 +249,14 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
         content
     };
 
+    // Strip control characters that LLMs sometimes emit (breaks JSON parsing)
+    let sanitized: String = json_str
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
+        .collect();
+
     let json: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+        serde_json::from_str(&sanitized).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     let condition = json
         .get("condition")
@@ -304,5 +310,16 @@ mod tests {
         let result = parse_lesson_pattern(content).unwrap();
         assert_eq!(result.0, "sector_5");
         assert_eq!(result.1, "avoid");
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_with_control_characters() {
+        // LLMs sometimes emit control characters that break JSON parsing
+        let content = "{\x00\"condition\": \"high_load\",\x01 \"action\": \"throttle\",\x02 \"confidence\": 0.85, \"expected_outcome\": \"stable\"\x03}";
+        let result = parse_lesson_pattern(content).unwrap();
+        assert_eq!(result.0, "high_load");
+        assert_eq!(result.1, "throttle");
+        assert_eq!(result.2, 0.85);
+        assert_eq!(result.3, "stable");
     }
 }
