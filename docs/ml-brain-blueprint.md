@@ -12,6 +12,20 @@ We do not build monolithic agents. Arkavo Edge is a secure, sovereign, and self-
 
 ---
 
+## Implementation Status
+
+| Brain Region | Status | Key Crates | Notes |
+|---|---|---|---|
+| Thalamus | Complete | arkavo-router, arkavo-protocol, arkavo-dataflow | mDNS mesh, A2A benchmarks |
+| Hippocampus | ~85% | arkavo-context, arkavo-tdf, arkavo-memory | PromptAdvisor persistence landed; federated retrieval pending |
+| Cortex | Complete | arkavo-mcp-tools, arkavo-code-search, arkavo-browser | All 6 MCP tools implemented |
+| Cerebellum | Complete | arkavo-llama-cpp, arkavo-llm | Ministral 3B/8B, Qwen3 0.6B |
+| Prefrontal Cortex | ~80% | arkavo-orchestrator, arkavo-workspace | GitHub webhook workflows; multi-goal planning evolving |
+| Amygdala | Complete | arkavo-mcp-tools, arkavo-validation, arkavo-protocol | Preflight policy enforcement + budget governor added |
+| Consolidation | ~40% | arkavo-autolearn, arkavo-gossip, learning/ | PromptAdvisor cross-session learning in place; offline daemon pending |
+
+---
+
 ## The ML-Brain Blueprint
 
 While the codebase uses standard software terminology (routers, ledgers, orchestrators), the system design maps directly to the functional regions of the biological brain.
@@ -64,7 +78,9 @@ The hippocampus handles short-term episodic memory and manages what gets sent to
 
 **Implementation:** Arkavo solves the "infinite context window" trap through its **Context Compression Pipeline**. Rather than dumping an entire codebase into an LLM prompt, the pipeline manages an active, rolling window of relevant context using semantic chunking, decomposition, and RLM (Recency-Length-Multimodal) detection. Memory privacy is native via **OpenTDF integration**: retrieval is federated and cryptographically access-controlled through OIDC, meaning the system only "remembers" what the current authorized session permits.
 
-**Crates:** `arkavo-context` (CompressionPipeline, ContextDecomposer, SemanticChunker), `arkavo-tdf` (OpenTDF encryption, KAS client), `arkavo-memory`
+The hippocampus also includes **short-term procedural memory** via the **PromptAdvisor**. The advisor learns from observed model failures (code fences on simple queries, output loops, wrong-expert routing) and injects corrective system messages into subsequent requests. Learned adjustments are persisted to SQLite via `AdvisorStateStore`, surviving across sessions -- the first concrete step toward hippocampal consolidation.
+
+**Crates:** `arkavo-context` (CompressionPipeline, ContextDecomposer, SemanticChunker), `arkavo-tdf` (OpenTDF encryption, KAS client), `arkavo-memory` (AdvisorStateStore, plan/orchestrator state)
 
 ## The Cortex: Specialized MCP Toolsets
 
@@ -119,10 +135,13 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 | `sbom_syft` | SBOM generation and dependency vulnerability checks via Syft |
 | Egress filter | IP-level SSRF prevention blocking metadata endpoints and private ranges |
 | Input validation | Unicode normalization, path traversal prevention, injection blocking |
+| Preflight moderation | TØR-G circuit evaluation blocks policy-violating requests before LLM inference |
+| Budget governor | Per-agent token and cost budgets with alerts at configurable thresholds |
+| TDF audit encryption | Cloud-bound messages are encrypted locally before transmission, creating an audit trail |
 
-These tools can immediately flag or block unsafe code modifications before they are ever committed.
+These tools can immediately flag or block unsafe code modifications before they are ever committed. Preflight moderation and budget enforcement act as **metabolic governors** -- the amygdala intervenes before resources are spent, not after.
 
-**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering)
+**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering), `arkavo-budget` (cost tracking and enforcement)
 
 ---
 
@@ -130,8 +149,19 @@ These tools can immediately flag or block unsafe code modifications before they 
 
 By defining the architecture against this biological blueprint, the gaps become the product roadmap.
 
-The biggest missing piece in modern AI -- and Arkavo's next frontier -- is **hippocampal consolidation** (the basal ganglia / sleep loop). Currently, agents learn *in-context* but forget when the session ends.
+The biggest missing piece in modern AI -- and Arkavo's next frontier -- is **hippocampal consolidation** (the basal ganglia / sleep loop).
 
-The router already has a **learning module** (`arkavo-router/src/learning/`) that tracks agent utility and coordination metrics at runtime. The next step is offline consolidation: background daemons that activate during idle compute to extract successful execution traces from the context pipeline, distill them into training signal, and continuously improve local edge model selection and routing decisions.
+**What's already in place:**
+
+- **PromptAdvisor** learns from model failures in-session and persists adjustments to SQLite via `AdvisorStateStore`. This is the first form of cross-session memory -- the system improves across restarts.
+- The **learning module** (`arkavo-router/src/learning/`) tracks agent utility, coordination metrics, and episodic memory records at runtime via Thompson Sampling.
+- The **AutoLearn system** (`arkavo-autolearn`) defines a 4-step immune loop: Pain Signal → Synthesis → Immune Response → Swarm Propagation. TØRG policy graphs are synthesized from failure signals and verified via SAT probing before deployment.
+- **Gossip-based lesson sharing** (`arkavo-gossip`) enables cross-swarm propagation of verified patches.
+
+**What's next:**
+
+- **Offline consolidation daemon**: A background process that activates during idle compute to extract successful execution traces, distill routing improvements, and feed them back into Thompson Sampling priors and advisor adjustments.
+- **End-to-end AutoLearn wiring**: Connect the router's runtime pain signals to the synthesis pipeline, then propagate verified patches across the mesh via gossip.
+- **Federated memory retrieval**: Compose TDF-encrypted memory queries with OIDC-scoped access control across agents.
 
 **Arkavo isn't just a router for LLMs. It is the operating system for a specialized, distributed, synthetic brain.**
