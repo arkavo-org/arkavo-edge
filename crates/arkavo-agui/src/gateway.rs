@@ -242,12 +242,8 @@ impl AgUiGateway {
             rate_limiter: rate_limiter.clone(),
         };
 
-        let app = Router::new()
-            .route("/", get(crate::gateway_static::index_handler))
-            .route(
-                "/static/*path",
-                get(crate::gateway_static::static_file_handler),
-            )
+        // Rate-limited API routes
+        let api_routes = Router::new()
             .route("/ws", get(crate::gateway_ws::websocket_handler))
             .route(
                 "/agent/:id",
@@ -265,11 +261,22 @@ impl AgUiGateway {
                 "/debug",
                 get(crate::gateway_status::debug_websocket_handler),
             )
-            .layer(crate::gateway_security::security_headers())
             .layer(middleware::from_fn(
                 arkavo_protocol::ip_rate_limit_middleware,
             ))
-            .layer(axum::Extension(rate_limiter))
+            .layer(axum::Extension(rate_limiter));
+
+        // Static file routes (no rate limiting — browser loads many files at once)
+        let static_routes = Router::new()
+            .route("/", get(crate::gateway_static::index_handler))
+            .route(
+                "/static/*path",
+                get(crate::gateway_static::static_file_handler),
+            );
+
+        let app = static_routes
+            .merge(api_routes)
+            .layer(crate::gateway_security::security_headers())
             .with_state(state);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();

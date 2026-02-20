@@ -59,7 +59,7 @@ See the [migration guide](docs/openclaw-migration-guide.md) for a full compariso
 ```bash
 # Use any provider with API key
 GEMINI_API_KEY=your-key arkavo chat --prompt "Hello"
-DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek --prompt "Explain Rust"
+DEEPSEEK_API_KEY=your-key arkavo chat --prompt "Explain Rust"
 ```
 
 ### Context Control Demo
