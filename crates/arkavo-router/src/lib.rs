@@ -41,7 +41,7 @@ pub use orchestrator::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
-pub use prompt_advisor::{AdvisorIssue, PromptAdvice, PromptAdvisor};
+pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
 pub use rlm::{
     RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
     RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,
@@ -80,6 +80,8 @@ pub struct Router {
     advisor: Arc<PromptAdvisor>,
     #[cfg(feature = "critic")]
     critic: Option<Arc<arkavo_critic::CriticPipeline>>,
+    #[cfg(feature = "advisor-persistence")]
+    advisor_store: Option<Arc<arkavo_memory::AdvisorStateStore>>,
 }
 
 impl Router {
@@ -94,6 +96,8 @@ impl Router {
             advisor: Arc::new(PromptAdvisor::new()),
             #[cfg(feature = "critic")]
             critic: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_store: None,
         })
     }
 
@@ -108,6 +112,8 @@ impl Router {
             advisor: Arc::new(PromptAdvisor::new()),
             #[cfg(feature = "critic")]
             critic: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_store: None,
         })
     }
 
@@ -129,6 +135,46 @@ impl Router {
     #[must_use]
     pub fn with_critic(mut self, pipeline: arkavo_critic::CriticPipeline) -> Self {
         self.critic = Some(Arc::new(pipeline));
+        self
+    }
+
+    /// Attach an advisor state store for persisting learned adjustments.
+    ///
+    /// Loads all previously persisted adjustments and imports them into
+    /// the in-memory advisor. The store is then retained for runtime saves.
+    #[cfg(feature = "advisor-persistence")]
+    #[must_use]
+    pub async fn with_advisor_store(mut self, store: arkavo_memory::AdvisorStateStore) -> Self {
+        if let Ok(persisted) = store.load_all().await {
+            let snapshots: Vec<prompt_advisor::DynamicSnapshot> = persisted
+                .into_iter()
+                .filter_map(|p| {
+                    let issue = match p.issue.as_str() {
+                        "UnwantedCodeFence" => AdvisorIssue::UnwantedCodeFence,
+                        "OutputLoop" => AdvisorIssue::OutputLoop,
+                        "WrongExpert" => AdvisorIssue::WrongExpert,
+                        "Timeout" => AdvisorIssue::Timeout,
+                        _ => return None,
+                    };
+                    Some(prompt_advisor::DynamicSnapshot {
+                        label: p.label,
+                        model_family: p.model_family,
+                        issue,
+                        text: p.text,
+                        success_rate: p.success_rate,
+                        applications: p.applications,
+                        feedback_count: p.feedback_count,
+                    })
+                })
+                .collect();
+
+            if !snapshots.is_empty() {
+                tracing::info!("Loaded {} persisted advisor adjustments", snapshots.len());
+                self.advisor.import_dynamic(snapshots);
+            }
+        }
+
+        self.advisor_store = Some(Arc::new(store));
         self
     }
 
@@ -271,6 +317,34 @@ impl Router {
         };
 
         Ok(RouteStream::from_response(response))
+    }
+
+    /// Persist validated dynamic adjustments in the background.
+    #[cfg(feature = "advisor-persistence")]
+    fn persist_advisor_state(&self) {
+        if let Some(store) = &self.advisor_store {
+            let snapshots = self.advisor.export_dynamic();
+            let store = store.clone();
+            tokio::spawn(async move {
+                let to_save: Vec<arkavo_memory::PersistedAdjustment> = snapshots
+                    .iter()
+                    .filter(|s| s.feedback_count >= 3 && s.success_rate > 0.5)
+                    .map(|s| arkavo_memory::PersistedAdjustment {
+                        label: s.label.clone(),
+                        model_family: s.model_family.clone(),
+                        issue: format!("{:?}", s.issue),
+                        text: s.text.clone(),
+                        success_rate: s.success_rate,
+                        applications: s.applications,
+                        feedback_count: s.feedback_count,
+                        updated_at: chrono::Utc::now(),
+                    })
+                    .collect();
+                if !to_save.is_empty() {
+                    let _ = store.save_batch(&to_save).await;
+                }
+            });
+        }
     }
 
     fn get_local_fallback(&self, category: TaskCategory) -> ModelChoice {
@@ -453,6 +527,8 @@ impl Router {
                 task_description,
                 &response.content,
             );
+            #[cfg(feature = "advisor-persistence")]
+            self.persist_advisor_state();
 
             // Post-process tool calls to handle language identifier fences (e.g., ```python)
             // The provider may return these as tool calls, but they contain nested tool calls
@@ -735,6 +811,8 @@ impl Router {
                 task_description,
                 &response.content,
             );
+            #[cfg(feature = "advisor-persistence")]
+            self.persist_advisor_state();
 
             // For local models, extract tool calls from text content if structured tool_calls is empty
             if response.tool_calls.is_empty() && !response.content.is_empty() {
@@ -1072,6 +1150,8 @@ impl Router {
             advisor: self.advisor.clone(),
             #[cfg(feature = "critic")]
             critic: self.critic.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_store: self.advisor_store.clone(),
         })
     }
 

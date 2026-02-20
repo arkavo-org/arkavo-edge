@@ -42,11 +42,13 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
 arkavo-critic = { path = "../arkavo-critic", optional = true }
+arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
 default = ["llama-cpp", "gemini", "deepseek", "kimi"]
 critic = ["arkavo-critic"]
+advisor-persistence = ["dep:arkavo-memory"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]

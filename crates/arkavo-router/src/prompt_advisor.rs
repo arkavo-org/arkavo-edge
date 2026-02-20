@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
 /// Issue types the advisor can address (mirrors arkavo-critic's DetectedIssue)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AdvisorIssue {
     UnwantedCodeFence,
     OutputLoop,
@@ -313,6 +314,70 @@ impl PromptAdvisor {
             })
             .collect()
     }
+
+    /// Export all dynamic (non-static) adjustments as snapshots for persistence.
+    pub fn export_dynamic(&self) -> Vec<DynamicSnapshot> {
+        let Ok(adjustments) = self.adjustments.read() else {
+            return Vec::new();
+        };
+
+        adjustments
+            .iter()
+            .filter(|a| !a.is_static)
+            .map(|a| DynamicSnapshot {
+                label: a.label.clone(),
+                model_family: a.model_family.clone(),
+                issue: a.issue.clone(),
+                text: a.text.clone(),
+                success_rate: a.success_rate,
+                applications: a.applications,
+                feedback_count: a.feedback_count,
+            })
+            .collect()
+    }
+
+    /// Import previously persisted dynamic adjustments.
+    ///
+    /// Deduplicates by (model_family, issue) — if a dynamic adjustment already
+    /// exists for that combination, the import is skipped.
+    pub fn import_dynamic(&self, snapshots: Vec<DynamicSnapshot>) {
+        let Ok(mut adjustments) = self.adjustments.write() else {
+            return;
+        };
+
+        for snap in snapshots {
+            let already_exists = adjustments.iter().any(|a| {
+                a.model_family == snap.model_family && a.issue == snap.issue && !a.is_static
+            });
+
+            if already_exists {
+                continue;
+            }
+
+            adjustments.push(Adjustment {
+                label: snap.label,
+                model_family: snap.model_family,
+                issue: snap.issue,
+                text: snap.text,
+                success_rate: snap.success_rate,
+                applications: snap.applications,
+                feedback_count: snap.feedback_count,
+                is_static: false,
+            });
+        }
+    }
+}
+
+/// Data transfer object for dynamic adjustments, used for persistence round-trips.
+#[derive(Debug, Clone)]
+pub struct DynamicSnapshot {
+    pub label: String,
+    pub model_family: String,
+    pub issue: AdvisorIssue,
+    pub text: String,
+    pub success_rate: f64,
+    pub applications: u32,
+    pub feedback_count: u32,
 }
 
 /// Check if a prompt is a simple conversational query (greetings, math, factual).
@@ -730,5 +795,49 @@ mod tests {
         advisor.observe("deepseek", "what is 2 + 2", "4");
         // No issues detected — no new adjustments
         assert_eq!(advisor.stats().len(), initial);
+    }
+
+    #[test]
+    fn test_export_dynamic_excludes_static() {
+        let advisor = PromptAdvisor::new();
+        // Static-only — export should be empty
+        assert!(advisor.export_dynamic().is_empty());
+
+        // Add a dynamic adjustment
+        advisor.learn("mistral", AdvisorIssue::OutputLoop, "Stop looping.".into());
+        let exported = advisor.export_dynamic();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(exported[0].model_family, "mistral");
+    }
+
+    #[test]
+    fn test_import_dynamic_roundtrip() {
+        let advisor = PromptAdvisor::new();
+        advisor.learn("deepseek", AdvisorIssue::Timeout, "Be brief.".into());
+
+        let snapshots = advisor.export_dynamic();
+        assert_eq!(snapshots.len(), 1);
+
+        // Import into a fresh advisor
+        let advisor2 = PromptAdvisor::new();
+        advisor2.import_dynamic(snapshots);
+
+        let stats = advisor2.stats();
+        let imported = stats.iter().find(|s| s.model_family == "deepseek");
+        assert!(imported.is_some());
+        assert!(!imported.unwrap().is_static);
+    }
+
+    #[test]
+    fn test_import_dynamic_deduplicates() {
+        let advisor = PromptAdvisor::new();
+        advisor.learn("mistral", AdvisorIssue::OutputLoop, "Stop looping.".into());
+
+        let snapshots = advisor.export_dynamic();
+        let count_before = advisor.stats().len();
+
+        // Import the same snapshots again — should not create duplicates
+        advisor.import_dynamic(snapshots);
+        assert_eq!(advisor.stats().len(), count_before);
     }
 }
