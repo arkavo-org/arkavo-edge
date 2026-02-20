@@ -450,6 +450,15 @@ impl A2aServer {
 
         match router_result {
             Ok(router) => {
+                // Attach advisor persistence (SQLite-backed learned adjustments)
+                let router = match Self::create_advisor_store().await {
+                    Some(store) => {
+                        info!("✓ Advisor persistence enabled");
+                        router.with_advisor_store(store).await
+                    }
+                    None => router,
+                };
+
                 let router = Arc::new(router);
                 *self.router.write().await = Some(router.clone());
                 info!(
@@ -465,6 +474,23 @@ impl A2aServer {
             }
             Err(e) => {
                 error!(error = %e, "✗ Failed to initialize router");
+            }
+        }
+    }
+
+    /// Create the advisor state store alongside the workspace memory DB.
+    async fn create_advisor_store() -> Option<arkavo_memory::AdvisorStateStore> {
+        let db_path = if std::path::Path::new(".arkavo").exists() {
+            std::path::PathBuf::from(".arkavo/memory_server/advisor.db")
+        } else {
+            return None;
+        };
+
+        match arkavo_memory::AdvisorStateStore::new(&db_path).await {
+            Ok(store) => Some(store),
+            Err(e) => {
+                tracing::warn!("Advisor persistence unavailable: {e}");
+                None
             }
         }
     }

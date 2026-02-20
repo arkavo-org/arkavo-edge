@@ -82,7 +82,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
-arkavo-router = { path = "../arkavo-router" }
+arkavo-router = { path = "../arkavo-router", features = ["advisor-persistence"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
