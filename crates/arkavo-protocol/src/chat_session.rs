@@ -795,16 +795,30 @@ impl ChatSessionManager {
                     let mut final_response;
 
                     // Route with quality gate (max 3 retries with model escalation)
+                    // Timeout prevents hanging when LLM inference stalls
                     #[allow(deprecated)]
-                    match router
-                        .route_with_quality_gate(
+                    let route_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(120),
+                        router.route_with_quality_gate(
                             &user_message.content,
                             conversation_context.clone(),
                             tool_registry.as_deref(),
                             3, // max_retries
-                        )
-                        .await
-                    {
+                        ),
+                    )
+                    .await;
+
+                    let route_result = match route_result {
+                        Ok(inner) => inner,
+                        Err(_elapsed) => {
+                            error!(session.id = %session_id, "LLM inference timed out after 120s");
+                            Err(arkavo_router::Error::ModelExecution(
+                                "LLM inference timed out after 120s".to_string(),
+                            ))
+                        }
+                    };
+
+                    match route_result {
                         Ok(response) => {
                             final_response = response.content.clone();
 
@@ -877,15 +891,23 @@ impl ChatSessionManager {
 
                                     // Route again to get final response with tool results
                                     #[allow(deprecated)]
-                                    match router
-                                        .route_with_quality_gate(
+                                    let retry_result = tokio::time::timeout(
+                                        std::time::Duration::from_secs(120),
+                                        router.route_with_quality_gate(
                                             &user_message.content,
                                             conversation_context.clone(),
                                             tool_registry.as_deref(),
                                             3,
-                                        )
-                                        .await
-                                    {
+                                        ),
+                                    )
+                                    .await;
+                                    let retry_result = match retry_result {
+                                        Ok(inner) => inner,
+                                        Err(_) => Err(arkavo_router::Error::ModelExecution(
+                                            "LLM inference timed out after 120s".to_string(),
+                                        )),
+                                    };
+                                    match retry_result {
                                         Ok(final_resp) => {
                                             final_response = final_resp.content.clone();
 
@@ -980,15 +1002,23 @@ impl ChatSessionManager {
 
                                         // Retry with tool hints
                                         #[allow(deprecated)]
-                                        match router
-                                            .route_with_quality_gate(
+                                        let hint_result = tokio::time::timeout(
+                                            std::time::Duration::from_secs(120),
+                                            router.route_with_quality_gate(
                                                 &user_message.content,
                                                 conversation_context.clone(),
                                                 tool_registry.as_deref(),
                                                 3,
-                                            )
-                                            .await
-                                        {
+                                            ),
+                                        )
+                                        .await;
+                                        let hint_result = match hint_result {
+                                            Ok(inner) => inner,
+                                            Err(_) => Err(arkavo_router::Error::ModelExecution(
+                                                "LLM inference timed out after 120s".to_string(),
+                                            )),
+                                        };
+                                        match hint_result {
                                             Ok(response) => {
                                                 final_response = response.content.clone();
 
