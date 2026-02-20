@@ -90,6 +90,10 @@ pub struct Router {
     critic: Option<Arc<arkavo_critic::CriticPipeline>>,
     #[cfg(feature = "advisor-persistence")]
     advisor_store: Option<Arc<arkavo_memory::AdvisorStateStore>>,
+    #[cfg(feature = "advisor-persistence")]
+    advisor_persist_count: std::sync::atomic::AtomicU64,
+    #[cfg(feature = "advisor-persistence")]
+    advisor_last_persist: std::sync::Mutex<std::time::Instant>,
     #[cfg(feature = "tdf-encrypt")]
     tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
 }
@@ -108,6 +112,10 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
             #[cfg(feature = "tdf-encrypt")]
             tdf_encryptor: None,
         })
@@ -126,6 +134,10 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
             #[cfg(feature = "tdf-encrypt")]
             tdf_encryptor: None,
         })
@@ -350,8 +362,32 @@ impl Router {
     }
 
     /// Persist validated dynamic adjustments in the background.
+    ///
+    /// Debounced: only flushes every 10 responses or 60 seconds, whichever
+    /// comes first, to avoid chatty SQLite writes on every LLM call.
     #[cfg(feature = "advisor-persistence")]
     fn persist_advisor_state(&self) {
+        use std::sync::atomic::Ordering;
+
+        const FLUSH_EVERY_N: u64 = 10;
+        const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        let count = self.advisor_persist_count.fetch_add(1, Ordering::Relaxed) + 1;
+        let timed_out = self
+            .advisor_last_persist
+            .lock()
+            .map(|last| last.elapsed() >= FLUSH_TIMEOUT)
+            .unwrap_or(false);
+
+        if count < FLUSH_EVERY_N && !timed_out {
+            return;
+        }
+
+        self.advisor_persist_count.store(0, Ordering::Relaxed);
+        if let Ok(mut last) = self.advisor_last_persist.lock() {
+            *last = std::time::Instant::now();
+        }
+
         if let Some(store) = &self.advisor_store {
             let snapshots = self.advisor.export_dynamic();
             let store = store.clone();
