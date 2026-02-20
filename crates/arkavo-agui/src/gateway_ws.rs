@@ -2,9 +2,10 @@ use crate::agent_connection::AgentConnection;
 use crate::budget_handler::BudgetHandler;
 use crate::types::*;
 use crate::{gateway_config, gateway_events};
+use arkavo_router::learning::LearningModule;
 use axum::extract::ws::{Message, WebSocket};
 use axum::{extract::State, response::Response};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
@@ -23,6 +24,8 @@ pub async fn websocket_handler(
             state.cost_handler,
             state.security_handler,
             state.task_store,
+            state.learning_module,
+            state.routing_history,
         )
     })
 }
@@ -38,6 +41,8 @@ async fn handle_websocket(
     cost_handler: Arc<RwLock<crate::cost_handler::CostHandler>>,
     security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
     task_store: Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    learning_module: Arc<RwLock<LearningModule>>,
+    routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -89,6 +94,8 @@ async fn handle_websocket(
             &cost_handler,
             &security_handler,
             &task_store,
+            &learning_module,
+            &routing_history,
             &tx,
         )
         .await
@@ -112,6 +119,8 @@ async fn handle_websocket(
                         &cost_handler,
                         &security_handler,
                         &task_store,
+                        &learning_module,
+                        &routing_history,
                         &tx,
                     )
                     .await
@@ -158,6 +167,8 @@ async fn dispatch_event(
     cost_handler: &Arc<RwLock<crate::cost_handler::CostHandler>>,
     security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    learning_module: &Arc<RwLock<LearningModule>>,
+    routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -282,9 +293,15 @@ async fn dispatch_event(
                 agent_connections,
                 task_store,
                 connections,
+                learning_module,
+                routing_history,
                 tx,
             )
             .await?;
+        }
+        AgUiEvent::RequestLearningStatus => {
+            gateway_events::handle_request_learning_status(learning_module, routing_history, tx)
+                .await?;
         }
         _ => {
             println!("AG-UI: Received event: {event:?}");

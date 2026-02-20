@@ -378,6 +378,39 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Learning panel events
+    RequestLearningStatus,
+    LearningStatusUpdate {
+        agents: Vec<AgentLearningInfo>,
+        #[serde(rename = "routingHistory")]
+        routing_history: Vec<RoutingRecord>,
+        timestamp: String,
+    },
+    RoutingEvaluation {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        #[serde(rename = "taskDescription")]
+        task_description: String,
+        candidates: Vec<RoutingCandidate>,
+        #[serde(rename = "selectedAgent")]
+        selected_agent: String,
+        #[serde(rename = "wasExploration")]
+        was_exploration: bool,
+        timestamp: String,
+    },
+    RoutingOutcome {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        success: bool,
+        #[serde(rename = "qualityScore")]
+        quality_score: f64,
+        #[serde(rename = "qualityIssues")]
+        quality_issues: Vec<String>,
+        timestamp: String,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -434,6 +467,59 @@ pub struct TaskInfo {
     pub created_at: String,
     #[serde(rename = "completedAt", skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingCandidate {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub score: f64,
+    pub alpha: f64,
+    #[serde(rename = "betaParam")]
+    pub beta_param: f64,
+    pub observations: u64,
+    #[serde(rename = "successRate")]
+    pub success_rate: f64,
+    pub probationary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentLearningInfo {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub alpha: f64,
+    #[serde(rename = "betaParam")]
+    pub beta_param: f64,
+    #[serde(rename = "expectedValue")]
+    pub expected_value: f64,
+    #[serde(rename = "stdDev")]
+    pub std_dev: f64,
+    #[serde(rename = "totalObservations")]
+    pub total_observations: u64,
+    #[serde(rename = "successRate")]
+    pub success_rate: f64,
+    pub probationary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingRecord {
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "selectedAgent")]
+    pub selected_agent: String,
+    #[serde(rename = "wasExploration")]
+    pub was_exploration: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(rename = "qualityScore", skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f64>,
+    #[serde(
+        rename = "qualityIssues",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub quality_issues: Vec<String>,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -7,11 +7,12 @@ use crate::security_handler::SecurityHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
+use arkavo_router::learning::LearningModule;
 use axum::{
     Router, middleware,
     routing::{get, post},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
@@ -51,6 +52,8 @@ pub struct AppState {
     pub debug_handler: Option<Arc<DebugHandler>>,
     pub rate_limiter: Arc<IpRateLimiter>,
     pub task_store: Arc<RwLock<HashMap<String, TrackedTask>>>,
+    pub learning_module: Arc<RwLock<LearningModule>>,
+    pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
 }
 
 pub struct AgUiGateway {
@@ -255,6 +258,8 @@ impl AgUiGateway {
             debug_handler: self.debug_handler.clone(),
             rate_limiter: rate_limiter.clone(),
             task_store: Arc::new(RwLock::new(HashMap::new())),
+            learning_module: Arc::new(RwLock::new(LearningModule::new())),
+            routing_history: Arc::new(RwLock::new(VecDeque::new())),
         };
 
         // Rate-limited API routes

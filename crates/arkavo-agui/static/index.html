@@ -31,6 +31,7 @@
                 <button class="nav-btn" data-view="security" title="Security &amp; TDF">&#x1F512;</button>
                 <button class="nav-btn" data-view="router" title="Router">&#x21C4;</button>
                 <button class="nav-btn" data-view="telemetry" title="Telemetry">&#x223F;</button>
+                <button class="nav-btn" data-view="learning" title="Learning">&#x1F9E0;</button>
             </nav>
 
             <div class="content-area">
@@ -85,6 +86,13 @@
                         <div class="empty-state"><h3>Waiting for Events</h3><p>Telemetry events will stream here</p></div>
                     </div>
                 </div>
+
+                <div class="view-panel" id="view-learning">
+                    <div class="panel-header">Cortical Routing Map</div>
+                    <div id="learning-container">
+                        <div class="empty-state"><h3>Waiting for Routing Data</h3><p>Submit tasks to watch the mesh brain think</p></div>
+                    </div>
+                </div>
             </div>
         </main>
 
@@ -116,6 +124,7 @@
     <script src="/static/js/panels/health.js"></script>
     <script src="/static/js/panels/security.js"></script>
     <script src="/static/js/panels/router.js"></script>
+    <script src="/static/js/panels/learning.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
