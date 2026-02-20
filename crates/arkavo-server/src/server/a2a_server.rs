@@ -62,6 +62,8 @@ pub struct A2aServer {
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached AGENTS.md config to avoid repeated file reads
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
+    /// Federated memory service for ABAC-scoped cross-agent retrieval
+    federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
 }
 
 impl A2aServer {
@@ -98,6 +100,7 @@ impl A2aServer {
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
             )),
+            federated_memory: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -542,6 +545,11 @@ impl A2aServer {
                     bus.set_router(router.clone()).await;
                     info!("✓ Router configured for learning synthesis");
                 }
+
+                // Initialize federated memory service for cross-agent retrieval
+                if let Some(svc) = Self::create_federated_memory_service().await {
+                    *self.federated_memory.write().await = Some(svc);
+                }
             }
             Err(e) => {
                 error!(error = %e, "✗ Failed to initialize router");
@@ -579,6 +587,27 @@ impl A2aServer {
             Ok(store) => Some(store),
             Err(e) => {
                 tracing::warn!("TDF audit persistence unavailable: {e}");
+                None
+            }
+        }
+    }
+
+    /// Create the federated memory service for ABAC-scoped cross-agent retrieval.
+    async fn create_federated_memory_service() -> Option<Arc<arkavo_memory::FederatedMemoryService>>
+    {
+        let db_path = if std::path::Path::new(".arkavo").exists() {
+            std::path::PathBuf::from(".arkavo/memory_server/federated.db")
+        } else {
+            return None;
+        };
+
+        match arkavo_memory::FederatedMemoryService::new(&db_path).await {
+            Ok(svc) => {
+                info!("✓ Federated memory service enabled");
+                Some(Arc::new(svc))
+            }
+            Err(e) => {
+                tracing::warn!("Federated memory unavailable: {e}");
                 None
             }
         }
