@@ -1,0 +1,24 @@
+{
+  "tasks": [
+    {
+      "id": "scan-validation",
+      "category": "code_review",
+      "prompt": "Review the arkavo-validation crate for test gaps.\n\nExisting tests cover: path traversal, sanitization, size limits, URL egress filtering.\n\nPublic functions:\n- path::no_traversal(path, root) -> Result<PathBuf>\n- sanitize::redact_sensitive_json(value) -> Value\n- sanitize::is_sensitive_key(key) -> bool\n- size::check_size(data, limit) -> Result<()>\n- url::extract_host(url) -> Option<String>\n- url::is_loopback_host(host) -> bool\n- url::egress_filter(url, allowlist) -> Result<()>\n\nIdentify which edge cases are NOT covered by existing tests."
+    },
+    {
+      "id": "test-validation-edge-cases",
+      "category": "test_generation",
+      "prompt": "Write unit tests for arkavo-validation edge cases not currently covered.\n\nFILE: crates/arkavo-validation/src/url.rs\n\nUntested scenarios:\n- URL with empty host\n- URL with port number in host extraction\n- URL with encoded characters (%20, %2F)\n- egress_filter with empty allowlist\n- is_loopback_host with \"localhost\" string\n- extract_host with malformed URLs (no scheme, double slashes)\n\nWrite tests following the existing pattern in the crate."
+    },
+    {
+      "id": "scan-config-encryption",
+      "category": "code_review",
+      "prompt": "Review the arkavo-config-encryption crate for quality issues.\n\nThis crate handles configuration encryption. Look for:\n- Missing error handling (unwrap, expect without context)\n- Edge cases in encryption/decryption (empty input, corrupted data)\n- Key management safety\n- Test gaps in error paths"
+    },
+    {
+      "id": "test-sanitize-edge-cases",
+      "category": "test_generation",
+      "prompt": "Write unit tests for arkavo-validation sanitization edge cases.\n\nFILE: crates/arkavo-validation/src/sanitize.rs\n\nUntested scenarios:\n- Deeply nested JSON objects (3+ levels)\n- JSON arrays containing sensitive keys\n- Empty string values for sensitive keys\n- Mixed case key matching (API_KEY vs api_key)\n- Unicode characters in keys and values\n- Very large JSON payloads near truncation boundary\n\nWrite tests following the existing pattern in the crate."
+    }
+  ]
+}
