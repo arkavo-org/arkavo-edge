@@ -48,7 +48,7 @@ extract_code_blocks() {
 # Looks for FILE: directives in the response
 extract_file_directive() {
     local file="$1"
-    grep -oP '(?<=FILE:\s).*' "$file" | head -1 | tr -d '[:space:]'
+    sed -n 's/.*FILE:[[:space:]]*//p' "$file" | head -1 | tr -d '[:space:]'
 }
 
 validate_test_writer() {
