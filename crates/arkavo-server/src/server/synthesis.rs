@@ -272,7 +272,8 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
     let confidence = json
         .get("confidence")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.5);
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
     let expected_outcome = json
         .get("expected_outcome")
         .and_then(|v| v.as_str())
@@ -322,6 +323,50 @@ mod tests {
         assert_eq!(result.1, "throttle");
         assert_eq!(result.2, 0.85);
         assert_eq!(result.3, "stable");
+    }
+
+    #[test]
+    fn test_extract_quality_score_negative_clamped() {
+        assert_eq!(extract_quality_score(r#"{"quality_score": -0.5}"#), 0.0);
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_missing_all_fields() {
+        let content = r#"{}"#;
+        let result = parse_lesson_pattern(content).unwrap();
+        assert_eq!(result.0, "unknown");
+        assert_eq!(result.1, "slow");
+        assert_eq!(result.2, 0.5);
+        assert_eq!(result.3, "improved_outcome");
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_no_braces() {
+        let content = "just plain text with no JSON";
+        assert!(parse_lesson_pattern(content).is_err());
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_confidence_clamped() {
+        // LLM might return confidence > 1.0 — should be clamped
+        let content = r#"{"condition": "overloaded", "action": "scale", "confidence": 5.0, "expected_outcome": "stable"}"#;
+        let result = parse_lesson_pattern(content).unwrap();
+        assert!(
+            result.2 <= 1.0,
+            "confidence {} should be clamped to [0, 1]",
+            result.2
+        );
+    }
+
+    #[test]
+    fn test_parse_lesson_pattern_surrounding_text() {
+        let content = r#"Here is the pattern I found:
+{"condition": "sector_9", "action": "avoid", "confidence": 0.95, "expected_outcome": "safe"}
+This pattern was found across all episodes."#;
+        let result = parse_lesson_pattern(content).unwrap();
+        assert_eq!(result.0, "sector_9");
+        assert_eq!(result.1, "avoid");
+        assert_eq!(result.2, 0.95);
     }
 
     #[test]
