@@ -30,7 +30,7 @@ pub use architect::{
     ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
     ComplexityScorer, Subtask, SubtaskResult,
 };
-pub use classifier::{TaskCategory, TaskClassifier};
+pub use classifier::{TaskCategory, TaskClassifier, classify_task_keywords};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, PlannerTier, RoutingDecision};
 pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
@@ -90,8 +90,14 @@ pub struct Router {
     critic: Option<Arc<arkavo_critic::CriticPipeline>>,
     #[cfg(feature = "advisor-persistence")]
     advisor_store: Option<Arc<arkavo_memory::AdvisorStateStore>>,
+    #[cfg(feature = "advisor-persistence")]
+    advisor_persist_count: std::sync::atomic::AtomicU64,
+    #[cfg(feature = "advisor-persistence")]
+    advisor_last_persist: std::sync::Mutex<std::time::Instant>,
     #[cfg(feature = "tdf-encrypt")]
     tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
+    #[cfg(feature = "tdf-encrypt")]
+    tdf_audit_store: Option<Arc<arkavo_memory::TdfAuditStore>>,
 }
 
 impl Router {
@@ -108,8 +114,14 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
             #[cfg(feature = "tdf-encrypt")]
             tdf_encryptor: None,
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_audit_store: None,
         })
     }
 
@@ -126,8 +138,14 @@ impl Router {
             critic: None,
             #[cfg(feature = "advisor-persistence")]
             advisor_store: None,
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
             #[cfg(feature = "tdf-encrypt")]
             tdf_encryptor: None,
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_audit_store: None,
         })
     }
 
@@ -205,6 +223,14 @@ impl Router {
     #[must_use]
     pub fn with_tdf_encryptor(mut self, encryptor: tdf_audit::MessageEncryptor) -> Self {
         self.tdf_encryptor = Some(Arc::new(encryptor));
+        self
+    }
+
+    /// Attach a TDF audit store for persisting encryption manifests.
+    #[cfg(feature = "tdf-encrypt")]
+    #[must_use]
+    pub fn with_tdf_audit_store(mut self, store: arkavo_memory::TdfAuditStore) -> Self {
+        self.tdf_audit_store = Some(Arc::new(store));
         self
     }
 
@@ -350,8 +376,32 @@ impl Router {
     }
 
     /// Persist validated dynamic adjustments in the background.
+    ///
+    /// Debounced: only flushes every 10 responses or 60 seconds, whichever
+    /// comes first, to avoid chatty SQLite writes on every LLM call.
     #[cfg(feature = "advisor-persistence")]
     fn persist_advisor_state(&self) {
+        use std::sync::atomic::Ordering;
+
+        const FLUSH_EVERY_N: u64 = 10;
+        const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        let count = self.advisor_persist_count.fetch_add(1, Ordering::Relaxed) + 1;
+        let timed_out = self
+            .advisor_last_persist
+            .lock()
+            .map(|last| last.elapsed() >= FLUSH_TIMEOUT)
+            .unwrap_or(false);
+
+        if count < FLUSH_EVERY_N && !timed_out {
+            return;
+        }
+
+        self.advisor_persist_count.store(0, Ordering::Relaxed);
+        if let Ok(mut last) = self.advisor_last_persist.lock() {
+            *last = std::time::Instant::now();
+        }
+
         if let Some(store) = &self.advisor_store {
             let snapshots = self.advisor.export_dynamic();
             let store = store.clone();
@@ -549,14 +599,41 @@ impl Router {
             {
                 let manifests = encryptor.encrypt_messages(&advised_messages).await;
                 if !manifests.is_empty() {
+                    let total_bytes: usize =
+                        manifests.iter().map(|(_, m)| m.payload.value.len()).sum();
                     tracing::info!(
-                        "TDF audit: encrypted {} cloud-bound messages ({} bytes ciphertext)",
+                        "TDF audit: encrypted {} cloud-bound messages ({total_bytes} bytes ciphertext)",
                         manifests.len(),
-                        manifests
-                            .iter()
-                            .map(|(_, m)| m.payload.value.len())
-                            .sum::<usize>()
                     );
+
+                    if let Some(ref store) = self.tdf_audit_store {
+                        let model_name = current_decision.recommended_model.name().to_string();
+                        let agent_id = encryptor.agent_id().to_string();
+                        let records: Vec<arkavo_memory::AuditRecord> = manifests
+                            .iter()
+                            .map(|(idx, m)| arkavo_memory::AuditRecord {
+                                session_id: String::new(),
+                                message_index: *idx,
+                                agent_id: agent_id.clone(),
+                                model: model_name.clone(),
+                                algorithm: m.encryption_information.method.algorithm.clone(),
+                                ciphertext_bytes: m.payload.value.len(),
+                                policy_attributes: m
+                                    .encryption_information
+                                    .key_access
+                                    .iter()
+                                    .map(|ka| ka.url.clone())
+                                    .collect(),
+                                created_at: chrono::Utc::now(),
+                            })
+                            .collect();
+                        let store = store.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = store.save_batch(&records).await {
+                                tracing::warn!("TDF audit persist failed: {e}");
+                            }
+                        });
+                    }
                 }
             }
 
@@ -1200,8 +1277,14 @@ impl Router {
             critic: self.critic.clone(),
             #[cfg(feature = "advisor-persistence")]
             advisor_store: self.advisor_store.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
             #[cfg(feature = "tdf-encrypt")]
             tdf_encryptor: self.tdf_encryptor.clone(),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_audit_store: self.tdf_audit_store.clone(),
         })
     }
 

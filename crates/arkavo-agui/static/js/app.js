@@ -62,6 +62,15 @@ function routeEvent(event) {
         case 'modelSelected':
             handleModelSelected(event);
             break;
+        case 'learningStatusUpdate':
+            handleLearningStatusUpdate(event);
+            break;
+        case 'routingEvaluation':
+            handleRoutingEvaluation(event);
+            break;
+        case 'routingOutcome':
+            handleRoutingOutcome(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;
@@ -102,6 +111,8 @@ function switchView(viewId) {
         requestBudgetData();
     } else if (viewId === 'security') {
         requestSecurityData();
+    } else if (viewId === 'learning') {
+        wsSend({ type: 'requestLearningStatus' });
     }
 }
 

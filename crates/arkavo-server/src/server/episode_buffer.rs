@@ -170,6 +170,34 @@ impl EpisodeBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_router::learning::{EpisodeOutcome, Observation, QualityMetrics};
+
+    fn obs(tool: &str, success: bool) -> ToolObservation {
+        ToolObservation {
+            tool_name: tool.to_string(),
+            args: serde_json::json!({}),
+            result: "ok".to_string(),
+            success,
+            latency_ms: 100,
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn episode(category: &str, success: bool) -> Episode {
+        Episode::new(
+            "agent-1".to_string(),
+            "swarm-1".to_string(),
+            uuid::Uuid::new_v4(),
+            category.to_string(),
+            Observation::new(
+                serde_json::json!({}),
+                "action".to_string(),
+                serde_json::json!({}),
+                vec![],
+            ),
+            EpisodeOutcome::new(success, QualityMetrics::new(0.8, 0.8, 0.8), 100, 0.0),
+        )
+    }
 
     #[test]
     fn test_infer_category() {
@@ -197,33 +225,138 @@ mod tests {
     fn test_add_observation() {
         let mut buffer = EpisodeBuffer::new();
 
-        let obs = ToolObservation {
-            tool_name: "navigate_to".to_string(),
-            args: serde_json::json!({}),
-            result: "ok".to_string(),
-            success: true,
-            latency_ms: 100,
-            timestamp: Utc::now(),
-        };
-
-        buffer.add_observation(obs);
+        buffer.add_observation(obs("navigate_to", true));
         assert!(buffer.ready_for_episode_synthesis().is_none());
 
         // Add more observations to hit threshold
         for _ in 0..2 {
-            buffer.add_observation(ToolObservation {
-                tool_name: "navigate_to".to_string(),
-                args: serde_json::json!({}),
-                result: "ok".to_string(),
-                success: true,
-                latency_ms: 100,
-                timestamp: Utc::now(),
-            });
+            buffer.add_observation(obs("navigate_to", true));
         }
 
         assert_eq!(
             buffer.ready_for_episode_synthesis(),
             Some("navigation".to_string())
         );
+    }
+
+    #[test]
+    fn test_failure_triggers_immediate_synthesis() {
+        let mut buffer = EpisodeBuffer::new();
+        // A single failed observation should trigger synthesis immediately
+        buffer.add_observation(obs("navigate_to", false));
+        assert_eq!(
+            buffer.ready_for_episode_synthesis(),
+            Some("navigation".to_string())
+        );
+    }
+
+    #[test]
+    fn test_failure_after_success_triggers_synthesis() {
+        let mut buffer = EpisodeBuffer::new();
+        buffer.add_observation(obs("build_wall", true));
+        // Not ready yet (1 success, threshold=3)
+        assert!(buffer.ready_for_episode_synthesis().is_none());
+        // Failure triggers immediately regardless of count
+        buffer.add_observation(obs("build_wall", false));
+        assert_eq!(
+            buffer.ready_for_episode_synthesis(),
+            Some("construction".to_string())
+        );
+    }
+
+    #[test]
+    fn test_multiple_categories_independent() {
+        let mut buffer = EpisodeBuffer::with_thresholds(2, 2);
+        buffer.add_observation(obs("navigate_to", true));
+        buffer.add_observation(obs("build_wall", true));
+        // Neither category has hit threshold of 2
+        assert!(buffer.ready_for_episode_synthesis().is_none());
+
+        // Push navigation over threshold
+        buffer.add_observation(obs("move_forward", true));
+        assert_eq!(
+            buffer.ready_for_episode_synthesis(),
+            Some("navigation".to_string())
+        );
+    }
+
+    #[test]
+    fn test_take_observations_consumes() {
+        let mut buffer = EpisodeBuffer::new();
+        for _ in 0..3 {
+            buffer.add_observation(obs("navigate_to", true));
+        }
+        assert!(buffer.ready_for_episode_synthesis().is_some());
+
+        let taken = buffer.take_observations("navigation");
+        assert_eq!(taken.len(), 3);
+
+        // After taking, buffer is empty for that category
+        assert!(buffer.ready_for_episode_synthesis().is_none());
+        // Taking again returns empty vec
+        assert!(buffer.take_observations("navigation").is_empty());
+    }
+
+    #[test]
+    fn test_episode_lesson_threshold() {
+        let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
+        buffer.add_episode(episode("code", true));
+        assert!(buffer.ready_for_lesson_synthesis().is_none());
+
+        buffer.add_episode(episode("code", false));
+        assert_eq!(
+            buffer.ready_for_lesson_synthesis(),
+            Some("code".to_string())
+        );
+    }
+
+    #[test]
+    fn test_take_episodes_consumes() {
+        let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
+        buffer.add_episode(episode("code", true));
+        buffer.add_episode(episode("code", true));
+        assert!(buffer.ready_for_lesson_synthesis().is_some());
+
+        let taken = buffer.take_episodes("code");
+        assert_eq!(taken.len(), 2);
+
+        assert!(buffer.ready_for_lesson_synthesis().is_none());
+        assert!(buffer.take_episodes("code").is_empty());
+    }
+
+    #[test]
+    fn test_episodes_multiple_categories_independent() {
+        let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
+        buffer.add_episode(episode("code", true));
+        buffer.add_episode(episode("security", true));
+        // Neither at threshold
+        assert!(buffer.ready_for_lesson_synthesis().is_none());
+
+        buffer.add_episode(episode("code", true));
+        assert_eq!(
+            buffer.ready_for_lesson_synthesis(),
+            Some("code".to_string())
+        );
+    }
+
+    #[test]
+    fn test_take_observations_preserves_order() {
+        let mut buffer = EpisodeBuffer::with_thresholds(3, 3);
+        for i in 0..3 {
+            buffer.add_observation(ToolObservation {
+                tool_name: "navigate_to".to_string(),
+                args: serde_json::json!({}),
+                result: format!("result-{i}"),
+                success: true,
+                latency_ms: (i + 1) as u64 * 100,
+                timestamp: Utc::now(),
+            });
+        }
+        let taken = buffer.take_observations("navigation");
+        assert_eq!(taken[0].result, "result-0");
+        assert_eq!(taken[1].result, "result-1");
+        assert_eq!(taken[2].result, "result-2");
+        assert_eq!(taken[0].latency_ms, 100);
+        assert_eq!(taken[2].latency_ms, 300);
     }
 }

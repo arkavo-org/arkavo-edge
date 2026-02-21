@@ -1,3 +1,7 @@
+pub use arkavo_critic::response_analyzer::is_simple_query;
+use arkavo_critic::response_analyzer::{
+    has_code_fence, has_code_indicators, has_repetition, is_chat_query,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
@@ -380,28 +384,6 @@ pub struct DynamicSnapshot {
     pub feedback_count: u32,
 }
 
-/// Check if a prompt is a simple conversational query (greetings, math, factual).
-/// Duplicated from arkavo-critic::response_analyzer to avoid a crate dependency.
-pub fn is_simple_query(prompt: &str) -> bool {
-    if prompt.starts_with("hi") || prompt.starts_with("hello") || prompt.starts_with("hey") {
-        return true;
-    }
-
-    let math_patterns = ["what is", "calculate", "compute", "how much"];
-    let contains_math = math_patterns.iter().any(|p| prompt.contains(p));
-    let has_numbers = prompt.chars().any(|c| c.is_ascii_digit());
-    if contains_math && has_numbers && prompt.len() < 50 {
-        return true;
-    }
-
-    let factual = ["capital of", "who is", "when was", "where is"];
-    if factual.iter().any(|p| prompt.contains(p)) {
-        return true;
-    }
-
-    false
-}
-
 /// Return the canonical instruction text for a given issue type.
 fn advice_text_for(issue: &AdvisorIssue) -> &'static str {
     match issue {
@@ -416,81 +398,6 @@ fn advice_text_for(issue: &AdvisorIssue) -> &'static str {
         }
         AdvisorIssue::Timeout => "Keep your response brief and direct.",
     }
-}
-
-/// Check if response contains code fences (duplicated from arkavo-critic::response_analyzer).
-fn has_code_fence(response: &str) -> bool {
-    response.contains("```")
-}
-
-/// Check for repetitive patterns indicating a loop (duplicated from arkavo-critic::response_analyzer).
-fn has_repetition(response: &str) -> bool {
-    let lines: Vec<&str> = response.lines().collect();
-    if lines.len() < 5 {
-        return false;
-    }
-
-    // Consecutive duplicate lines
-    let mut repeat_count = 1;
-    for i in 1..lines.len() {
-        if lines[i] == lines[i - 1] && !lines[i].trim().is_empty() {
-            repeat_count += 1;
-            if repeat_count >= 3 {
-                return true;
-            }
-        } else {
-            repeat_count = 1;
-        }
-    }
-
-    // Q&A loop pattern
-    let question_count = lines
-        .iter()
-        .filter(|l| l.contains("What is") || l.contains("what is"))
-        .count();
-    if question_count >= 3 {
-        return true;
-    }
-
-    // Repeated phrases (5-word chunks)
-    let words: Vec<&str> = response.split_whitespace().collect();
-    if words.len() > 20 {
-        let chunk_size = 5;
-        for i in 0..(words.len() - chunk_size * 2) {
-            let chunk1 = &words[i..i + chunk_size];
-            let chunk2 = &words[i + chunk_size..i + chunk_size * 2];
-            if chunk1 == chunk2 {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
-/// Check if this is a conversational query (duplicated from arkavo-critic::response_analyzer).
-fn is_chat_query(prompt: &str) -> bool {
-    let chat_indicators = [
-        "hi",
-        "hello",
-        "hey",
-        "thanks",
-        "thank you",
-        "how are",
-        "what's up",
-        "tell me about",
-        "explain",
-    ];
-    chat_indicators.iter().any(|p| prompt.contains(p))
-}
-
-/// Check if response has coding/tool expert indicators (duplicated from arkavo-critic::response_analyzer).
-fn has_code_indicators(response: &str) -> bool {
-    response.contains("def ")
-        || response.contains("import ")
-        || response.contains("print(")
-        || response.contains("```python")
-        || response.contains("```")
 }
 
 /// Truncate text at the last complete sentence that fits within `max_len`.

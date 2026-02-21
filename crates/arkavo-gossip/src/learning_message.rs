@@ -26,6 +26,15 @@ pub struct LessonAnnouncement {
     pub timestamp: DateTime<Utc>,
     /// Ed25519 signature over the announcement
     pub signature: Vec<u8>,
+    /// Lesson pattern condition (unsigned metadata for direct application)
+    #[serde(default)]
+    pub condition: Option<String>,
+    /// Lesson pattern action (unsigned metadata)
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Lesson pattern expected outcome (unsigned metadata)
+    #[serde(default)]
+    pub expected_outcome: Option<String>,
 }
 
 impl LessonAnnouncement {
@@ -48,7 +57,24 @@ impl LessonAnnouncement {
             confidence,
             timestamp: Utc::now(),
             signature: Vec::new(),
+            condition: None,
+            action: None,
+            expected_outcome: None,
         }
+    }
+
+    /// Attach lesson pattern metadata for direct application by receivers
+    #[must_use]
+    pub fn with_pattern(
+        mut self,
+        condition: String,
+        action: String,
+        expected_outcome: String,
+    ) -> Self {
+        self.condition = Some(condition);
+        self.action = Some(action);
+        self.expected_outcome = Some(expected_outcome);
+        self
     }
 
     /// Get the content bytes for signing

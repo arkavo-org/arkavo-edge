@@ -11,7 +11,10 @@ use arkavo_gossip::{
     sign_lesson_announcement,
 };
 use arkavo_router::Router;
-use arkavo_router::learning::{AgentContribution, Episode, LearningModule, Lesson, ToolCallFormat};
+use arkavo_router::learning::{
+    AgentContribution, BurstFeedback, Episode, LearningModule, Lesson, LessonPattern,
+    ToolCallFormat,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
@@ -212,15 +215,63 @@ impl LearningBus {
     }
 
     /// Handle incoming gossip message from peer
+    ///
+    /// For lesson announcements that pass signature verification, immediately
+    /// adds the lesson to the local policy cache for behavior guidance injection.
     pub async fn handle_gossip(&self, message: GossipMessage) -> Vec<GossipMessage> {
+        // Capture announcement metadata before passing to gossip protocol
+        let lesson_announce = if let GossipMessage::LessonAnnounce(ref ann) = message {
+            Some(ann.clone())
+        } else {
+            None
+        };
+
         let gossip = self.gossip.read().await;
-        match gossip.handle_message(message).await {
+        let responses = match gossip.handle_message(message).await {
             Ok(responses) => responses,
             Err(e) => {
                 tracing::warn!("Gossip message error: {}", e);
-                vec![]
+                return vec![];
             }
+        };
+        drop(gossip);
+
+        // If the lesson announcement passed signature verification (didn't error),
+        // add it to the policy cache for immediate behavior guidance injection
+        if let Some(ann) = lesson_announce {
+            let pattern = LessonPattern::new(
+                ann.condition
+                    .clone()
+                    .unwrap_or_else(|| ann.category.clone()),
+                ann.action
+                    .clone()
+                    .unwrap_or_else(|| "adjust approach".to_string()),
+                ann.expected_outcome
+                    .clone()
+                    .unwrap_or_else(|| "improved quality".to_string()),
+            );
+            let lesson = Lesson::new(
+                ann.originator.clone(),
+                self.swarm_id.clone(),
+                ann.category.clone(),
+                pattern,
+                ann.confidence,
+                1,
+            );
+
+            let mut cache = self.policy_cache.write().await;
+            cache.add_lesson(lesson);
+            drop(cache);
+
+            tracing::info!(
+                lesson_id = %ann.lesson_id,
+                category = %ann.category,
+                originator = %ann.originator,
+                "Gossip lesson applied to policy cache for guidance injection"
+            );
         }
+
+        responses
     }
 
     /// Add a peer to gossip protocol with their public key
@@ -514,10 +565,123 @@ impl LearningBus {
         cache.get_few_shot_examples(tool_names)
     }
 
+    /// Get behavior guidance for prompt injection from cached lessons
+    pub async fn get_behavior_guidance(&self, category: Option<&str>) -> String {
+        let cache = self.policy_cache.read().await;
+        cache.get_behavior_guidance(category)
+    }
+
+    /// Record a quality score for an (agent, category) pair
+    pub async fn record_quality(&self, agent_id: &str, category: &str, score: f64) {
+        let mut cache = self.policy_cache.write().await;
+        cache.record_quality(agent_id, category, score);
+    }
+
+    /// Get all quality trends from the policy cache
+    pub async fn get_quality_trends(&self) -> Vec<super::policy_cache::QualityTrend> {
+        let cache = self.policy_cache.read().await;
+        cache.get_all_trends()
+    }
+
+    /// Get behavior lesson count
+    pub async fn behavior_lesson_count(&self) -> usize {
+        let cache = self.policy_cache.read().await;
+        cache.behavior_lesson_count()
+    }
+
     /// Update the model name for pattern attribution
     pub async fn set_model_name(&self, model_name: String) {
         let mut observer = self.tool_pattern_observer.write().await;
         observer.set_model_name(model_name);
+    }
+
+    /// Start receiving lessons from the gateway and propagating via gossip
+    ///
+    /// Signs each lesson as an announcement and sends to the gossip network.
+    pub fn start_lesson_receiver(&self, mut rx: mpsc::Receiver<Lesson>) {
+        let gossip = self.gossip.clone();
+        let keypair = self.keypair.clone();
+        let gossip_out_tx = self.gossip_out_tx.clone();
+        let learning = self.learning.clone();
+        let swarm_id = self.swarm_id.clone();
+        let policy_cache = self.policy_cache.clone();
+
+        tokio::spawn(async move {
+            while let Some(lesson) = rx.recv().await {
+                tracing::info!(
+                    "Learning bus received lesson: {} (category={})",
+                    lesson.pattern.condition,
+                    lesson.category
+                );
+
+                // Store in policy cache for behavior guidance injection
+                {
+                    let mut cache = policy_cache.write().await;
+                    cache.add_lesson(lesson.clone());
+                }
+
+                // Apply locally: inject negative feedback for the originator+category
+                Self::apply_lesson_to_local_routing(&learning, &lesson).await;
+
+                // Create and sign announcement for gossip propagation
+                let mut announcement = LessonAnnouncement::new(
+                    lesson.id,
+                    lesson.compute_hash(),
+                    lesson.agent_id.clone(),
+                    swarm_id.clone(),
+                    lesson.category.clone(),
+                    lesson.confidence,
+                )
+                .with_pattern(
+                    lesson.pattern.condition.clone(),
+                    lesson.pattern.action.clone(),
+                    lesson.pattern.expected_outcome.clone(),
+                );
+
+                if let Err(e) = sign_lesson_announcement(&mut announcement, &keypair) {
+                    tracing::warn!("Failed to sign lesson announcement: {}", e);
+                    continue;
+                }
+
+                let g = gossip.read().await;
+                let peers = g.select_propagation_peers(None).await;
+                drop(g);
+
+                let peer_count = peers.len();
+                for peer_id in peers {
+                    let _ = gossip_out_tx
+                        .send((peer_id, GossipMessage::LessonAnnounce(announcement.clone())));
+                }
+
+                tracing::info!(
+                    "Propagated lesson {} to {} peers",
+                    announcement.lesson_id,
+                    peer_count
+                );
+            }
+        });
+    }
+
+    /// Apply a received gossip lesson to local routing by injecting synthetic feedback
+    async fn apply_lesson_to_local_routing(
+        learning: &Arc<RwLock<LearningModule>>,
+        lesson: &Lesson,
+    ) {
+        let feedback = BurstFeedback::failure(Uuid::new_v4(), lesson.category.clone(), 0)
+            .with_quality(1.0 - lesson.confidence);
+
+        learning
+            .write()
+            .await
+            .immediate_update(&lesson.agent_id, &feedback)
+            .await;
+
+        tracing::debug!(
+            "Applied lesson locally: agent={}, category={}, confidence={}",
+            lesson.agent_id,
+            lesson.category,
+            lesson.confidence
+        );
     }
 
     /// Check if there are patterns ready for lesson synthesis
@@ -535,16 +699,21 @@ impl LearningBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_router::learning::LessonPattern;
 
-    #[tokio::test]
-    async fn test_learning_bus_creation() {
+    fn make_bus() -> LearningBus {
         let keypair = Arc::new(AgentKeypair::generate());
-        let bus = LearningBus::new(
+        LearningBus::new(
             "test-agent".to_string(),
             "test-swarm".to_string(),
             keypair,
             GossipConfig::default(),
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn test_learning_bus_creation() {
+        let bus = make_bus();
 
         assert_eq!(bus.agent_id(), "test-agent");
         assert_eq!(bus.swarm_id(), "test-swarm");
@@ -567,5 +736,97 @@ mod tests {
 
         bus.remove_peer("peer-1").await;
         assert_eq!(bus.peer_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_behavior_guidance_via_bus() {
+        let bus = make_bus();
+
+        let lesson = Lesson::new(
+            "agent-1".to_string(),
+            "local".to_string(),
+            "code".to_string(),
+            LessonPattern::new(
+                "Agent returns generic non-answers".to_string(),
+                "Reduce weight".to_string(),
+                "Substantive response".to_string(),
+            ),
+            0.8,
+            1,
+        );
+        bus.add_lesson_to_cache(lesson).await;
+
+        let guidance = bus.get_behavior_guidance(None).await;
+        assert!(!guidance.is_empty());
+        assert!(guidance.contains("generic non-answers"));
+    }
+
+    #[tokio::test]
+    async fn test_record_quality_via_bus() {
+        let bus = make_bus();
+
+        bus.record_quality("a", "code", 0.5).await;
+
+        let trends = bus.get_quality_trends().await;
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].scores, vec![0.5]);
+    }
+
+    #[tokio::test]
+    async fn test_behavior_lesson_count_via_bus() {
+        let bus = make_bus();
+
+        for i in 0..3 {
+            let lesson = Lesson::new(
+                "a".to_string(),
+                "s".to_string(),
+                "code".to_string(),
+                LessonPattern::new(
+                    format!("issue-{i}"),
+                    "action".to_string(),
+                    "outcome".to_string(),
+                ),
+                0.8,
+                1,
+            );
+            bus.add_lesson_to_cache(lesson).await;
+        }
+
+        assert_eq!(bus.behavior_lesson_count().await, 3);
+    }
+
+    #[tokio::test]
+    async fn test_lesson_receiver_stores_in_policy_cache() {
+        let bus = make_bus();
+        let (tx, rx) = mpsc::channel(16);
+
+        bus.start_lesson_receiver(rx);
+
+        let lesson = Lesson::new(
+            "agent-x".to_string(),
+            "test-swarm".to_string(),
+            "security".to_string(),
+            LessonPattern::new(
+                "Agent agent-x returns empty responses".to_string(),
+                "Avoid routing".to_string(),
+                "Non-empty response".to_string(),
+            ),
+            0.9,
+            1,
+        );
+        tx.send(lesson).await.expect("send should succeed");
+
+        // Yield briefly to let the spawned task process the lesson
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(
+            bus.cached_lesson_count().await >= 1,
+            "lesson should be stored in policy cache"
+        );
+        let guidance = bus.get_behavior_guidance(None).await;
+        assert!(
+            guidance.contains("empty responses"),
+            "guidance should contain lesson condition text"
+        );
     }
 }

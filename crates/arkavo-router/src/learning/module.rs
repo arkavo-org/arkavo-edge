@@ -11,6 +11,8 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone)]
 pub struct AgentUtilityStats {
     pub agent_id: String,
+    pub alpha: f64,
+    pub beta_param: f64,
     pub expected_value: f64,
     pub std_dev: f64,
     pub total_observations: u64,
@@ -172,6 +174,8 @@ impl LearningModule {
         let agents = self.agents.read().await;
         agents.get(agent_id).map(|u| AgentUtilityStats {
             agent_id: u.agent_id.clone(),
+            alpha: u.prior.alpha,
+            beta_param: u.prior.beta,
             expected_value: u.prior.expected_value(),
             std_dev: u.prior.std_dev(),
             total_observations: u.total_observations(),
@@ -193,6 +197,8 @@ impl LearningModule {
             .values()
             .map(|u| AgentUtilityStats {
                 agent_id: u.agent_id.clone(),
+                alpha: u.prior.alpha,
+                beta_param: u.prior.beta,
                 expected_value: u.prior.expected_value(),
                 std_dev: u.prior.std_dev(),
                 total_observations: u.total_observations(),
@@ -314,6 +320,32 @@ impl LearningModule {
         }
 
         (best_format, best_score)
+    }
+
+    /// Get per-category statistics for an agent
+    ///
+    /// Returns `(category, alpha, beta, expected_value, observations)` tuples,
+    /// filtering out `"format:"` keys which are used for tool format learning.
+    pub async fn get_category_stats(&self, agent_id: &str) -> Vec<(String, f64, f64, f64, u64)> {
+        let agents = self.agents.read().await;
+        let Some(utility) = agents.get(agent_id) else {
+            return vec![];
+        };
+
+        utility
+            .category_priors
+            .iter()
+            .filter(|(k, _)| !k.starts_with("format:"))
+            .map(|(k, prior)| {
+                (
+                    k.clone(),
+                    prior.alpha,
+                    prior.beta,
+                    prior.expected_value(),
+                    prior.total_observations() as u64,
+                )
+            })
+            .collect()
     }
 
     /// Get format statistics for an agent

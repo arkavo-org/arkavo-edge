@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "review-auth",
+      "category": "security_scan",
+      "prompt": "Review this authentication function for security issues:\n\n```rust\npub fn authenticate(username: &str, password: &str) -> bool {\n    let query = format!(\"SELECT * FROM users WHERE name='{}' AND pass='{}'\", username, password);\n    db::execute(&query).is_ok()\n}\n```"
+    },
+    {
+      "id": "review-parser",
+      "category": "code_review",
+      "prompt": "Review this parser for quality issues:\n\n```rust\nfn parse_config(input: &str) -> Config {\n    let lines: Vec<&str> = input.split('\\n').collect();\n    let mut config = Config::default();\n    for line in lines {\n        let parts: Vec<&str> = line.splitn(2, '=').collect();\n        if parts.len() == 2 {\n            config.set(parts[0].trim(), parts[1].trim());\n        }\n    }\n    config\n}\n```"
+    },
+    {
+      "id": "generate-tests-cache",
+      "category": "test_generation",
+      "prompt": "Generate unit tests for this LRU cache implementation:\n\n```rust\npub struct LruCache<K, V> {\n    capacity: usize,\n    map: HashMap<K, V>,\n    order: VecDeque<K>,\n}\n\nimpl<K: Hash + Eq + Clone, V> LruCache<K, V> {\n    pub fn new(capacity: usize) -> Self { ... }\n    pub fn get(&mut self, key: &K) -> Option<&V> { ... }\n    pub fn put(&mut self, key: K, value: V) { ... }\n}\n```"
+    },
+    {
+      "id": "review-crypto",
+      "category": "security_scan",
+      "prompt": "Audit this token generation for cryptographic issues:\n\n```rust\nuse rand::Rng;\n\npub fn generate_session_token() -> String {\n    let mut rng = rand::thread_rng();\n    let token: u64 = rng.gen();\n    format!(\"{:x}\", token)\n}\n```"
+    },
+    {
+      "id": "review-error-handling",
+      "category": "code_review",
+      "prompt": "Review this error handling pattern:\n\n```rust\npub fn process_request(data: &[u8]) -> String {\n    let parsed = serde_json::from_slice(data).unwrap();\n    let result = db::query(parsed).unwrap();\n    let output = transform(result).unwrap();\n    serde_json::to_string(&output).unwrap()\n}\n```"
+    },
+    {
+      "id": "generate-tests-ring-buffer",
+      "category": "test_generation",
+      "prompt": "Generate edge-case tests for this ring buffer:\n\n```rust\npub struct RingBuffer<T> {\n    buf: Vec<Option<T>>,\n    head: usize,\n    len: usize,\n}\n\nimpl<T> RingBuffer<T> {\n    pub fn new(capacity: usize) -> Self { ... }\n    pub fn push(&mut self, item: T) { ... }\n    pub fn pop(&mut self) -> Option<T> { ... }\n    pub fn len(&self) -> usize { self.len }\n    pub fn is_empty(&self) -> bool { self.len == 0 }\n}\n```"
+    }
+  ]
+}

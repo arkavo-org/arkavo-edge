@@ -49,23 +49,58 @@ impl GossipProtocol {
         // Mark as seen with timestamp
         self.seen_lesson_ids.write().await.insert(lesson_id, now);
 
-        // Store the lesson
+        // Store the lesson and auto-vote approve (signature-verified = trusted)
+        let mut consensus = LessonConsensusState::new(lesson_id);
+        let auto_vote = LessonVote::new(lesson_id, self.agent_id.clone(), true);
+        consensus.add_vote(auto_vote.clone());
+
+        // Check quorum immediately (originator may have also voted via delivery)
+        let peer_count = self.peers.read().await.len();
+        consensus.check_quorum(peer_count + 1, &self.config.quorum);
+
+        let approved = consensus.status == LessonConsensusStatus::Approved;
+        let status = if approved {
+            LessonStatus::Approved
+        } else {
+            LessonStatus::Pending
+        };
+
         let state = LessonState {
             announcement: announcement.clone(),
-            status: LessonStatus::Pending,
-            consensus: LessonConsensusState::new(lesson_id),
+            status,
+            consensus,
             content: None,
             created_at: now,
         };
         self.lessons.write().await.insert(lesson_id, state);
 
+        // If already approved, emit notification
+        if approved {
+            tracing::info!(
+                lesson_id = %lesson_id,
+                "Lesson auto-approved on receipt (signature verified)"
+            );
+            if let Some(tx) = &self.lesson_approved_tx {
+                let _ = tx.send(announcement.clone());
+            }
+        }
+
         // Generate messages to propagate
-        Ok(vec![
+        let mut messages = vec![
             // Request the lesson content
             GossipMessage::LessonRequest(LessonRequest::new(lesson_id, self.agent_id.clone())),
             // Propagate announcement to peers (gossip)
             GossipMessage::LessonAnnounce(announcement),
-        ])
+            // Propagate our approve vote
+            GossipMessage::LessonVote(auto_vote),
+        ];
+
+        // If not yet approved, peers still need votes to reach quorum
+        if approved {
+            messages.truncate(2); // No need to propagate vote if already approved
+        }
+
+        Ok(messages)
     }
 
     /// Handle a lesson vote

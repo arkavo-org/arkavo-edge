@@ -33,16 +33,25 @@ pub async fn start_lesson_application_loop(
                     announcement.originator
                 );
 
-                // Convert announcement to Lesson and add to cache
+                // Convert announcement to Lesson using pattern metadata if available
+                let condition = announcement
+                    .condition
+                    .clone()
+                    .unwrap_or_else(|| announcement.category.clone());
+                let action = announcement
+                    .action
+                    .clone()
+                    .unwrap_or_else(|| "adjust approach".to_string());
+                let expected_outcome = announcement
+                    .expected_outcome
+                    .clone()
+                    .unwrap_or_else(|| "improved quality".to_string());
+
                 let lesson = Lesson::new(
                     announcement.originator.clone(),
                     learning_bus.swarm_id().to_string(),
                     announcement.category.clone(),
-                    LessonPattern::new(
-                        announcement.category.clone(),
-                        "slow".to_string(),
-                        "avoid_crash".to_string(),
-                    ),
+                    LessonPattern::new(condition, action, expected_outcome),
                     announcement.confidence,
                     1,
                 );
@@ -188,6 +197,11 @@ pub async fn start_event_processing_loop(
                                                     learning_bus.swarm_id().to_string(),
                                                     lesson.category.clone(),
                                                     lesson.confidence,
+                                                )
+                                                .with_pattern(
+                                                    lesson.pattern.condition.clone(),
+                                                    lesson.pattern.action.clone(),
+                                                    lesson.pattern.expected_outcome.clone(),
                                                 );
 
                                                 if let Err(e) =

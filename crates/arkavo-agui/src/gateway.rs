@@ -7,11 +7,12 @@ use crate::security_handler::SecurityHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
+use arkavo_router::learning::LearningModule;
 use axum::{
     Router, middleware,
     routing::{get, post},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
@@ -22,6 +23,20 @@ pub struct ConnectionInfo {
     pub subscriptions: Vec<SubscriptionHandle>,
     pub current_plan: Option<Vec<arkavo_ui_generator::planner::ComponentPart>>,
     pub current_prompt: Option<String>,
+}
+
+/// Tracks a task submitted via the UI and delegated to an agent
+#[derive(Debug, Clone)]
+pub struct TrackedTask {
+    pub id: String,
+    pub description: String,
+    pub target_agent: Option<String>,
+    pub status: String,
+    pub progress: Option<f32>,
+    pub result: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    pub task_category: Option<String>,
 }
 
 #[derive(Clone)]
@@ -37,6 +52,11 @@ pub struct AppState {
     pub telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
     pub debug_handler: Option<Arc<DebugHandler>>,
     pub rate_limiter: Arc<IpRateLimiter>,
+    pub task_store: Arc<RwLock<HashMap<String, TrackedTask>>>,
+    pub learning_module: Arc<RwLock<LearningModule>>,
+    pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
+    pub lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    pub lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
 }
 
 pub struct AgUiGateway {
@@ -228,6 +248,29 @@ impl AgUiGateway {
             Arc::new(RwLock::new(handler))
         };
 
+        // Create lesson pipeline: extracted lessons flow into a local store for guidance injection
+        let lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>> =
+            Arc::new(RwLock::new(Vec::new()));
+        let (lesson_tx, mut lesson_rx) = mpsc::channel::<arkavo_router::learning::Lesson>(64);
+
+        let lesson_store_for_rx = lesson_store.clone();
+        tokio::spawn(async move {
+            const MAX_LESSONS_PER_KEY: usize = 5;
+            while let Some(lesson) = lesson_rx.recv().await {
+                println!(
+                    "AG-UI: Caching lesson for {} on {}: {}",
+                    lesson.agent_id, lesson.category, lesson.pattern.condition
+                );
+                let mut store = lesson_store_for_rx.write().await;
+                store.push(lesson);
+                // Evict oldest when too many for same (agent, category) key
+                let len = store.len();
+                if len > MAX_LESSONS_PER_KEY * 10 {
+                    store.drain(..len - MAX_LESSONS_PER_KEY * 10);
+                }
+            }
+        });
+
         let state = AppState {
             connections: self.connections.clone(),
             agents: discovered_agents.clone(),
@@ -240,6 +283,11 @@ impl AgUiGateway {
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
             debug_handler: self.debug_handler.clone(),
             rate_limiter: rate_limiter.clone(),
+            task_store: Arc::new(RwLock::new(HashMap::new())),
+            learning_module: Arc::new(RwLock::new(LearningModule::new())),
+            routing_history: Arc::new(RwLock::new(VecDeque::new())),
+            lesson_tx: Some(lesson_tx),
+            lesson_store,
         };
 
         // Rate-limited API routes

@@ -20,6 +20,7 @@ pub enum TaskCategory {
     CodeSearch,
     SecurityScan,
     TestGeneration,
+    CodeReview,
     Documentation,
     Refactoring,
     CodeGeneration,
@@ -35,6 +36,7 @@ impl TaskCategory {
             "code_search" | "search" => Self::CodeSearch,
             "security_scan" | "security" => Self::SecurityScan,
             "test_generation" | "tests" | "testing" => Self::TestGeneration,
+            "code_review" | "review" => Self::CodeReview,
             "documentation" | "docs" => Self::Documentation,
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
@@ -50,6 +52,7 @@ impl TaskCategory {
             Self::CodeSearch => "code_search",
             Self::SecurityScan => "security_scan",
             Self::TestGeneration => "test_generation",
+            Self::CodeReview => "code_review",
             Self::Documentation => "documentation",
             Self::Refactoring => "refactoring",
             Self::CodeGeneration => "code_generation",
@@ -79,6 +82,10 @@ impl TaskCategory {
             Self::TestGeneration => TokenEstimate {
                 input: 500,
                 output: 2500,
+            },
+            Self::CodeReview => TokenEstimate {
+                input: 400,
+                output: 1500,
             },
             Self::Documentation => TokenEstimate {
                 input: 300,
@@ -223,6 +230,72 @@ impl Classification {
         };
 
         (is_multi_step, estimated_subtasks)
+    }
+}
+
+/// Rule-based task classification from description keywords (no LLM required)
+pub fn classify_task_keywords(description: &str) -> TaskCategory {
+    let lower = description.to_lowercase();
+
+    if lower.contains("react")
+        || lower.contains("vue")
+        || lower.contains("svelte")
+        || lower.contains("tailwind")
+        || lower.contains("component")
+        || lower.contains("frontend")
+        || lower.contains("ui")
+    {
+        TaskCategory::FrontendUI
+    } else if lower.contains("api")
+        || lower.contains("endpoint")
+        || lower.contains("backend")
+        || lower.contains("database")
+        || lower.contains("auth")
+    {
+        TaskCategory::BackendAPI
+    } else if lower.contains("search")
+        || lower.contains("find")
+        || lower.contains("grep")
+        || lower.contains("locate")
+    {
+        TaskCategory::CodeSearch
+    } else if lower.contains("security")
+        || lower.contains("vulnerability")
+        || lower.contains("audit")
+        || lower.contains("scan")
+    {
+        TaskCategory::SecurityScan
+    } else if lower.contains("test")
+        || lower.contains("jest")
+        || lower.contains("pytest")
+        || lower.contains("unit")
+    {
+        TaskCategory::TestGeneration
+    } else if lower.contains("review")
+        || lower.contains("code quality")
+        || lower.contains("anti-pattern")
+        || lower.contains("complexity")
+        || lower.contains("error handling")
+    {
+        TaskCategory::CodeReview
+    } else if lower.contains("document")
+        || lower.contains("readme")
+        || lower.contains("comment")
+        || lower.contains("docs")
+    {
+        TaskCategory::Documentation
+    } else if lower.contains("refactor") || lower.contains("cleanup") || lower.contains("optimize")
+    {
+        TaskCategory::Refactoring
+    } else if lower.contains("screenshot")
+        || lower.contains("image")
+        || lower.contains("vision")
+        || lower.contains("analyze ui")
+        || lower.contains("ui from")
+    {
+        TaskCategory::VisionAnalysis
+    } else {
+        TaskCategory::General
     }
 }
 
@@ -378,6 +451,17 @@ impl TaskClassifier {
                 0.80,
                 "Keywords match test generation".to_string(),
             )
+        } else if task_lower.contains("review")
+            || task_lower.contains("code quality")
+            || task_lower.contains("anti-pattern")
+            || task_lower.contains("complexity")
+            || task_lower.contains("error handling")
+        {
+            (
+                TaskCategory::CodeReview,
+                0.80,
+                "Keywords match code review".to_string(),
+            )
         } else if task_lower.contains("document")
             || task_lower.contains("readme")
             || task_lower.contains("comment")
@@ -447,6 +531,7 @@ Categories:
 - code_search: Finding code, grep, repository search, AST analysis
 - security_scan: Vulnerabilities, security audit, code scanning
 - test_generation: Unit tests, integration tests, test suites
+- code_review: Code review, anti-patterns, error handling, code quality
 - documentation: README, API docs, comments, guides
 - refactoring: Code cleanup, optimization, restructuring
 - general: Other coding tasks
@@ -595,6 +680,17 @@ impl TaskClassifier {
                 0.80,
                 "Keywords match test generation".to_string(),
             )
+        } else if task_lower.contains("review")
+            || task_lower.contains("code quality")
+            || task_lower.contains("anti-pattern")
+            || task_lower.contains("complexity")
+            || task_lower.contains("error handling")
+        {
+            (
+                TaskCategory::CodeReview,
+                0.80,
+                "Keywords match code review".to_string(),
+            )
         } else if task_lower.contains("document")
             || task_lower.contains("readme")
             || task_lower.contains("comment")
@@ -700,6 +796,39 @@ mod tests {
     fn test_token_estimation() {
         let estimate = TaskCategory::FrontendUI.estimated_tokens();
         assert!(estimate.output > estimate.input);
+    }
+
+    #[test]
+    fn test_classify_task_keywords() {
+        assert_eq!(
+            classify_task_keywords("Build a React component with Tailwind CSS"),
+            TaskCategory::FrontendUI
+        );
+        assert_eq!(
+            classify_task_keywords("Create a REST API endpoint for authentication"),
+            TaskCategory::BackendAPI
+        );
+        assert_eq!(
+            classify_task_keywords("Scan for security vulnerabilities"),
+            TaskCategory::SecurityScan
+        );
+        assert_eq!(
+            classify_task_keywords("Generate unit tests for the parser"),
+            TaskCategory::TestGeneration
+        );
+        assert_eq!(
+            classify_task_keywords("Review this error handling pattern"),
+            TaskCategory::CodeReview
+        );
+        assert_eq!(
+            classify_task_keywords("Write documentation for the module"),
+            TaskCategory::Documentation
+        );
+        assert_eq!(
+            classify_task_keywords("Refactor the data pipeline"),
+            TaskCategory::Refactoring
+        );
+        assert_eq!(classify_task_keywords("Hello world"), TaskCategory::General);
     }
 
     #[tokio::test]

@@ -265,6 +265,92 @@ mod tests {
     }
 
     #[test]
+    fn test_set_model_name_propagates() {
+        let mut observer = ToolPatternObserver::with_min_evidence("old-model".to_string(), 1);
+
+        // Record tool_a with old model name
+        observer.record_success("tool_a", ToolCallFormat::Fence, "", &serde_json::json!({}));
+
+        observer.set_model_name("new-model".to_string());
+
+        // Record tool_b with new model name
+        observer.record_success("tool_b", ToolCallFormat::Fence, "", &serde_json::json!({}));
+
+        // tool_a should retain old model name
+        let lesson_a = observer
+            .synthesize_lesson("tool_a", ToolCallFormat::Fence, "a", "s")
+            .unwrap();
+        let meta_a = lesson_a.pattern.metadata.as_ref().unwrap();
+        assert_eq!(meta_a["model_name"], "old-model");
+
+        // tool_b should have new model name
+        let lesson_b = observer
+            .synthesize_lesson("tool_b", ToolCallFormat::Fence, "a", "s")
+            .unwrap();
+        let meta_b = lesson_b.pattern.metadata.as_ref().unwrap();
+        assert_eq!(meta_b["model_name"], "new-model");
+    }
+
+    #[test]
+    fn test_remove_pattern() {
+        let mut observer = ToolPatternObserver::with_min_evidence("m".to_string(), 1);
+        observer.record_success("tool_a", ToolCallFormat::Fence, "", &serde_json::json!({}));
+        observer.record_success("tool_b", ToolCallFormat::Json, "", &serde_json::json!({}));
+        assert_eq!(observer.pattern_count(), 2);
+
+        observer.remove_pattern("tool_a", ToolCallFormat::Fence);
+        assert_eq!(observer.pattern_count(), 1);
+        assert!(
+            observer
+                .synthesize_lesson("tool_a", ToolCallFormat::Fence, "a", "s")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_confidence_increases_with_evidence() {
+        let mut observer = ToolPatternObserver::with_min_evidence("m".to_string(), 1);
+        observer.record_success("tool_a", ToolCallFormat::Fence, "", &serde_json::json!({}));
+        let low = observer
+            .synthesize_lesson("tool_a", ToolCallFormat::Fence, "a", "s")
+            .unwrap()
+            .confidence;
+
+        // Add many more successes
+        for _ in 0..20 {
+            observer.record_success("tool_a", ToolCallFormat::Fence, "", &serde_json::json!({}));
+        }
+        let high = observer
+            .synthesize_lesson("tool_a", ToolCallFormat::Fence, "a", "s")
+            .unwrap()
+            .confidence;
+
+        assert!(high > low, "confidence should increase with more evidence");
+        assert!(high < 1.0, "confidence should never reach 1.0");
+    }
+
+    #[test]
+    fn test_same_tool_different_formats_separate() {
+        let mut observer = ToolPatternObserver::with_min_evidence("m".to_string(), 1);
+        observer.record_success(
+            "get_sector",
+            ToolCallFormat::Fence,
+            "",
+            &serde_json::json!({}),
+        );
+        observer.record_success(
+            "get_sector",
+            ToolCallFormat::Json,
+            "",
+            &serde_json::json!({}),
+        );
+
+        assert_eq!(observer.pattern_count(), 2);
+        let ready = observer.get_ready_tool_names();
+        assert_eq!(ready.len(), 2);
+    }
+
+    #[test]
     fn test_synthesize_all_lessons() {
         let mut observer = ToolPatternObserver::with_min_evidence("test".to_string(), 2);
 

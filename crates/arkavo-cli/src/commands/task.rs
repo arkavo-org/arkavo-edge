@@ -3,7 +3,7 @@ use arkavo_orchestrator::{
     LocalTaskStrategy, MeshTaskStrategy, TaskConfig as OrchestratorConfig, TaskExecutor,
 };
 use arkavo_protocol::{
-    agent_registry::{AgentInfo, AgentRegistry},
+    agent_registry::AgentRegistry,
     http::HttpTransport,
     transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TlsConfig, TransportConfig},
     types::{
@@ -11,14 +11,15 @@ use arkavo_protocol::{
         TaskGetResponse, TaskStatus,
     },
 };
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::warn;
+
+use super::mesh::discover_mesh_agents;
 
 use super::terminal_ui::TerminalUI;
 
@@ -189,14 +190,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             arg => {
                 // First non-flag argument is the task description
-                if !arg.starts_with('-') {
+                if !arg.starts_with('-') && task_description.is_none() {
                     task_description = Some(arg.to_string());
-                    // Collect remaining args as part of task description
-                    if i + 1 < args.len() {
-                        let remaining: Vec<String> = args[i + 1..].to_vec();
-                        task_description = Some(format!("{} {}", arg, remaining.join(" ")));
-                        break;
-                    }
+                } else if !arg.starts_with('-') {
+                    // Additional non-flag words extend the task description
+                    let existing = task_description.as_deref().unwrap_or("");
+                    task_description = Some(format!("{existing} {arg}"));
                 } else {
                     return Err(format!("Unknown argument: {arg}").into());
                 }
@@ -348,103 +347,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-}
-
-/// Discover agents on the mesh network using mDNS
-#[cfg(feature = "mdns")]
-fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
-    use mdns_sd::{ServiceDaemon, ServiceEvent};
-    use std::time::Duration;
-
-    info!("Discovering mesh agents via mDNS...");
-
-    let mdns = ServiceDaemon::new()?;
-    let receiver = mdns.browse("_a2a._tcp.local.")?;
-
-    let mut agents = Vec::new();
-    let timeout = Duration::from_secs(3);
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < timeout {
-        match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(event) => {
-                if let ServiceEvent::ServiceResolved(info) = event {
-                    let agent_id = info
-                        .get_property_val_str("agent_id")
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let name = info.get_fullname().to_string();
-                    let purpose = info
-                        .get_property_val_str("purpose")
-                        .unwrap_or("")
-                        .to_string();
-
-                    let capabilities_str = info
-                        .get_property_val_str("capabilities")
-                        .unwrap_or_default();
-                    let mut capabilities: Vec<String> = if capabilities_str.is_empty() {
-                        vec![]
-                    } else {
-                        capabilities_str.split(',').map(|s| s.to_string()).collect()
-                    };
-
-                    let mcp_tools_str = info.get_property_val_str("mcp_tools").unwrap_or_default();
-                    if !mcp_tools_str.is_empty() {
-                        let mcp_tools: Vec<String> =
-                            mcp_tools_str.split(',').map(|s| s.to_string()).collect();
-                        capabilities.extend(mcp_tools);
-                    }
-
-                    let address = info
-                        .get_addresses()
-                        .iter()
-                        .next()
-                        .map(|addr| format!("http://{}:{}", addr, info.get_port()));
-
-                    let mut metadata = HashMap::new();
-                    if let Some(model) = info.get_property_val_str("model") {
-                        metadata.insert("model".to_string(), model.to_string());
-                    }
-
-                    // Extract public key for TDF encryption
-                    let public_key = info
-                        .get_property_val_str("public_key")
-                        .map(|s| s.to_string());
-
-                    agents.push(AgentInfo {
-                        agent_id,
-                        name: name.clone(),
-                        purpose,
-                        capabilities,
-                        device_caps: None,
-                        metadata,
-                        last_seen: chrono::Utc::now(),
-                        load: 0.0,
-                        is_available: true,
-                        address,
-                        public_key,
-                        capability_manifest: None,
-                        capabilities_queried_at: None,
-                        last_specialized_at: None,
-                    });
-
-                    debug!("Discovered agent: {}", name);
-                }
-            }
-            Err(_) => {
-                // Timeout on recv - continue until overall timeout
-            }
-        }
-    }
-
-    info!("Discovered {} agents via mDNS", agents.len());
-    Ok(agents)
-}
-
-#[cfg(not(feature = "mdns"))]
-fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
-    warn!("mDNS feature not compiled in - cannot discover agents");
-    Ok(Vec::new())
 }
 
 fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {

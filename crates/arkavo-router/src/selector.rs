@@ -253,6 +253,7 @@ impl ModelSelector {
             (TaskCategory::BackendAPI, _) => "Backend API: Gemini Pro provides highest quality",
             (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
             (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
+            (TaskCategory::CodeReview, _) => "Code review: Capable model for thorough analysis",
             (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
                 "Test generation: Claude Opus for comprehensive tests"
             }

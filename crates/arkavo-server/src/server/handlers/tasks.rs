@@ -37,11 +37,13 @@ pub async fn handle_tasks_get(
     match task_store.get_task(&task_id).await {
         Ok(Some(task)) => {
             let result = if task.status == TaskStatus::Completed {
+                // Try dedicated task_results table first, fall back to Task.result field
                 task_store
                     .get_task_result(&task_id)
                     .await
                     .ok()
                     .flatten()
+                    .or_else(|| task.result.clone())
                     .and_then(|v| serde_json::from_value::<Message>(v).ok())
             } else {
                 None
