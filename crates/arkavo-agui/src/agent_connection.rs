@@ -69,12 +69,6 @@ pub enum TelemetryEvent {
         tool_name: String,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
-    StateChanged {
-        agent_id: String,
-        session_id: String,
-        patch_count: usize,
-        timestamp: chrono::DateTime<chrono::Utc>,
-    },
     MetricsSnapshot {
         snapshot: arkavo_observability::metrics_snapshot::MetricsSnapshot,
     },
@@ -548,12 +542,26 @@ impl AgentConnection {
                             name,
                             args_json_fragment,
                             done,
-                        } => crate::types::MessageDeltaContent::ToolCall {
-                            tool_call_id,
-                            name,
-                            args_json_fragment,
-                            done,
-                        },
+                        } => {
+                            if done && let Some(ref tool_name) = name {
+                                let tool_telemetry = crate::types::AgUiEvent::TelemetryEvent {
+                                    event_type: "tool_call_executed".to_string(),
+                                    agent_id: agent_id_for_forward.clone(),
+                                    details: serde_json::json!({
+                                        "tool_call_id": tool_call_id,
+                                        "tool_name": tool_name,
+                                    }),
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                };
+                                let _ = ui_tx_clone.try_send(tool_telemetry);
+                            }
+                            crate::types::MessageDeltaContent::ToolCall {
+                                tool_call_id,
+                                name,
+                                args_json_fragment,
+                                done,
+                            }
+                        }
                         MessageDeltaContent::StreamEnd { .. } => {
                             // Convert stream end to text for UI
                             crate::types::MessageDeltaContent::Text {

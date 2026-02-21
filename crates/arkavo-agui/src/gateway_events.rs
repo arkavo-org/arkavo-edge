@@ -485,72 +485,28 @@ pub async fn handle_submit_task(
             let lesson_tx_clone = lesson_tx.clone();
 
             tokio::spawn(async move {
-                // Update status to working
-                update_task_status(
-                    &task_store_clone,
-                    &task_id_clone,
-                    "working",
-                    Some(0.1),
-                    None,
-                    &connections_clone,
-                    &learning_clone,
-                    &history_clone,
-                    &lesson_tx_clone,
-                )
-                .await;
-
-                match conn_clone
+                // Submit task to agent — returns immediately with task_id
+                let agent_task_id = match conn_clone
                     .send_request("message/send", request, &task_id_clone)
                     .await
                 {
                     Ok(response) => {
-                        let result_text = response
-                            .get("response")
-                            .and_then(|r| r.get("parts"))
-                            .and_then(|p| p.as_array())
-                            .and_then(|arr| arr.first())
-                            .and_then(|p| p.get("content"))
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("Task completed")
+                        let tid = response
+                            .get("task_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
                             .to_string();
-
                         println!(
-                            "AG-UI: Task {} completed by {} ({} chars)",
+                            "AG-UI: Task {} submitted to {}, agent_task_id={}",
                             &task_id_clone[..8],
                             agent_id_clone,
-                            result_text.len()
+                            &tid[..tid.len().min(8)]
                         );
-
-                        // Emit ModelSelected for the agent's declared model
-                        let model_event = AgUiEvent::ModelSelected {
-                            agent_id: agent_id_clone.clone(),
-                            provider: "local".to_string(),
-                            model: agent_model.clone(),
-                            estimated_cost: arkavo_budget::TokenCost::ZERO,
-                            reason: format!(
-                                "Agent {} selected via Thompson Sampling",
-                                agent_id_clone
-                            ),
-                            event_id: uuid::Uuid::new_v4().to_string(),
-                        };
-                        broadcast_event(&model_event, &connections_clone).await;
-
-                        update_task_status(
-                            &task_store_clone,
-                            &task_id_clone,
-                            "completed",
-                            Some(1.0),
-                            Some(result_text),
-                            &connections_clone,
-                            &learning_clone,
-                            &history_clone,
-                            &lesson_tx_clone,
-                        )
-                        .await;
+                        tid
                     }
                     Err(e) => {
                         eprintln!(
-                            "AG-UI: Task {} failed on {}: {}",
+                            "AG-UI: Task {} submit failed on {}: {}",
                             &task_id_clone[..8],
                             agent_id_clone,
                             e
@@ -567,8 +523,170 @@ pub async fn handle_submit_task(
                             &lesson_tx_clone,
                         )
                         .await;
+                        return;
+                    }
+                };
+
+                // Update status to working
+                update_task_status(
+                    &task_store_clone,
+                    &task_id_clone,
+                    "working",
+                    Some(0.1),
+                    None,
+                    &connections_clone,
+                    &learning_clone,
+                    &history_clone,
+                    &lesson_tx_clone,
+                )
+                .await;
+
+                // Poll tasks/get until terminal status
+                let mut progress = 0.15_f32;
+                let poll_interval = std::time::Duration::from_secs(2);
+                let max_polls = 150; // 5 minutes max
+                for _ in 0..max_polls {
+                    tokio::time::sleep(poll_interval).await;
+
+                    let poll_request = serde_json::json!({ "task_id": agent_task_id });
+                    match conn_clone
+                        .send_request("tasks/get", poll_request, &task_id_clone)
+                        .await
+                    {
+                        Ok(poll_response) => {
+                            let status = poll_response
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+
+                            match status {
+                                "Completed" | "completed" => {
+                                    let result_text = poll_response
+                                        .get("result")
+                                        .and_then(|r| r.get("parts"))
+                                        .and_then(|p| p.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .and_then(|p| p.get("content"))
+                                        .and_then(|c| c.as_str())
+                                        .unwrap_or("Task completed")
+                                        .to_string();
+
+                                    println!(
+                                        "AG-UI: Task {} completed by {} ({} chars)",
+                                        &task_id_clone[..8],
+                                        agent_id_clone,
+                                        result_text.len()
+                                    );
+
+                                    let model_event = AgUiEvent::ModelSelected {
+                                        agent_id: agent_id_clone.clone(),
+                                        provider: "local".to_string(),
+                                        model: agent_model.clone(),
+                                        estimated_cost: arkavo_budget::TokenCost::ZERO,
+                                        reason: format!(
+                                            "Agent {} selected via Thompson Sampling",
+                                            agent_id_clone
+                                        ),
+                                        event_id: uuid::Uuid::new_v4().to_string(),
+                                    };
+                                    broadcast_event(&model_event, &connections_clone).await;
+
+                                    update_task_status(
+                                        &task_store_clone,
+                                        &task_id_clone,
+                                        "completed",
+                                        Some(1.0),
+                                        Some(result_text),
+                                        &connections_clone,
+                                        &learning_clone,
+                                        &history_clone,
+                                        &lesson_tx_clone,
+                                    )
+                                    .await;
+                                    return;
+                                }
+                                "Failed" | "failed" => {
+                                    let error_msg = poll_response
+                                        .get("error")
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("Task failed")
+                                        .to_string();
+
+                                    eprintln!(
+                                        "AG-UI: Task {} failed on {}: {}",
+                                        &task_id_clone[..8],
+                                        agent_id_clone,
+                                        error_msg
+                                    );
+                                    update_task_status(
+                                        &task_store_clone,
+                                        &task_id_clone,
+                                        "failed",
+                                        None,
+                                        Some(error_msg),
+                                        &connections_clone,
+                                        &learning_clone,
+                                        &history_clone,
+                                        &lesson_tx_clone,
+                                    )
+                                    .await;
+                                    return;
+                                }
+                                "Canceled" | "canceled" | "Rejected" | "rejected" => {
+                                    update_task_status(
+                                        &task_store_clone,
+                                        &task_id_clone,
+                                        status,
+                                        None,
+                                        None,
+                                        &connections_clone,
+                                        &learning_clone,
+                                        &history_clone,
+                                        &lesson_tx_clone,
+                                    )
+                                    .await;
+                                    return;
+                                }
+                                _ => {
+                                    // Still working — update progress
+                                    if progress < 0.9 {
+                                        progress += 0.05;
+                                    }
+                                    let event = AgUiEvent::TaskStatusChanged {
+                                        task_id: task_id_clone.clone(),
+                                        status: "working".to_string(),
+                                        progress: Some(progress),
+                                        result: None,
+                                        timestamp: chrono::Utc::now().to_rfc3339(),
+                                    };
+                                    broadcast_event(&event, &connections_clone).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("AG-UI: Task {} poll error: {}", &task_id_clone[..8], e);
+                        }
                     }
                 }
+
+                // Timeout after max polls
+                eprintln!(
+                    "AG-UI: Task {} timed out after 5 minutes",
+                    &task_id_clone[..8]
+                );
+                update_task_status(
+                    &task_store_clone,
+                    &task_id_clone,
+                    "failed",
+                    None,
+                    Some("Task timed out after 5 minutes".to_string()),
+                    &connections_clone,
+                    &learning_clone,
+                    &history_clone,
+                    &lesson_tx_clone,
+                )
+                .await;
             });
         }
     }

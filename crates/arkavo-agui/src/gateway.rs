@@ -268,7 +268,21 @@ impl AgUiGateway {
                             timestamp: timestamp.to_rfc3339(),
                         }
                     }
-                    TelemetryEvent::MetricsSnapshot { .. } => continue,
+                    TelemetryEvent::MetricsSnapshot { snapshot } => {
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let count = SNAPSHOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+                        if !count.is_multiple_of(30) {
+                            continue;
+                        }
+                        AgUiEvent::TelemetryEvent {
+                            event_type: "metrics_snapshot".to_string(),
+                            agent_id: "system".to_string(),
+                            details: serde_json::to_value(snapshot)
+                                .unwrap_or(serde_json::Value::Null),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        }
+                    }
                     _ => {
                         let (event_type, agent_id, timestamp) = match &event {
                             TelemetryEvent::AgentConnected {
@@ -291,11 +305,6 @@ impl AgUiGateway {
                                 timestamp,
                                 ..
                             } => ("tool_call_executed", agent_id.as_str(), *timestamp),
-                            TelemetryEvent::StateChanged {
-                                agent_id,
-                                timestamp,
-                                ..
-                            } => ("state_changed", agent_id.as_str(), *timestamp),
                             _ => continue,
                         };
                         let details =
