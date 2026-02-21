@@ -21,16 +21,19 @@ RESPONSE_DIR="$SCRIPT_DIR/responses"
 LOGFILE="$LOG_DIR/dogfood.log"
 BRANCH="dogfood/$(date +%Y-%m-%d)"
 
-CRATES=(
-    arkavo-test-macros
-    arkavo-validation
-    arkavo-config-encryption
-    arkavo-events
-    arkavo-bench
-    arkavo-sbe
-    arkavo-observability
-    arkavo-budget
-)
+# Exclude crates that are core infrastructure or have C++ deps
+EXCLUDE="arkavo-cli arkavo-server arkavo-router arkavo-gossip arkavo-llama-cpp arkavo-llama-cpp-sys arkavo-cef arkavo-snpe arkavo-browser"
+
+# Auto-discover all crates
+CRATES=()
+for dir in "$PROJECT_ROOT"/crates/*/; do
+    crate=$(basename "$dir")
+    skip=0
+    for ex in $EXCLUDE; do
+        [ "$crate" = "$ex" ] && skip=1 && break
+    done
+    [ "$skip" -eq 0 ] && [ -f "$dir/Cargo.toml" ] && CRATES+=("$crate")
+done
 
 mkdir -p "$LOG_DIR" "$RESPONSE_DIR"
 
