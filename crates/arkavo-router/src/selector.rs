@@ -535,7 +535,25 @@ impl ModelSelector {
         let model_ids: Vec<String> = feasible.iter().map(|m| m.name().to_string()).collect();
         let category = Some(classification.category.as_str());
 
+        tracing::info!(
+            feasible_count = feasible.len(),
+            category = classification.category.as_str(),
+            models = %model_ids.join(", "),
+            "Thompson Sampling: evaluating feasible models"
+        );
+
         let ranked = learning.rank_agents(&model_ids, category).await;
+
+        // Log full ranking for diagnostics
+        for (i, (name, score)) in ranked.iter().enumerate() {
+            tracing::info!(
+                rank = i + 1,
+                model = %name,
+                score = format!("{score:.4}").as_str(),
+                category = classification.category.as_str(),
+                "Thompson Sampling rank"
+            );
+        }
 
         if let Some((best_model_name, score)) = ranked.first() {
             let model = feasible

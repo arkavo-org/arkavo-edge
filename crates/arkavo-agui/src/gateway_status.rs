@@ -1,41 +1,15 @@
-use crate::agent_connection::TelemetryEvent;
 use crate::debug_handler::DebugHandler;
 use crate::types::*;
 use axum::extract::ws::{Message, WebSocket};
 use axum::{extract::State, response::Response};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
-
-pub async fn telemetry_websocket_handler(
-    ws: axum::extract::ws::WebSocketUpgrade,
-    State(state): State<super::gateway::AppState>,
-) -> Response {
-    ws.on_upgrade(|socket| handle_telemetry_websocket(socket, state.telemetry_rx))
-}
+use tokio::sync::mpsc;
 
 pub async fn debug_websocket_handler(
     ws: axum::extract::ws::WebSocketUpgrade,
     State(state): State<super::gateway::AppState>,
 ) -> Response {
     ws.on_upgrade(|socket| handle_debug_websocket(socket, state.debug_handler))
-}
-
-async fn handle_telemetry_websocket(
-    mut ws: WebSocket,
-    telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
-) {
-    println!("New telemetry WebSocket connection");
-    let mut rx = telemetry_rx.write().await;
-
-    while let Some(event) = rx.recv().await {
-        if let Ok(json) = serde_json::to_string(&event)
-            && ws.send(Message::Text(json)).await.is_err()
-        {
-            break;
-        }
-    }
-
-    println!("Telemetry WebSocket connection closed");
 }
 
 async fn handle_debug_websocket(mut ws: WebSocket, debug_handler: Option<Arc<DebugHandler>>) {

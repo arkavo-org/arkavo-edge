@@ -616,6 +616,11 @@ pub enum MessageDeltaContent {
         #[serde(rename = "isError")]
         is_error: bool,
     },
+    /// Internal metadata (never serialized to frontend)
+    Metadata {
+        key: String,
+        value: serde_json::Value,
+    },
 }
 
 /// JSON Patch operation as per RFC 6902

@@ -66,7 +66,7 @@ pub use learning::{
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse, ToolParser};
+use arkavo_llm::{Message, ModelRegistry, Provider, ProviderResponse, StreamResponse, ToolParser};
 use arkavo_mcp_tools::ToolRegistry;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -90,6 +90,8 @@ pub struct Router {
     classifier: Arc<TaskClassifier>,
     selector: Arc<ModelSelector>,
     model_learning: Arc<LearningModule>,
+    /// Cached local models — loaded once, reused across requests.
+    model_registry: Arc<ModelRegistry>,
     /// Temporarily excluded models: name → (when, consecutive_failures).
     /// Cooldown duration doubles each consecutive failure, resets on success.
     model_cooldowns: Arc<RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
@@ -122,6 +124,7 @@ impl Router {
             classifier: Arc::new(TaskClassifier::new().await?),
             selector,
             model_learning,
+            model_registry: Arc::new(ModelRegistry::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
@@ -152,6 +155,7 @@ impl Router {
             classifier: Arc::new(TaskClassifier::new().await?),
             selector,
             model_learning,
+            model_registry: Arc::new(ModelRegistry::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
@@ -268,6 +272,34 @@ impl Router {
         &self.model_learning
     }
 
+    /// Log the full Thompson Sampling state for all tracked models.
+    ///
+    /// Shows Beta prior (α, β), expected value, and observation count
+    /// per (model, category) pair. Useful for diagnostics after a mesh run.
+    pub async fn dump_learning_state(&self) {
+        let models = self.selector.feasible_models();
+        tracing::info!("=== Thompson Sampling State ===");
+        for model in &models {
+            let stats = self.model_learning.get_category_stats(model.name()).await;
+            if stats.is_empty() {
+                tracing::info!(model = model.name(), "No learning data");
+                continue;
+            }
+            for (category, alpha, beta, ev, obs) in &stats {
+                tracing::info!(
+                    model = model.name(),
+                    category = category.as_str(),
+                    alpha = format!("{alpha:.2}").as_str(),
+                    beta = format!("{beta:.2}").as_str(),
+                    expected = format!("{ev:.3}").as_str(),
+                    observations = obs,
+                    "Prior state"
+                );
+            }
+        }
+        tracing::info!("=== End Thompson Sampling State ===");
+    }
+
     /// Record that a model is temporarily unavailable (availability failure, not quality).
     ///
     /// This does NOT update the model's Beta prior — availability failures are
@@ -317,7 +349,14 @@ impl Router {
                 std::time::Duration::from_secs(Self::cooldown_duration_secs(*consecutive));
             since.elapsed() < duration
         });
-        cooldowns.keys().cloned().collect()
+        let excluded: Vec<String> = cooldowns.keys().cloned().collect();
+        if !excluded.is_empty() {
+            tracing::info!(
+                excluded = %excluded.join(", "),
+                "Models on cooldown (excluded from selection)"
+            );
+        }
+        excluded
     }
 
     pub fn set_offline_mode(&mut self, offline: bool) {
@@ -848,6 +887,12 @@ impl Router {
 
                     // Record negative feedback for adaptive model routing
                     let elapsed = inference_start.elapsed();
+                    tracing::info!(
+                        model = %current_decision.recommended_model.name(),
+                        category = current_decision.task_category.as_str(),
+                        latency_ms = elapsed.as_millis() as u64,
+                        "Quality feedback recorded (negative — validation failure)"
+                    );
                     self.model_learning
                         .immediate_update(
                             current_decision.recommended_model.name(),
@@ -904,6 +949,12 @@ impl Router {
 
                                 // Record negative feedback for adaptive model routing
                                 let elapsed = inference_start.elapsed();
+                                tracing::info!(
+                                    model = %current_decision.recommended_model.name(),
+                                    category = current_decision.task_category.as_str(),
+                                    latency_ms = elapsed.as_millis() as u64,
+                                    "Quality feedback recorded (negative — judge rejection)"
+                                );
                                 self.model_learning
                                     .immediate_update(
                                         current_decision.recommended_model.name(),
@@ -970,6 +1021,14 @@ impl Router {
                 &response.content,
                 elapsed.as_millis() as u64,
                 current_decision.task_category.as_str(),
+            );
+            tracing::info!(
+                model = %current_decision.recommended_model.name(),
+                category = current_decision.task_category.as_str(),
+                quality = format!("{quality:.3}").as_str(),
+                latency_ms = elapsed.as_millis() as u64,
+                response_len = response.content.len(),
+                "Quality feedback recorded (positive)"
             );
             self.model_learning
                 .immediate_update(
@@ -1070,7 +1129,30 @@ impl Router {
         tool_registry: Option<&ToolRegistry>,
         max_retries: u8,
     ) -> Result<ProviderResponse> {
-        let mut current_decision = self.classify(task_description).await?;
+        let decision = self.classify(task_description).await?;
+        self.route_with_quality_gate_from(
+            decision,
+            task_description,
+            messages,
+            tool_registry,
+            max_retries,
+        )
+        .await
+    }
+
+    /// Route with quality gate using a pre-computed routing decision.
+    ///
+    /// Allows callers to inspect the `RoutingDecision` before inference begins
+    /// (e.g. to emit telemetry about model selection).
+    pub async fn route_with_quality_gate_from(
+        &self,
+        decision: RoutingDecision,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        max_retries: u8,
+    ) -> Result<ProviderResponse> {
+        let mut current_decision = decision;
 
         // Estimate input tokens for context-aware tool discovery
         let input_tokens = Self::estimate_tokens(task_description);
@@ -1229,6 +1311,12 @@ impl Router {
 
                     // Record negative feedback for adaptive model routing
                     let elapsed = inference_start.elapsed();
+                    tracing::info!(
+                        model = %current_decision.recommended_model.name(),
+                        category = current_decision.task_category.as_str(),
+                        latency_ms = elapsed.as_millis() as u64,
+                        "Quality feedback recorded (negative — validation failure)"
+                    );
                     self.model_learning
                         .immediate_update(
                             current_decision.recommended_model.name(),
@@ -1281,6 +1369,12 @@ impl Router {
 
                                 // Record negative feedback for adaptive model routing
                                 let elapsed = inference_start.elapsed();
+                                tracing::info!(
+                                    model = %current_decision.recommended_model.name(),
+                                    category = current_decision.task_category.as_str(),
+                                    latency_ms = elapsed.as_millis() as u64,
+                                    "Quality feedback recorded (negative — judge rejection)"
+                                );
                                 self.model_learning
                                     .immediate_update(
                                         current_decision.recommended_model.name(),
@@ -1348,6 +1442,14 @@ impl Router {
                 &response.content,
                 elapsed.as_millis() as u64,
                 current_decision.task_category.as_str(),
+            );
+            tracing::info!(
+                model = %current_decision.recommended_model.name(),
+                category = current_decision.task_category.as_str(),
+                quality = format!("{quality:.3}").as_str(),
+                latency_ms = elapsed.as_millis() as u64,
+                response_len = response.content.len(),
+                "Quality feedback recorded (positive)"
             );
             self.model_learning
                 .immediate_update(
@@ -1549,6 +1651,7 @@ impl Router {
             classifier: self.classifier.clone(),
             selector: self.selector.clone(),
             model_learning: self.model_learning.clone(),
+            model_registry: self.model_registry.clone(),
             model_cooldowns: self.model_cooldowns.clone(),
             metrics: self.metrics.clone(),
             connectivity: self.connectivity.clone(),
@@ -1654,6 +1757,51 @@ impl Router {
         }
     }
 
+    /// Load a local model into the registry (if not already loaded) and create a provider.
+    /// Models are loaded once and cached for the lifetime of the Router.
+    #[cfg(feature = "llama-cpp")]
+    async fn load_local_model(
+        &self,
+        registry_name: &str,
+        repo: &str,
+        filename: &str,
+    ) -> Result<Box<dyn Provider>> {
+        if !self.model_registry.is_loaded(registry_name) {
+            let model_path = model_discovery::find_gguf_model(repo, filename)
+                .await
+                .map_err(Error::ModelExecution)?;
+
+            tracing::info!(
+                model = registry_name,
+                path = %model_path.display(),
+                "Loading model into registry (first use)"
+            );
+
+            self.model_registry
+                .load(registry_name, &model_path.to_string_lossy())
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
+                })?;
+
+            tracing::info!(model = registry_name, "Model loaded and cached in registry");
+        } else {
+            tracing::debug!(model = registry_name, "Using cached model from registry");
+        }
+
+        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
+            self.model_registry.clone(),
+            registry_name.to_string(),
+            arkavo_llm::SamplingConfig::default(),
+        )
+        .map_err(|e| {
+            Error::ModelExecution(format!(
+                "Failed to create provider for {registry_name}: {e}"
+            ))
+        })?;
+
+        Ok(Box::new(provider))
+    }
+
     async fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         tracing::debug!(model = %model.name(), "Instantiating provider");
         match model {
@@ -1681,7 +1829,6 @@ impl Router {
                     // Fallback to local model when Gemini API key is not available
                     #[cfg(feature = "llama-cpp")]
                     {
-                        // Use model discovery to find any compatible model (prefers Qwen3/Ministral)
                         let model_path = model_discovery::find_any_gguf()
                             .await
                             .ok_or_else(|| Error::ModelExecution(
@@ -1694,9 +1841,20 @@ impl Router {
                             .unwrap_or("local-model")
                             .to_string();
 
-                        let provider = arkavo_llm::LlamaCppProvider::new(
+                        if !self.model_registry.is_loaded(&model_name) {
+                            self.model_registry
+                                .load(&model_name, &model_path.to_string_lossy())
+                                .map_err(|e| {
+                                    Error::ModelExecution(format!(
+                                        "Failed to load fallback model: {e}"
+                                    ))
+                                })?;
+                        }
+
+                        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
+                            self.model_registry.clone(),
                             model_name,
-                            model_path.to_string_lossy().to_string(),
+                            arkavo_llm::SamplingConfig::default(),
                         )
                         .map_err(|e| {
                             Error::ModelExecution(format!(
@@ -1715,159 +1873,71 @@ impl Router {
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalQwen3 => {
-                let model_path = model_discovery::find_gguf_model(
-                    "Qwen/Qwen3-0.6B-GGUF",
-                    "Qwen3-0.6B-Q8_0.gguf",
-                )
-                .await
-                .map_err(Error::ModelExecution)?;
-
-                tracing::info!(path = %model_path.display(), "Loading Qwen3 model");
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "qwen3-0.6b".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-
-                tracing::info!("Qwen3 provider ready");
-                Ok(Box::new(provider))
+                self.load_local_model("qwen3-0.6b", "Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
+                    .await
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalMinistral3B => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "ministral-3b",
                     "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
                     "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                tracing::info!(path = %model_path.display(), "Loading Ministral-3B model");
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "ministral-3b".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-
-                tracing::info!("Ministral-3B provider ready");
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalMinistral8B => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "ministral-8b",
                     "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                     "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "ministral-8b".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma270M => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "gemma-3-270m-it",
                     "unsloth/gemma-3-270m-it-GGUF",
                     "gemma-3-270m-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "gemma-3-270m-it".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma4B => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "gemma-3-4b-it",
                     "unsloth/gemma-3-4b-it-GGUF",
                     "gemma-3-4b-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "gemma-3-4b-it".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma12B => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "gemma-3-12b-it",
                     "unsloth/gemma-3-12b-it-GGUF",
                     "gemma-3-12b-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "gemma-3-12b-it".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
-                })?;
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalDeepSeekCoder => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "deepseek-coder-v2-lite-instruct",
                     "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                     "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "deepseek-coder-v2-lite-instruct".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create DeepSeek-Coder provider: {e}"))
-                })?;
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGlm47Flash => {
-                let model_path = model_discovery::find_gguf_model(
+                self.load_local_model(
+                    "glm-4.7-flash",
                     "unsloth/GLM-4.7-Flash-GGUF",
                     "GLM-4.7-Flash-Q4_K_M.gguf",
                 )
                 .await
-                .map_err(Error::ModelExecution)?;
-
-                tracing::info!(path = %model_path.display(), "Loading GLM-4.7-Flash model");
-
-                let provider = arkavo_llm::LlamaCppProvider::new(
-                    "glm-4.7-flash".to_string(),
-                    model_path.to_string_lossy().to_string(),
-                )
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
-                })?;
-
-                tracing::info!("GLM-4.7-Flash provider ready");
-                Ok(Box::new(provider))
             }
             #[cfg(feature = "kimi")]
             ModelChoice::KimiK2 => {

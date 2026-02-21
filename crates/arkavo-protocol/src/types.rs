@@ -703,6 +703,13 @@ pub enum MessageDeltaContent {
         /// Error message
         message: String,
     },
+    /// Internal metadata (routing decisions, quality feedback)
+    Metadata {
+        /// Metadata type (e.g. "model_selected", "quality_feedback")
+        key: String,
+        /// Structured metadata payload
+        value: serde_json::Value,
+    },
 }
 
 /// Reason for stream ending

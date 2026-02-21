@@ -464,6 +464,17 @@ pub async fn handle_submit_task(
                 "task_id": task_id
             });
 
+            // Look up agent's declared model for ModelSelected event
+            let agent_model = {
+                let agents_list = agents.read().await;
+                agents_list
+                    .iter()
+                    .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(agent_id))
+                    .and_then(|a| a.get("model").and_then(|v| v.as_str()))
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
+
             let task_store_clone = task_store.clone();
             let task_id_clone = task_id.clone();
             let connections_clone = connections.clone();
@@ -509,6 +520,20 @@ pub async fn handle_submit_task(
                             agent_id_clone,
                             result_text.len()
                         );
+
+                        // Emit ModelSelected for the agent's declared model
+                        let model_event = AgUiEvent::ModelSelected {
+                            agent_id: agent_id_clone.clone(),
+                            provider: "local".to_string(),
+                            model: agent_model.clone(),
+                            estimated_cost: arkavo_budget::TokenCost::ZERO,
+                            reason: format!(
+                                "Agent {} selected via Thompson Sampling",
+                                agent_id_clone
+                            ),
+                            event_id: uuid::Uuid::new_v4().to_string(),
+                        };
+                        broadcast_event(&model_event, &connections_clone).await;
 
                         update_task_status(
                             &task_store_clone,

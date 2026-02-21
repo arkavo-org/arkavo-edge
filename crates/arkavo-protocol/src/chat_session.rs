@@ -339,6 +339,7 @@ impl ChatSessionManager {
                             MessageDeltaContent::ToolResult { .. } => "tool_result",
                             MessageDeltaContent::Error { .. } => "error",
                             MessageDeltaContent::StreamEnd { .. } => "stream_end",
+                            MessageDeltaContent::Metadata { .. } => "metadata",
                         };
 
                         if let Some(metrics) = session_metrics.read().await.get(&session_id_clone) {
@@ -794,39 +795,84 @@ impl ChatSessionManager {
 
                     let mut final_response;
 
-                    // Route with quality gate (max 3 retries with model escalation)
-                    // Timeout prevents hanging when LLM inference stalls
-                    #[allow(deprecated)]
-                    let route_result = tokio::time::timeout(
-                        std::time::Duration::from_secs(120),
-                        router.route_with_quality_gate(
-                            &user_message.content,
-                            conversation_context.clone(),
-                            tool_registry.as_deref(),
-                            3, // max_retries
-                        ),
-                    )
-                    .await;
+                    // Classify first to get routing decision for telemetry
+                    let inference_start = std::time::Instant::now();
+                    let decision = router.classify(&user_message.content).await;
 
-                    let route_result = match route_result {
-                        Ok(inner) => inner,
-                        Err(_elapsed) => {
-                            error!(session.id = %session_id, "LLM inference timed out after 120s");
-                            Err(arkavo_router::Error::ModelExecution(
-                                "LLM inference timed out after 120s".to_string(),
-                            ))
+                    let route_result = match decision {
+                        Ok(decision) => {
+                            // Emit model_selected metadata delta
+                            let metadata_delta = MessageDelta {
+                                session_id: session_id.clone(),
+                                message_id: message_id.clone(),
+                                sequence: 0,
+                                delta: MessageDeltaContent::Metadata {
+                                    key: "model_selected".to_string(),
+                                    value: serde_json::json!({
+                                        "model": decision.recommended_model.name(),
+                                        "category": decision.task_category.as_str(),
+                                        "reasoning": decision.reasoning,
+                                        "estimated_cost_usd": decision.estimated_cost_usd,
+                                    }),
+                                },
+                                timestamp: chrono::Utc::now(),
+                            };
+                            let _ = delta_tx.send(metadata_delta);
+
+                            // Route with pre-computed decision (max 3 retries with model escalation)
+                            // Timeout prevents hanging when LLM inference stalls
+                            let inner = tokio::time::timeout(
+                                std::time::Duration::from_secs(120),
+                                router.route_with_quality_gate_from(
+                                    decision,
+                                    &user_message.content,
+                                    conversation_context.clone(),
+                                    tool_registry.as_deref(),
+                                    3, // max_retries
+                                ),
+                            )
+                            .await;
+
+                            match inner {
+                                Ok(result) => result,
+                                Err(_elapsed) => {
+                                    error!(session.id = %session_id, "LLM inference timed out after 120s");
+                                    Err(arkavo_router::Error::ModelExecution(
+                                        "LLM inference timed out after 120s".to_string(),
+                                    ))
+                                }
+                            }
                         }
+                        Err(e) => Err(e),
                     };
 
                     match route_result {
                         Ok(response) => {
                             final_response = response.content.clone();
+                            let elapsed = inference_start.elapsed();
 
-                            // Send text delta
+                            // Emit quality_feedback metadata delta
+                            let quality_delta = MessageDelta {
+                                session_id: session_id.clone(),
+                                message_id: message_id.clone(),
+                                sequence: 1,
+                                delta: MessageDeltaContent::Metadata {
+                                    key: "quality_feedback".to_string(),
+                                    value: serde_json::json!({
+                                        "latency_ms": elapsed.as_millis() as u64,
+                                        "response_len": response.content.len(),
+                                        "has_tool_calls": !response.tool_calls.is_empty(),
+                                    }),
+                                },
+                                timestamp: chrono::Utc::now(),
+                            };
+                            let _ = delta_tx.send(quality_delta);
+
+                            // Send text delta (sequence 2+, after metadata deltas)
                             let text_delta = MessageDelta {
                                 session_id: session_id.clone(),
                                 message_id: message_id.clone(),
-                                sequence: 0,
+                                sequence: 2,
                                 delta: MessageDeltaContent::Text {
                                     text: response.content.clone(),
                                 },
@@ -841,7 +887,7 @@ impl ChatSessionManager {
                                     let tool_delta = MessageDelta {
                                         session_id: session_id.clone(),
                                         message_id: message_id.clone(),
-                                        sequence: idx as u64 + 1,
+                                        sequence: idx as u64 + 3,
                                         delta: MessageDeltaContent::ToolCall {
                                             tool_call_id: tool_call.call_id.clone().unwrap_or_else(|| format!("call_{idx}")),
                                             name: Some(tool_call.tool_name.clone()),
@@ -878,7 +924,7 @@ impl ChatSessionManager {
                                         let result_delta = MessageDelta {
                                             session_id: session_id.clone(),
                                             message_id: message_id.clone(),
-                                            sequence: (response.tool_calls.len() + idx + 1) as u64,
+                                            sequence: (response.tool_calls.len() + idx + 3) as u64,
                                             delta: MessageDeltaContent::ToolResult {
                                                 tool_call_id: result.call_id.clone().unwrap_or_else(|| format!("call_{idx}")),
                                                 content: serde_json::to_string(&result.result).unwrap_or_default(),
@@ -915,7 +961,7 @@ impl ChatSessionManager {
                                             let final_delta = MessageDelta {
                                                 session_id: session_id.clone(),
                                                 message_id: message_id.clone(),
-                                                sequence: (response.tool_calls.len() + tool_results.len() + 1) as u64,
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 3) as u64,
                                                 delta: MessageDeltaContent::Text {
                                                     text: final_resp.content.clone(),
                                                 },
