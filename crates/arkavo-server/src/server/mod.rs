@@ -27,7 +27,7 @@ pub use gossip_transport::{
 };
 pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
 pub use mcp_bridge::McpBridgeTool;
-pub use policy_cache::PolicyCache;
+pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};

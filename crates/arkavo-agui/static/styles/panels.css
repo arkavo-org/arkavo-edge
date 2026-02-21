@@ -363,3 +363,11 @@
 .category-table { width: 100%; font-size: 11px; border-collapse: collapse; }
 .category-table th { text-align: left; font-weight: 500; color: var(--text-secondary); padding: 2px 4px; border-bottom: 1px solid var(--border-color); }
 .category-table td { padding: 2px 4px; font-family: monospace; }
+
+/* Quality trend sparklines */
+.quality-trend-section { margin-top: 10px; }
+.trend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.trend-label { font-size: 10px; color: var(--text-secondary); width: 60px; }
+.sparkline-svg { width: 80px; height: 20px; }
+.trend-no-data { font-size: 10px; color: var(--text-secondary); }
+.lesson-count-badge { margin-top: 8px; text-align: center; font-size: 10px; color: var(--accent); padding: 4px; background: rgba(99, 102, 241, 0.1); border-radius: 4px; }

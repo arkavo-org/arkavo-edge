@@ -19,7 +19,9 @@ var AppState = {
     learningAgents: {},
     routingHistory: [],
     routingAnimations: [],
-    pathWeights: {}
+    pathWeights: {},
+    qualityTrends: [],
+    lessonCount: 0
 };
 
 var MAX_TELEMETRY = 200;

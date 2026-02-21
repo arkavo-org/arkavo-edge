@@ -16,6 +16,8 @@ function handleLearningStatusUpdate(event) {
         AppState.learningAgents[agents[i].agentId] = agents[i];
     }
     AppState.routingHistory = event.routingHistory || [];
+    AppState.qualityTrends = event.qualityTrends || [];
+    AppState.lessonCount = event.lessonCount || 0;
     renderLearningPanel();
 }
 
@@ -374,6 +376,15 @@ function renderBetaCard(agentId) {
         catHtml += '</tbody></table></div>';
     }
 
+    // Quality trends for this agent
+    var trendsHtml = renderQualityTrends(agentId);
+
+    // Lesson count badge
+    var lessonBadge = '';
+    if (AppState.lessonCount > 0) {
+        lessonBadge = '<div class="lesson-count-badge">' + AppState.lessonCount + ' lessons cached</div>';
+    }
+
     return '<div class="beta-card">' +
         '<div class="beta-card-title">' + escapeHtml(shortAgentName(agentId)) + '</div>' +
         '<svg class="beta-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
@@ -391,7 +402,54 @@ function renderBetaCard(agentId) {
             (a.probationary ? '<div class="beta-probation">Probationary</div>' : '<div class="beta-graduated">Graduated</div>') +
         '</div>' +
         catHtml +
+        trendsHtml +
+        lessonBadge +
     '</div>';
+}
+
+function renderSparkline(scores) {
+    if (!scores || scores.length < 2) return '<span class="trend-no-data">-</span>';
+
+    var w = 80, h = 20, pad = 2;
+    var min = Math.min.apply(null, scores);
+    var max = Math.max.apply(null, scores);
+    var range = max - min || 1;
+
+    var points = [];
+    for (var i = 0; i < scores.length; i++) {
+        var x = pad + (i / (scores.length - 1)) * (w - 2 * pad);
+        var y = (h - pad) - ((scores[i] - min) / range) * (h - 2 * pad);
+        points.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+
+    var last = scores[scores.length - 1];
+    var color = last > 0.7 ? 'var(--success)' : (last > 0.3 ? 'var(--warning)' : 'var(--error)');
+
+    return '<svg class="sparkline-svg" viewBox="0 0 ' + w + ' ' + h + '">' +
+        '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" />' +
+        '</svg>';
+}
+
+function renderQualityTrends(agentId) {
+    var trends = AppState.qualityTrends || [];
+    var agentTrends = [];
+    for (var i = 0; i < trends.length; i++) {
+        if (trends[i].agentId === agentId) {
+            agentTrends.push(trends[i]);
+        }
+    }
+
+    if (agentTrends.length === 0) return '';
+
+    var html = '<div class="quality-trend-section"><div class="category-breakdown-title">Quality Trends</div>';
+    for (var j = 0; j < agentTrends.length; j++) {
+        html += '<div class="trend-row">' +
+            '<span class="trend-label">' + escapeHtml(shortCategory(agentTrends[j].category)) + '</span>' +
+            renderSparkline(agentTrends[j].scores) +
+            '</div>';
+    }
+    html += '</div>';
+    return html;
 }
 
 function selectLearningAgent(agentId) {

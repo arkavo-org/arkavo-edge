@@ -384,6 +384,14 @@ pub enum AgUiEvent {
         agents: Vec<AgentLearningInfo>,
         #[serde(rename = "routingHistory")]
         routing_history: Vec<RoutingRecord>,
+        #[serde(
+            rename = "qualityTrends",
+            default,
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        quality_trends: Vec<QualityTrend>,
+        #[serde(rename = "lessonCount", default)]
+        lesson_count: usize,
         timestamp: String,
     },
     RoutingEvaluation {
@@ -469,6 +477,14 @@ pub struct TaskInfo {
     pub created_at: String,
     #[serde(rename = "completedAt", skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityTrend {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub category: String,
+    pub scores: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

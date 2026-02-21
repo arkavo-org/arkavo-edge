@@ -180,7 +180,7 @@ pub async fn execute_with_conductor_and_learning(
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
     let registry_arc = Arc::new(tool_registry);
 
-    // Inject few-shot examples from learned tool patterns
+    // Inject learned guidance: behavior lessons + few-shot tool examples
     let augmented_content = if let Some(bus) = learning_bus {
         let tool_names: Vec<String> = registry_arc
             .list_tools()
@@ -190,16 +190,31 @@ pub async fn execute_with_conductor_and_learning(
         let few_shot_examples = bus
             .get_few_shot_examples(&tool_names, arkavo_router::learning::ToolCallFormat::Fence)
             .await;
+        let behavior_guidance = bus.get_behavior_guidance(None).await;
 
+        let mut prefix = String::new();
+        if !behavior_guidance.is_empty() {
+            info!(
+                "Injecting {} chars of behavior guidance",
+                behavior_guidance.len()
+            );
+            prefix.push_str(&behavior_guidance);
+            prefix.push('\n');
+        }
         if !few_shot_examples.is_empty() {
             info!(
                 "Injecting {} chars of few-shot examples for {} tools",
                 few_shot_examples.len(),
                 tool_names.len()
             );
-            format!("{few_shot_examples}\n\n{task_content}")
-        } else {
+            prefix.push_str(&few_shot_examples);
+            prefix.push('\n');
+        }
+
+        if prefix.is_empty() {
             task_content.clone()
+        } else {
+            format!("{prefix}\n{task_content}")
         }
     } else {
         task_content.clone()
