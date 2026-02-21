@@ -35,7 +35,6 @@ RESPONSE_DIR="$SCRIPT_DIR/responses"
 # Configuration
 BRANCH="dogfood/$(date +%Y-%m-%d)"
 MAX_CYCLES="${MAX_CYCLES:-50}"
-CYCLE_INTERVAL="${CYCLE_INTERVAL:-300}"  # 5 minutes
 AGENT_STARTUP_WAIT=5
 
 # Crate rotation: smallest and most isolated first.
@@ -337,7 +336,7 @@ validate_and_commit() {
 }
 
 run_loop() {
-    print_status "INFO" "Starting dogfood loop: $MAX_CYCLES cycles, ${CYCLE_INTERVAL}s interval"
+    print_status "INFO" "Starting dogfood loop: $MAX_CYCLES cycles across ${#CRATES[@]} crates"
     print_status "INFO" "Crate rotation: ${CRATES[*]}"
     echo ""
 
@@ -349,15 +348,7 @@ run_loop() {
         scan_and_dispatch "$crate" "$CYCLE_COUNT" || true
         validate_and_commit "$crate" "$CYCLE_COUNT" "test-writer" || true
 
-        # Progress summary
-        print_status "CYCLE" "Progress: $COMMIT_COUNT committed, $FAIL_COUNT failed, $SKIP_COUNT skipped"
-        echo ""
-
-        # Sleep between cycles (unless this is the last one)
-        if [ "$i" -lt $((MAX_CYCLES - 1)) ]; then
-            print_status "INFO" "Sleeping ${CYCLE_INTERVAL}s until next cycle..."
-            sleep "$CYCLE_INTERVAL"
-        fi
+        print_status "INFO" "Progress: $COMMIT_COUNT committed, $FAIL_COUNT failed, $SKIP_COUNT skipped"
     done
 
     print_status "SUCCESS" "Loop complete: $CYCLE_COUNT cycles"
@@ -432,8 +423,6 @@ main() {
             print_status "INFO" "Logs: $LOG_DIR/"
             print_status "INFO" "Stop: $0 stop"
             echo ""
-            print_status "INFO" "Starting task loop in 10s (Ctrl+C to cancel)..."
-            sleep 10
             run_loop
             print_status "INFO" "Creating PR..."
             create_pr
@@ -450,8 +439,7 @@ main() {
             echo "  pr         Create PR from current branch"
             echo ""
             echo "Environment:"
-            echo "  MAX_CYCLES=50        Number of cycles (default: 50)"
-            echo "  CYCLE_INTERVAL=300   Seconds between cycles (default: 300)"
+            echo "  MAX_CYCLES=50          Number of cycles (default: 50)"
             echo "  BINARY=path/to/arkavo  Custom binary path"
             exit 1
             ;;
