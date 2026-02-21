@@ -201,6 +201,7 @@ pub(crate) async fn broadcast_event(
 pub(crate) async fn handle_request_learning_status(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
+    lesson_count: usize,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received RequestLearningStatus");
@@ -236,12 +237,128 @@ pub(crate) async fn handle_request_learning_status(
 
     let history: Vec<RoutingRecord> = routing_history.read().await.iter().cloned().collect();
 
+    // Derive quality trends from routing history
+    let quality_trends = derive_quality_trends(&history);
+
     tx.send(AgUiEvent::LearningStatusUpdate {
         agents,
         routing_history: history,
+        quality_trends,
+        lesson_count,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
     .await?;
 
     Ok(())
+}
+
+/// Derive quality trends from routing history records
+pub(crate) fn derive_quality_trends(history: &[RoutingRecord]) -> Vec<crate::types::QualityTrend> {
+    let mut trends: HashMap<(String, String), Vec<f64>> = HashMap::new();
+    for record in history {
+        if let Some(score) = record.quality_score {
+            let category = record.category.clone().unwrap_or_else(|| "general".into());
+            let key = (record.selected_agent.clone(), category);
+            trends.entry(key).or_default().push(score);
+        }
+    }
+    trends
+        .into_iter()
+        .map(
+            |((agent_id, category), scores)| crate::types::QualityTrend {
+                agent_id,
+                category,
+                scores,
+            },
+        )
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(agent: &str, cat: Option<&str>, score: Option<f64>) -> RoutingRecord {
+        RoutingRecord {
+            task_id: uuid::Uuid::new_v4().to_string(),
+            selected_agent: agent.to_string(),
+            was_exploration: false,
+            outcome: Some("completed".to_string()),
+            quality_score: score,
+            quality_issues: vec![],
+            category: cat.map(|c| c.to_string()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn test_derive_trends_empty_history() {
+        let trends = derive_quality_trends(&[]);
+        assert!(trends.is_empty());
+    }
+
+    #[test]
+    fn test_derive_trends_single_agent() {
+        let history = vec![
+            record("agent-1", Some("code"), Some(0.3)),
+            record("agent-1", Some("code"), Some(0.5)),
+            record("agent-1", Some("code"), Some(0.9)),
+        ];
+        let trends = derive_quality_trends(&history);
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].agent_id, "agent-1");
+        assert_eq!(trends[0].category, "code");
+        assert_eq!(trends[0].scores, vec![0.3, 0.5, 0.9]);
+    }
+
+    #[test]
+    fn test_derive_trends_multiple_agents() {
+        let history = vec![
+            record("agent-1", Some("code"), Some(0.4)),
+            record("agent-2", Some("code"), Some(0.8)),
+        ];
+        let trends = derive_quality_trends(&history);
+        assert_eq!(trends.len(), 2);
+
+        let a1 = trends.iter().find(|t| t.agent_id == "agent-1").unwrap();
+        let a2 = trends.iter().find(|t| t.agent_id == "agent-2").unwrap();
+        assert_eq!(a1.scores, vec![0.4]);
+        assert_eq!(a2.scores, vec![0.8]);
+    }
+
+    #[test]
+    fn test_derive_trends_missing_quality_score() {
+        let history = vec![
+            record("agent-1", Some("code"), Some(0.5)),
+            record("agent-1", Some("code"), None),
+            record("agent-1", Some("code"), Some(0.7)),
+        ];
+        let trends = derive_quality_trends(&history);
+        assert_eq!(trends.len(), 1);
+        // The None record is skipped
+        assert_eq!(trends[0].scores, vec![0.5, 0.7]);
+    }
+
+    #[test]
+    fn test_derive_trends_missing_category_defaults_to_general() {
+        let history = vec![
+            record("agent-1", None, Some(0.6)),
+            record("agent-1", None, Some(0.8)),
+        ];
+        let trends = derive_quality_trends(&history);
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].category, "general");
+        assert_eq!(trends[0].scores, vec![0.6, 0.8]);
+    }
+
+    #[test]
+    fn test_derive_trends_preserves_insertion_order() {
+        let history = vec![
+            record("agent-1", Some("code"), Some(0.1)),
+            record("agent-1", Some("code"), Some(0.9)),
+            record("agent-1", Some("code"), Some(0.5)),
+        ];
+        let trends = derive_quality_trends(&history);
+        assert_eq!(trends[0].scores, vec![0.1, 0.9, 0.5]);
+    }
 }

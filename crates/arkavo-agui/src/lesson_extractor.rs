@@ -83,7 +83,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
     };
 
-    let pattern = LessonPattern::new(condition, action, expected);
+    let pattern = LessonPattern::new(condition, action, expected)
+        .with_metadata(serde_json::json!({"quality_score": judgment.quality_score}));
     let confidence = 1.0 - judgment.quality_score;
 
     Some(Lesson::new(
@@ -165,6 +166,26 @@ mod tests {
         let lesson = extract_lesson(&judgment, &ctx("agent-3", "backend_api")).unwrap();
         assert!(lesson.pattern.condition.contains("hallucinated"));
         assert!(lesson.pattern.action.contains("tool-heavy"));
+    }
+
+    #[test]
+    fn test_lesson_metadata_contains_quality_score() {
+        let judgment = TaskJudgment {
+            quality_score: 0.3,
+            issues: vec!["Generic".into()],
+            failure_modes: vec![FailureMode::Generic],
+        };
+        let lesson = extract_lesson(&judgment, &ctx("a", "code")).unwrap();
+        let meta = lesson
+            .pattern
+            .metadata
+            .as_ref()
+            .expect("metadata should be set");
+        let score = meta
+            .get("quality_score")
+            .and_then(|v| v.as_f64())
+            .expect("quality_score should be a number");
+        assert!((score - 0.3).abs() < f64::EPSILON);
     }
 
     #[test]

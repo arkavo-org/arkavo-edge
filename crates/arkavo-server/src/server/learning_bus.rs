@@ -516,6 +516,30 @@ impl LearningBus {
         cache.get_few_shot_examples(tool_names)
     }
 
+    /// Get behavior guidance for prompt injection from cached lessons
+    pub async fn get_behavior_guidance(&self, category: Option<&str>) -> String {
+        let cache = self.policy_cache.read().await;
+        cache.get_behavior_guidance(category)
+    }
+
+    /// Record a quality score for an (agent, category) pair
+    pub async fn record_quality(&self, agent_id: &str, category: &str, score: f64) {
+        let mut cache = self.policy_cache.write().await;
+        cache.record_quality(agent_id, category, score);
+    }
+
+    /// Get all quality trends from the policy cache
+    pub async fn get_quality_trends(&self) -> Vec<super::policy_cache::QualityTrend> {
+        let cache = self.policy_cache.read().await;
+        cache.get_all_trends()
+    }
+
+    /// Get behavior lesson count
+    pub async fn behavior_lesson_count(&self) -> usize {
+        let cache = self.policy_cache.read().await;
+        cache.behavior_lesson_count()
+    }
+
     /// Update the model name for pattern attribution
     pub async fn set_model_name(&self, model_name: String) {
         let mut observer = self.tool_pattern_observer.write().await;
@@ -531,6 +555,7 @@ impl LearningBus {
         let gossip_out_tx = self.gossip_out_tx.clone();
         let learning = self.learning.clone();
         let swarm_id = self.swarm_id.clone();
+        let policy_cache = self.policy_cache.clone();
 
         tokio::spawn(async move {
             while let Some(lesson) = rx.recv().await {
@@ -539,6 +564,12 @@ impl LearningBus {
                     lesson.pattern.condition,
                     lesson.category
                 );
+
+                // Store in policy cache for behavior guidance injection
+                {
+                    let mut cache = policy_cache.write().await;
+                    cache.add_lesson(lesson.clone());
+                }
 
                 // Apply locally: inject negative feedback for the originator+category
                 Self::apply_lesson_to_local_routing(&learning, &lesson).await;
@@ -614,16 +645,21 @@ impl LearningBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_router::learning::LessonPattern;
 
-    #[tokio::test]
-    async fn test_learning_bus_creation() {
+    fn make_bus() -> LearningBus {
         let keypair = Arc::new(AgentKeypair::generate());
-        let bus = LearningBus::new(
+        LearningBus::new(
             "test-agent".to_string(),
             "test-swarm".to_string(),
             keypair,
             GossipConfig::default(),
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn test_learning_bus_creation() {
+        let bus = make_bus();
 
         assert_eq!(bus.agent_id(), "test-agent");
         assert_eq!(bus.swarm_id(), "test-swarm");
@@ -646,5 +682,97 @@ mod tests {
 
         bus.remove_peer("peer-1").await;
         assert_eq!(bus.peer_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_behavior_guidance_via_bus() {
+        let bus = make_bus();
+
+        let lesson = Lesson::new(
+            "agent-1".to_string(),
+            "local".to_string(),
+            "code".to_string(),
+            LessonPattern::new(
+                "Agent returns generic non-answers".to_string(),
+                "Reduce weight".to_string(),
+                "Substantive response".to_string(),
+            ),
+            0.8,
+            1,
+        );
+        bus.add_lesson_to_cache(lesson).await;
+
+        let guidance = bus.get_behavior_guidance(None).await;
+        assert!(!guidance.is_empty());
+        assert!(guidance.contains("generic non-answers"));
+    }
+
+    #[tokio::test]
+    async fn test_record_quality_via_bus() {
+        let bus = make_bus();
+
+        bus.record_quality("a", "code", 0.5).await;
+
+        let trends = bus.get_quality_trends().await;
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].scores, vec![0.5]);
+    }
+
+    #[tokio::test]
+    async fn test_behavior_lesson_count_via_bus() {
+        let bus = make_bus();
+
+        for i in 0..3 {
+            let lesson = Lesson::new(
+                "a".to_string(),
+                "s".to_string(),
+                "code".to_string(),
+                LessonPattern::new(
+                    format!("issue-{i}"),
+                    "action".to_string(),
+                    "outcome".to_string(),
+                ),
+                0.8,
+                1,
+            );
+            bus.add_lesson_to_cache(lesson).await;
+        }
+
+        assert_eq!(bus.behavior_lesson_count().await, 3);
+    }
+
+    #[tokio::test]
+    async fn test_lesson_receiver_stores_in_policy_cache() {
+        let bus = make_bus();
+        let (tx, rx) = mpsc::channel(16);
+
+        bus.start_lesson_receiver(rx);
+
+        let lesson = Lesson::new(
+            "agent-x".to_string(),
+            "test-swarm".to_string(),
+            "security".to_string(),
+            LessonPattern::new(
+                "Agent agent-x returns empty responses".to_string(),
+                "Avoid routing".to_string(),
+                "Non-empty response".to_string(),
+            ),
+            0.9,
+            1,
+        );
+        tx.send(lesson).await.expect("send should succeed");
+
+        // Yield briefly to let the spawned task process the lesson
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(
+            bus.cached_lesson_count().await >= 1,
+            "lesson should be stored in policy cache"
+        );
+        let guidance = bus.get_behavior_guidance(None).await;
+        assert!(
+            guidance.contains("empty responses"),
+            "guidance should contain lesson condition text"
+        );
     }
 }
