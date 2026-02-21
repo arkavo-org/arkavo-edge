@@ -20,6 +20,7 @@ pub enum TaskCategory {
     CodeSearch,
     SecurityScan,
     TestGeneration,
+    CodeReview,
     Documentation,
     Refactoring,
     CodeGeneration,
@@ -35,6 +36,7 @@ impl TaskCategory {
             "code_search" | "search" => Self::CodeSearch,
             "security_scan" | "security" => Self::SecurityScan,
             "test_generation" | "tests" | "testing" => Self::TestGeneration,
+            "code_review" | "review" => Self::CodeReview,
             "documentation" | "docs" => Self::Documentation,
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
@@ -50,6 +52,7 @@ impl TaskCategory {
             Self::CodeSearch => "code_search",
             Self::SecurityScan => "security_scan",
             Self::TestGeneration => "test_generation",
+            Self::CodeReview => "code_review",
             Self::Documentation => "documentation",
             Self::Refactoring => "refactoring",
             Self::CodeGeneration => "code_generation",
@@ -79,6 +82,10 @@ impl TaskCategory {
             Self::TestGeneration => TokenEstimate {
                 input: 500,
                 output: 2500,
+            },
+            Self::CodeReview => TokenEstimate {
+                input: 400,
+                output: 1500,
             },
             Self::Documentation => TokenEstimate {
                 input: 300,
@@ -264,6 +271,13 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("unit")
     {
         TaskCategory::TestGeneration
+    } else if lower.contains("review")
+        || lower.contains("code quality")
+        || lower.contains("anti-pattern")
+        || lower.contains("complexity")
+        || lower.contains("error handling")
+    {
+        TaskCategory::CodeReview
     } else if lower.contains("document")
         || lower.contains("readme")
         || lower.contains("comment")
@@ -437,6 +451,17 @@ impl TaskClassifier {
                 0.80,
                 "Keywords match test generation".to_string(),
             )
+        } else if task_lower.contains("review")
+            || task_lower.contains("code quality")
+            || task_lower.contains("anti-pattern")
+            || task_lower.contains("complexity")
+            || task_lower.contains("error handling")
+        {
+            (
+                TaskCategory::CodeReview,
+                0.80,
+                "Keywords match code review".to_string(),
+            )
         } else if task_lower.contains("document")
             || task_lower.contains("readme")
             || task_lower.contains("comment")
@@ -506,6 +531,7 @@ Categories:
 - code_search: Finding code, grep, repository search, AST analysis
 - security_scan: Vulnerabilities, security audit, code scanning
 - test_generation: Unit tests, integration tests, test suites
+- code_review: Code review, anti-patterns, error handling, code quality
 - documentation: README, API docs, comments, guides
 - refactoring: Code cleanup, optimization, restructuring
 - general: Other coding tasks
@@ -654,6 +680,17 @@ impl TaskClassifier {
                 0.80,
                 "Keywords match test generation".to_string(),
             )
+        } else if task_lower.contains("review")
+            || task_lower.contains("code quality")
+            || task_lower.contains("anti-pattern")
+            || task_lower.contains("complexity")
+            || task_lower.contains("error handling")
+        {
+            (
+                TaskCategory::CodeReview,
+                0.80,
+                "Keywords match code review".to_string(),
+            )
         } else if task_lower.contains("document")
             || task_lower.contains("readme")
             || task_lower.contains("comment")
@@ -780,11 +817,15 @@ mod tests {
             TaskCategory::TestGeneration
         );
         assert_eq!(
+            classify_task_keywords("Review this error handling pattern"),
+            TaskCategory::CodeReview
+        );
+        assert_eq!(
             classify_task_keywords("Write documentation for the module"),
             TaskCategory::Documentation
         );
         assert_eq!(
-            classify_task_keywords("Refactor the error handling"),
+            classify_task_keywords("Refactor the data pipeline"),
             TaskCategory::Refactoring
         );
         assert_eq!(classify_task_keywords("Hello world"), TaskCategory::General);

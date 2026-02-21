@@ -28,7 +28,7 @@ Each example demonstrates specific Arkavo capabilities. Find by use case:
 |--------------|------------|------------------|
 | Build a coding assistant | [code-agent-claude](code-agent-claude/) | Core Agent, MCP Tools |
 | Create a multi-agent team | [software-development-simple](software-development-simple/) | Multi-Agent Mesh, A2A Protocol |
-| Add learning to agents | [fleet-immunity](fleet-immunity/) | Gossip Learning |
+| Add learning to agents | [learning-mesh](learning-mesh/) | Lesson-Informed Prompting, Thompson Sampling |
 | Use external tools | [minecraft](minecraft/) | MCP Tools |
 | Secure my agents | [secure-agent](secure-agent/) | Preflight Policies |
 | Bridge to external AI | [openclaw-a2a-bridge](openclaw-a2a-bridge/) | A2A Protocol, TDF, Preflight, Budget |
@@ -80,6 +80,7 @@ Advanced orchestration and learning patterns.
 |---------|---------|-------------|
 | `family-travel-mesh` | HRM | Hierarchical orchestration with Thompson Sampling |
 | `fleet-immunity` | Gossip | Peer-to-peer learning between rovers |
+| `learning-mesh` | Learning | Quality-aware routing with lesson-informed prompting |
 | `hyperforum-council` | Discourse | AI-powered discussion management |
 | `autonomous_refactor` | Ledger | Context tracking for code refactoring |
 | `openclaw-a2a-bridge` | Bridge | A2A protocol bridge with security comparison |

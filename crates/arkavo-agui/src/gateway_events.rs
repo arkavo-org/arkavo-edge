@@ -308,6 +308,7 @@ pub async fn handle_submit_task(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received SubmitTask: {}", description);
@@ -415,9 +416,50 @@ pub async fn handle_submit_task(
     if let Some(ref agent_id) = selected_agent {
         let ac = agent_connections.read().await;
         if let Some(conn) = ac.get(agent_id) {
+            // Inject behavior guidance from cached lessons
+            let augmented_description = {
+                let store = lesson_store.read().await;
+                let category_str_ref = task_store
+                    .read()
+                    .await
+                    .get(&task_id)
+                    .and_then(|t| t.task_category.clone());
+                let cat = category_str_ref.as_deref().unwrap_or("general");
+                let relevant: Vec<&str> = store
+                    .iter()
+                    .filter(|l| l.category == cat || l.category == "general")
+                    .map(|l| l.pattern.condition.as_str())
+                    .collect();
+                if relevant.is_empty() {
+                    description.clone()
+                } else {
+                    let mut seen = std::collections::HashSet::new();
+                    let unique: Vec<&str> = relevant
+                        .into_iter()
+                        .filter(|c| seen.insert(*c))
+                        .take(5)
+                        .collect();
+                    let guidance = format!(
+                        "## Prior Lessons Learned\n{}\n\n## Task\n{}",
+                        unique
+                            .iter()
+                            .map(|c| format!("- Avoid: {c}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        description
+                    );
+                    println!(
+                        "AG-UI: Injecting {} chars of behavior guidance ({} lessons)",
+                        guidance.len() - description.len(),
+                        unique.len()
+                    );
+                    guidance
+                }
+            };
+
             let request = serde_json::json!({
                 "message": {
-                    "parts": [{ "type": "text", "content": description }]
+                    "parts": [{ "type": "text", "content": augmented_description }]
                 },
                 "task_id": task_id
             });

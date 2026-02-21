@@ -27,6 +27,7 @@ pub async fn websocket_handler(
             state.learning_module,
             state.routing_history,
             state.lesson_tx,
+            state.lesson_store,
         )
     })
 }
@@ -45,6 +46,7 @@ async fn handle_websocket(
     learning_module: Arc<RwLock<LearningModule>>,
     routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -99,6 +101,7 @@ async fn handle_websocket(
             &learning_module,
             &routing_history,
             &lesson_tx,
+            &lesson_store,
             &tx,
         )
         .await
@@ -125,6 +128,7 @@ async fn handle_websocket(
                         &learning_module,
                         &routing_history,
                         &lesson_tx,
+                        &lesson_store,
                         &tx,
                     )
                     .await
@@ -174,6 +178,7 @@ async fn dispatch_event(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -301,6 +306,7 @@ async fn dispatch_event(
                 learning_module,
                 routing_history,
                 lesson_tx,
+                lesson_store,
                 tx,
             )
             .await?;

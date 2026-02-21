@@ -187,10 +187,11 @@ Guidelines:
                 }
             }
 
-            // Backend/Security/Tests: Use more capable models
+            // Backend/Security/Tests/Review: Use more capable models
             TaskCategory::BackendAPI
             | TaskCategory::SecurityScan
-            | TaskCategory::TestGeneration => {
+            | TaskCategory::TestGeneration
+            | TaskCategory::CodeReview => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeOpus
                 } else if self.availability.gemini {

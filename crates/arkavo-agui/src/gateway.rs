@@ -56,6 +56,7 @@ pub struct AppState {
     pub learning_module: Arc<RwLock<LearningModule>>,
     pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     pub lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    pub lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
 }
 
 pub struct AgUiGateway {
@@ -247,6 +248,29 @@ impl AgUiGateway {
             Arc::new(RwLock::new(handler))
         };
 
+        // Create lesson pipeline: extracted lessons flow into a local store for guidance injection
+        let lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>> =
+            Arc::new(RwLock::new(Vec::new()));
+        let (lesson_tx, mut lesson_rx) = mpsc::channel::<arkavo_router::learning::Lesson>(64);
+
+        let lesson_store_for_rx = lesson_store.clone();
+        tokio::spawn(async move {
+            const MAX_LESSONS_PER_KEY: usize = 5;
+            while let Some(lesson) = lesson_rx.recv().await {
+                println!(
+                    "AG-UI: Caching lesson for {} on {}: {}",
+                    lesson.agent_id, lesson.category, lesson.pattern.condition
+                );
+                let mut store = lesson_store_for_rx.write().await;
+                store.push(lesson);
+                // Evict oldest when too many for same (agent, category) key
+                let len = store.len();
+                if len > MAX_LESSONS_PER_KEY * 10 {
+                    store.drain(..len - MAX_LESSONS_PER_KEY * 10);
+                }
+            }
+        });
+
         let state = AppState {
             connections: self.connections.clone(),
             agents: discovered_agents.clone(),
@@ -262,7 +286,8 @@ impl AgUiGateway {
             task_store: Arc::new(RwLock::new(HashMap::new())),
             learning_module: Arc::new(RwLock::new(LearningModule::new())),
             routing_history: Arc::new(RwLock::new(VecDeque::new())),
-            lesson_tx: None,
+            lesson_tx: Some(lesson_tx),
+            lesson_store,
         };
 
         // Rate-limited API routes

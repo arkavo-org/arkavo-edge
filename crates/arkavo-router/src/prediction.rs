@@ -194,6 +194,7 @@ impl WorkflowCostPredictor {
             TaskCategory::CodeSearch => Duration::from_secs(1),
             TaskCategory::SecurityScan => Duration::from_secs(2),
             TaskCategory::TestGeneration => Duration::from_secs(12),
+            TaskCategory::CodeReview => Duration::from_secs(5),
             TaskCategory::Documentation => Duration::from_secs(2),
             TaskCategory::Refactoring => Duration::from_secs(5),
             TaskCategory::CodeGeneration => Duration::from_secs(8),
