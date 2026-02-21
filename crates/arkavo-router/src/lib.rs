@@ -77,10 +77,22 @@ use tokio_stream::Stream;
 /// Balance between memory usage and backpressure handling
 const STREAM_BUFFER_SIZE: usize = 100;
 
+/// Base cooldown after first availability failure (5 minutes).
+/// Doubles on each consecutive failure: 5 → 10 → 20 → 40 → 60 (capped).
+/// Resets to base after the first successful response from that model.
+const MODEL_COOLDOWN_BASE_SECS: u64 = 300;
+
+/// Maximum cooldown duration regardless of consecutive failures (1 hour).
+const MODEL_COOLDOWN_MAX_SECS: u64 = 3600;
+
 /// Intelligent router for cost-optimized model selection
 pub struct Router {
     classifier: Arc<TaskClassifier>,
     selector: Arc<ModelSelector>,
+    model_learning: Arc<LearningModule>,
+    /// Temporarily excluded models: name → (when, consecutive_failures).
+    /// Cooldown duration doubles each consecutive failure, resets on success.
+    model_cooldowns: Arc<RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
     metrics: Arc<RwLock<RoutingMetrics>>,
     connectivity: Arc<ConnectivityChecker>,
     offline_mode: bool,
@@ -102,9 +114,15 @@ pub struct Router {
 
 impl Router {
     pub async fn new() -> Result<Self> {
+        let selector = Arc::new(ModelSelector::new());
+        let model_learning = Arc::new(LearningModule::new());
+        selector::seed_model_learning(&selector, &model_learning).await;
+
         Ok(Self {
             classifier: Arc::new(TaskClassifier::new().await?),
-            selector: Arc::new(ModelSelector::new()),
+            selector,
+            model_learning,
+            model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: false,
@@ -126,9 +144,15 @@ impl Router {
     }
 
     pub async fn new_offline() -> Result<Self> {
+        let selector = Arc::new(ModelSelector::new());
+        let model_learning = Arc::new(LearningModule::new());
+        selector::seed_model_learning(&selector, &model_learning).await;
+
         Ok(Self {
             classifier: Arc::new(TaskClassifier::new().await?),
-            selector: Arc::new(ModelSelector::new()),
+            selector,
+            model_learning,
+            model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
             offline_mode: true,
@@ -239,6 +263,63 @@ impl Router {
         &self.advisor
     }
 
+    /// Get a reference to the model learning module (Thompson Sampling state)
+    pub fn model_learning(&self) -> &LearningModule {
+        &self.model_learning
+    }
+
+    /// Record that a model is temporarily unavailable (availability failure, not quality).
+    ///
+    /// This does NOT update the model's Beta prior — availability failures are
+    /// operational events, not learning events. Cooldown duration doubles on
+    /// each consecutive failure (5 → 10 → 20 → 40 → 60 min cap), then resets
+    /// after the first successful response from that model.
+    async fn record_model_cooldown(&self, model_name: &str) {
+        let mut cooldowns = self.model_cooldowns.write().await;
+        let consecutive = cooldowns
+            .get(model_name)
+            .map(|(_, count)| count + 1)
+            .unwrap_or(1);
+        cooldowns.insert(
+            model_name.to_string(),
+            (std::time::Instant::now(), consecutive),
+        );
+        let duration = Self::cooldown_duration_secs(consecutive);
+        tracing::info!(
+            model = model_name,
+            consecutive,
+            "Model cooled down for {}s (availability failure)",
+            duration
+        );
+    }
+
+    /// Clear cooldown for a model after a successful response.
+    ///
+    /// Resets the exponential backoff so the next failure starts at the base duration.
+    async fn clear_model_cooldown(&self, model_name: &str) {
+        self.model_cooldowns.write().await.remove(model_name);
+    }
+
+    /// Cooldown duration with exponential backoff: base × 2^(n-1), capped.
+    fn cooldown_duration_secs(consecutive: u32) -> u64 {
+        let shift = consecutive.saturating_sub(1).min(10); // prevent overflow
+        let multiplier = 1u64 << shift;
+        MODEL_COOLDOWN_BASE_SECS
+            .saturating_mul(multiplier)
+            .min(MODEL_COOLDOWN_MAX_SECS)
+    }
+
+    /// Get model names currently on cooldown (expired entries are pruned)
+    async fn get_excluded_models(&self) -> Vec<String> {
+        let mut cooldowns = self.model_cooldowns.write().await;
+        cooldowns.retain(|_, (since, consecutive)| {
+            let duration =
+                std::time::Duration::from_secs(Self::cooldown_duration_secs(*consecutive));
+            since.elapsed() < duration
+        });
+        cooldowns.keys().cloned().collect()
+    }
+
     pub fn set_offline_mode(&mut self, offline: bool) {
         self.offline_mode = offline;
     }
@@ -257,7 +338,11 @@ impl Router {
             "Task classified"
         );
 
-        let mut decision = self.selector.select(&classification, task_description)?;
+        let excluded = self.get_excluded_models().await;
+        let mut decision = self
+            .selector
+            .select_adaptive(&self.model_learning, &classification, 0.0, &excluded)
+            .await?;
 
         tracing::info!(
             model = %decision.recommended_model.name(),
@@ -373,6 +458,43 @@ impl Router {
         };
 
         Ok(RouteStream::from_response(response))
+    }
+
+    /// Route using the fastest available local model, skipping classification.
+    ///
+    /// Designed for internal ML Brain tasks (episode synthesis, lesson extraction)
+    /// that need speed over quality. Uses qwen3-0.6b or ministral-3b directly.
+    pub async fn route_fast(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+    ) -> Result<RouteStream> {
+        use crate::stream::{RouteResponse, RouteStream};
+
+        let model = self.selector.fastest_local_model();
+        tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
+
+        let provider = self.instantiate_provider(&model).await?;
+        let content = provider
+            .complete(messages)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("{task_description}: {e}")))?;
+
+        let response = RouteResponse {
+            content,
+            tool_calls: Vec::new(),
+            model,
+            cost_usd: 0.0,
+            used_architect_mode: false,
+            architect_savings: None,
+        };
+
+        Ok(RouteStream::from_response(response))
+    }
+
+    /// Get the fastest available local model choice (for callers that need to know)
+    pub fn fastest_local_model(&self) -> ModelChoice {
+        self.selector.fastest_local_model()
     }
 
     /// Persist validated dynamic adjustments in the background.
@@ -552,6 +674,8 @@ impl Router {
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
 
         for attempt in 0..MAX_RETRIES {
+            let inference_start = std::time::Instant::now();
+
             let tools_json = match tool_registry {
                 Some(registry) => {
                     let detail_level =
@@ -641,10 +765,36 @@ impl Router {
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
-            let mut response = provider
+            let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, None)
                 .await
-                .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    // Availability failure — cooldown, don't poison Beta prior
+                    self.record_model_cooldown(current_decision.recommended_model.name())
+                        .await;
+
+                    if attempt + 1 < MAX_RETRIES {
+                        let excluded = self.get_excluded_models().await;
+                        let re_class = classifier::Classification::new(
+                            current_decision.task_category,
+                            current_decision.confidence,
+                            "Re-routed after availability failure".to_string(),
+                        );
+                        current_decision = self
+                            .selector
+                            .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
+                            .await?;
+                        tracing::info!(
+                            model = %current_decision.recommended_model.name(),
+                            "Re-routed after availability failure: {e}"
+                        );
+                        continue;
+                    }
+                    return Err(Error::ModelExecution(format!("Provider error: {e}")));
+                }
+            };
 
             // Observe response for style issues (auto-learn)
             self.advisor.observe(
@@ -696,6 +846,19 @@ impl Router {
                         self.advisor.record_feedback(labels, false);
                     }
 
+                    // Record negative feedback for adaptive model routing
+                    let elapsed = inference_start.elapsed();
+                    self.model_learning
+                        .immediate_update(
+                            current_decision.recommended_model.name(),
+                            &BurstFeedback::failure(
+                                uuid::Uuid::new_v4(),
+                                current_decision.task_category.as_str().to_string(),
+                                elapsed.as_millis() as u64,
+                            ),
+                        )
+                        .await;
+
                     if attempt + 1 < MAX_RETRIES
                         && let Some(upgraded) =
                             Self::upgrade_model_local_only(&current_decision.recommended_model)
@@ -738,6 +901,19 @@ impl Router {
                                 if let Some(ref labels) = advice_labels {
                                     self.advisor.record_feedback(labels, false);
                                 }
+
+                                // Record negative feedback for adaptive model routing
+                                let elapsed = inference_start.elapsed();
+                                self.model_learning
+                                    .immediate_update(
+                                        current_decision.recommended_model.name(),
+                                        &BurstFeedback::failure(
+                                            uuid::Uuid::new_v4(),
+                                            current_decision.task_category.as_str().to_string(),
+                                            elapsed.as_millis() as u64,
+                                        ),
+                                    )
+                                    .await;
 
                                 // Special handling for MissingToolUse
                                 if judgment.issue_type == IssueType::MissingToolUse
@@ -783,6 +959,31 @@ impl Router {
             if let Some(ref labels) = advice_labels {
                 self.advisor.record_feedback(labels, true);
             }
+
+            // Model responded — clear any cooldown (resets exponential backoff)
+            self.clear_model_cooldown(current_decision.recommended_model.name())
+                .await;
+
+            // Record positive feedback for adaptive model routing
+            let elapsed = inference_start.elapsed();
+            let quality = selector::compute_response_quality(
+                &response.content,
+                elapsed.as_millis() as u64,
+                current_decision.task_category.as_str(),
+            );
+            self.model_learning
+                .immediate_update(
+                    current_decision.recommended_model.name(),
+                    &BurstFeedback::success(
+                        uuid::Uuid::new_v4(),
+                        current_decision.task_category.as_str().to_string(),
+                        elapsed.as_millis() as u64,
+                    )
+                    .with_quality(quality)
+                    .with_usage(current_decision.estimated_cost_usd, 0),
+                )
+                .await;
+
             return Ok(response);
         }
 
@@ -876,6 +1077,8 @@ impl Router {
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
 
         for attempt in 0..max_retries {
+            let inference_start = std::time::Instant::now();
+
             let tools_json = match tool_registry {
                 Some(registry) => {
                     let detail_level =
@@ -925,10 +1128,36 @@ impl Router {
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
 
-            let mut response = provider
+            let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json.clone(), None)
                 .await
-                .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    // Availability failure — cooldown, don't poison Beta prior
+                    self.record_model_cooldown(current_decision.recommended_model.name())
+                        .await;
+
+                    if attempt + 1 < max_retries {
+                        let excluded = self.get_excluded_models().await;
+                        let re_class = classifier::Classification::new(
+                            current_decision.task_category,
+                            current_decision.confidence,
+                            "Re-routed after availability failure".to_string(),
+                        );
+                        current_decision = self
+                            .selector
+                            .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
+                            .await?;
+                        tracing::info!(
+                            model = %current_decision.recommended_model.name(),
+                            "Re-routed after availability failure: {e}"
+                        );
+                        continue;
+                    }
+                    return Err(Error::ModelExecution(format!("Provider error: {e}")));
+                }
+            };
 
             // Observe response for style issues (auto-learn)
             self.advisor.observe(
@@ -998,6 +1227,19 @@ impl Router {
                         self.advisor.record_feedback(labels, false);
                     }
 
+                    // Record negative feedback for adaptive model routing
+                    let elapsed = inference_start.elapsed();
+                    self.model_learning
+                        .immediate_update(
+                            current_decision.recommended_model.name(),
+                            &BurstFeedback::failure(
+                                uuid::Uuid::new_v4(),
+                                current_decision.task_category.as_str().to_string(),
+                                elapsed.as_millis() as u64,
+                            ),
+                        )
+                        .await;
+
                     if attempt + 1 < max_retries {
                         current_decision.recommended_model =
                             self.upgrade_model(&current_decision.recommended_model);
@@ -1036,6 +1278,19 @@ impl Router {
                                 if let Some(ref labels) = advice_labels {
                                     self.advisor.record_feedback(labels, false);
                                 }
+
+                                // Record negative feedback for adaptive model routing
+                                let elapsed = inference_start.elapsed();
+                                self.model_learning
+                                    .immediate_update(
+                                        current_decision.recommended_model.name(),
+                                        &BurstFeedback::failure(
+                                            uuid::Uuid::new_v4(),
+                                            current_decision.task_category.as_str().to_string(),
+                                            elapsed.as_millis() as u64,
+                                        ),
+                                    )
+                                    .await;
 
                                 // Special handling for MissingToolUse - search for tools instead of upgrading model
                                 if judgment.issue_type == IssueType::MissingToolUse
@@ -1082,6 +1337,31 @@ impl Router {
             if let Some(ref labels) = advice_labels {
                 self.advisor.record_feedback(labels, true);
             }
+
+            // Model responded — clear any cooldown (resets exponential backoff)
+            self.clear_model_cooldown(current_decision.recommended_model.name())
+                .await;
+
+            // Record positive feedback for adaptive model routing
+            let elapsed = inference_start.elapsed();
+            let quality = selector::compute_response_quality(
+                &response.content,
+                elapsed.as_millis() as u64,
+                current_decision.task_category.as_str(),
+            );
+            self.model_learning
+                .immediate_update(
+                    current_decision.recommended_model.name(),
+                    &BurstFeedback::success(
+                        uuid::Uuid::new_v4(),
+                        current_decision.task_category.as_str().to_string(),
+                        elapsed.as_millis() as u64,
+                    )
+                    .with_quality(quality)
+                    .with_usage(current_decision.estimated_cost_usd, 0),
+                )
+                .await;
+
             return Ok(response);
         }
 
@@ -1268,6 +1548,8 @@ impl Router {
         Ok(Self {
             classifier: self.classifier.clone(),
             selector: self.selector.clone(),
+            model_learning: self.model_learning.clone(),
+            model_cooldowns: self.model_cooldowns.clone(),
             metrics: self.metrics.clone(),
             connectivity: self.connectivity.clone(),
             offline_mode: self.offline_mode,

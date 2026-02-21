@@ -70,11 +70,7 @@ Respond with a JSON object:
 
     let messages = vec![Message::user(prompt)];
     let stream = router
-        .route(
-            "Analyze observations and create episode summary",
-            messages,
-            None,
-        )
+        .route_fast("episode synthesis", messages)
         .await
         .map_err(|e| format!("Router error: {e}"))?;
 
@@ -182,7 +178,7 @@ If no clear pattern, respond with: NO_LESSON"#,
 
     let messages = vec![Message::user(prompt)];
     let stream = router
-        .route("Extract lesson pattern from episodes", messages, None)
+        .route_fast("lesson synthesis", messages)
         .await
         .map_err(|e| format!("Router error: {e}"))?;
 

@@ -1,6 +1,6 @@
 //! LearningModule - Thompson Sampling for agent/model selection
 
-use super::agent_utility::{AgentUtility, BurstFeedback, FinalTaskReport};
+use super::agent_utility::{AgentUtility, BetaPrior, BurstFeedback, FinalTaskReport};
 use super::config::LearningConfig;
 use super::tool_patterns::ToolCallFormat;
 use std::collections::HashMap;
@@ -320,6 +320,24 @@ impl LearningModule {
         }
 
         (best_format, best_score)
+    }
+
+    /// Seed category priors for an agent (warm start from static heuristic)
+    ///
+    /// Only inserts priors that don't already exist, preserving
+    /// any persisted state from previous runs.
+    pub async fn seed_priors(&self, agent_id: &str, priors: &[(&str, f64, f64)]) {
+        let mut agents = self.agents.write().await;
+        let utility = agents
+            .entry(agent_id.to_string())
+            .or_insert_with(|| AgentUtility::new(agent_id.to_string()));
+
+        for &(category, alpha, beta) in priors {
+            utility
+                .category_priors
+                .entry(category.to_string())
+                .or_insert_with(|| BetaPrior::new(alpha, beta));
+        }
     }
 
     /// Get per-category statistics for an agent
