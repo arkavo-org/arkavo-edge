@@ -401,12 +401,14 @@ pub async fn handle_submit_task(
         created_at: now.clone(),
         completed_at: None,
         task_category: Some(category_str),
+        first_working_at: None,
     };
     task_store.write().await.insert(task_id.clone(), tracked);
 
     // Notify UI of submission
     tx.send(AgUiEvent::TaskSubmitted {
         task_id: task_id.clone(),
+        description: Some(description.clone()),
         status: "submitted".to_string(),
         timestamp: now.clone(),
     })
@@ -658,6 +660,7 @@ pub async fn handle_submit_task(
                                         status: "working".to_string(),
                                         progress: Some(progress),
                                         result: None,
+                                        metrics: None,
                                         timestamp: chrono::Utc::now().to_rfc3339(),
                                     };
                                     broadcast_event(&event, &connections_clone).await;

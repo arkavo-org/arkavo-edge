@@ -37,6 +37,7 @@ pub struct TrackedTask {
     pub created_at: String,
     pub completed_at: Option<String>,
     pub task_category: Option<String>,
+    pub first_working_at: Option<String>,
 }
 
 #[derive(Clone)]

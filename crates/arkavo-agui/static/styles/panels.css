@@ -371,3 +371,197 @@
 .sparkline-svg { width: 80px; height: 20px; }
 .trend-no-data { font-size: 10px; color: var(--text-secondary); }
 .lesson-count-badge { margin-top: 8px; text-align: center; font-size: 10px; color: var(--accent); padding: 4px; background: rgba(99, 102, 241, 0.1); border-radius: 4px; }
+
+/* Task Detail View */
+.task-card-clickable {
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.task-card-clickable:hover {
+    border-color: var(--accent);
+    background: var(--bg-tertiary);
+}
+
+.task-detail-back {
+    font-size: 13px;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 10px 12px 6px;
+    display: inline-block;
+    font-weight: 500;
+}
+
+.task-detail-back:hover { text-decoration: underline; }
+
+.detail-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    padding: 12px 12px 6px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 4px;
+}
+
+.detail-section-title:first-of-type { border-top: none; margin-top: 0; }
+
+.detail-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 20px 12px;
+}
+
+.detail-empty strong { color: var(--text-primary); }
+
+.task-detail-summary {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 16px;
+    margin: 0 12px 4px;
+}
+
+.task-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.task-detail-id {
+    font-size: 14px;
+    font-family: monospace;
+    color: var(--text-secondary);
+}
+
+.task-detail-description {
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+}
+
+.task-detail-result {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 14px;
+    margin: 0 12px 4px;
+}
+
+.task-result-text {
+    font-size: 13px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-primary);
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 0;
+    line-height: 1.6;
+}
+
+.task-detail-routing {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 0 12px 4px;
+}
+
+.task-detail-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+}
+
+.task-detail-issues-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--error);
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.task-detail-issues {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.task-detail-issues li {
+    font-size: 12px;
+    color: var(--error);
+    padding: 4px 0 4px 12px;
+    border-left: 2px solid var(--error);
+    margin-bottom: 4px;
+}
+
+/* A2A Trace */
+.task-detail-a2a {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    margin: 0 12px 4px;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.a2a-trace-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.a2a-trace-item:last-child { border-bottom: none; }
+.a2a-trace-item.inbound { border-left: 3px solid var(--accent); }
+.a2a-trace-item.outbound { border-left: 3px solid var(--success); }
+
+.a2a-trace-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+    min-width: 60px;
+}
+
+.a2a-trace-dir {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.a2a-trace-from { font-weight: 500; }
+
+.a2a-trace-method {
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-size: 11px;
+}
+
+/* Task detail metrics */
+.task-detail-metrics {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 0 12px 4px;
+}
+
+.task-metrics-config {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-align: right;
+    margin-top: 6px;
+    font-style: italic;
+}
+
+/* Task detail telemetry */
+.task-detail-telemetry {
+    margin: 0 12px 16px;
+    max-height: 300px;
+    overflow-y: auto;
+}
