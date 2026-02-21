@@ -97,26 +97,57 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    // A2A mode is the default (and only) chat mode
-    let prompt = args
-        .windows(2)
-        .find(|w| w[0] == "--prompt" || w[0] == "--print")
-        .map(|w| w[1].clone());
+    // Parse --prompt and --agent-id from args
+    let mut prompt: Option<String> = None;
+    let mut agent_id: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--prompt" | "--print" => {
+                if i + 1 < args.len() {
+                    prompt = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--agent-id" => {
+                if i + 1 < args.len() {
+                    agent_id = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--agent-id requires an argument".into());
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    // Direct A2A chat with a specific mesh agent
+    if let Some(id) = agent_id {
+        return execute_a2a_direct_chat(&id, prompt.as_deref());
+    }
+
+    // Default: route through local in-process Router
     execute_a2a_chat(prompt.as_deref())
 }
 
 fn print_usage() {
     println!("Start interactive chat with LLM\n");
     println!("USAGE:");
-    println!("    arkavo chat                     Interactive chat mode");
-    println!("    arkavo chat --prompt \"query\"    One-shot query\n");
+    println!("    arkavo chat                                   Interactive chat mode");
+    println!("    arkavo chat --prompt \"query\"                  One-shot query");
+    println!("    arkavo chat --agent-id <ID>                   Chat with a mesh agent");
+    println!("    arkavo chat --agent-id <ID> --prompt \"query\"  One-shot to mesh agent\n");
     println!("EXAMPLES:");
     println!("    arkavo chat");
-    println!("    arkavo chat --prompt \"What is 2+2?\"\n");
+    println!("    arkavo chat --prompt \"What is 2+2?\"");
+    println!("    arkavo chat --agent-id security-auditor-agent --prompt \"Audit this code\"");
+    println!("    arkavo chat --agent-id code-analyzer-agent\n");
     println!("OPTIONS:");
-    println!("    --prompt <TEXT>       One-shot query (exits after response)");
-    println!("    --debug               Show debug output");
-    println!("    -h, --help            Show this help\n");
+    println!("    --agent-id <ID>       Chat directly with a mesh agent via A2A");
+    println!("    --prompt <TEXT>        One-shot query (exits after response)");
+    println!("    --debug                Show debug output");
+    println!("    -h, --help             Show this help\n");
     println!("INTERACTIVE COMMANDS:");
     println!("    /new              Start a new conversation");
     println!("    /clear            Clear conversation context");
@@ -200,6 +231,105 @@ fn execute_a2a_chat(prompt: Option<&str>) -> Result<(), Box<dyn std::error::Erro
             }
         }
 
+        Ok(())
+    })
+}
+
+/// Chat directly with a mesh agent via A2A protocol (bypasses local Router)
+#[allow(clippy::disallowed_methods)]
+fn execute_a2a_direct_chat(
+    agent_id: &str,
+    prompt: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arkavo_protocol::{
+        http::HttpTransport,
+        transport::{A2aEndpoint, A2aTransport, TlsConfig, TransportConfig},
+    };
+
+    let discovered = super::mesh::discover_mesh_agents()?;
+    if discovered.is_empty() {
+        return Err("No mesh agents discovered. Are agents running?".into());
+    }
+
+    // Match by agent_id (exact) or name substring (fuzzy)
+    let agent = discovered
+        .iter()
+        .find(|a| a.agent_id == agent_id)
+        .or_else(|| {
+            let lower = agent_id.to_lowercase();
+            discovered
+                .iter()
+                .find(|a| a.name.to_lowercase().contains(&lower))
+        })
+        .ok_or_else(|| {
+            let available: Vec<_> = discovered
+                .iter()
+                .map(|a| format!("  {} ({})", a.name, a.agent_id))
+                .collect();
+            format!(
+                "Agent '{}' not found. Available agents:\n{}",
+                agent_id,
+                available.join("\n")
+            )
+        })?;
+
+    let address = agent
+        .address
+        .as_ref()
+        .ok_or("Selected agent has no address")?;
+
+    println!("Connecting to {} ({})...", agent.name, agent.agent_id);
+    println!("  Address: {address}");
+
+    let runtime = get_or_create_runtime();
+    runtime.block_on(async {
+        let transport_config = TransportConfig {
+            timeout_ms: 60000,
+            max_retries: 2,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let transport = HttpTransport::new(transport_config)?;
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: agent.agent_id.clone(),
+            public_key: None,
+        };
+
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| format!("Failed to connect: {e}"))?;
+        println!("  Connected\n");
+
+        // One-shot mode
+        if let Some(text) = prompt {
+            super::mesh::send_and_poll_agent(&transport, text).await?;
+            transport.close().await.ok();
+            return Ok(());
+        }
+
+        // Interactive REPL
+        println!("Direct chat with {} (type /exit to quit)", agent.name);
+        loop {
+            let input = read_user_input()?;
+            if input.is_empty() {
+                continue;
+            }
+            if input == "/exit" || input == "/quit" || input == "/q" {
+                break;
+            }
+            match super::mesh::send_and_poll_agent(&transport, &input).await {
+                Ok(()) => {}
+                Err(e) => eprintln!("Error: {e}"),
+            }
+        }
+
+        transport.close().await.ok();
         Ok(())
     })
 }

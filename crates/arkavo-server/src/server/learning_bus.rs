@@ -12,7 +12,8 @@ use arkavo_gossip::{
 };
 use arkavo_router::Router;
 use arkavo_router::learning::{
-    AgentContribution, BurstFeedback, Episode, LearningModule, Lesson, ToolCallFormat,
+    AgentContribution, BurstFeedback, Episode, LearningModule, Lesson, LessonPattern,
+    ToolCallFormat,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
@@ -214,15 +215,63 @@ impl LearningBus {
     }
 
     /// Handle incoming gossip message from peer
+    ///
+    /// For lesson announcements that pass signature verification, immediately
+    /// adds the lesson to the local policy cache for behavior guidance injection.
     pub async fn handle_gossip(&self, message: GossipMessage) -> Vec<GossipMessage> {
+        // Capture announcement metadata before passing to gossip protocol
+        let lesson_announce = if let GossipMessage::LessonAnnounce(ref ann) = message {
+            Some(ann.clone())
+        } else {
+            None
+        };
+
         let gossip = self.gossip.read().await;
-        match gossip.handle_message(message).await {
+        let responses = match gossip.handle_message(message).await {
             Ok(responses) => responses,
             Err(e) => {
                 tracing::warn!("Gossip message error: {}", e);
-                vec![]
+                return vec![];
             }
+        };
+        drop(gossip);
+
+        // If the lesson announcement passed signature verification (didn't error),
+        // add it to the policy cache for immediate behavior guidance injection
+        if let Some(ann) = lesson_announce {
+            let pattern = LessonPattern::new(
+                ann.condition
+                    .clone()
+                    .unwrap_or_else(|| ann.category.clone()),
+                ann.action
+                    .clone()
+                    .unwrap_or_else(|| "adjust approach".to_string()),
+                ann.expected_outcome
+                    .clone()
+                    .unwrap_or_else(|| "improved quality".to_string()),
+            );
+            let lesson = Lesson::new(
+                ann.originator.clone(),
+                self.swarm_id.clone(),
+                ann.category.clone(),
+                pattern,
+                ann.confidence,
+                1,
+            );
+
+            let mut cache = self.policy_cache.write().await;
+            cache.add_lesson(lesson);
+            drop(cache);
+
+            tracing::info!(
+                lesson_id = %ann.lesson_id,
+                category = %ann.category,
+                originator = %ann.originator,
+                "Gossip lesson applied to policy cache for guidance injection"
+            );
         }
+
+        responses
     }
 
     /// Add a peer to gossip protocol with their public key
@@ -582,6 +631,11 @@ impl LearningBus {
                     swarm_id.clone(),
                     lesson.category.clone(),
                     lesson.confidence,
+                )
+                .with_pattern(
+                    lesson.pattern.condition.clone(),
+                    lesson.pattern.action.clone(),
+                    lesson.pattern.expected_outcome.clone(),
                 );
 
                 if let Err(e) = sign_lesson_announcement(&mut announcement, &keypair) {
