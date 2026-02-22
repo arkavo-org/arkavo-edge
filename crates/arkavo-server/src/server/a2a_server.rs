@@ -62,6 +62,8 @@ pub struct A2aServer {
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
     /// Federated memory service for ABAC-scoped cross-agent retrieval
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
+    /// Orchestrator tick counter shared with the RPC impl for learning/status
+    orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl A2aServer {
@@ -98,6 +100,7 @@ impl A2aServer {
                 arkavo_router::load_agent_config().unwrap_or_default(),
             )),
             federated_memory: Arc::new(tokio::sync::RwLock::new(None)),
+            orchestrator_tick: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -1066,6 +1069,7 @@ impl A2aServer {
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
+            orchestrator_tick: self.orchestrator_tick.clone(),
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
@@ -1116,6 +1120,7 @@ impl A2aServer {
         let agent_metadata = self.agent_metadata.clone();
         let learning_bus = self.learning_bus.read().await.clone();
         let agent_memory = self.agent_memory.clone();
+        let orchestrator_tick = self.orchestrator_tick.clone();
 
         info!("Starting orchestrator loop (observe → plan → act)");
 
@@ -1126,6 +1131,7 @@ impl A2aServer {
             let mut tick: u64 = 0;
             loop {
                 tick += 1;
+                orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
                 let metadata = agent_metadata.read().await;
                 let purpose = metadata.purpose.clone();
                 drop(metadata);

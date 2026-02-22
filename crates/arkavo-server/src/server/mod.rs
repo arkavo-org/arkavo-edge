@@ -218,6 +218,10 @@ pub trait A2aRpc {
     #[method(name = "learning/checkPolicy")]
     async fn check_policy(&self, sector_id: String) -> RpcResult<learning_bus::BehaviorAdvice>;
 
+    /// Get Thompson Sampling learning state for UI dashboard
+    #[method(name = "learning/status")]
+    async fn learning_status(&self) -> RpcResult<serde_json::Value>;
+
     /// Get agent capabilities for orchestrator onboarding
     #[method(name = "agent.capabilities.get")]
     async fn agent_capabilities_get(&self) -> RpcResult<AgentCapabilitiesGetResponse>;
@@ -271,6 +275,8 @@ pub struct A2aRpcImpl {
     pub(crate) public_key: Option<String>,
     /// Budget manager for cost enforcement
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
+    /// Orchestrator tick counter (shared with orchestrator loop)
+    pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -735,6 +741,69 @@ impl A2aRpcServer for A2aRpcImpl {
                 Ok(learning_bus::BehaviorAdvice::Default)
             }
         }
+    }
+
+    async fn learning_status(&self) -> RpcResult<serde_json::Value> {
+        let timer = RpcTimer::new("learning_status".to_string(), self.metrics.clone());
+
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        let router = match &self.router {
+            Some(r) => r,
+            None => {
+                timer.success();
+                return Ok(
+                    serde_json::json!({ "agents": [], "selectedModel": null, "tickCount": 0 }),
+                );
+            }
+        };
+
+        let lm = router.model_learning();
+        let all_stats = lm.get_all_stats().await;
+        let mut agents = Vec::with_capacity(all_stats.len());
+
+        for s in &all_stats {
+            let cat_stats = lm.get_category_stats(&s.agent_id).await;
+            let category_stats: Vec<serde_json::Value> = cat_stats
+                .into_iter()
+                .map(|(cat, alpha, beta_param, ev, obs)| {
+                    serde_json::json!({
+                        "category": cat,
+                        "alpha": alpha,
+                        "betaParam": beta_param,
+                        "expectedValue": ev,
+                        "observations": obs,
+                    })
+                })
+                .collect();
+
+            agents.push(serde_json::json!({
+                "agentId": s.agent_id,
+                "alpha": s.alpha,
+                "betaParam": s.beta_param,
+                "expectedValue": s.expected_value,
+                "stdDev": s.std_dev,
+                "totalObservations": s.total_observations,
+                "successRate": s.success_rate,
+                "probationary": s.probationary,
+                "categoryStats": category_stats,
+            }));
+        }
+
+        let tick = self
+            .orchestrator_tick
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        timer.success();
+        Ok(serde_json::json!({
+            "agents": agents,
+            "selectedModel": router.last_routed_model(),
+            "tickCount": tick,
+        }))
     }
 
     async fn agent_capabilities_get(&self) -> RpcResult<AgentCapabilitiesGetResponse> {

@@ -113,6 +113,12 @@ function switchView(viewId) {
         requestSecurityData();
     } else if (viewId === 'learning') {
         wsSend({ type: 'requestLearningStatus' });
+        startLearningPolling();
+    }
+
+    // Stop learning polling when navigating away
+    if (viewId !== 'learning') {
+        stopLearningPolling();
     }
 }
 
