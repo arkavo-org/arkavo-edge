@@ -25,7 +25,7 @@ use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
-use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
+use super::{A2aRpcImpl, A2aRpcServer};
 
 #[cfg(feature = "kas")]
 use arkavo_tdf::KasA2aHandler;
@@ -826,13 +826,12 @@ impl A2aServer {
                         let memory_section = memory.format_for_prompt();
                         drop(memory);
 
+                        // Purpose goes as System message; event/goals/memory as User
                         let prompt = format!(
-                            "{}{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
-                            system_prompt,
-                            goals_section,
-                            memory_section,
-                            notification.server,
-                            event_str
+                            "{goals_section}{memory_section}\n\n\
+                             ## Event\nServer: {}\nData: {}\n\n\
+                             ## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
+                            notification.server, event_str
                         );
 
                         eprintln!(
@@ -840,13 +839,16 @@ impl A2aServer {
                             prompt.len()
                         );
                         let start_time = std::time::Instant::now();
-                        match execute_with_conductor(
+                        match super::conductor::execute_with_conductor_and_learning(
                             &conductor,
                             &router,
                             &mcp_registry,
                             prompt,
                             None,
                             None,
+                            None,
+                            None,
+                            Some(&system_prompt),
                         )
                         .await
                         {
@@ -1125,10 +1127,10 @@ impl A2aServer {
             loop {
                 tick += 1;
                 let metadata = agent_metadata.read().await;
-                let system_prompt = metadata.purpose.clone();
+                let purpose = metadata.purpose.clone();
                 drop(metadata);
 
-                if system_prompt.is_empty() {
+                if purpose.is_empty() {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     continue;
                 }
@@ -1136,14 +1138,14 @@ impl A2aServer {
                 // Read short-term memory (recent tool calls from previous ticks)
                 let recent_actions = agent_memory.read().await.format_for_prompt();
 
+                // Purpose goes as System message so the LLM treats tool examples
+                // and planning workflow as authoritative instructions.
+                // Tick-specific instruction goes as User message.
                 let tick_prompt = if tick == 1 {
-                    // First tick: agent sees full purpose and starts from scratch
-                    system_prompt
+                    "Begin your startup workflow now.".to_string()
                 } else {
-                    // Subsequent ticks: ToolMemory shows what already happened
                     format!(
-                        "{system_prompt}\
-                         {recent_actions}\n\n\
+                        "{recent_actions}\n\n\
                          ## Autonomous Tick {tick}\n\
                          Initialization is complete. Do not repeat setup steps.\n\
                          Continue from where you left off. Take the next action.",
@@ -1162,6 +1164,7 @@ impl A2aServer {
                     None,
                     learning_bus.as_ref(),
                     Some(&agent_memory),
+                    Some(&purpose),
                 )
                 .await
                 {

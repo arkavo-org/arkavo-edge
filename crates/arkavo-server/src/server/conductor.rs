@@ -44,12 +44,15 @@ pub async fn execute_with_conductor(
         task_executor,
         None,
         None,
+        None,
     )
     .await
 }
 
-/// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
-/// Optionally emits learning events for tool calls
+/// Execute a task via HRM Conductor with optional learning and system prompt.
+///
+/// When `system_prompt` is provided, it is sent as a System message so the LLM
+/// treats AGENTS.md instructions (tool examples, planning workflow) as authoritative.
 #[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_with_conductor_and_learning(
@@ -61,6 +64,7 @@ pub async fn execute_with_conductor_and_learning(
     task_executor: Option<&Arc<TaskExecutor>>,
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
+    system_prompt: Option<&str>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -239,27 +243,27 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    // Build messages, prepending RLM system prompt if active
-    let messages = if let Some(ref rlm_prompt) = rlm_system_prompt {
-        vec![
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::System,
-                content: rlm_prompt.clone(),
-                images: None,
-            },
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::User,
-                content: augmented_content,
-                images: None,
-            },
-        ]
-    } else {
-        vec![arkavo_llm::Message {
-            role: arkavo_llm::Role::User,
-            content: augmented_content,
+    // Build messages: System (AGENTS.md purpose) → System (RLM, if active) → User (task)
+    let mut messages = Vec::new();
+    if let Some(sys) = system_prompt {
+        messages.push(arkavo_llm::Message {
+            role: arkavo_llm::Role::System,
+            content: sys.to_string(),
             images: None,
-        }]
-    };
+        });
+    }
+    if let Some(ref rlm_prompt) = rlm_system_prompt {
+        messages.push(arkavo_llm::Message {
+            role: arkavo_llm::Role::System,
+            content: rlm_prompt.clone(),
+            images: None,
+        });
+    }
+    messages.push(arkavo_llm::Message {
+        role: arkavo_llm::Role::User,
+        content: augmented_content,
+        images: None,
+    });
 
     let response = router
         .route_with_tools(&task_content, messages, Some(&registry_arc))
