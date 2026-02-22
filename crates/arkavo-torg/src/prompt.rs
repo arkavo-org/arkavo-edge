@@ -59,6 +59,10 @@ pub fn format_prompt(policy: &str, format: ModelFormat) -> String {
                  <start_of_turn>model\n"
             )
         }
+        ModelFormat::GLM4 => {
+            // GLM-4 format (ChatML variant)
+            format!("[gMASK]<sop><|system|>\n{TORG_SYSTEM_PROMPT}<|user|>\n{policy}<|assistant|>\n")
+        }
     }
 }
 
@@ -96,5 +100,16 @@ mod tests {
         assert!(prompt.contains("<start_of_turn>user"));
         assert!(prompt.contains("<start_of_turn>model"));
         assert!(prompt.contains("allow access"));
+    }
+
+    #[test]
+    fn test_format_prompt_glm4() {
+        let prompt = format_prompt("admin check", ModelFormat::GLM4);
+        assert!(prompt.contains("[gMASK]<sop>"));
+        assert!(prompt.contains("<|system|>"));
+        assert!(prompt.contains("<|user|>"));
+        assert!(prompt.contains("<|assistant|>"));
+        assert!(prompt.contains("admin check"));
+        assert!(prompt.contains(TORG_SYSTEM_PROMPT));
     }
 }
