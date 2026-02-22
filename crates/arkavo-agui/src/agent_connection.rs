@@ -583,7 +583,7 @@ impl AgentConnection {
                             content,
                             is_error,
                         },
-                        MessageDeltaContent::Metadata { .. } => unreachable!(),
+                        MessageDeltaContent::Metadata { .. } => continue,
                     },
                 };
 

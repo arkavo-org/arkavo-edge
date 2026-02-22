@@ -64,7 +64,7 @@ pub(crate) async fn update_task_status(
                 if !j.issues.is_empty() {
                     println!(
                         "AG-UI: Task {} quality={:.2}, issues: {:?}",
-                        &task_id[..task_id.len().min(8)],
+                        crate::gateway_events::short_id(task_id),
                         j.quality_score,
                         j.issues
                     );
