@@ -289,14 +289,10 @@ impl super::Router {
                                 if judgment.issue_type == IssueType::MissingToolUse
                                     && !judgment.suggested_keywords.is_empty()
                                 {
-                                    tracing::info!(
-                                        "Judge detected missing tool usage, searching for: {:?}",
+                                    tracing::warn!(
+                                        "Judge suggested tools {:?} but available tools may differ — continuing with response",
                                         judgment.suggested_keywords
                                     );
-                                    return Err(Error::ModelExecution(format!(
-                                        "MISSING_TOOL_USE:{:?}",
-                                        judgment.suggested_keywords
-                                    )));
                                 }
 
                                 if attempt + 1 < MAX_RETRIES {
