@@ -69,9 +69,14 @@ impl ContextManager {
 
     /// Load a pre-encoded context `.bin` file as a named slot.
     ///
-    /// The file is loaded via `state_seq_load_file` onto the learning sequence.
-    /// Entries arrive at native positions `[0, N)` and are then shifted to
-    /// `[write_head, write_head + N)` via `seq_add`.
+    /// `state_seq_load_file` restores entries at their native positions `[0, N)`
+    /// and may clear the destination sequence first. When slots already exist on
+    /// the learning sequence, loading directly would corrupt them. Instead,
+    /// subsequent slots are staged through the conversation sequence:
+    ///   1. Load onto conversation seq at `[0, N)`
+    ///   2. Shift to `[write_head, write_head + N)` via `seq_add`
+    ///   3. Copy to learning seq via `seq_cp`
+    ///   4. Clean up conversation seq
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn load(
         &mut self,
@@ -83,23 +88,39 @@ impl ContextManager {
             return Err(ContextError::SlotAlreadyLoaded(name.to_string()));
         }
 
-        // Compute source hash
         let source_hash =
             hash_file(path).map_err(|e| ContextError::LoadFailed(path.to_string(), e))?;
 
-        // Load onto learning sequence at native positions [0, N)
-        let (tokens, _bytes) = ctx
-            .state_seq_load_file(path, self.seq_learning, 128 * 1024)
-            .map_err(|e| ContextError::LoadFailed(path.to_string(), e))?;
-
-        let token_count = tokens.len();
-        let n = i32::try_from(token_count).unwrap_or(i32::MAX);
-
-        // Shift loaded entries from [0, N) to [write_head, write_head + N)
-        if self.write_head > 0 {
+        let (token_count, n) = if self.write_head == 0 {
+            // First slot: load directly onto learning sequence at [0, N)
+            let (tokens, _bytes) = ctx
+                .state_seq_load_file(path, self.seq_learning, 128 * 1024)
+                .map_err(|e| ContextError::LoadFailed(path.to_string(), e))?;
+            let n = i32::try_from(tokens.len()).unwrap_or(i32::MAX);
+            (tokens.len(), n)
+        } else {
+            // Subsequent slots: stage via conversation seq to avoid corrupting
+            // existing entries on the learning seq.
+            let (tokens, _bytes) = ctx
+                .state_seq_load_file(path, self.seq_conversation, 128 * 1024)
+                .map_err(|e| ContextError::LoadFailed(path.to_string(), e))?;
+            let n = i32::try_from(tokens.len()).unwrap_or(i32::MAX);
             let mem = ctx.get_memory();
-            mem.seq_add(self.seq_learning, 0, n, self.write_head);
-        }
+
+            // Shift new entries from [0, N) to [write_head, write_head+N) on staging seq
+            mem.seq_add(self.seq_conversation, 0, n, self.write_head);
+            // Copy from staging to learning at the target range
+            mem.seq_cp(
+                self.seq_conversation,
+                self.seq_learning,
+                self.write_head,
+                self.write_head + n,
+            );
+            // Clean up staging area
+            mem.seq_rm(self.seq_conversation, -1, -1);
+
+            (tokens.len(), n)
+        };
 
         let slot = ContextSlot {
             name: name.to_string(),
@@ -111,8 +132,9 @@ impl ContextManager {
 
         self.write_head += n;
         self.slots.push(slot);
+        let idx = self.slots.len() - 1;
 
-        Ok(self.slots.last().unwrap())
+        Ok(&self.slots[idx])
     }
 
     /// Unload a named slot and compact remaining slots to fill the gap.
