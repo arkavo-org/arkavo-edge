@@ -132,6 +132,7 @@ pub async fn handle_message_send(
                         Some(task_id_clone),
                         Some(&task_executor),
                         learning_bus.as_ref(),
+                        None,
                     )
                     .await
                     {

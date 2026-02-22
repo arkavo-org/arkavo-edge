@@ -364,6 +364,12 @@ impl super::Router {
                 )
                 .await;
 
+            // Record which model was selected so the conductor can attribute
+            // reward-based corrective feedback to the right Thompson Sampling prior.
+            if let Ok(mut guard) = self.last_routed_model.write() {
+                *guard = Some(current_decision.recommended_model.name().to_string());
+            }
+
             return Ok(response);
         }
 

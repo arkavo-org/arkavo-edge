@@ -524,6 +524,7 @@ impl super::Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: self.tdf_audit_store.clone(),
             inference_semaphore: self.inference_semaphore.clone(),
+            last_routed_model: self.last_routed_model.clone(),
         })
     }
 }

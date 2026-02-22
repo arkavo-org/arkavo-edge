@@ -121,6 +121,10 @@ pub struct Router {
     /// concurrent context allocation. This semaphore queues requests so the
     /// second caller waits instead of failing with an OOM/slot error.
     inference_semaphore: Arc<Semaphore>,
+    /// Tracks which model was last selected by route_with_tools().
+    /// The conductor reads this after tool execution to attribute
+    /// reward-based corrective feedback to the right Thompson Sampling prior.
+    last_routed_model: Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl Router {
@@ -154,6 +158,7 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            last_routed_model: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -187,6 +192,7 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            last_routed_model: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -283,6 +289,14 @@ impl Router {
     /// Get a reference to the model learning module (Thompson Sampling state)
     pub fn model_learning(&self) -> &LearningModule {
         &self.model_learning
+    }
+
+    /// Get the model name last selected by `route_with_tools()`.
+    ///
+    /// Returns `None` if no routing has occurred yet. Used by the conductor
+    /// to attribute reward-based corrective feedback to the right model.
+    pub fn last_routed_model(&self) -> Option<String> {
+        self.last_routed_model.read().ok().and_then(|g| g.clone())
     }
 
     /// Log the full Thompson Sampling state for all tracked models.
