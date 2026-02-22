@@ -90,7 +90,7 @@ start_agent() {
 
     cd "$dir"
     # Enable debug logging for chat/swarm interactions
-    local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info}"
+    local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info,arkavo_server=info}"
     nohup env RUST_LOG="$log_level" "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"

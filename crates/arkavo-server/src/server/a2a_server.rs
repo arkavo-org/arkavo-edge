@@ -1092,6 +1092,89 @@ impl A2aServer {
         Ok((handle, actual_port))
     }
 
+    /// Start the autonomous orchestrator loop.
+    ///
+    /// Called by the agent CLI after startup when the agent has MCP tools configured
+    /// (i.e., it's an orchestrator). Specialists don't call this.
+    ///
+    /// Loop: observe → plan → delegate → execute → sleep → repeat
+    pub async fn start_orchestrator_loop(&self) {
+        let router_guard = self.router.read().await;
+        let router = match router_guard.clone() {
+            Some(r) => r,
+            None => {
+                warn!("Cannot start orchestrator loop: no router configured");
+                return;
+            }
+        };
+        drop(router_guard);
+
+        let mcp_registry = self.mcp_registry.clone();
+        let conductor = self.conductor.read().await.clone();
+        let agent_metadata = self.agent_metadata.clone();
+        let learning_bus = self.learning_bus.read().await.clone();
+
+        info!("Starting orchestrator loop (observe → plan → act)");
+
+        tokio::spawn(async move {
+            // Wait for MCP server to be ready
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+            let mut tick: u64 = 0;
+            loop {
+                tick += 1;
+                let metadata = agent_metadata.read().await;
+                let system_prompt = metadata.purpose.clone();
+                drop(metadata);
+
+                if system_prompt.is_empty() {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                let tick_prompt = format!(
+                    "{system_prompt}\n\n\
+                     ## Orchestrator Tick {tick}\n\
+                     Execute your planning workflow:\n\
+                     1. Observe: Use sim_step with Wait to see colony state\n\
+                     2. Analyze: Identify the most urgent need\n\
+                     3. Act: Execute the best action for the colony\n\n\
+                     Start by observing the colony.",
+                );
+
+                info!("Orchestrator tick {tick}: executing observe→plan→act cycle");
+                let start = std::time::Instant::now();
+
+                match super::conductor::execute_with_conductor_and_learning(
+                    &conductor,
+                    &router,
+                    &mcp_registry,
+                    tick_prompt,
+                    None,
+                    None,
+                    learning_bus.as_ref(),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        let elapsed = start.elapsed();
+                        info!(
+                            "Orchestrator tick {tick} completed in {:.1}s: {} chars",
+                            elapsed.as_secs_f64(),
+                            result.len()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Orchestrator tick {tick} failed: {e}");
+                    }
+                }
+
+                // Wait between ticks — gives the game time to advance
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            }
+        });
+    }
+
     /// Release GPU resources for graceful shutdown.
     ///
     /// Must be called before std::process::exit() to ensure Metal
