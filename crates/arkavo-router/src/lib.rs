@@ -78,7 +78,7 @@ use arkavo_llm::Message;
 use arkavo_llm::ModelRegistry;
 use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 
 /// Base cooldown after first availability failure (5 minutes).
 /// Doubles on each consecutive failure: 5 → 10 → 20 → 40 → 60 (capped).
@@ -116,6 +116,11 @@ pub struct Router {
     tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
     #[cfg(feature = "tdf-encrypt")]
     tdf_audit_store: Option<Arc<arkavo_memory::TdfAuditStore>>,
+    /// Serializes concurrent LLM inference calls.
+    /// Local models (llama-cpp) share a single KV cache and cannot handle
+    /// concurrent context allocation. This semaphore queues requests so the
+    /// second caller waits instead of failing with an OOM/slot error.
+    inference_semaphore: Arc<Semaphore>,
 }
 
 impl Router {
@@ -148,6 +153,7 @@ impl Router {
             tdf_encryptor: None,
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
+            inference_semaphore: Arc::new(Semaphore::new(1)),
         })
     }
 
@@ -180,6 +186,7 @@ impl Router {
             tdf_encryptor: None,
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
+            inference_semaphore: Arc::new(Semaphore::new(1)),
         })
     }
 
@@ -520,6 +527,13 @@ impl Router {
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
 
         let provider = self.instantiate_provider(&model).await?;
+
+        let _permit = self
+            .inference_semaphore
+            .acquire()
+            .await
+            .map_err(|_| Error::ModelExecution("Inference semaphore closed".to_string()))?;
+
         let content = provider
             .complete(messages)
             .await

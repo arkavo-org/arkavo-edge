@@ -184,60 +184,6 @@ impl super::Router {
         }
     }
 
-    /// Upgrade model within local tier only - never escalate to cloud
-    pub(crate) fn upgrade_model_local_only(current: &ModelChoice) -> Option<ModelChoice> {
-        let candidate = match current {
-            ModelChoice::LocalQwen3 => Some(ModelChoice::LocalMinistral3B),
-            ModelChoice::LocalMinistral3B => Some(ModelChoice::LocalMinistral8B),
-            ModelChoice::LocalMinistral8B => None,
-            ModelChoice::LocalGemma270M => Some(ModelChoice::LocalGemma4B),
-            ModelChoice::LocalGemma4B => Some(ModelChoice::LocalGemma12B),
-            ModelChoice::LocalGemma12B => None,
-            ModelChoice::LocalDeepSeekCoder => None,
-            _ => None,
-        };
-
-        candidate.filter(Self::is_model_cached_static)
-    }
-
-    /// Check if a local model is cached (static version for use in upgrade_model_local_only)
-    pub(crate) fn is_model_cached_static(model: &ModelChoice) -> bool {
-        match model {
-            ModelChoice::LocalQwen3 => {
-                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
-            }
-            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
-                "unsloth/gemma-3-270m-it-GGUF",
-                "gemma-3-270m-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalGemma4B => model_discovery::is_model_cached(
-                "unsloth/gemma-3-4b-it-GGUF",
-                "gemma-3-4b-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalGemma12B => model_discovery::is_model_cached(
-                "unsloth/gemma-3-12b-it-GGUF",
-                "gemma-3-12b-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
-                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
-            ),
-            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
-                "unsloth/GLM-4.7-Flash-GGUF",
-                "GLM-4.7-Flash-Q4_K_M.gguf",
-            ),
-            _ => false,
-        }
-    }
-
     /// Load a local model into the registry (if not already loaded) and create a provider.
     #[cfg(feature = "llama-cpp")]
     pub(crate) async fn load_local_model(

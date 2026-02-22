@@ -523,6 +523,7 @@ impl super::Router {
             tdf_encryptor: self.tdf_encryptor.clone(),
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: self.tdf_audit_store.clone(),
+            inference_semaphore: self.inference_semaphore.clone(),
         })
     }
 }

@@ -2,6 +2,8 @@
 //!
 //! Converts observations into episodes and episodes into lessons using LLM.
 
+use std::fmt::Write;
+
 use arkavo_llm::Message;
 use arkavo_router::Router;
 use arkavo_router::learning::{
@@ -10,6 +12,17 @@ use arkavo_router::learning::{
 use uuid::Uuid;
 
 use super::episode_buffer::ToolObservation;
+
+/// Truncate a result string to fit within a character budget.
+fn truncate_result(result: &str, max_chars: usize) -> String {
+    if result.len() <= max_chars {
+        return result.to_string();
+    }
+    let original_len = result.len();
+    let mut truncated = result[..max_chars].to_string();
+    let _ = write!(truncated, "...(truncated from {original_len} chars)");
+    truncated
+}
 
 /// Synthesize an episode from observations using LLM
 pub(super) async fn synthesize_episode(
@@ -26,7 +39,7 @@ pub(super) async fn synthesize_episode(
             serde_json::json!({
                 "tool": o.tool_name,
                 "args": o.args,
-                "result": o.result,
+                "result": truncate_result(&o.result, 500),
                 "success": o.success,
                 "latency_ms": o.latency_ms
             })
@@ -282,6 +295,27 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_truncate_result_short() {
+        let result = "short result";
+        assert_eq!(truncate_result(result, 500), "short result");
+    }
+
+    #[test]
+    fn test_truncate_result_exact_limit() {
+        let result = "x".repeat(500);
+        assert_eq!(truncate_result(&result, 500), result);
+    }
+
+    #[test]
+    fn test_truncate_result_over_limit() {
+        let result = "a".repeat(1000);
+        let truncated = truncate_result(&result, 500);
+        assert!(truncated.starts_with(&"a".repeat(500)));
+        assert!(truncated.ends_with("...(truncated from 1000 chars)"));
+        assert!(truncated.len() < 1000);
+    }
 
     #[test]
     fn test_extract_quality_score() {

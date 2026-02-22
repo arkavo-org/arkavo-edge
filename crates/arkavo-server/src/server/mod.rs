@@ -33,7 +33,7 @@ pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
 pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
-pub use well_known::{WellKnownState, start_well_known_server};
+pub use well_known::WellKnownState;
 
 use arkavo_agent::registration::{
     ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
@@ -237,6 +237,14 @@ pub trait A2aRpc {
     #[method(name = "kas.publicKey")]
     async fn kas_public_key(&self, request: KasPublicKeyRequest)
     -> RpcResult<KasPublicKeyResponse>;
+
+    /// Get agent card (proxied from GET /.well-known/agent.json)
+    #[method(name = "agent_card")]
+    async fn agent_card(&self) -> RpcResult<serde_json::Value>;
+
+    /// Health check (proxied from GET /health)
+    #[method(name = "health")]
+    async fn health(&self) -> RpcResult<serde_json::Value>;
 }
 
 pub struct A2aRpcImpl {
@@ -806,5 +814,27 @@ impl A2aRpcServer for A2aRpcImpl {
                 Some("Build with --features kas to enable KAS capability".to_string()),
             ))
         }
+    }
+
+    async fn agent_card(&self) -> RpcResult<serde_json::Value> {
+        #[allow(clippy::needless_update)]
+        let state = well_known::WellKnownState {
+            agent_metadata: self.agent_metadata.clone(),
+            mcp_registry: self.mcp_registry.clone(),
+            rpc_port: 0,
+            rate_limiter: Arc::new(arkavo_protocol::IpRateLimiter::new(
+                arkavo_protocol::RateLimitConfig::default(),
+            )),
+            #[cfg(feature = "kas")]
+            kas_enabled: true,
+        };
+        let card = well_known::build_agent_card(&state).await;
+        serde_json::to_value(card).map_err(|e| {
+            ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
+        })
+    }
+
+    async fn health(&self) -> RpcResult<serde_json::Value> {
+        Ok(serde_json::json!({"status": "ok"}))
     }
 }

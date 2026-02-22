@@ -7,6 +7,7 @@ use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
 use arkavo_llm::{LlmClient, LlmClientAdapter, LlmConfig};
+use jsonrpsee::server::middleware::http::ProxyGetRequestLayer;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
@@ -24,7 +25,6 @@ use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
-use super::well_known::{WellKnownState, start_well_known_server};
 use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
 
 #[cfg(feature = "kas")]
@@ -56,8 +56,6 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
-    /// Handle for the well-known HTTP server
-    well_known_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Budget manager loaded from AGENTS.md config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached AGENTS.md config to avoid repeated file reads
@@ -95,7 +93,6 @@ impl A2aServer {
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
-            well_known_handle: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
@@ -906,6 +903,42 @@ impl A2aServer {
         Some(handle)
     }
 
+    /// Rebuild tool registry from MCP connections
+    ///
+    /// Fixes race condition where tools are queried before MCP servers connect.
+    /// Called just before server start to ensure all MCP tools are registered.
+    async fn rebuild_tool_registry(&self) {
+        use super::mcp_bridge::McpBridgeTool;
+
+        let mcp_tools = match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => tools,
+            Err(e) => {
+                warn!("Failed to list MCP tools for rebuild: {}", e);
+                return;
+            }
+        };
+
+        if mcp_tools.is_empty() {
+            debug!("No MCP tools to register");
+            return;
+        }
+
+        info!(
+            "Rebuilding tool registry with {} MCP tools",
+            mcp_tools.len()
+        );
+
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
+
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(self.mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
+
+        *self.tool_registry.write().await = Some(Arc::new(tool_registry));
+    }
+
     /// Start the server and return the handle along with the actual bound port
     pub async fn start(&self) -> Result<ServerHandle> {
         let (handle, _actual_port) = self.start_with_port().await?;
@@ -921,10 +954,19 @@ impl A2aServer {
 
         info!("Starting A2A server on {}", addr);
 
+        // Rebuild tool registry now that MCP servers have been registered
+        self.rebuild_tool_registry().await;
+
         let server_cfg = jsonrpsee::server::ServerConfig::builder()
             .max_connections(self.config.max_connections as u32)
             .build();
+        let proxy_layer = ProxyGetRequestLayer::new([
+            ("/.well-known/agent.json", "agent_card"),
+            ("/health", "health"),
+        ])
+        .map_err(|e| A2aError::Transport(format!("Failed to create proxy layer: {e}")))?;
         let server = ServerBuilder::with_config(server_cfg)
+            .set_http_middleware(tower::ServiceBuilder::new().layer(proxy_layer))
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
@@ -1042,60 +1084,12 @@ impl A2aServer {
         let handle = server.start(rpc_impl.into_rpc());
 
         info!("A2A server started successfully on {}", actual_addr);
-        info!("OpenRPC schema available via JSON-RPC method: rpc.discover");
-
-        // Start the well-known HTTP server on port + 1 (or dynamic if port is 0)
-        let http_port = if self.config.port == 0 {
-            0
-        } else {
-            self.config.port + 1
-        };
-
-        if let Err(e) = self.start_well_known_server(http_port, actual_port).await {
-            warn!("Failed to start well-known HTTP server: {}", e);
-        }
-
-        Ok((handle, actual_port))
-    }
-
-    /// Start the well-known HTTP server for agent discovery
-    /// Serves /.well-known/agent.json per A2A protocol spec
-    pub async fn start_well_known_server(&self, http_port: u16, rpc_port: u16) -> Result<u16> {
-        let bind_addr: SocketAddr = format!("{}:{}", self.config.bind_address, http_port)
-            .parse()
-            .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid HTTP bind address: {e}")))?;
-
-        let state = WellKnownState {
-            agent_metadata: self.agent_metadata.clone(),
-            mcp_registry: self.mcp_registry.clone(),
-            rpc_port,
-            rate_limiter: Arc::new(arkavo_protocol::IpRateLimiter::new(
-                arkavo_protocol::RateLimitConfig::default(),
-            )),
-            #[cfg(feature = "kas")]
-            kas_enabled: true,
-        };
-
-        let (handle, actual_http_port) = start_well_known_server(bind_addr, state)
-            .await
-            .map_err(|e| A2aError::Transport(format!("Failed to start well-known server: {e}")))?;
-
-        *self.well_known_handle.write().await = Some(handle);
-
         info!(
             "Agent Card available at http://{}:{}/.well-known/agent.json",
-            self.config.bind_address, actual_http_port
+            self.config.bind_address, actual_port
         );
 
-        Ok(actual_http_port)
-    }
-
-    /// Stop the well-known HTTP server
-    pub async fn stop_well_known_server(&self) {
-        if let Some(handle) = self.well_known_handle.write().await.take() {
-            handle.abort();
-            info!("Well-known HTTP server stopped");
-        }
+        Ok((handle, actual_port))
     }
 
     /// Release GPU resources for graceful shutdown.
