@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
+#[cfg(feature = "llama-cpp")]
+use crate::judge;
 use crate::learning::BurstFeedback;
-use crate::{classifier, judge, prompt_advisor, selector_quality, tool_extraction, validator};
+use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
 use arkavo_llm::{Message, ProviderResponse, StreamResponse};
 use arkavo_mcp_tools::ToolRegistry;
 use futures::StreamExt;
@@ -501,6 +503,7 @@ impl super::Router {
             classifier: self.classifier.clone(),
             selector: self.selector.clone(),
             model_learning: self.model_learning.clone(),
+            #[cfg(feature = "llama-cpp")]
             model_registry: self.model_registry.clone(),
             model_cooldowns: self.model_cooldowns.clone(),
             metrics: self.metrics.clone(),

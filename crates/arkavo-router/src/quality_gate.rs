@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
+#[cfg(feature = "llama-cpp")]
+use crate::judge;
 use crate::learning::BurstFeedback;
-use crate::{classifier, judge, prompt_advisor, selector_quality, tool_extraction, validator};
+use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
 use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
 

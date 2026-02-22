@@ -73,7 +73,9 @@ pub use learning::{
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::{Message, ModelRegistry};
+use arkavo_llm::Message;
+#[cfg(feature = "llama-cpp")]
+use arkavo_llm::ModelRegistry;
 use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -92,6 +94,7 @@ pub struct Router {
     selector: Arc<ModelSelector>,
     model_learning: Arc<LearningModule>,
     /// Cached local models — loaded once, reused across requests.
+    #[cfg(feature = "llama-cpp")]
     model_registry: Arc<ModelRegistry>,
     /// Temporarily excluded models: name → (when, consecutive_failures).
     /// Cooldown duration doubles each consecutive failure, resets on success.
@@ -125,6 +128,7 @@ impl Router {
             classifier: Arc::new(TaskClassifier::new().await?),
             selector,
             model_learning,
+            #[cfg(feature = "llama-cpp")]
             model_registry: Arc::new(ModelRegistry::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
@@ -156,6 +160,7 @@ impl Router {
             classifier: Arc::new(TaskClassifier::new().await?),
             selector,
             model_learning,
+            #[cfg(feature = "llama-cpp")]
             model_registry: Arc::new(ModelRegistry::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
