@@ -1113,6 +1113,7 @@ impl A2aServer {
         let conductor = self.conductor.read().await.clone();
         let agent_metadata = self.agent_metadata.clone();
         let learning_bus = self.learning_bus.read().await.clone();
+        let agent_memory = self.agent_memory.clone();
 
         info!("Starting orchestrator loop (observe → plan → act)");
 
@@ -1132,17 +1133,24 @@ impl A2aServer {
                     continue;
                 }
 
-                let tick_prompt = format!(
-                    "{system_prompt}\n\n\
-                     ## Orchestrator Tick {tick}\n\
-                     Execute your planning workflow:\n\
-                     1. Observe: Use sim_step with Wait to see colony state\n\
-                     2. Analyze: Identify the most urgent need\n\
-                     3. Act: Execute the best action for the colony\n\n\
-                     Start by observing the colony.",
-                );
+                // Read short-term memory (recent tool calls from previous ticks)
+                let recent_actions = agent_memory.read().await.format_for_prompt();
 
-                info!("Orchestrator tick {tick}: executing observe→plan→act cycle");
+                let tick_prompt = if tick == 1 {
+                    // First tick: agent sees full purpose and starts from scratch
+                    system_prompt
+                } else {
+                    // Subsequent ticks: ToolMemory shows what already happened
+                    format!(
+                        "{system_prompt}\
+                         {recent_actions}\n\n\
+                         ## Autonomous Tick {tick}\n\
+                         Initialization is complete. Do not repeat setup steps.\n\
+                         Continue from where you left off. Take the next action.",
+                    )
+                };
+
+                info!("Orchestrator tick {tick}: executing cycle");
                 let start = std::time::Instant::now();
 
                 match super::conductor::execute_with_conductor_and_learning(
@@ -1153,6 +1161,7 @@ impl A2aServer {
                     None,
                     None,
                     learning_bus.as_ref(),
+                    Some(&agent_memory),
                 )
                 .await
                 {
@@ -1169,7 +1178,7 @@ impl A2aServer {
                     }
                 }
 
-                // Wait between ticks — gives the game time to advance
+                // Wait between ticks — gives the environment time to advance
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             }
         });
