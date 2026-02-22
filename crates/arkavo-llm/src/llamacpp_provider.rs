@@ -44,7 +44,6 @@ impl Default for SamplingConfig {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::ModelRegistry;
 
 /// Type alias for conversation identifiers
@@ -231,6 +230,16 @@ impl LlamaCppProvider {
         _model_name: String,
         _model_path: String,
         _mmproj_path: Option<String>,
+        _config: SamplingConfig,
+    ) -> Result<Self> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    pub fn new_with_registry(
+        _registry: Arc<ModelRegistry>,
+        _model_name: String,
         _config: SamplingConfig,
     ) -> Result<Self> {
         Err(Error::Config(

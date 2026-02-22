@@ -21,7 +21,8 @@ var AppState = {
     routingAnimations: [],
     pathWeights: {},
     qualityTrends: [],
-    lessonCount: 0
+    lessonCount: 0,
+    selectedTaskId: null
 };
 
 var MAX_TELEMETRY = 200;

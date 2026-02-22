@@ -69,12 +69,6 @@ pub enum TelemetryEvent {
         tool_name: String,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
-    StateChanged {
-        agent_id: String,
-        session_id: String,
-        patch_count: usize,
-        timestamp: chrono::DateTime<chrono::Utc>,
-    },
     MetricsSnapshot {
         snapshot: arkavo_observability::metrics_snapshot::MetricsSnapshot,
     },
@@ -509,6 +503,33 @@ impl AgentConnection {
         let agent_id_for_forward = agent_id.clone();
         tokio::spawn(async move {
             while let Ok(ordered_delta) = broadcast_rx.recv().await {
+                // Intercept Metadata deltas — convert to UI events instead of forwarding
+                if let MessageDeltaContent::Metadata { ref key, ref value } =
+                    ordered_delta.delta.delta
+                {
+                    if key == "model_selected" {
+                        let model_event = crate::types::AgUiEvent::ModelSelected {
+                            agent_id: agent_id_for_forward.clone(),
+                            provider: value["category"].as_str().unwrap_or("local").to_string(),
+                            model: value["model"].as_str().unwrap_or("unknown").to_string(),
+                            estimated_cost: arkavo_budget::TokenCost::from_dollars(
+                                value["estimated_cost_usd"].as_f64().unwrap_or(0.0),
+                            ),
+                            reason: value["reasoning"].as_str().unwrap_or("").to_string(),
+                            event_id: uuid::Uuid::new_v4().to_string(),
+                        };
+                        let _ = ui_tx_clone.try_send(model_event);
+                    }
+                    let telemetry = crate::types::AgUiEvent::TelemetryEvent {
+                        event_type: key.clone(),
+                        agent_id: agent_id_for_forward.clone(),
+                        details: value.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = ui_tx_clone.try_send(telemetry);
+                    continue; // Don't forward Metadata as MessageDelta
+                }
+
                 let event = crate::types::AgUiEvent::MessageDelta {
                     agent_id: agent_id_for_forward.clone(),
                     message_id: ordered_delta.delta.message_id,
@@ -521,12 +542,26 @@ impl AgentConnection {
                             name,
                             args_json_fragment,
                             done,
-                        } => crate::types::MessageDeltaContent::ToolCall {
-                            tool_call_id,
-                            name,
-                            args_json_fragment,
-                            done,
-                        },
+                        } => {
+                            if done && let Some(ref tool_name) = name {
+                                let tool_telemetry = crate::types::AgUiEvent::TelemetryEvent {
+                                    event_type: "tool_call_executed".to_string(),
+                                    agent_id: agent_id_for_forward.clone(),
+                                    details: serde_json::json!({
+                                        "tool_call_id": tool_call_id,
+                                        "tool_name": tool_name,
+                                    }),
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                };
+                                let _ = ui_tx_clone.try_send(tool_telemetry);
+                            }
+                            crate::types::MessageDeltaContent::ToolCall {
+                                tool_call_id,
+                                name,
+                                args_json_fragment,
+                                done,
+                            }
+                        }
                         MessageDeltaContent::StreamEnd { .. } => {
                             // Convert stream end to text for UI
                             crate::types::MessageDeltaContent::Text {
@@ -548,6 +583,7 @@ impl AgentConnection {
                             content,
                             is_error,
                         },
+                        MessageDeltaContent::Metadata { .. } => continue,
                     },
                 };
 

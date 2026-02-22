@@ -1,6 +1,15 @@
 "use strict";
 
 var _pendingTaskDescription = null;
+var MAX_TASK_EVENTS = 50;
+
+function addTaskEvent(taskId, evt) {
+    if (!taskId || !AppState.tasks[taskId]) return;
+    var task = AppState.tasks[taskId];
+    if (!task._events) task._events = [];
+    task._events.unshift(evt);
+    if (task._events.length > MAX_TASK_EVENTS) task._events.pop();
+}
 
 function handleTaskList(event) {
     AppState.tasks = {};
@@ -15,21 +24,26 @@ function handleTaskList(event) {
 function handleTaskSubmitted(event) {
     var task = {
         id: event.taskId || event.task_id,
-        description: _pendingTaskDescription || 'Task',
+        description: event.description || _pendingTaskDescription || 'Task',
         status: event.status || 'submitted',
-        created_at: event.timestamp
+        created_at: event.timestamp,
+        _events: []
     };
     _pendingTaskDescription = null;
     AppState.tasks[task.id] = task;
     AppState.taskCount++;
-    renderTasks();
-    updateStats();
-    addTelemetry({
+
+    var evt = {
         eventType: 'task-submitted',
         agentId: 'system',
         details: { taskId: task.id },
         timestamp: event.timestamp
-    });
+    };
+    addTaskEvent(task.id, evt);
+    addTelemetry(evt);
+
+    renderTasks();
+    updateStats();
 }
 
 function handleTaskStatusChanged(event) {
@@ -42,20 +56,41 @@ function handleTaskStatusChanged(event) {
         if (event.result) {
             AppState.tasks[id].result = event.result;
         }
+        if (event.metrics) {
+            AppState.tasks[id].metrics = event.metrics;
+        }
         if (event.status === 'completed') {
             AppState.tasks[id].completed_at = event.timestamp;
         }
     }
-    renderTasks();
-    addTelemetry({
+
+    var evt = {
         eventType: 'task-' + event.status,
         agentId: event.targetAgent || 'system',
         details: { taskId: id, progress: event.progress },
         timestamp: event.timestamp
-    });
+    };
+    addTaskEvent(id, evt);
+    addTelemetry(evt);
+
+    renderTasks();
+}
+
+function selectTask(taskId) {
+    AppState.selectedTaskId = taskId;
+    renderTaskDetail();
+}
+
+function deselectTask() {
+    AppState.selectedTaskId = null;
+    renderTasks();
 }
 
 function renderTasks() {
+    if (AppState.selectedTaskId) {
+        renderTaskDetail();
+        return;
+    }
     var container = document.getElementById('tasks-container');
     if (!container) return;
     var tasks = Object.values(AppState.tasks);
@@ -77,21 +112,31 @@ function renderTasks() {
         var taskId = escapeHtml((task.id || '').slice(0, 8));
         var status = escapeHtml(task.status || '');
         var statusClass = status.replace(/[^a-zA-Z0-9-]/g, '');
-        var targetAgent = task.target_agent || task.targetAgent;
+        var agent = getTaskAgent(task, task.id);
+        var agentDisplay = agent ? shortAgentName(agent) : 'Routing...';
         var progress = typeof task.progress === 'number' ? Math.min(100, Math.max(0, task.progress * 100)) : null;
-        return '<div class="task-card">' +
+        return '<div class="task-card task-card-clickable" data-task-id="' + escapeHtml(task.id) + '">' +
             '<div class="task-header">' +
             '<span class="task-id">#' + taskId + '</span>' +
             '<span class="task-status ' + statusClass + '">' + status + '</span>' +
             '</div>' +
             '<div class="task-description">' + (escapeHtml(task.description) || 'Task') + '</div>' +
             '<div class="task-meta">' +
-            (targetAgent ? 'Agent: ' + escapeHtml(targetAgent) : 'Auto-assigned') +
+            escapeHtml(agentDisplay) +
             ((task.created_at || task.createdAt) ? ' | ' + escapeHtml(formatTime(task.created_at || task.createdAt)) : '') +
             '</div>' +
             (progress !== null ? '<div class="task-progress"><div class="task-progress-bar" style="width: ' + progress + '%"></div></div>' : '') +
             '</div>';
     }).join('');
+
+    var cards = container.querySelectorAll('.task-card-clickable');
+    for (var i = 0; i < cards.length; i++) {
+        (function(card) {
+            card.addEventListener('click', function() {
+                selectTask(card.getAttribute('data-task-id'));
+            });
+        })(cards[i]);
+    }
 
     document.getElementById('task-count').textContent = tasks.length;
 }

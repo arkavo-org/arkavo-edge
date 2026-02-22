@@ -31,9 +31,9 @@ impl ProviderAvailability {
 }
 
 pub struct ModelSelector {
-    budget_threshold: f64,
-    availability: ProviderAvailability,
-    gpu_available: bool,
+    pub(crate) budget_threshold: f64,
+    pub(crate) availability: ProviderAvailability,
+    pub(crate) gpu_available: bool,
 }
 
 impl ModelSelector {
@@ -99,27 +99,37 @@ impl ModelSelector {
     fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
         // If no GPU, skip large models to avoid slow CPU-only inference
         if !self.gpu_available {
-            // Without GPU, prefer smaller/faster models
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 return ModelChoice::LocalMinistral3B;
             }
             return ModelChoice::LocalQwen3;
         }
 
-        // GPU available - prefer Ministral-8B for faster responses with good tool calling
         if prefer_larger {
-            // Prefer Ministral-8B (faster) over GLM-4.7-Flash (slower but higher quality)
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
-                ModelChoice::LocalMinistral8B
-            } else if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+            // GLM-4.7-Flash: 30B MoE, highest quality local model
+            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram_for_glm()
             {
                 ModelChoice::LocalGlm47Flash
+            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+                ModelChoice::LocalMinistral8B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 ModelChoice::LocalMinistral3B
             } else {
                 ModelChoice::LocalQwen3
             }
+        } else {
+            ModelChoice::LocalQwen3
+        }
+    }
+
+    /// Fastest available local model for internal tasks (judging, synthesis, classification).
+    /// These need speed, not quality — always pick the smallest cached model.
+    pub fn fastest_local_model(&self) -> ModelChoice {
+        if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
+            ModelChoice::LocalQwen3
+        } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+            ModelChoice::LocalMinistral3B
         } else {
             ModelChoice::LocalQwen3
         }
@@ -187,7 +197,7 @@ impl ModelSelector {
         }
     }
 
-    fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
+    pub(crate) fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
         match classification.category {
             TaskCategory::FrontendUI if classification.confidence > 0.75 => {
                 self.best_cloud_model(false)
@@ -238,195 +248,50 @@ impl ModelSelector {
         }
     }
 
-    fn explain_selection(&self, model: &ModelChoice, classification: &Classification) -> String {
-        let category_reason = match (classification.category, model) {
-            (TaskCategory::FrontendUI, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Frontend task: Claude Sonnet excellent for UI development"
-            }
-            (TaskCategory::FrontendUI, _) => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
-            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus) => {
-                "Backend API: Claude Opus for highest quality code"
-            }
-            (TaskCategory::BackendAPI, ModelChoice::ClaudeSonnet) => {
-                "Backend API: Claude Sonnet for fast, high-quality code"
-            }
-            (TaskCategory::BackendAPI, _) => "Backend API: Gemini Pro provides highest quality",
-            (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
-            (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
-            (TaskCategory::CodeReview, _) => "Code review: Capable model for thorough analysis",
-            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
-                "Test generation: Claude Opus for comprehensive tests"
-            }
-            (TaskCategory::TestGeneration, _) => {
-                "Test generation: Gemini Pro for comprehensive tests"
-            }
-            (TaskCategory::Documentation, _) => "Documentation: Local Gemma 4B sufficient",
-            (TaskCategory::Refactoring, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Refactoring: Claude for excellent code transformations"
-            }
-            (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
-            (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
-                "Code generation: DeepSeek V3.2 with tool support for code generation"
-            }
-            (TaskCategory::CodeGeneration, _) => {
-                "Code generation: DeepSeek-Coder V2 Lite optimized for code/patch generation"
-            }
-            (TaskCategory::VisionAnalysis, _) => {
-                "Vision analysis: Gemini Flash with multimodal support"
-            }
-            (TaskCategory::General, ModelChoice::LocalQwen3) => {
-                "General task: Fast local Qwen3 for quick responses"
-            }
-            (TaskCategory::General, _) => "General task: Local model for efficiency",
-        };
+    /// All models currently feasible (cached local + API keys for cloud)
+    pub fn feasible_models(&self) -> Vec<ModelChoice> {
+        let mut models = Vec::new();
 
-        let model_benefit = match model {
-            ModelChoice::GeminiFlash => "Fast (3s), cost-effective ($0.003-0.006)",
-            ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
-            ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
-            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
-            ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
-            ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
-            ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
-            ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
-            ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
-            ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
-            ModelChoice::LocalGemma12B => "High quality, zero cost, private",
-            ModelChoice::LocalDeepSeekCoder => {
-                "Code-specialized (4s), zero cost, optimized for patches"
+        // Local models
+        if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
+            models.push(ModelChoice::LocalQwen3);
+        }
+        if self.gpu_available {
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+                models.push(ModelChoice::LocalMinistral3B);
             }
-            ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
-            ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
-            ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
-        };
-
-        format!(
-            "{}. Using {}: {}",
-            category_reason,
-            model.name(),
-            model_benefit
-        )
-    }
-
-    /// Select the best model for a subtask based on its category (used in architect mode)
-    pub fn select_for_subtask(&self, category: TaskCategory) -> ModelChoice {
-        match category {
-            // Frontend tasks: Use cheaper, fast models
-            TaskCategory::FrontendUI => {
-                if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+                models.push(ModelChoice::LocalMinistral8B);
             }
-
-            // Backend/Security/Tests: Use more capable models
-            TaskCategory::BackendAPI
-            | TaskCategory::SecurityScan
-            | TaskCategory::TestGeneration => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeOpus
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral8B
-                }
-            }
-
-            // Documentation: Use cheaper models
-            TaskCategory::Documentation => {
-                if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
-            }
-
-            // Refactoring: Use balanced models
-            TaskCategory::Refactoring => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // CodeGeneration: DeepSeek V3.2 excels at code generation with tools
-            TaskCategory::CodeGeneration => {
-                if self.availability.deepseek {
-                    ModelChoice::DeepSeekV32
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalDeepSeekCoder
-                }
-            }
-
-            // Code search: Local model is sufficient
-            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
-
-            // Vision: Needs multimodal
-            TaskCategory::VisionAnalysis => {
-                if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // General: Use fast local model
-            TaskCategory::General => ModelChoice::LocalQwen3,
-
-            // Fallback for any future categories - prefer local
-            #[allow(unreachable_patterns)]
-            _ => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiFlash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
+            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+                && Self::has_sufficient_ram_for_glm()
+            {
+                models.push(ModelChoice::LocalGlm47Flash);
             }
         }
-    }
 
-    pub async fn select_with_budget_constraint(
-        &self,
-        classification: &Classification,
-        task_description: &str,
-        budget_usage_percent: f64,
-    ) -> Result<RoutingDecision> {
-        let mut decision = self.select(classification, task_description)?;
-
-        if budget_usage_percent > self.budget_threshold && decision.recommended_model.is_cloud() {
-            let local_fallback = match classification.category {
-                TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
-                    ModelChoice::LocalMinistral3B
-                }
-                _ => ModelChoice::LocalQwen3,
-            };
-
-            decision.reasoning = format!(
-                "Budget constrained ({}% used). Switching to local model: {}. Original: {}",
-                (budget_usage_percent * 100.0) as u32,
-                local_fallback.name(),
-                decision.reasoning
-            );
-
-            decision.recommended_model = local_fallback;
-            decision.estimated_cost_usd = 0.0;
+        // Cloud models
+        if self.availability.gemini {
+            models.push(ModelChoice::GeminiFlash);
+            models.push(ModelChoice::GeminiPro);
+        }
+        if self.availability.anthropic {
+            models.push(ModelChoice::ClaudeSonnet);
+            models.push(ModelChoice::ClaudeOpus);
+        }
+        if self.availability.deepseek {
+            models.push(ModelChoice::DeepSeekV32);
+        }
+        if self.availability.kimi {
+            models.push(ModelChoice::KimiK2);
         }
 
-        Ok(decision)
+        // Fallback: always include Qwen3 as baseline
+        if models.is_empty() {
+            models.push(ModelChoice::LocalQwen3);
+        }
+
+        models
     }
 }
 
@@ -438,7 +303,6 @@ impl Default for ModelSelector {
 
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
-#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -472,14 +336,11 @@ mod tests {
     #[tokio::test]
     async fn test_frontend_routing_gemini() {
         let selector = ModelSelector::with_availability(gemini_only());
-
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
-
         let decision = selector
             .select(&classification, "Build a React component")
             .unwrap();
-
         assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
         assert!(decision.reasoning.contains("WebDev Arena"));
     }
@@ -487,14 +348,11 @@ mod tests {
     #[tokio::test]
     async fn test_frontend_routing_anthropic() {
         let selector = ModelSelector::with_availability(anthropic_only());
-
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
-
         let decision = selector
             .select(&classification, "Build a React component")
             .unwrap();
-
         assert_eq!(decision.recommended_model, ModelChoice::ClaudeSonnet);
         assert!(decision.reasoning.contains("Claude"));
     }
@@ -502,49 +360,26 @@ mod tests {
     #[tokio::test]
     async fn test_code_search_routing() {
         let selector = ModelSelector::with_availability(gemini_only());
-
         let classification = Classification::new(
             TaskCategory::CodeSearch,
             0.85,
             "Code search task".to_string(),
         );
-
         let decision = selector
             .select(&classification, "Find all uses of")
             .unwrap();
-
         assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
         assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
     #[tokio::test]
-    async fn test_budget_constraint() {
-        let selector = ModelSelector::with_availability(gemini_only());
-
-        let classification =
-            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
-
-        let decision = selector
-            .select_with_budget_constraint(&classification, "Build a React component", 0.90)
-            .await
-            .unwrap();
-
-        assert_eq!(decision.recommended_model, ModelChoice::LocalMinistral3B);
-        assert!(decision.reasoning.contains("Budget constrained"));
-    }
-
-    #[tokio::test]
     async fn test_backend_api_routing_uses_local() {
-        // BackendAPI now uses local models for simple tasks (saves cloud for complex API design)
         let selector = ModelSelector::with_availability(gemini_only());
-
         let classification =
             Classification::new(TaskCategory::BackendAPI, 0.85, "Backend API".to_string());
-
         let decision = selector
             .select(&classification, "Create a REST API endpoint")
             .unwrap();
-
         assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
         assert_eq!(decision.estimated_cost_usd, 0.0);
     }
@@ -552,33 +387,43 @@ mod tests {
     #[tokio::test]
     async fn test_no_cloud_falls_back_to_local() {
         let selector = ModelSelector::with_availability(ProviderAvailability::default());
-
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
-
         let decision = selector
             .select(&classification, "Build a React component")
             .unwrap();
-
-        // When no cloud is available, should fall back to local
         assert!(decision.recommended_model.is_local());
     }
 
     #[tokio::test]
     async fn test_code_generation_routing_deepseek() {
         let selector = ModelSelector::with_availability(deepseek_only());
-
         let classification = Classification::new(
             TaskCategory::CodeGeneration,
             0.85,
             "Code generation task".to_string(),
         );
-
         let decision = selector
             .select(&classification, "Generate a function")
             .unwrap();
-
         assert_eq!(decision.recommended_model, ModelChoice::DeepSeekV32);
         assert!(decision.recommended_model.is_deepseek());
+    }
+
+    #[test]
+    fn test_feasible_models_gemini_only() {
+        let selector = ModelSelector::with_availability(gemini_only());
+        let feasible = selector.feasible_models();
+        assert!(feasible.contains(&ModelChoice::GeminiFlash));
+        assert!(feasible.contains(&ModelChoice::GeminiPro));
+        assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
+        assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
+    }
+
+    #[test]
+    fn test_feasible_models_no_cloud_has_fallback() {
+        let selector = ModelSelector::with_availability(ProviderAvailability::default());
+        let feasible = selector.feasible_models();
+        assert!(!feasible.is_empty());
     }
 }

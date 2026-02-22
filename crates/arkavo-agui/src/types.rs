@@ -435,6 +435,8 @@ pub enum AgUiEvent {
     TaskSubmitted {
         #[serde(rename = "taskId")]
         task_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
         status: String,
         timestamp: String,
     },
@@ -446,8 +448,24 @@ pub enum AgUiEvent {
         progress: Option<f32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metrics: Option<TaskMetrics>,
         timestamp: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskMetrics {
+    #[serde(rename = "tokensGenerated")]
+    pub tokens_generated: u32,
+    #[serde(rename = "tokensPerSec")]
+    pub tokens_per_sec: f64,
+    #[serde(rename = "ttftMs")]
+    pub ttft_ms: u64,
+    #[serde(rename = "inferenceDurationMs")]
+    pub inference_duration_ms: u64,
+    #[serde(rename = "energyWh")]
+    pub energy_wh: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -615,6 +633,11 @@ pub enum MessageDeltaContent {
         content: String,
         #[serde(rename = "isError")]
         is_error: bool,
+    },
+    /// Internal metadata (never serialized to frontend)
+    Metadata {
+        key: String,
+        value: serde_json::Value,
     },
 }
 

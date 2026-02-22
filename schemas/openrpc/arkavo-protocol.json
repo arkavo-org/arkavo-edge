@@ -552,6 +552,30 @@
                   "type"
                 ],
                 "type": "object"
+              },
+              {
+                "description": "Internal metadata (routing decisions, quality feedback)",
+                "properties": {
+                  "key": {
+                    "description": "Metadata type (e.g. \"model_selected\", \"quality_feedback\")",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "metadata"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "description": "Structured metadata payload"
+                  }
+                },
+                "required": [
+                  "key",
+                  "type",
+                  "value"
+                ],
+                "type": "object"
               }
             ]
           },
@@ -815,6 +839,30 @@
               "code",
               "message",
               "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Internal metadata (routing decisions, quality feedback)",
+            "properties": {
+              "key": {
+                "description": "Metadata type (e.g. \"model_selected\", \"quality_feedback\")",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "metadata"
+                ],
+                "type": "string"
+              },
+              "value": {
+                "description": "Structured metadata payload"
+              }
+            },
+            "required": [
+              "key",
+              "type",
+              "value"
             ],
             "type": "object"
           }
@@ -2316,7 +2364,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.52.0"
+    "version": "0.61.0"
   },
   "methods": [
     {

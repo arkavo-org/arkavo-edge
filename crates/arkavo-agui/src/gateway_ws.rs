@@ -1,7 +1,7 @@
 use crate::agent_connection::AgentConnection;
 use crate::budget_handler::BudgetHandler;
 use crate::types::*;
-use crate::{gateway_config, gateway_events, gateway_routing};
+use crate::{gateway_config, gateway_events, gateway_routing, gateway_task_dispatch};
 use arkavo_router::learning::LearningModule;
 use axum::extract::ws::{Message, WebSocket};
 use axum::{extract::State, response::Response};
@@ -296,7 +296,7 @@ async fn dispatch_event(
             description,
             target_agent,
         } => {
-            gateway_events::handle_submit_task(
+            gateway_task_dispatch::handle_submit_task(
                 description,
                 target_agent,
                 agents,

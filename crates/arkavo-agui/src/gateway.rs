@@ -37,6 +37,7 @@ pub struct TrackedTask {
     pub created_at: String,
     pub completed_at: Option<String>,
     pub task_category: Option<String>,
+    pub first_working_at: Option<String>,
 }
 
 #[derive(Clone)]
@@ -49,7 +50,6 @@ pub struct AppState {
     pub security_handler: Arc<RwLock<SecurityHandler>>,
     pub initial_prompt: Arc<RwLock<Option<String>>>,
     pub dataflow_handler: Arc<DataflowHandler>,
-    pub telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
     pub debug_handler: Option<Arc<DebugHandler>>,
     pub rate_limiter: Arc<IpRateLimiter>,
     pub task_store: Arc<RwLock<HashMap<String, TrackedTask>>>,
@@ -232,10 +232,98 @@ impl AgUiGateway {
             discovered_agents.clone(),
         );
 
+        // Bridge TelemetryEvent → AgUiEvent on the main WebSocket
         let telemetry_rx = self
             .telemetry_rx
             .take()
             .expect("telemetry_rx already taken");
+        let connections_for_telemetry = self.connections.clone();
+        tokio::spawn(async move {
+            let mut rx = telemetry_rx;
+            while let Some(event) = rx.recv().await {
+                let ui_event = match &event {
+                    TelemetryEvent::MessageRouted {
+                        agent_id,
+                        message_type,
+                        direction,
+                        timestamp,
+                        ..
+                    } => {
+                        let dir = match direction {
+                            crate::agent_connection::MessageDirection::Inbound => "inbound",
+                            crate::agent_connection::MessageDirection::Outbound => "outbound",
+                        };
+                        AgUiEvent::A2AMessage {
+                            from_agent: if dir == "outbound" {
+                                "gateway".to_string()
+                            } else {
+                                agent_id.clone()
+                            },
+                            to_agent: if dir == "outbound" {
+                                agent_id.clone()
+                            } else {
+                                "gateway".to_string()
+                            },
+                            method: message_type.clone(),
+                            direction: dir.to_string(),
+                            timestamp: timestamp.to_rfc3339(),
+                        }
+                    }
+                    TelemetryEvent::MetricsSnapshot { snapshot } => {
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let count = SNAPSHOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+                        if !count.is_multiple_of(30) {
+                            continue;
+                        }
+                        AgUiEvent::TelemetryEvent {
+                            event_type: "metrics_snapshot".to_string(),
+                            agent_id: "system".to_string(),
+                            details: serde_json::to_value(snapshot)
+                                .unwrap_or(serde_json::Value::Null),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        }
+                    }
+                    _ => {
+                        let (event_type, agent_id, timestamp) = match &event {
+                            TelemetryEvent::AgentConnected {
+                                agent_id,
+                                timestamp,
+                                ..
+                            } => ("agent_connected", agent_id.as_str(), *timestamp),
+                            TelemetryEvent::AgentDisconnected {
+                                agent_id,
+                                timestamp,
+                                ..
+                            } => ("agent_disconnected", agent_id.as_str(), *timestamp),
+                            TelemetryEvent::AgentReconnecting {
+                                agent_id,
+                                timestamp,
+                                ..
+                            } => ("agent_reconnecting", agent_id.as_str(), *timestamp),
+                            TelemetryEvent::ToolCallExecuted {
+                                agent_id,
+                                timestamp,
+                                ..
+                            } => ("tool_call_executed", agent_id.as_str(), *timestamp),
+                            _ => continue,
+                        };
+                        let details =
+                            serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                        AgUiEvent::TelemetryEvent {
+                            event_type: event_type.to_string(),
+                            agent_id: agent_id.to_string(),
+                            details,
+                            timestamp: timestamp.to_rfc3339(),
+                        }
+                    }
+                };
+                let conns = connections_for_telemetry.read().await;
+                for (_, conn_info) in conns.iter() {
+                    let _ = conn_info._ws_tx.send(ui_event.clone()).await;
+                }
+            }
+        });
 
         let rate_limiter = Arc::new(IpRateLimiter::new(RateLimitConfig::default()));
         // Wire budget manager into cost handler for ROI dashboard
@@ -280,7 +368,6 @@ impl AgUiGateway {
             security_handler: self.security_handler.clone(),
             initial_prompt: Arc::new(RwLock::new(self.initial_prompt.clone())),
             dataflow_handler: self.dataflow_handler.clone(),
-            telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
             debug_handler: self.debug_handler.clone(),
             rate_limiter: rate_limiter.clone(),
             task_store: Arc::new(RwLock::new(HashMap::new())),
@@ -300,10 +387,6 @@ impl AgUiGateway {
             .route(
                 "/api/dataflow/*path",
                 post(crate::gateway_proxy::dataflow_handler),
-            )
-            .route(
-                "/telemetry",
-                get(crate::gateway_status::telemetry_websocket_handler),
             )
             .route(
                 "/debug",

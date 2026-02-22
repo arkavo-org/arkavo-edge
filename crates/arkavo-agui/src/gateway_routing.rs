@@ -22,8 +22,8 @@ pub(crate) async fn update_task_status(
         store.get(task_id).and_then(|t| t.target_agent.clone())
     };
 
-    // Update store
-    {
+    // Update store and capture timing data
+    let (created_at, first_working_at) = {
         let mut store = task_store.write().await;
         if let Some(task) = store.get_mut(task_id) {
             task.status = status.to_string();
@@ -33,11 +33,17 @@ pub(crate) async fn update_task_status(
             if let Some(ref r) = result {
                 task.result = Some(r.clone());
             }
+            if status == "working" && task.first_working_at.is_none() {
+                task.first_working_at = Some(chrono::Utc::now().to_rfc3339());
+            }
             if status == "completed" || status == "failed" {
                 task.completed_at = Some(chrono::Utc::now().to_rfc3339());
             }
+            (task.created_at.clone(), task.first_working_at.clone())
+        } else {
+            (String::new(), None)
         }
-    }
+    };
 
     // Judge + Learn: assess quality and feed back into Thompson Sampling
     let is_terminal = status == "completed" || status == "failed";
@@ -58,7 +64,7 @@ pub(crate) async fn update_task_status(
                 if !j.issues.is_empty() {
                     println!(
                         "AG-UI: Task {} quality={:.2}, issues: {:?}",
-                        &task_id[..task_id.len().min(8)],
+                        crate::gateway_events::short_id(task_id),
                         j.quality_score,
                         j.issues
                     );
@@ -150,16 +156,82 @@ pub(crate) async fn update_task_status(
         }
     }
 
+    // Calculate inference metrics on terminal status
+    let metrics = if (status == "completed" || status == "failed") && !created_at.is_empty() {
+        compute_task_metrics(&created_at, &first_working_at, result.as_deref())
+    } else {
+        None
+    };
+
     // Broadcast status change to all connected UIs
     let event = AgUiEvent::TaskStatusChanged {
         task_id: task_id.to_string(),
         status: status.to_string(),
         progress,
         result,
+        metrics,
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
 
     broadcast_event(&event, connections).await;
+}
+
+/// GPU power draw in watts for energy calculations (configurable default)
+const DEFAULT_GPU_WATTS: f64 = 150.0;
+
+fn compute_task_metrics(
+    created_at: &str,
+    first_working_at: &Option<String>,
+    result_text: Option<&str>,
+) -> Option<TaskMetrics> {
+    use chrono::DateTime;
+    let created: DateTime<chrono::Utc> = DateTime::parse_from_rfc3339(created_at)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    let completed = chrono::Utc::now();
+
+    // TTFT: time from submission to first working status
+    let ttft_ms = first_working_at
+        .as_deref()
+        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+        .map(|working| {
+            (working.with_timezone(&chrono::Utc) - created)
+                .num_milliseconds()
+                .max(0) as u64
+        })
+        .unwrap_or(0);
+
+    // Inference duration: from first working to completion (excludes routing overhead)
+    let inference_start = first_working_at
+        .as_deref()
+        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+        .map(|t| t.with_timezone(&chrono::Utc))
+        .unwrap_or(created);
+    let inference_duration_ms = (completed - inference_start).num_milliseconds().max(1) as u64;
+
+    // Estimate token count from result text (~4 chars per token for English)
+    let tokens_generated = result_text
+        .map(|t| (t.len() as f64 / 4.0).ceil() as u32)
+        .unwrap_or(0);
+
+    let inference_secs = inference_duration_ms as f64 / 1000.0;
+    let tokens_per_sec = if inference_secs > 0.0 {
+        tokens_generated as f64 / inference_secs
+    } else {
+        0.0
+    };
+
+    // Energy: inference_duration_hours × GPU watts → Wh
+    let inference_hours = inference_secs / 3600.0;
+    let energy_wh = inference_hours * DEFAULT_GPU_WATTS;
+
+    Some(TaskMetrics {
+        tokens_generated,
+        tokens_per_sec,
+        ttft_ms,
+        inference_duration_ms,
+        energy_wh,
+    })
 }
 
 pub(crate) async fn build_routing_candidates(

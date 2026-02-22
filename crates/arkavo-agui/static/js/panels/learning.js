@@ -43,6 +43,11 @@ function handleRoutingEvaluation(event) {
     var sel = event.selectedAgent;
     AppState.pathWeights[sel] = (AppState.pathWeights[sel] || 0) + 1;
 
+    // Write selected agent back to task object for detail view
+    if (event.taskId && AppState.tasks[event.taskId]) {
+        AppState.tasks[event.taskId].target_agent = sel;
+    }
+
     // Add to routing history
     AppState.routingHistory.push({
         taskId: event.taskId,

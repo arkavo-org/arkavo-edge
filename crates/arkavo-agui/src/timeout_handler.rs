@@ -43,14 +43,30 @@ impl TimeoutHandler {
     ) -> Result<()> {
         let analyses = self.analyzer.analyze_batch(batch).await?;
 
-        for analysis in analyses {
-            if analysis.should_timeout
-                && let Some(msg) = analysis.user_message
-            {
-                self.send_notification(msg, &analysis.severity, event_tx)
-                    .await;
+        let total = analyses.len();
+        let mut unhealthy = 0;
+        for analysis in &analyses {
+            if analysis.should_timeout {
+                unhealthy += 1;
+                if let Some(ref msg) = analysis.user_message {
+                    self.send_notification(msg.clone(), &analysis.severity, event_tx)
+                        .await;
+                }
             }
         }
+
+        // Emit health summary so the telemetry stream always has health visibility
+        let summary = AgUiEvent::TelemetryEvent {
+            event_type: "health_summary".to_string(),
+            agent_id: "system".to_string(),
+            details: serde_json::json!({
+                "healthy": total - unhealthy,
+                "unhealthy": unhealthy,
+                "total": total,
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        let _ = event_tx.send(summary).await;
 
         Ok(())
     }

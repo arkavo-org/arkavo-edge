@@ -430,6 +430,7 @@ async fn process_stream(
                 eprintln!("\n[Error: {message}]");
                 break;
             }
+            MessageDeltaContent::Metadata { .. } => {}
         }
     }
 }
