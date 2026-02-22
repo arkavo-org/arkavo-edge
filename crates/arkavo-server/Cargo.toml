@@ -88,6 +88,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-hrm = { path = "../arkavo-hrm" }
+arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 

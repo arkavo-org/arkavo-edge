@@ -852,6 +852,7 @@ impl A2aServer {
                             None,
                             None,
                             Some(&system_prompt),
+                            None,
                         )
                         .await
                         {
@@ -1121,6 +1122,7 @@ impl A2aServer {
         let learning_bus = self.learning_bus.read().await.clone();
         let agent_memory = self.agent_memory.clone();
         let orchestrator_tick = self.orchestrator_tick.clone();
+        let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
 
         info!("Starting orchestrator loop (observe → plan → act)");
 
@@ -1171,6 +1173,7 @@ impl A2aServer {
                     learning_bus.as_ref(),
                     Some(&agent_memory),
                     Some(&purpose),
+                    Some(&mesh_state),
                 )
                 .await
                 {

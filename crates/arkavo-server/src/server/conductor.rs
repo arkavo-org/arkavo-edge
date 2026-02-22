@@ -45,6 +45,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -65,6 +66,7 @@ pub async fn execute_with_conductor_and_learning(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
+    mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -119,7 +121,6 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
 
-    let tool_count = mcp_tools.len();
     for tool in &mcp_tools {
         debug!(
             "Tool schema: {} - {} (params: {})",
@@ -135,9 +136,15 @@ pub async fn execute_with_conductor_and_learning(
         tool_registry.register(&tool_name, Box::new(bridge));
     }
 
+    // Register A2A mesh tools (list_agents, agent_query, send_task, get_task_status)
+    if let Some(state) = mesh_state {
+        arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
+        info!("Registered 4 mesh delegation tools");
+    }
+
     info!(
-        "Task has {} MCP tools available: {:?}",
-        tool_count,
+        "Task has {} tools available: {:?}",
+        tool_registry.list_tools().len(),
         tool_registry
             .list_tools()
             .iter()

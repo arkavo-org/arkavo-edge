@@ -1602,6 +1602,7 @@ dependencies = [
  "arkavo-hrm",
  "arkavo-llm",
  "arkavo-mcp",
+ "arkavo-mcp-mesh",
  "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",

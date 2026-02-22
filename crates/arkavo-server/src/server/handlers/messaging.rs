@@ -134,6 +134,7 @@ pub async fn handle_message_send(
                         learning_bus.as_ref(),
                         None,
                         None,
+                        None,
                     )
                     .await
                     {
