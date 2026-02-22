@@ -68,6 +68,7 @@ members = [
     "crates/arkavo-server",
     "crates/arkavo-torg-circuits",
     "crates/arkavo-session",
+    "crates/arkavo-kv-cache",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]

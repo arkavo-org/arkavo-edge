@@ -104,6 +104,9 @@ pub struct PooledContext {
     pub use_count: usize,
     /// Current token position in KV cache (for resuming generation)
     pub token_position: i32,
+    /// Optional context manager for multi-sequence KV cache slots
+    #[cfg(feature = "llama-cpp")]
+    pub context_manager: Option<arkavo_kv_cache::ContextManager>,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -115,6 +118,8 @@ impl PooledContext {
             created_at: std::time::Instant::now(),
             use_count: 0,
             token_position: 0,
+            #[cfg(feature = "llama-cpp")]
+            context_manager: None,
         }
     }
 
@@ -200,6 +205,31 @@ impl ModelContextPool {
         Ok(PooledContext::new(context, self.model_name()))
     }
 
+    /// Acquire a context with multi-sequence support (learning + conversation).
+    /// Creates a context via `new_with_sequences(model, 2, true)` and attaches
+    /// a `ContextManager` with seq_learning=0, seq_conversation=1.
+    fn acquire_multi_seq(&mut self) -> Result<PooledContext> {
+        let total_contexts = self.in_use + self.available.len();
+        if total_contexts >= self.max_contexts {
+            return Err(Error::Internal(format!(
+                "Max contexts ({}) reached for model. All contexts in use.",
+                self.max_contexts
+            )));
+        }
+
+        let context = LlamaContext::new_with_sequences(&self.model, 2, true)
+            .map_err(|e| Error::Config(format!("Failed to create multi-seq context: {e}")))?;
+
+        let mut pooled = PooledContext::new(context, self.model_name());
+        #[cfg(feature = "llama-cpp")]
+        {
+            pooled.context_manager = Some(arkavo_kv_cache::ContextManager::new(0, 1));
+        }
+        pooled.mark_used();
+        self.in_use += 1;
+        Ok(pooled)
+    }
+
     /// Release a context back to the pool
     fn release(&mut self, mut context: PooledContext, clear_cache: bool) {
         if self.in_use > 0 {
@@ -277,6 +307,18 @@ impl ContextPool {
             .get_mut(model_name)
             .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
             .and_then(|pool| pool.acquire_fresh())
+    }
+
+    /// Acquire a context with multi-sequence support for KV cache context slots.
+    /// The returned `PooledContext` has a `ContextManager` attached.
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn acquire_multi_seq(&self, model_name: &str) -> Result<PooledContext> {
+        self.pools
+            .write()
+            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
+            .get_mut(model_name)
+            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
+            .and_then(|pool| pool.acquire_multi_seq())
     }
 
     /// Release a context back to the pool
