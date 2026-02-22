@@ -145,7 +145,9 @@ mcp_tools:
 a2a:
   enabled: true
   peers:
-    - "http://localhost:8402"
+    - "http://localhost:8410"
+    - "http://localhost:8411"
+    - "http://localhost:8412"
 
 mcp_servers:
   - name: rimworld

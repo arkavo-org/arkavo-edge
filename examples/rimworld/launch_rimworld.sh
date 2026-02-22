@@ -1,6 +1,6 @@
 #!/bin/bash
 # RimWorld Survival Swarm - HRM Multi-Agent Demo
-# Launches 5-agent swarm for RimWorld colony management
+# Launches 4-agent swarm: 1 orchestrator + 3 specialists
 
 set -e
 
@@ -115,7 +115,7 @@ verify_swarm() {
     print_status "INFO" "Verifying swarm connectivity..."
     local all_healthy=true
 
-    local agents=("commander:8401" "router:8402" "survival:8410" "industry:8411" "defense:8412")
+    local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412")
 
     for agent in "${agents[@]}"; do
         IFS=':' read -r name port <<< "$agent"
@@ -138,7 +138,7 @@ main() {
     echo ""
     echo "========================================"
     echo " RIMWORLD SURVIVAL SWARM               "
-    echo " 5-Agent HRM Demo                      "
+    echo " 4-Agent HRM Demo                      "
     echo "========================================"
     echo ""
 
@@ -193,13 +193,10 @@ main() {
     print_status "INFO" "Starting HRM swarm agents..."
     echo ""
 
-    # Start in dependency order: Specialists -> Router -> Commander
+    # Start in dependency order: Specialists -> Commander (orchestrator)
     start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
     start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
     start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
-    sleep 1
-
-    start_agent "router" "$SCRIPT_DIR/agents/router" 8402 || exit 1
     sleep 1
 
     start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1
@@ -214,8 +211,7 @@ main() {
         print_status "SUCCESS" "RimWorld Survival Swarm is ready!"
         echo ""
         echo "Agent Endpoints:"
-        echo "  Commander: http://localhost:8401  (has MCP tools)"
-        echo "  Router:    http://localhost:8402"
+        echo "  Commander: http://localhost:8401  (orchestrator, has MCP tools)"
         echo "  Survival:  http://localhost:8410"
         echo "  Industry:  http://localhost:8411"
         echo "  Defense:   http://localhost:8412"

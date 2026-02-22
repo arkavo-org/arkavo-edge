@@ -48,4 +48,3 @@ a2a:
   enabled: true
   peers:
     - "http://localhost:8401"
-    - "http://localhost:8402"
