@@ -184,6 +184,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     return Err("--agent-id requires an argument".into());
                 }
             }
+            "--prompt" | "-p" => {
+                if i + 1 < args.len() {
+                    task_description = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--prompt requires an argument".into());
+                }
+            }
             "--help" | "-h" => {
                 print_usage();
                 return Ok(());
@@ -497,9 +505,10 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         };
 
         // Connect to agent
-        transport.connect(&endpoint).await.map_err(|e| {
-            format!("Failed to connect to agent: {e}")
-        })?;
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| format!("Failed to connect to agent: {e}"))?;
 
         println!("  ✓ Connected\n");
 
@@ -508,11 +517,10 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         println!("  Task: {task}");
 
         // Pre-flight check on outgoing A2A request (load from user config)
-        let moderator = arkavo_router::preflight::load_policies_from_config()
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to load policies: {e}, using empty moderator");
-                arkavo_router::preflight::PreflightModerator::new()
-            });
+        let moderator = arkavo_router::preflight::load_policies_from_config().unwrap_or_else(|e| {
+            tracing::warn!("Failed to load policies: {e}, using empty moderator");
+            arkavo_router::preflight::PreflightModerator::new()
+        });
         if let arkavo_router::ModerationResult::Block {
             policy_id, reason, ..
         } = moderator.check(task)
@@ -521,14 +529,9 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
             return Err(format!("Task blocked by policy {policy_id}: {reason}").into());
         }
 
-        // Send raw task content to agent - agent handles RLM decomposition if needed
-        let task_prompt = format!(
-            "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
-        );
-
         let message = Message {
             parts: vec![MessagePart::Text {
-                content: task_prompt,
+                content: task.to_string(),
             }],
             metadata: Some(serde_json::json!({
                 "task_type": "code_task",
@@ -543,14 +546,12 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         };
 
         // Wrap in object with "request" key as expected by RPC method signature
-        let rpc_request = A2aRequest::new(
-            "message/send",
-            serde_json::json!([send_request]),
-        );
+        let rpc_request = A2aRequest::new("message/send", serde_json::json!([send_request]));
 
-        let response = transport.send_request(rpc_request).await.map_err(|e| {
-            format!("Failed to send task: {e}")
-        })?;
+        let response = transport
+            .send_request(rpc_request)
+            .await
+            .map_err(|e| format!("Failed to send task: {e}"))?;
 
         let task_id = match response {
             A2aResponse::Success { result, .. } => {
@@ -583,14 +584,12 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                 task_id: task_id.clone(),
             };
 
-            let rpc_request = A2aRequest::new(
-                "tasks/get",
-                serde_json::json!([get_request]),
-            );
+            let rpc_request = A2aRequest::new("tasks/get", serde_json::json!([get_request]));
 
-            let response = transport.send_request(rpc_request).await.map_err(|e| {
-                format!("Failed to get task status: {e}")
-            })?;
+            let response = transport
+                .send_request(rpc_request)
+                .await
+                .map_err(|e| format!("Failed to get task status: {e}"))?;
 
             match response {
                 A2aResponse::Success { result, .. } => {

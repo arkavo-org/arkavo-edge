@@ -1,12 +1,5 @@
-use axum::{
-    Json, Router, extract::State, http::StatusCode, middleware, response::IntoResponse,
-    routing::get,
-};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::set_header::SetResponseHeaderLayer;
-use tracing::{info, warn};
 
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::rate_limit::IpRateLimiter;
@@ -27,7 +20,7 @@ pub struct WellKnownState {
 }
 
 /// Build the Agent Card from current agent state
-async fn build_agent_card(state: &WellKnownState) -> AgentCard {
+pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
     let metadata = state.agent_metadata.read().await;
 
     // Get MCP tools to build skills list
@@ -114,74 +107,6 @@ async fn build_agent_card(state: &WellKnownState) -> AgentCard {
         extensions: vec![],
         signature: None,
     }
-}
-
-/// Handler for GET /.well-known/agent.json
-async fn get_agent_json(State(state): State<WellKnownState>) -> impl IntoResponse {
-    let agent_card = build_agent_card(&state).await;
-    (StatusCode::OK, Json(agent_card))
-}
-
-/// Create the axum router for well-known endpoints
-fn create_well_known_router(state: WellKnownState) -> Router {
-    let rate_limiter = state.rate_limiter.clone();
-    Router::new()
-        .route("/.well-known/agent.json", get(get_agent_json))
-        .layer(middleware::from_fn(
-            arkavo_protocol::ip_rate_limit_middleware,
-        ))
-        .layer(axum::Extension(rate_limiter))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_CONTENT_TYPE_OPTIONS,
-            axum::http::HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_FRAME_OPTIONS,
-            axum::http::HeaderValue::from_static("DENY"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::REFERRER_POLICY,
-            axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_XSS_PROTECTION,
-            axum::http::HeaderValue::from_static("0"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::CONTENT_SECURITY_POLICY,
-            axum::http::HeaderValue::from_static("default-src 'none'"),
-        ))
-        .with_state(state)
-}
-
-/// Start the HTTP server for well-known endpoints
-pub async fn start_well_known_server(
-    bind_addr: SocketAddr,
-    state: WellKnownState,
-) -> Result<(tokio::task::JoinHandle<()>, u16), Box<dyn std::error::Error + Send + Sync>> {
-    let router = create_well_known_router(state);
-
-    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
-    let actual_addr = listener.local_addr()?;
-    let actual_port = actual_addr.port();
-
-    info!(
-        "Well-known HTTP server listening on {} (/.well-known/agent.json)",
-        actual_addr
-    );
-
-    let handle = tokio::spawn(async move {
-        if let Err(e) = axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
-        {
-            warn!("Well-known HTTP server error: {}", e);
-        }
-    });
-
-    Ok((handle, actual_port))
 }
 
 #[cfg(test)]

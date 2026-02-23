@@ -35,9 +35,7 @@ deny = []
 # Skip expected duplicates that cannot be easily resolved
 skip = [
     # Dev/build dependencies - Different contexts (acceptable)
-    { crate = "itertools@0.10.5", reason = "criterion dev-dependency" },
     { crate = "itertools@0.12.1", reason = "bindgen build-dependency" },
-    { crate = "itertools@0.13.0", reason = "ratatui dependency (no stable 0.14 release yet)" },
 
     # Transitive deps requiring upstream updates
     { crate = "tower@0.4.13", reason = "jsonrpsee v0.24.x requirement" },
@@ -47,7 +45,6 @@ skip = [
 
     # Minor duplicates with low impact
     { crate = "fancy-regex@0.14.0", reason = "tokenizers older version" },
-    { crate = "compact_str@0.8.1", reason = "ratatui dependency" },
     { crate = "bit-set@0.5.3", reason = "old syntect dependency" },
     { crate = "bit-vec@0.6.3", reason = "old syntect dependency" },
 ]

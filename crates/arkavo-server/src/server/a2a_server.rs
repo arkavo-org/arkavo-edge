@@ -7,6 +7,7 @@ use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
 use arkavo_llm::{LlmClient, LlmClientAdapter, LlmConfig};
+use jsonrpsee::server::middleware::http::ProxyGetRequestLayer;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
@@ -24,8 +25,7 @@ use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
 use super::tool_memory::ToolMemory;
-use super::well_known::{WellKnownState, start_well_known_server};
-use super::{A2aRpcImpl, A2aRpcServer, execute_with_conductor};
+use super::{A2aRpcImpl, A2aRpcServer};
 
 #[cfg(feature = "kas")]
 use arkavo_tdf::KasA2aHandler;
@@ -56,14 +56,14 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
-    /// Handle for the well-known HTTP server
-    well_known_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Budget manager loaded from AGENTS.md config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached AGENTS.md config to avoid repeated file reads
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
     /// Federated memory service for ABAC-scoped cross-agent retrieval
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
+    /// Orchestrator tick counter shared with the RPC impl for learning/status
+    orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl A2aServer {
@@ -95,12 +95,12 @@ impl A2aServer {
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
-            well_known_handle: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
             )),
             federated_memory: Arc::new(tokio::sync::RwLock::new(None)),
+            orchestrator_tick: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -829,13 +829,12 @@ impl A2aServer {
                         let memory_section = memory.format_for_prompt();
                         drop(memory);
 
+                        // Purpose goes as System message; event/goals/memory as User
                         let prompt = format!(
-                            "{}{}{}\n\n## Event\nServer: {}\nData: {}\n\n## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
-                            system_prompt,
-                            goals_section,
-                            memory_section,
-                            notification.server,
-                            event_str
+                            "{goals_section}{memory_section}\n\n\
+                             ## Event\nServer: {}\nData: {}\n\n\
+                             ## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
+                            notification.server, event_str
                         );
 
                         eprintln!(
@@ -843,12 +842,16 @@ impl A2aServer {
                             prompt.len()
                         );
                         let start_time = std::time::Instant::now();
-                        match execute_with_conductor(
+                        match super::conductor::execute_with_conductor_and_learning(
                             &conductor,
                             &router,
                             &mcp_registry,
                             prompt,
                             None,
+                            None,
+                            None,
+                            None,
+                            Some(&system_prompt),
                             None,
                         )
                         .await
@@ -906,6 +909,42 @@ impl A2aServer {
         Some(handle)
     }
 
+    /// Rebuild tool registry from MCP connections
+    ///
+    /// Fixes race condition where tools are queried before MCP servers connect.
+    /// Called just before server start to ensure all MCP tools are registered.
+    async fn rebuild_tool_registry(&self) {
+        use super::mcp_bridge::McpBridgeTool;
+
+        let mcp_tools = match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => tools,
+            Err(e) => {
+                warn!("Failed to list MCP tools for rebuild: {}", e);
+                return;
+            }
+        };
+
+        if mcp_tools.is_empty() {
+            debug!("No MCP tools to register");
+            return;
+        }
+
+        info!(
+            "Rebuilding tool registry with {} MCP tools",
+            mcp_tools.len()
+        );
+
+        let mut tool_registry = arkavo_mcp_tools::ToolRegistry::empty();
+
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(self.mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
+
+        *self.tool_registry.write().await = Some(Arc::new(tool_registry));
+    }
+
     /// Start the server and return the handle along with the actual bound port
     pub async fn start(&self) -> Result<ServerHandle> {
         let (handle, _actual_port) = self.start_with_port().await?;
@@ -921,10 +960,19 @@ impl A2aServer {
 
         info!("Starting A2A server on {}", addr);
 
+        // Rebuild tool registry now that MCP servers have been registered
+        self.rebuild_tool_registry().await;
+
         let server_cfg = jsonrpsee::server::ServerConfig::builder()
             .max_connections(self.config.max_connections as u32)
             .build();
+        let proxy_layer = ProxyGetRequestLayer::new([
+            ("/.well-known/agent.json", "agent_card"),
+            ("/health", "health"),
+        ])
+        .map_err(|e| A2aError::Transport(format!("Failed to create proxy layer: {e}")))?;
         let server = ServerBuilder::with_config(server_cfg)
+            .set_http_middleware(tower::ServiceBuilder::new().layer(proxy_layer))
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
@@ -1022,6 +1070,7 @@ impl A2aServer {
             learning_bus: self.learning_bus.read().await.clone(),
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
+            orchestrator_tick: self.orchestrator_tick.clone(),
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
@@ -1042,60 +1091,109 @@ impl A2aServer {
         let handle = server.start(rpc_impl.into_rpc());
 
         info!("A2A server started successfully on {}", actual_addr);
-        info!("OpenRPC schema available via JSON-RPC method: rpc.discover");
-
-        // Start the well-known HTTP server on port + 1 (or dynamic if port is 0)
-        let http_port = if self.config.port == 0 {
-            0
-        } else {
-            self.config.port + 1
-        };
-
-        if let Err(e) = self.start_well_known_server(http_port, actual_port).await {
-            warn!("Failed to start well-known HTTP server: {}", e);
-        }
+        info!(
+            "Agent Card available at http://{}:{}/.well-known/agent.json",
+            self.config.bind_address, actual_port
+        );
 
         Ok((handle, actual_port))
     }
 
-    /// Start the well-known HTTP server for agent discovery
-    /// Serves /.well-known/agent.json per A2A protocol spec
-    pub async fn start_well_known_server(&self, http_port: u16, rpc_port: u16) -> Result<u16> {
-        let bind_addr: SocketAddr = format!("{}:{}", self.config.bind_address, http_port)
-            .parse()
-            .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid HTTP bind address: {e}")))?;
-
-        let state = WellKnownState {
-            agent_metadata: self.agent_metadata.clone(),
-            mcp_registry: self.mcp_registry.clone(),
-            rpc_port,
-            rate_limiter: Arc::new(arkavo_protocol::IpRateLimiter::new(
-                arkavo_protocol::RateLimitConfig::default(),
-            )),
-            #[cfg(feature = "kas")]
-            kas_enabled: true,
+    /// Start the autonomous orchestrator loop.
+    ///
+    /// Called by the agent CLI after startup when the agent has MCP tools configured
+    /// (i.e., it's an orchestrator). Specialists don't call this.
+    ///
+    /// Loop: observe → plan → delegate → execute → sleep → repeat
+    pub async fn start_orchestrator_loop(&self) {
+        let router_guard = self.router.read().await;
+        let router = match router_guard.clone() {
+            Some(r) => r,
+            None => {
+                warn!("Cannot start orchestrator loop: no router configured");
+                return;
+            }
         };
+        drop(router_guard);
 
-        let (handle, actual_http_port) = start_well_known_server(bind_addr, state)
-            .await
-            .map_err(|e| A2aError::Transport(format!("Failed to start well-known server: {e}")))?;
+        let mcp_registry = self.mcp_registry.clone();
+        let conductor = self.conductor.read().await.clone();
+        let agent_metadata = self.agent_metadata.clone();
+        let learning_bus = self.learning_bus.read().await.clone();
+        let agent_memory = self.agent_memory.clone();
+        let orchestrator_tick = self.orchestrator_tick.clone();
+        let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
 
-        *self.well_known_handle.write().await = Some(handle);
+        info!("Starting orchestrator loop (observe → plan → act)");
 
-        info!(
-            "Agent Card available at http://{}:{}/.well-known/agent.json",
-            self.config.bind_address, actual_http_port
-        );
+        tokio::spawn(async move {
+            // Wait for MCP server to be ready
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        Ok(actual_http_port)
-    }
+            let mut tick: u64 = 0;
+            loop {
+                tick += 1;
+                orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
+                let metadata = agent_metadata.read().await;
+                let purpose = metadata.purpose.clone();
+                drop(metadata);
 
-    /// Stop the well-known HTTP server
-    pub async fn stop_well_known_server(&self) {
-        if let Some(handle) = self.well_known_handle.write().await.take() {
-            handle.abort();
-            info!("Well-known HTTP server stopped");
-        }
+                if purpose.is_empty() {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                // Read short-term memory (recent tool calls from previous ticks)
+                let recent_actions = agent_memory.read().await.format_for_prompt();
+
+                // Purpose goes as System message so the LLM treats tool examples
+                // and planning workflow as authoritative instructions.
+                // Tick-specific instruction goes as User message.
+                let tick_prompt = if tick == 1 {
+                    "Begin your startup workflow now.".to_string()
+                } else {
+                    format!(
+                        "{recent_actions}\n\n\
+                         ## Autonomous Tick {tick}\n\
+                         Initialization is complete. Do not repeat setup steps.\n\
+                         Continue from where you left off. Take the next action.",
+                    )
+                };
+
+                info!("Orchestrator tick {tick}: executing cycle");
+                let start = std::time::Instant::now();
+
+                match super::conductor::execute_with_conductor_and_learning(
+                    &conductor,
+                    &router,
+                    &mcp_registry,
+                    tick_prompt,
+                    None,
+                    None,
+                    learning_bus.as_ref(),
+                    Some(&agent_memory),
+                    Some(&purpose),
+                    Some(&mesh_state),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        let elapsed = start.elapsed();
+                        info!(
+                            "Orchestrator tick {tick} completed in {:.1}s: {} chars",
+                            elapsed.as_secs_f64(),
+                            result.len()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Orchestrator tick {tick} failed: {e}");
+                    }
+                }
+
+                // Wait between ticks — gives the environment time to advance
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            }
+        });
     }
 
     /// Release GPU resources for graceful shutdown.

@@ -323,6 +323,7 @@ async fn dispatch_event(
                 learning_module,
                 routing_history,
                 lesson_count,
+                agent_connections,
                 tx,
             )
             .await?;

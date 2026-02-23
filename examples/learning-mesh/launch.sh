@@ -99,7 +99,7 @@ show_status() {
     echo "Learning Mesh Status:"
     echo "====================="
 
-    local agents=("orchestrator:8411" "code-analyzer:8413" "test-generator:8415" "security-auditor:8417")
+    local agents=("orchestrator:8410" "code-analyzer:8412" "test-generator:8414" "security-auditor:8416")
 
     for agent in "${agents[@]}"; do
         local name="${agent%:*}"

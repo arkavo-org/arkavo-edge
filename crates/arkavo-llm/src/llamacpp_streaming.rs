@@ -10,8 +10,9 @@ use arkavo_llama_cpp::multimodal::{
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
-    batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain,
-    create_sampler_chain_with_dry, decode_batch, token_to_bytes, tokenize_with_model,
+    batch_get_one_with_offset, batch_init_with_tokens, batch_init_with_tokens_seq,
+    create_sampler_chain, create_sampler_chain_with_dry, decode_batch, token_to_bytes,
+    tokenize_with_model,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -137,6 +138,8 @@ pub(crate) struct ContextReuseOptions {
     pub start_position: Option<i32>,
     /// Whether to clear KV cache before generation
     pub clear_cache: bool,
+    /// Sequence ID for multi-sequence inference. None = use default (seq 0).
+    pub seq_id: Option<i32>,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -337,7 +340,11 @@ pub(crate) async fn generate_tokens_with_context(
 
             sampler.accept(token);
 
-            let mut batch = batch_init_with_tokens(&[token], pos, true);
+            let mut batch = if let Some(sid) = context_options.seq_id {
+                batch_init_with_tokens_seq(&[token], pos, sid, true)
+            } else {
+                batch_init_with_tokens(&[token], pos, true)
+            };
             decode_batch(&ctx, batch)
                 .map_err(|e| Error::Config(format!("Failed to decode token at pos {pos}: {e}")))?;
             batch_free(&mut batch);

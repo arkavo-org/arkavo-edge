@@ -27,9 +27,16 @@ mod stubs {
 #[cfg(target_env = "musl")]
 pub use stubs::*;
 
+#[cfg(not(target_env = "musl"))]
+pub use memory::LlamaMemory;
+
 // Multimodal support module
 #[cfg(not(target_env = "musl"))]
 pub mod multimodal;
+
+// KV cache memory management
+#[cfg(not(target_env = "musl"))]
+pub mod memory;
 
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
@@ -527,6 +534,135 @@ impl LlamaContext {
         }
         true
     }
+
+    /// Create a context with support for multiple parallel sequences.
+    ///
+    /// `n_seq_max` controls how many independent sequences can share the KV cache.
+    /// When `kv_unified` is true, sequences share a common prefix (recommended for
+    /// composed context slots). `swa_full` is forced true when `n_seq_max > 1` per
+    /// llama.cpp requirements.
+    pub fn new_with_sequences(
+        model: &LlamaModel,
+        n_seq_max: u32,
+        kv_unified: bool,
+    ) -> Result<Self, String> {
+        let num_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8);
+        let thread_count = num_cores.min(16) as i32;
+
+        let trained_ctx = model.get_trained_context_size();
+        let safe_ctx = if trained_ctx <= 8192 {
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            trained_ctx / 2
+        } else {
+            (trained_ctx / 4).min(16384)
+        };
+
+        // SAFETY: Returns a default-initialized struct
+        let mut params = unsafe { ffi::llama_context_default_params() };
+        params.n_ctx = safe_ctx;
+        params.n_batch = 2048;
+        params.n_ubatch = 512;
+        params.n_seq_max = n_seq_max;
+        params.n_threads = thread_count;
+        params.n_threads_batch = thread_count;
+        params.offload_kqv = GPU_STATUS.load(Ordering::Relaxed) != 2;
+        params.flash_attn_type = if GPU_STATUS.load(Ordering::Relaxed) != 2 {
+            ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO
+        } else {
+            ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED
+        };
+        params.kv_unified = kv_unified;
+        // swa_full required when n_seq_max > 1 per llama.h
+        params.swa_full = n_seq_max > 1;
+
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "Creating multi-seq context: n_seq_max={}, kv_unified={}, swa_full={}",
+                n_seq_max, kv_unified, params.swa_full
+            );
+        }
+
+        // SAFETY: model.ptr was validated during LlamaModel construction
+        let context = unsafe { ffi::llama_new_context_with_model(model.ptr, params) };
+        if context.is_null() {
+            Err(format!(
+                "Failed to create multi-sequence context (n_seq_max={})",
+                n_seq_max
+            ))
+        } else {
+            Ok(Self { ptr: context })
+        }
+    }
+
+    /// Get the KV cache memory handle for sequence-level operations.
+    pub fn get_memory(&self) -> LlamaMemory {
+        // SAFETY: ctx.ptr is valid for the lifetime of LlamaContext
+        let mem = unsafe { ffi::llama_get_memory(self.ptr) };
+        // SAFETY: llama_get_memory returns a valid handle for a valid context
+        unsafe { LlamaMemory::from_raw(mem) }
+    }
+
+    /// Save a single sequence's KV cache state to a file.
+    ///
+    /// Returns the number of bytes written on success.
+    pub fn state_seq_save_file(
+        &self,
+        path: &str,
+        seq_id: i32,
+        tokens: &[i32],
+    ) -> Result<usize, String> {
+        let c_path = CString::new(path).map_err(|e| format!("Invalid path: {e}"))?;
+        // SAFETY: All pointers are valid; CString lives for the duration of the call
+        let written = unsafe {
+            ffi::llama_state_seq_save_file(
+                self.ptr,
+                c_path.as_ptr(),
+                seq_id,
+                tokens.as_ptr(),
+                tokens.len(),
+            )
+        };
+        if written == 0 {
+            Err(format!("Failed to save sequence state to {path}"))
+        } else {
+            Ok(written)
+        }
+    }
+
+    /// Load a sequence's KV cache state from a file.
+    ///
+    /// Returns `(tokens, bytes_read)` on success. The loaded entries are
+    /// placed on `dest_seq_id` starting at their native positions.
+    pub fn state_seq_load_file(
+        &self,
+        path: &str,
+        dest_seq_id: i32,
+        capacity: usize,
+    ) -> Result<(Vec<i32>, usize), String> {
+        let c_path = CString::new(path).map_err(|e| format!("Invalid path: {e}"))?;
+        let mut tokens = vec![0i32; capacity];
+        let mut n_token_count: usize = 0;
+        // SAFETY: All pointers are valid; CString lives for the duration of the call
+        let bytes_read = unsafe {
+            ffi::llama_state_seq_load_file(
+                self.ptr,
+                c_path.as_ptr(),
+                dest_seq_id,
+                tokens.as_mut_ptr(),
+                capacity,
+                &mut n_token_count,
+            )
+        };
+        if bytes_read == 0 {
+            Err(format!("Failed to load sequence state from {path}"))
+        } else {
+            tokens.truncate(n_token_count);
+            Ok((tokens, bytes_read))
+        }
+    }
 }
 
 #[cfg(not(target_env = "musl"))]
@@ -813,6 +949,46 @@ pub fn batch_init_with_tokens(
     // Set logits=1 on the last token if requested (crucial for sampling)
     if request_logits_on_last && !tokens.is_empty() {
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
+        unsafe {
+            *batch.logits.add(tokens.len() - 1) = 1;
+        }
+    }
+
+    batch.n_tokens = tokens.len() as i32;
+    batch
+}
+
+/// Like `batch_init_with_tokens` but assigns all tokens to a specific `seq_id`.
+/// Used for multi-sequence inference where different sequences share a KV cache.
+#[cfg(not(target_env = "musl"))]
+pub fn batch_init_with_tokens_seq(
+    tokens: &[ffi::llama_token],
+    pos_offset: i32,
+    seq_id: i32,
+    request_logits_on_last: bool,
+) -> ffi::llama_batch {
+    // SAFETY: llama_batch_init allocates all internal arrays
+    let mut batch = unsafe {
+        ffi::llama_batch_init(
+            tokens.len() as i32,
+            0, // embd = 0 for token mode
+            1, // n_seq_max = 1 per token
+        )
+    };
+
+    for (i, &token) in tokens.iter().enumerate() {
+        // SAFETY: Arrays are allocated by llama_batch_init with capacity >= tokens.len()
+        unsafe {
+            *batch.token.add(i) = token;
+            *batch.pos.add(i) = pos_offset + i as i32;
+            *batch.n_seq_id.add(i) = 1;
+            *(*batch.seq_id.add(i)) = seq_id;
+            *batch.logits.add(i) = 0;
+        }
+    }
+
+    if request_logits_on_last && !tokens.is_empty() {
+        // SAFETY: Array bounds checked via !tokens.is_empty()
         unsafe {
             *batch.logits.add(tokens.len() - 1) = 1;
         }

@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::judge;
 use crate::learning::BurstFeedback;
 use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
-use arkavo_llm::{Message, ProviderResponse};
+use arkavo_llm::{Message, ProviderResponse, Role};
 use arkavo_mcp_tools::ToolRegistry;
 
 impl super::Router {
@@ -21,6 +21,7 @@ impl super::Router {
     ) -> Result<ProviderResponse> {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
+        let mut feedback_messages: Vec<Message> = Vec::new();
 
         let input_tokens = tool_extraction::estimate_tokens(task_description);
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
@@ -62,9 +63,12 @@ impl super::Router {
                 );
                 let mut msgs = vec![Message::system(advice.system_text)];
                 msgs.extend(messages.clone());
+                msgs.extend(feedback_messages.clone());
                 (msgs, Some(advice.applied_labels))
             } else {
-                (messages.clone(), None)
+                let mut msgs = messages.clone();
+                msgs.extend(feedback_messages.clone());
+                (msgs, None)
             };
 
             // TDF audit: encrypt cloud-bound messages for local audit trail
@@ -115,6 +119,15 @@ impl super::Router {
             let provider = self
                 .instantiate_provider(&current_decision.recommended_model)
                 .await?;
+
+            // Acquire inference semaphore — serializes concurrent LLM calls
+            // so the second request waits instead of failing with a KV cache OOM.
+            let _permit = self
+                .inference_semaphore
+                .acquire()
+                .await
+                .map_err(|_| Error::ModelExecution("Inference semaphore closed".to_string()))?;
+            tracing::debug!("Inference semaphore acquired");
 
             let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, None)
@@ -208,19 +221,26 @@ impl super::Router {
                         )
                         .await;
 
-                    if attempt + 1 < MAX_RETRIES
-                        && let Some(upgraded) =
-                            Self::upgrade_model_local_only(&current_decision.recommended_model)
-                    {
-                        current_decision.recommended_model = upgraded;
+                    if attempt + 1 < MAX_RETRIES {
+                        // RL FEEDBACK: Inject validation error back into conversation
+                        // so the model can learn the correct format and retry
+                        let feedback_msg = Message {
+                            role: Role::User,
+                            content: format!(
+                                "ERROR: {validation_error}\n\nYou MUST include ALL required parameters inside the fence. Example:\n```tool_name\nparam1: value1\nparam2: value2\n```\nTry again with the correct parameters.",
+                            ),
+                            images: None,
+                        };
+                        feedback_messages.push(feedback_msg);
                         tracing::info!(
-                            "Upgrading to {:?} due to validation failure (local only)",
-                            current_decision.recommended_model
+                            "RL feedback: injecting validation error for retry (attempt {})",
+                            attempt + 1
                         );
                         continue;
                     }
                     tracing::warn!(
-                        "Validation failed but no local upgrade available, returning response"
+                        "Validation failed after {} attempts, returning response",
+                        MAX_RETRIES
                     );
                     return Ok(response);
                 }
@@ -269,30 +289,36 @@ impl super::Router {
                                 if judgment.issue_type == IssueType::MissingToolUse
                                     && !judgment.suggested_keywords.is_empty()
                                 {
-                                    tracing::info!(
-                                        "Judge detected missing tool usage, searching for: {:?}",
+                                    tracing::warn!(
+                                        "Judge suggested tools {:?} but available tools may differ — continuing with response",
                                         judgment.suggested_keywords
                                     );
-                                    return Err(Error::ModelExecution(format!(
-                                        "MISSING_TOOL_USE:{:?}",
-                                        judgment.suggested_keywords
-                                    )));
                                 }
 
-                                if attempt + 1 < MAX_RETRIES
-                                    && let Some(upgraded) = Self::upgrade_model_local_only(
-                                        &current_decision.recommended_model,
-                                    )
-                                {
-                                    current_decision.recommended_model = upgraded;
+                                if attempt + 1 < MAX_RETRIES {
+                                    // RL FEEDBACK: Inject judge rejection reason back into
+                                    // conversation so the model can learn from the feedback
+                                    let reason = judgment
+                                        .reason
+                                        .as_deref()
+                                        .unwrap_or("Quality check failed");
+                                    let feedback_msg = Message {
+                                        role: Role::User,
+                                        content: format!(
+                                            "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
+                                        ),
+                                        images: None,
+                                    };
+                                    feedback_messages.push(feedback_msg);
                                     tracing::info!(
-                                        "Upgrading to {:?} after judge rejection (local only)",
-                                        current_decision.recommended_model
+                                        "RL feedback: injecting judge rejection for retry (attempt {})",
+                                        attempt + 1
                                     );
                                     continue;
                                 }
                                 tracing::warn!(
-                                    "Judge rejected but no local upgrade available, returning response"
+                                    "Judge rejected after {} attempts, returning response",
+                                    MAX_RETRIES
                                 );
                                 return Ok(response);
                             }
@@ -337,6 +363,12 @@ impl super::Router {
                     .with_usage(current_decision.estimated_cost_usd, 0),
                 )
                 .await;
+
+            // Record which model was selected so the conductor can attribute
+            // reward-based corrective feedback to the right Thompson Sampling prior.
+            if let Ok(mut guard) = self.last_routed_model.write() {
+                *guard = Some(current_decision.recommended_model.name().to_string());
+            }
 
             return Ok(response);
         }

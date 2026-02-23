@@ -1,3 +1,4 @@
+use crate::agent_connection::AgentConnection;
 use crate::types::*;
 use arkavo_router::learning::{BurstFeedback, LearningModule, Lesson};
 use std::collections::{HashMap, VecDeque};
@@ -274,10 +275,12 @@ pub(crate) async fn handle_request_learning_status(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_count: usize,
+    agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received RequestLearningStatus");
 
+    // Collect local learning data
     let lm = learning_module.read().await;
     let all_stats = lm.get_all_stats().await;
 
@@ -306,10 +309,43 @@ pub(crate) async fn handle_request_learning_status(
             category_stats,
         });
     }
+    drop(lm);
+
+    // Query connected agents for their Thompson Sampling state
+    let local_ids: std::collections::HashSet<String> =
+        agents.iter().map(|a| a.agent_id.clone()).collect();
+    let conns = agent_connections.read().await;
+    for (_id, conn) in conns.iter() {
+        if !conn.is_connected().await {
+            continue;
+        }
+        match conn
+            .send_request("learning/status", serde_json::json!(null), "learning-poll")
+            .await
+        {
+            Ok(resp) => {
+                if let Some(remote_agents) = resp.get("agents").and_then(|v| v.as_array()) {
+                    for ra in remote_agents {
+                        let agent_id = ra
+                            .get("agentId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        if agent_id.is_empty() || local_ids.contains(&agent_id) {
+                            continue;
+                        }
+                        agents.push(parse_remote_agent_info(ra));
+                    }
+                }
+            }
+            Err(e) => {
+                println!("AG-UI: Failed to query agent learning/status: {e}");
+            }
+        }
+    }
+    drop(conns);
 
     let history: Vec<RoutingRecord> = routing_history.read().await.iter().cloned().collect();
-
-    // Derive quality trends from routing history
     let quality_trends = derive_quality_trends(&history);
 
     tx.send(AgUiEvent::LearningStatusUpdate {
@@ -322,6 +358,56 @@ pub(crate) async fn handle_request_learning_status(
     .await?;
 
     Ok(())
+}
+
+fn parse_remote_agent_info(v: &serde_json::Value) -> AgentLearningInfo {
+    let cat_stats = v
+        .get("categoryStats")
+        .and_then(|cs| cs.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|c| CategoryStat {
+                    category: c
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("general")
+                        .to_string(),
+                    alpha: c.get("alpha").and_then(|v| v.as_f64()).unwrap_or(2.0),
+                    beta_param: c.get("betaParam").and_then(|v| v.as_f64()).unwrap_or(1.0),
+                    expected_value: c
+                        .get("expectedValue")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.667),
+                    observations: c.get("observations").and_then(|v| v.as_u64()).unwrap_or(0),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    AgentLearningInfo {
+        agent_id: v
+            .get("agentId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        alpha: v.get("alpha").and_then(|v| v.as_f64()).unwrap_or(2.0),
+        beta_param: v.get("betaParam").and_then(|v| v.as_f64()).unwrap_or(1.0),
+        expected_value: v
+            .get("expectedValue")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.667),
+        std_dev: v.get("stdDev").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        total_observations: v
+            .get("totalObservations")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        success_rate: v.get("successRate").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        probationary: v
+            .get("probationary")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        category_stats: cat_stats,
+    }
 }
 
 /// Derive quality trends from routing history records

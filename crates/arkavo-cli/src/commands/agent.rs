@@ -1291,6 +1291,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let (handle, actual_port) = server.start_with_port().await?;
 
+    // Start orchestrator loop if this agent has MCP tools configured
+    if !config.mcp_servers.is_empty() {
+        server.start_orchestrator_loop().await;
+    }
+
     // Generate and display QR code for registration
     if !quiet {
         use arkavo_crypto::AgentKeypair;

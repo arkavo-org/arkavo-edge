@@ -8,6 +8,25 @@ var ORBIT_RADIUS = 140;
 var NODE_MIN = 16;
 var NODE_MAX = 50;
 var selectedLearningAgent = null;
+var learningPollInterval = null;
+
+function startLearningPolling() {
+    stopLearningPolling();
+    learningPollInterval = setInterval(function() {
+        if (AppState.activeView === 'learning') {
+            wsSend({ type: 'requestLearningStatus' });
+        } else {
+            stopLearningPolling();
+        }
+    }, 10000);
+}
+
+function stopLearningPolling() {
+    if (learningPollInterval) {
+        clearInterval(learningPollInterval);
+        learningPollInterval = null;
+    }
+}
 
 function handleLearningStatusUpdate(event) {
     var agents = event.agents || [];
@@ -19,6 +38,11 @@ function handleLearningStatusUpdate(event) {
     AppState.qualityTrends = event.qualityTrends || [];
     AppState.lessonCount = event.lessonCount || 0;
     renderLearningPanel();
+
+    // Keep polling while on the learning panel
+    if (AppState.activeView === 'learning' && !learningPollInterval) {
+        startLearningPolling();
+    }
 }
 
 function handleRoutingEvaluation(event) {

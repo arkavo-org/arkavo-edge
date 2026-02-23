@@ -1,13 +1,29 @@
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::mcp_bridge::McpBridgeTool;
 use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
+use super::tool_memory::ToolMemory;
 use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
 use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::types::TaskProgress;
+use arkavo_router::BurstFeedback;
 use arkavo_tasks::task_executor::TaskExecutor;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+
+/// Extract a reward signal from an MCP tool result.
+///
+/// The result is double-wrapped JSON: `{"result": "{\"Reward\": -0.294, ...}"}`.
+/// Returns `None` if the result doesn't contain a reward field.
+fn extract_reward_from_result(result_json: &str) -> Option<f64> {
+    let outer: serde_json::Value = serde_json::from_str(result_json).ok()?;
+    let inner_str = outer.get("result").and_then(|v| v.as_str())?;
+    let inner: serde_json::Value = serde_json::from_str(inner_str).ok()?;
+    inner
+        .get("Reward")
+        .or_else(|| inner.get("reward"))
+        .and_then(|v| v.as_f64())
+}
 
 /// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
 #[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
@@ -27,13 +43,19 @@ pub async fn execute_with_conductor(
         task_id,
         task_executor,
         None,
+        None,
+        None,
+        None,
     )
     .await
 }
 
-/// Execute a task using the HRM Conductor with 1:1 task-to-subtask mapping
-/// Optionally emits learning events for tool calls
+/// Execute a task via HRM Conductor with optional learning and system prompt.
+///
+/// When `system_prompt` is provided, it is sent as a System message so the LLM
+/// treats AGENTS.md instructions (tool examples, planning workflow) as authoritative.
 #[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_with_conductor_and_learning(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: &Arc<arkavo_router::Router>,
@@ -42,6 +64,9 @@ pub async fn execute_with_conductor_and_learning(
     task_id: Option<uuid::Uuid>,
     task_executor: Option<&Arc<TaskExecutor>>,
     learning_bus: Option<&Arc<LearningBus>>,
+    tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
+    system_prompt: Option<&str>,
+    mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -96,7 +121,6 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
 
-    let tool_count = mcp_tools.len();
     for tool in &mcp_tools {
         debug!(
             "Tool schema: {} - {} (params: {})",
@@ -112,9 +136,15 @@ pub async fn execute_with_conductor_and_learning(
         tool_registry.register(&tool_name, Box::new(bridge));
     }
 
+    // Register A2A mesh tools (list_agents, agent_query, send_task, get_task_status)
+    if let Some(state) = mesh_state {
+        arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
+        info!("Registered 4 mesh delegation tools");
+    }
+
     info!(
-        "Task has {} MCP tools available: {:?}",
-        tool_count,
+        "Task has {} tools available: {:?}",
+        tool_registry.list_tools().len(),
         tool_registry
             .list_tools()
             .iter()
@@ -220,27 +250,27 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    // Build messages, prepending RLM system prompt if active
-    let messages = if let Some(ref rlm_prompt) = rlm_system_prompt {
-        vec![
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::System,
-                content: rlm_prompt.clone(),
-                images: None,
-            },
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::User,
-                content: augmented_content,
-                images: None,
-            },
-        ]
-    } else {
-        vec![arkavo_llm::Message {
-            role: arkavo_llm::Role::User,
-            content: augmented_content,
+    // Build messages: System (AGENTS.md purpose) → System (RLM, if active) → User (task)
+    let mut messages = Vec::new();
+    if let Some(sys) = system_prompt {
+        messages.push(arkavo_llm::Message {
+            role: arkavo_llm::Role::System,
+            content: sys.to_string(),
             images: None,
-        }]
-    };
+        });
+    }
+    if let Some(ref rlm_prompt) = rlm_system_prompt {
+        messages.push(arkavo_llm::Message {
+            role: arkavo_llm::Role::System,
+            content: rlm_prompt.clone(),
+            images: None,
+        });
+    }
+    messages.push(arkavo_llm::Message {
+        role: arkavo_llm::Role::User,
+        content: augmented_content,
+        images: None,
+    });
 
     let response = router
         .route_with_tools(&task_content, messages, Some(&registry_arc))
@@ -287,6 +317,7 @@ pub async fn execute_with_conductor_and_learning(
         info!("Executing {tool_count} tool calls");
 
         let mut tool_results = Vec::new();
+        let mut reward_signals: Vec<f64> = Vec::new();
         for tool_call in &response.tool_calls {
             let args = tool_call.arguments.clone();
             debug!(
@@ -311,17 +342,41 @@ pub async fn execute_with_conductor_and_learning(
             match tool_result {
                 Ok(result) => {
                     let latency_ms = start_time.elapsed().as_millis() as u64;
-                    info!("Tool {} succeeded", tool_call.tool_name);
                     let result_str = serde_json::to_string(&result).unwrap_or_default();
+
+                    // Extract reward signal from game/sim results.
+                    // Negative reward means the action hurt (e.g. colonists starving)
+                    // even though the MCP call itself succeeded.
+                    let reward = extract_reward_from_result(&result_str);
+                    let tool_success = reward.is_none_or(|r| r >= 0.0);
+
+                    if let Some(r) = reward {
+                        reward_signals.push(r);
+                        if r < 0.0 {
+                            info!(
+                                "Tool {} returned negative reward {:.3} — marking as failure for learning",
+                                tool_call.tool_name, r
+                            );
+                        }
+                    } else {
+                        info!("Tool {} succeeded", tool_call.tool_name);
+                    }
                     debug!("Tool {} result: {}", tool_call.tool_name, result_str);
 
-                    // Emit learning event for successful tool call
+                    // Record in short-term tool memory
+                    if let Some(mem) = tool_memory {
+                        mem.write()
+                            .await
+                            .add(tool_call.tool_name.clone(), &args, &result_str);
+                    }
+
+                    // Emit learning event — success reflects game reward, not just MCP status
                     if let Some(bus) = learning_bus {
                         let event = LearningEvent::ToolCall {
                             tool_name: tool_call.tool_name.clone(),
                             args: args.clone(),
                             result: result_str.clone(),
-                            success: true,
+                            success: tool_success,
                             latency_ms,
                         };
                         let _ = bus.sender().send(event).await;
@@ -336,6 +391,15 @@ pub async fn execute_with_conductor_and_learning(
                 Err(err_str) => {
                     let latency_ms = start_time.elapsed().as_millis() as u64;
                     warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
+
+                    // Record failure in short-term tool memory
+                    if let Some(mem) = tool_memory {
+                        mem.write().await.add(
+                            tool_call.tool_name.clone(),
+                            &args,
+                            &format!("Error: {err_str}"),
+                        );
+                    }
 
                     // Emit learning event for failed tool call
                     if let Some(bus) = learning_bus {
@@ -361,6 +425,35 @@ pub async fn execute_with_conductor_and_learning(
             final_result.push_str("\n\n## Tool Execution Results\n");
             final_result.push_str(&tool_results.join("\n\n"));
         }
+
+        // Corrective Thompson Sampling feedback based on actual game reward.
+        // The quality gate already recorded success + quality ~1.0 based on text format.
+        // This second signal injects the ground-truth reward so Thompson Sampling
+        // eventually demotes models that produce plausible-looking but harmful actions.
+        if !reward_signals.is_empty()
+            && let Some(model_name) = router.last_routed_model()
+        {
+            let avg_reward = reward_signals.iter().sum::<f64>() / reward_signals.len() as f64;
+            // Map reward [-1, 1] → quality [0, 1]
+            let quality = f64::midpoint(avg_reward, 1.0).clamp(0.0, 1.0);
+            let feedback = if avg_reward >= 0.0 {
+                BurstFeedback::success(uuid::Uuid::new_v4(), "reward_correction".to_string(), 0)
+                    .with_quality(quality)
+            } else {
+                BurstFeedback::failure(uuid::Uuid::new_v4(), "reward_correction".to_string(), 0)
+                    .with_quality(quality)
+            };
+            info!(
+                model = %model_name,
+                avg_reward = format!("{avg_reward:.3}").as_str(),
+                quality = format!("{quality:.3}").as_str(),
+                "Reward correction applied to Thompson Sampling"
+            );
+            router
+                .model_learning()
+                .immediate_update(&model_name, &feedback)
+                .await;
+        }
     } else {
         debug!("LLM did not request any tool calls");
     }
@@ -378,4 +471,64 @@ pub async fn execute_with_conductor_and_learning(
     info!("Task {} completed via Conductor", hrm_task.id);
 
     Ok(final_result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_reward_positive() {
+        let json = r#"{"result":"{\"Reward\":0.5,\"State\":{}}"}"#;
+        assert_eq!(extract_reward_from_result(json), Some(0.5));
+    }
+
+    #[test]
+    fn extract_reward_negative() {
+        let json = r#"{"result":"{\"Reward\":-0.294,\"food_critical\":-0.2}"}"#;
+        let reward = extract_reward_from_result(json).unwrap();
+        assert!((reward - (-0.294)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extract_reward_lowercase_key() {
+        let json = r#"{"result":"{\"reward\":1.0}"}"#;
+        assert_eq!(extract_reward_from_result(json), Some(1.0));
+    }
+
+    #[test]
+    fn extract_reward_missing() {
+        let json = r#"{"result":"{\"State\":{\"colonists\":3}}"}"#;
+        assert_eq!(extract_reward_from_result(json), None);
+    }
+
+    #[test]
+    fn extract_reward_not_double_wrapped() {
+        let json = r#"{"Reward":0.5}"#;
+        assert_eq!(extract_reward_from_result(json), None);
+    }
+
+    #[test]
+    fn extract_reward_invalid_json() {
+        assert_eq!(extract_reward_from_result("not json"), None);
+    }
+
+    #[test]
+    fn reward_to_quality_mapping() {
+        // Reward -0.294 → quality midpoint(-0.294, 1.0) = 0.353
+        let quality = f64::midpoint(-0.294, 1.0).clamp(0.0, 1.0);
+        assert!((quality - 0.353).abs() < 0.001);
+
+        // Reward 0.0 → quality 0.5
+        let quality_zero = f64::midpoint(0.0, 1.0).clamp(0.0, 1.0);
+        assert!((quality_zero - 0.5).abs() < 1e-6);
+
+        // Reward 1.0 → quality 1.0
+        let quality_max = f64::midpoint(1.0, 1.0).clamp(0.0, 1.0);
+        assert!((quality_max - 1.0).abs() < 1e-6);
+
+        // Reward -1.0 → quality 0.0
+        let quality_min = f64::midpoint(-1.0, 1.0).clamp(0.0, 1.0);
+        assert!(quality_min.abs() < 1e-6);
+    }
 }

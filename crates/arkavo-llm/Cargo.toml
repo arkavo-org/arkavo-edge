@@ -18,7 +18,7 @@ kimi = ["dep:arkavo-kimi", "dep:reqwest"]
 deepseek = ["dep:arkavo-deepseek", "dep:reqwest"]
 qwen = ["dep:arkavo-qwen", "dep:reqwest"]
 gemini = ["dep:arkavo-gemini"]
-llama-cpp = ["dep:arkavo-llama-cpp", "dep:scopeguard", "dep:tokio-util"]
+llama-cpp = ["dep:arkavo-llama-cpp", "dep:arkavo-kv-cache", "dep:scopeguard", "dep:tokio-util"]
 snpe = ["dep:arkavo-snpe"]
 
 [dependencies]
@@ -50,6 +50,7 @@ arkavo-deepseek = { path = "../arkavo-deepseek", optional = true }
 arkavo-qwen = { path = "../arkavo-qwen", optional = true }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
+arkavo-kv-cache = { path = "../arkavo-kv-cache", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
 
