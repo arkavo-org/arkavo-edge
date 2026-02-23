@@ -87,6 +87,24 @@ pub async fn start_lesson_propagation_loop(learning_bus: Arc<LearningBus>, inter
     }
 }
 
+/// Start periodic broadcast of proven advisor adjustments to mesh peers
+pub async fn start_advisor_broadcast_loop(learning_bus: Arc<LearningBus>, interval: Duration) {
+    tracing::info!(
+        "Starting advisor broadcast loop for agent {} (interval: {:?})",
+        learning_bus.agent_id(),
+        interval
+    );
+    let mut ticker = tokio::time::interval(interval);
+
+    loop {
+        ticker.tick().await;
+
+        tracing::debug!("Advisor broadcast tick");
+
+        learning_bus.broadcast_advisor_adjustments().await;
+    }
+}
+
 /// Start periodic cleanup of expired gossip entries
 ///
 /// Cleans up patches, lessons, and seen_* maps older than max_message_age.

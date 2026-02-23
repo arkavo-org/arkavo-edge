@@ -1,5 +1,6 @@
 //! Gossip message types for patch propagation and learning
 
+pub use crate::advisor_message::AdvisorAdjustmentAnnouncement;
 pub use crate::context_message::{
     ContextChunkDelivery, ContextChunkRequest, ContextManifestAnnouncement,
 };
@@ -40,6 +41,8 @@ pub enum GossipMessage {
     ContextChunkRequest(ContextChunkRequest),
     /// Deliver requested chunks from a context manifest
     ContextChunkDelivery(ContextChunkDelivery),
+    /// Announce a proven advisor adjustment to the mesh
+    AdvisorAdjustmentAnnounce(AdvisorAdjustmentAnnouncement),
 }
 
 /// Announcement of a new patch

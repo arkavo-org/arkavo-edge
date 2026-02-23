@@ -22,8 +22,8 @@ pub use config_helpers::AgentMetadata;
 pub use episode_buffer::{EpisodeBuffer, ToolObservation};
 pub use event_loop::{start_event_processing_loop, start_lesson_application_loop};
 pub use gossip_transport::{
-    start_anti_entropy_loop, start_cleanup_loop, start_gossip_transport,
-    start_lesson_propagation_loop,
+    start_advisor_broadcast_loop, start_anti_entropy_loop, start_cleanup_loop,
+    start_gossip_transport, start_lesson_propagation_loop,
 };
 pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
 pub use mcp_bridge::McpBridgeTool;

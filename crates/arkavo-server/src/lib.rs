@@ -16,7 +16,7 @@ pub use server::{
     LearningBus, LearningConfig, LearningEvent, McpBridgeTool, PolicyCache, RlmBridge, ToolMemory,
     ToolMemoryEntry, ToolObservation, ToolPatternCache, ToolPatternObserver, WellKnownState,
     estimate_tokens, execute_with_conductor, execute_with_conductor_and_learning,
-    model_context_size, run_startup_planning_phase, start_anti_entropy_loop, start_cleanup_loop,
-    start_event_processing_loop, start_gossip_transport, start_lesson_application_loop,
-    start_lesson_propagation_loop,
+    model_context_size, run_startup_planning_phase, start_advisor_broadcast_loop,
+    start_anti_entropy_loop, start_cleanup_loop, start_event_processing_loop,
+    start_gossip_transport, start_lesson_application_loop, start_lesson_propagation_loop,
 };

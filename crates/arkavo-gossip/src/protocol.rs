@@ -227,6 +227,9 @@ impl GossipProtocol {
             GossipMessage::ContextChunkDelivery(delivery) => {
                 self.handle_context_chunk_delivery(delivery).await
             }
+            GossipMessage::AdvisorAdjustmentAnnounce(ann) => {
+                self.handle_advisor_adjustment_announce(ann).await
+            }
         }
     }
 
@@ -623,6 +626,49 @@ impl GossipProtocol {
         // NOTE: Chunk storage would integrate with RlmContextManager here.
         // For now, we just acknowledge receipt.
         Ok(Vec::new())
+    }
+
+    // ========== Advisor Adjustment Handlers ==========
+
+    /// Handle an advisor adjustment announcement
+    ///
+    /// No consensus needed -- the success_rate and feedback_count
+    /// carried by the adjustment IS the evidence of quality.
+    async fn handle_advisor_adjustment_announce(
+        &self,
+        announcement: crate::advisor_message::AdvisorAdjustmentAnnouncement,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        let ann_id = announcement.announcement_id;
+        let now = Utc::now();
+
+        // Dedup via seen_messages
+        {
+            let seen = self.seen_messages.read().await;
+            if seen.contains_key(&ann_id) {
+                return Err(GossipError::Duplicate(ann_id));
+            }
+        }
+
+        // Verify signature
+        {
+            let verifier = self.verifier.read().await;
+            verifier.verify_advisor_announcement(&announcement)?;
+        }
+
+        // Mark as seen
+        self.seen_messages.write().await.insert(ann_id, now);
+
+        tracing::info!(
+            announcement_id = %ann_id,
+            originator = %announcement.originator,
+            model_family = %announcement.model_family,
+            issue = %announcement.issue,
+            success_rate = announcement.stats.success_rate,
+            "Received advisor adjustment announcement"
+        );
+
+        // Propagate to peers
+        Ok(vec![GossipMessage::AdvisorAdjustmentAnnounce(announcement)])
     }
 }
 

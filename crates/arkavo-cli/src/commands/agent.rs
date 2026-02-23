@@ -1041,7 +1041,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     use arkavo_gossip::GossipConfig;
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig};
     use arkavo_server::A2aServer;
-    use arkavo_server::{LearningBus, start_anti_entropy_loop, start_lesson_propagation_loop};
+    use arkavo_server::{
+        LearningBus, start_advisor_broadcast_loop, start_anti_entropy_loop,
+        start_lesson_propagation_loop,
+    };
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
@@ -1405,6 +1408,12 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         let learning_bus_lp = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             start_lesson_propagation_loop(learning_bus_lp, Duration::from_secs(15)).await;
+        }));
+
+        // Start advisor adjustment broadcast loop (60s interval)
+        let learning_bus_adv = learning_bus.clone();
+        gossip_handles.push(tokio::spawn(async move {
+            start_advisor_broadcast_loop(learning_bus_adv, Duration::from_secs(60)).await;
         }));
 
         // Start lesson application loop (processes approved lessons, adds to policy cache)
