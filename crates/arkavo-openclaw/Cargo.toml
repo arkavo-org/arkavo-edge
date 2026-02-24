@@ -1,0 +1,34 @@
+[package]
+name = "arkavo-openclaw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WebSocket protocol adapter bridging OpenClaw and Arkavo A2A JSON-RPC"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true, features = ["std", "tls12"] }
+webpki-roots = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+dashmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+arkavo-protocol = { path = "../arkavo-protocol" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

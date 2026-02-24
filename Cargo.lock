@@ -1342,6 +1342,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-openclaw"
+version = "0.62.1"
+dependencies = [
+ "anyhow",
+ "arkavo-protocol",
+ "async-trait",
+ "dashmap",
+ "futures",
+ "hex",
+ "rand 0.8.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "arkavo-orchestrator"
 version = "0.62.1"
 dependencies = [
