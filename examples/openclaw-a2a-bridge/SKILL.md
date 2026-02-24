@@ -23,7 +23,7 @@ bash command:"./bridge.sh 'your coding task'"
 
 ## What Happens
 
-1. **Discovery** - The bridge queries `http://localhost:8361/.well-known/agent.json`
+1. **Discovery** - The bridge queries `http://localhost:8360/.well-known/agent.json`
    to verify the Arkavo agent is running and discover its capabilities.
 
 2. **Task Submission** - The bridge sends a `message/send` JSON-RPC request to
@@ -49,4 +49,4 @@ bash command:"./bridge.sh 'your coding task'"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ARKAVO_A2A_ENDPOINT` | `http://localhost:8360` | Arkavo JSON-RPC endpoint |
-| `ARKAVO_DISCOVERY_URL` | `http://localhost:8361` | Arkavo Agent Card endpoint |
+| `ARKAVO_DISCOVERY_URL` | `http://localhost:8360` | Arkavo Agent Card endpoint |

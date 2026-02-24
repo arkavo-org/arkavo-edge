@@ -5,13 +5,13 @@
 # over OpenClaw's plaintext, unbounded, cloud-only approach.
 #
 # Usage: ./demo.sh
-#   Requires: Arkavo agent running on port 8360-8361
+#   Requires: Arkavo agent running on port 8360
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENDPOINT="${ARKAVO_A2A_ENDPOINT:-http://localhost:8360}"
-DISCOVERY_URL="${ARKAVO_DISCOVERY_URL:-http://localhost:8361}"
+DISCOVERY_URL="${ARKAVO_DISCOVERY_URL:-${ENDPOINT}}"
 RESULTS_DIR="$SCRIPT_DIR/results"
 
 # Colors
@@ -82,7 +82,7 @@ banner "Act 1 — Setup"
 bridge "Checking Arkavo agent..."
 AGENT_CARD=$(curl -sf --connect-timeout 5 \
     "${DISCOVERY_URL}/.well-known/agent.json" 2>/dev/null) || {
-    echo -e "  ${RED}Arkavo agent not running on port 8361${NC}"
+    echo -e "  ${RED}Arkavo agent not running at ${DISCOVERY_URL}${NC}"
     echo -e "  Run: ./launch.sh"
     exit 1
 }

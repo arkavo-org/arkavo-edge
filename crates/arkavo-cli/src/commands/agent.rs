@@ -516,9 +516,32 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             a2a_enabled: true,
             a2a_service_type: None,
         };
+        // Known top-level YAML keys that parse_yaml_properties handles
+        const KNOWN_SECTIONS: &[&str] = &[
+            "name:",
+            "purpose:",
+            "model:",
+            "listen:",
+            "mdns:",
+            "a2a:",
+            "peers:",
+            "mcp_servers:",
+            "discovery:",
+        ];
+        let mut in_unknown_section = false;
         for line in frontmatter.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            // Non-indented line: check if it starts a known or unknown section
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                let is_known = KNOWN_SECTIONS.iter().any(|k| trimmed.starts_with(k))
+                    || trimmed.contains("_API_KEY:")
+                    || trimmed.contains("_api_key:");
+                in_unknown_section = !is_known;
+            }
+            if in_unknown_section {
                 continue;
             }
             parse_yaml_properties(
@@ -2098,6 +2121,14 @@ name: arkavo-bridge-agent
 purpose: "A2A protocol bridge demonstrating TDF encryption, budget enforcement, and preflight policies"
 model: ministral-3b
 
+kas:
+  enabled: true
+  key_id: "bridge-demo-key-1"
+  algorithm: "ec:secp256r1"
+  trusted_roots:
+    - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+      name: "Demo Root Authority"
+
 a2a:
   enabled: true
   discovery:
@@ -2114,6 +2145,15 @@ This agent serves as Arkavo's side of the A2A protocol bridge.
         assert_eq!(agents[0].model, "ministral-3b");
         assert!(agents[0].a2a_enabled);
         assert!(agents[0].purpose.contains("A2A protocol bridge"));
+    }
+
+    #[test]
+    fn parse_frontmatter_unknown_section_name_not_leaked() {
+        // Regression: nested `name:` inside kas: trusted_roots must not override agent name
+        let content = "---\nname: my-agent\npurpose: \"Test\"\nmodel: test\nkas:\n  trusted_roots:\n    - did: \"did:key:abc\"\n      name: \"Root Authority\"\n---\n";
+        let agents = parse_agents_config(content).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "my-agent");
     }
 
     #[test]

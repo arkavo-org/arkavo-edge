@@ -9,7 +9,7 @@ set -e
 
 # Configuration
 ENDPOINT="${ARKAVO_A2A_ENDPOINT:-http://localhost:8360}"
-DISCOVERY_URL="${ARKAVO_DISCOVERY_URL:-http://localhost:8361}"
+DISCOVERY_URL="${ARKAVO_DISCOVERY_URL:-${ENDPOINT}}"
 TASK_TEXT="${1:?Usage: ./bridge.sh \"your coding task\"}"
 
 # Colors
