@@ -296,7 +296,7 @@ Arkavo Edge is open source (check the license in the repository). You have the b
 1. **Start with the examples**: `examples/secure-agent/` for encryption basics, `examples/kas-a2a-capability/` for A2A protocol
 2. **Join the community**: Discord for questions, GitHub issues for bugs
 3. **Try the A2A bridge**: `examples/openclaw-a2a-bridge/` if you want to keep OpenClaw running while evaluating Arkavo
-4. **Read the security comparison**: `docs/security-comparison.md` for the full technical analysis
+4. **Read the security comparison**: see [The security comparison in detail](#the-security-comparison-in-detail) above for the full technical analysis
 
 ---
 
