@@ -10,14 +10,11 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
-use crate::handshake::{self, SessionInfo};
+use crate::handshake;
 use crate::protocol::OpenClawFrame;
 use crate::translator;
 
 /// Trait for dispatching translated A2A requests to the local handler.
-///
-/// Implementors bridge between the OpenClaw listener and the actual A2A
-/// processing pipeline (e.g., `A2aRpcImpl` handlers).
 #[async_trait]
 pub trait OpenClawDispatcher: Send + Sync {
     async fn dispatch(&self, request: A2aRequest) -> A2aResponse;
@@ -96,13 +93,11 @@ async fn handle_connection(
     config: Arc<ListenerConfig>,
     dispatcher: Arc<dyn OpenClawDispatcher>,
 ) -> Result<(), ConnectionError> {
-    // Upgrade to WebSocket
     let mut ws = accept_async(stream)
         .await
         .map_err(|e| ConnectionError::WebSocket(format!("upgrade failed: {e}")))?;
 
-    // Run server-side handshake
-    let session = handshake::server_handshake(
+    let (session, _connect_id) = handshake::server_handshake(
         &mut ws,
         config.expected_token.as_deref(),
         config.handshake_timeout_ms,
@@ -112,17 +107,16 @@ async fn handle_connection(
 
     info!(
         "OpenClaw client authenticated: role={:?}, scopes={:?}",
-        session.role, session.scope
+        session.role, session.scopes
     );
 
-    // Enter message loop
     message_loop(&mut ws, &dispatcher, &session).await
 }
 
 async fn message_loop<S>(
     ws: &mut S,
     dispatcher: &Arc<dyn OpenClawDispatcher>,
-    _session: &SessionInfo,
+    _session: &handshake::SessionInfo,
 ) -> Result<(), ConnectionError>
 where
     S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
@@ -160,17 +154,12 @@ where
                                 })?;
                             }
                             Err(e) => {
-                                let err_resp =
-                                    OpenClawFrame::Response(crate::protocol::ResponseFrame {
-                                        id: oc_id,
-                                        result: None,
-                                        error: Some(crate::protocol::OpenClawError {
-                                            code: -32600,
-                                            message: format!("translation error: {e}"),
-                                            data: None,
-                                        }),
-                                    });
-                                let json = serde_json::to_string(&err_resp).map_err(|e| {
+                                let err_frame = crate::protocol::error_response(
+                                    &oc_id,
+                                    "INVALID_REQUEST",
+                                    &format!("translation error: {e}"),
+                                );
+                                let json = serde_json::to_string(&err_frame).map_err(|e| {
                                     ConnectionError::Protocol(format!("serialize: {e}"))
                                 })?;
                                 ws.send(Message::Text(json)).await.map_err(|e| {
@@ -180,8 +169,7 @@ where
                         }
                     }
                     OpenClawFrame::Event(ev) => {
-                        debug!("received event: topic={}", ev.topic);
-                        // Events from clients are acknowledged but not dispatched
+                        debug!("received event: {}", ev.event);
                     }
                     _ => {
                         debug!("ignoring non-request frame in message loop");
@@ -264,37 +252,52 @@ mod tests {
         handle.abort();
     }
 
-    #[tokio::test]
-    async fn end_to_end_request_response() {
-        let config = ListenerConfig {
-            bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
-            expected_token: None,
-            handshake_timeout_ms: 5000,
-        };
-        let listener = OpenClawListener::new(config, Arc::new(EchoDispatcher));
-        let (handle, addr) = listener.start().await.unwrap();
+    /// Helper: connect + handshake using real OpenClaw protocol
+    async fn connect_and_handshake(
+        addr: SocketAddr,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
+        use crate::protocol::{ChallengePayload, ClientInfo, ConnectParams};
 
-        // Connect as a client via raw tokio-tungstenite
         let url = format!("ws://127.0.0.1:{}", addr.port());
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
 
-        // Server sends challenge
+        // Server sends challenge event
         let challenge_msg = ws.next().await.unwrap().unwrap();
         let challenge_text = match challenge_msg {
             Message::Text(t) => t,
             other => panic!("expected text, got {other:?}"),
         };
         let challenge: OpenClawFrame = serde_json::from_str(&challenge_text).unwrap();
-        assert!(matches!(challenge, OpenClawFrame::Challenge(_)));
+        match &challenge {
+            OpenClawFrame::Event(e) => {
+                assert_eq!(e.event, "connect.challenge");
+                let _cp: ChallengePayload = serde_json::from_value(e.payload.clone()).unwrap();
+            }
+            _ => panic!("expected connect.challenge event"),
+        }
 
-        // Send connect (no auth required)
-        let connect = OpenClawFrame::Connect(crate::protocol::ConnectFrame {
+        // Send connect request
+        let params = ConnectParams {
+            min_protocol: 3,
+            max_protocol: 3,
+            client: ClientInfo {
+                id: "test".to_string(),
+                version: "0.1.0".to_string(),
+                platform: "test".to_string(),
+                mode: "test".to_string(),
+                display_name: None,
+                instance_id: None,
+            },
+            role: Some("operator".to_string()),
+            scopes: None,
+            caps: None,
             auth: None,
-            role: Some("test".to_string()),
-            scope: None,
-            min_protocol: None,
-            max_protocol: None,
-        });
+            device: None,
+            locale: None,
+            user_agent: None,
+        };
+        let connect = crate::protocol::connect_request("hs-test", params);
         ws.send(Message::Text(serde_json::to_string(&connect).unwrap()))
             .await
             .unwrap();
@@ -306,13 +309,34 @@ mod tests {
             other => panic!("expected text, got {other:?}"),
         };
         let hello: OpenClawFrame = serde_json::from_str(&hello_text).unwrap();
-        assert!(matches!(hello, OpenClawFrame::HelloOk(_)));
+        match &hello {
+            OpenClawFrame::Response(r) => {
+                assert_eq!(r.id, "hs-test");
+                assert!(r.ok);
+            }
+            _ => panic!("expected hello-ok response"),
+        }
+
+        ws
+    }
+
+    #[tokio::test]
+    async fn end_to_end_request_response() {
+        let config = ListenerConfig {
+            bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            expected_token: None,
+            handshake_timeout_ms: 5000,
+        };
+        let listener = OpenClawListener::new(config, Arc::new(EchoDispatcher));
+        let (handle, addr) = listener.start().await.unwrap();
+
+        let mut ws = connect_and_handshake(addr).await;
 
         // Send a chat request
         let req = OpenClawFrame::Request(crate::protocol::RequestFrame {
             id: "test-1".to_string(),
-            method: "chat".to_string(),
-            params: Some(serde_json::json!({"content": "hello"})),
+            method: "chat.send".to_string(),
+            params: Some(serde_json::json!({"message": "hello"})),
         });
         ws.send(Message::Text(serde_json::to_string(&req).unwrap()))
             .await
@@ -328,8 +352,8 @@ mod tests {
         match resp {
             OpenClawFrame::Response(r) => {
                 assert_eq!(r.id, "test-1");
-                assert!(r.error.is_none());
-                assert_eq!(r.result.as_ref().unwrap()["echo"], "message/send");
+                assert!(r.ok);
+                assert_eq!(r.payload.as_ref().unwrap()["echo"], "message/send");
             }
             other => panic!("expected Response, got {other:?}"),
         }
@@ -348,28 +372,13 @@ mod tests {
         let listener = OpenClawListener::new(config, Arc::new(ErrorDispatcher));
         let (handle, addr) = listener.start().await.unwrap();
 
-        let url = format!("ws://127.0.0.1:{}", addr.port());
-        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-
-        // Handshake
-        let _ = ws.next().await; // challenge
-        let connect = OpenClawFrame::Connect(crate::protocol::ConnectFrame {
-            auth: None,
-            role: None,
-            scope: None,
-            min_protocol: None,
-            max_protocol: None,
-        });
-        ws.send(Message::Text(serde_json::to_string(&connect).unwrap()))
-            .await
-            .unwrap();
-        let _ = ws.next().await; // hello-ok
+        let mut ws = connect_and_handshake(addr).await;
 
         // Send request
         let req = OpenClawFrame::Request(crate::protocol::RequestFrame {
             id: "err-1".to_string(),
-            method: "chat".to_string(),
-            params: Some(serde_json::json!({"content": "test"})),
+            method: "chat.send".to_string(),
+            params: Some(serde_json::json!({"message": "test"})),
         });
         ws.send(Message::Text(serde_json::to_string(&req).unwrap()))
             .await
@@ -385,8 +394,8 @@ mod tests {
         match resp {
             OpenClawFrame::Response(r) => {
                 assert_eq!(r.id, "err-1");
-                assert!(r.error.is_some());
-                assert_eq!(r.error.unwrap().code, -32601);
+                assert!(!r.ok);
+                assert_eq!(r.error.unwrap().code, "METHOD_NOT_FOUND");
             }
             _ => panic!("expected Response"),
         }

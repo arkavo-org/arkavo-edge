@@ -20,7 +20,8 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::handshake::{HandshakeConfig, client_handshake};
+use crate::device::DeviceIdentity;
+use crate::handshake::{HandshakeConfig, HandshakeOutcome, client_handshake_with_device};
 use crate::protocol::{OpenClawFrame, ResponseFrame};
 use crate::translator;
 
@@ -40,6 +41,7 @@ struct OpenClawConnection {
 pub struct OpenClawTransport {
     transport_config: TransportConfig,
     handshake_config: HandshakeConfig,
+    device: Option<DeviceIdentity>,
     connection: Arc<RwLock<Option<OpenClawConnection>>>,
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
     /// Maps OpenClaw request ID (string) -> oneshot sender for response routing.
@@ -51,10 +53,17 @@ impl OpenClawTransport {
         Self {
             transport_config,
             handshake_config,
+            device: None,
             connection: Arc::new(RwLock::new(None)),
             endpoint: Arc::new(RwLock::new(None)),
             pending_requests: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Create transport with a device identity for scoped access.
+    pub fn with_device(mut self, device: DeviceIdentity) -> Self {
+        self.device = Some(device);
+        self
     }
 
     fn build_tls_connector(&self) -> Result<Connector, A2aError> {
@@ -103,11 +112,8 @@ impl OpenClawTransport {
                                 warn!("response for unknown id: {}", resp.id);
                             }
                         }
-                        Ok(OpenClawFrame::Error(e)) => {
-                            error!("server error: {} (code {})", e.message, e.code);
-                        }
                         Ok(OpenClawFrame::Event(ev)) => {
-                            debug!("event: topic={}", ev.topic);
+                            debug!("event: {}", ev.event);
                         }
                         Ok(_) => {
                             debug!("ignoring non-response frame");
@@ -154,15 +160,25 @@ impl A2aTransport for OpenClawTransport {
 
         let mut ws_stream = self.connect_websocket(&endpoint.url).await?;
 
-        // Perform OpenClaw challenge-response handshake
-        let hello = client_handshake(&mut ws_stream, &self.handshake_config)
-            .await
-            .map_err(|e| A2aError::AuthenticationFailed(format!("OpenClaw handshake: {e}")))?;
+        let outcome = client_handshake_with_device(
+            &mut ws_stream,
+            &self.handshake_config,
+            self.device.as_ref(),
+        )
+        .await
+        .map_err(|e| A2aError::AuthenticationFailed(format!("OpenClaw handshake: {e}")))?;
 
-        info!(
-            "OpenClaw handshake complete, device_token={}",
-            hello.device_token
-        );
+        let session = match outcome {
+            HandshakeOutcome::Connected(session) => session,
+            HandshakeOutcome::PairingRequested { request_id } => {
+                return Err(A2aError::AuthenticationFailed(format!(
+                    "device pairing required (requestId={request_id:?}), approve with: openclaw devices approve"
+                ))
+                .into());
+            }
+        };
+
+        info!("OpenClaw handshake complete, conn_id={:?}", session.conn_id);
 
         let (writer, reader) = ws_stream.split();
         let reader_task = Self::start_reader_task(reader, self.pending_requests.clone());

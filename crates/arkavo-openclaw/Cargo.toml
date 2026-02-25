@@ -28,6 +28,9 @@ uuid = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+base64 = { workspace = true }
+dirs = { workspace = true }
 arkavo-protocol = { path = "../arkavo-protocol" }
 
 [dev-dependencies]

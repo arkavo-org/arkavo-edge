@@ -10,7 +10,7 @@ use crate::protocol::{EventFrame, OpenClawError, RequestFrame, ResponseFrame};
 /// parameters to match the A2A schema.
 pub fn openclaw_req_to_a2a(frame: &RequestFrame) -> Result<A2aRequest, TranslatorError> {
     let (method, params) = match frame.method.as_str() {
-        "chat" | "send_message" => {
+        "chat.send" | "send" | "chat" | "send_message" => {
             let content = extract_content(frame.params.as_ref())?;
             let params = serde_json::json!({
                 "request": {
@@ -36,7 +36,7 @@ pub fn openclaw_req_to_a2a(frame: &RequestFrame) -> Result<A2aRequest, Translato
             });
             ("message/send", wrapped)
         }
-        "discover" | "list_agents" => {
+        "agents.list" | "discover" | "list_agents" => {
             let params = frame
                 .params
                 .clone()
@@ -50,7 +50,7 @@ pub fn openclaw_req_to_a2a(frame: &RequestFrame) -> Result<A2aRequest, Translato
                 .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
             ("tasks/get", params)
         }
-        "cancel" => {
+        "cancel" | "chat.abort" => {
             let params = frame
                 .params
                 .clone()
@@ -79,14 +79,16 @@ pub fn a2a_response_to_openclaw(openclaw_id: &str, response: &A2aResponse) -> Re
     match response {
         A2aResponse::Success { result, .. } => ResponseFrame {
             id: openclaw_id.to_string(),
-            result: Some(result.clone()),
+            ok: true,
+            payload: Some(result.clone()),
             error: None,
         },
         A2aResponse::Error { error, .. } => ResponseFrame {
             id: openclaw_id.to_string(),
-            result: None,
+            ok: false,
+            payload: None,
             error: Some(OpenClawError {
-                code: error.code,
+                code: a2a_error_code_to_string(error.code),
                 message: error.message.clone(),
                 data: error.data.clone(),
             }),
@@ -94,28 +96,28 @@ pub fn a2a_response_to_openclaw(openclaw_id: &str, response: &A2aResponse) -> Re
     }
 }
 
-/// Translate an A2A event (streaming delta, broadcast) into an OpenClaw event frame.
+/// Translate an A2A event into an OpenClaw event frame.
 pub fn a2a_event_to_openclaw(method: &str, data: Value) -> EventFrame {
-    let topic = match method {
-        "message/stream" | "chat_stream" => "chat.delta",
-        "agent_broadcast" => "status",
+    let event_name = match method {
+        "message/stream" | "chat_stream" => "chat",
+        "agent_broadcast" => "presence",
         other => other,
     };
     EventFrame {
-        topic: topic.to_string(),
-        data,
+        event: event_name.to_string(),
+        payload: data,
+        seq: None,
+        state_version: None,
     }
 }
 
-/// Translate an A2A JSON-RPC request into an OpenClaw request frame (outbound direction).
-///
-/// Used by the client transport to convert A2A requests before sending to an OpenClaw gateway.
+/// Translate an A2A JSON-RPC request into an OpenClaw request frame (outbound).
 pub fn a2a_to_openclaw_req(request: &A2aRequest) -> RequestFrame {
     let method = match request.method.as_str() {
-        "message/send" => "chat",
-        "agent_discover" => "discover",
+        "message/send" => "chat.send",
+        "agent_discover" => "agents.list",
         "tasks/get" => "status",
-        "tasks/cancel" => "cancel",
+        "tasks/cancel" => "chat.abort",
         other => other,
     };
     RequestFrame {
@@ -126,42 +128,67 @@ pub fn a2a_to_openclaw_req(request: &A2aRequest) -> RequestFrame {
 }
 
 /// Translate an OpenClaw response frame back into an A2A JSON-RPC response.
-///
-/// Used by the client transport after receiving a response from an OpenClaw gateway.
 pub fn openclaw_response_to_a2a(original_id: Uuid, frame: &ResponseFrame) -> A2aResponse {
-    if let Some(error) = &frame.error {
+    if !frame.ok {
+        let (code, message) = frame
+            .error
+            .as_ref()
+            .map(|e| (openclaw_error_code_to_int(&e.code), e.message.clone()))
+            .unwrap_or_else(|| (-32000, "unknown error".to_string()));
         A2aResponse::Error {
             jsonrpc: "2.0".to_string(),
             id: original_id,
             error: JsonRpcError {
-                code: error.code,
-                message: error.message.clone(),
-                data: error.data.clone(),
+                code,
+                message,
+                data: frame.error.as_ref().and_then(|e| e.data.clone()),
             },
         }
     } else {
         A2aResponse::Success {
             jsonrpc: "2.0".to_string(),
             id: original_id,
-            result: frame.result.clone().unwrap_or(Value::Null),
+            result: frame.payload.clone().unwrap_or(Value::Null),
         }
     }
 }
 
 fn extract_content(params: Option<&Value>) -> Result<String, TranslatorError> {
     let params = params.ok_or(TranslatorError::MissingParams)?;
-    // Try common OpenClaw patterns: {content: "..."}, {message: "..."}, or plain string
-    if let Some(content) = params.get("content").and_then(Value::as_str) {
-        return Ok(content.to_string());
-    }
+    // OpenClaw chat.send uses params.message for the text
     if let Some(message) = params.get("message").and_then(Value::as_str) {
         return Ok(message.to_string());
+    }
+    if let Some(content) = params.get("content").and_then(Value::as_str) {
+        return Ok(content.to_string());
     }
     if let Some(s) = params.as_str() {
         return Ok(s.to_string());
     }
-    // Fall back to stringified params
     Ok(params.to_string())
+}
+
+fn a2a_error_code_to_string(code: i32) -> String {
+    match code {
+        -32700 => "PARSE_ERROR".to_string(),
+        -32600 => "INVALID_REQUEST".to_string(),
+        -32601 => "METHOD_NOT_FOUND".to_string(),
+        -32602 => "INVALID_PARAMS".to_string(),
+        -32603 => "INTERNAL_ERROR".to_string(),
+        other => format!("ERROR_{other}"),
+    }
+}
+
+fn openclaw_error_code_to_int(code: &str) -> i32 {
+    match code {
+        "PARSE_ERROR" => -32700,
+        "INVALID_REQUEST" => -32600,
+        "METHOD_NOT_FOUND" => -32601,
+        "INVALID_PARAMS" => -32602,
+        "INTERNAL_ERROR" => -32603,
+        "NOT_LINKED" => -32001,
+        _ => -32000,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -175,11 +202,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chat_request_maps_to_message_send() {
+    fn chat_send_request_maps_to_message_send() {
         let frame = RequestFrame {
             id: "r1".to_string(),
-            method: "chat".to_string(),
-            params: Some(serde_json::json!({"content": "hello world"})),
+            method: "chat.send".to_string(),
+            params: Some(serde_json::json!({"message": "hello world"})),
         };
         let a2a = openclaw_req_to_a2a(&frame).unwrap();
         assert_eq!(a2a.method, "message/send");
@@ -188,21 +215,21 @@ mod tests {
     }
 
     #[test]
-    fn send_message_alias() {
+    fn chat_alias_maps_to_message_send() {
         let frame = RequestFrame {
             id: "r2".to_string(),
-            method: "send_message".to_string(),
-            params: Some(serde_json::json!({"message": "hi"})),
+            method: "chat".to_string(),
+            params: Some(serde_json::json!({"content": "hi"})),
         };
         let a2a = openclaw_req_to_a2a(&frame).unwrap();
         assert_eq!(a2a.method, "message/send");
     }
 
     #[test]
-    fn discover_request_maps_to_agent_discover() {
+    fn agents_list_maps_to_agent_discover() {
         let frame = RequestFrame {
             id: "r3".to_string(),
-            method: "discover".to_string(),
+            method: "agents.list".to_string(),
             params: None,
         };
         let a2a = openclaw_req_to_a2a(&frame).unwrap();
@@ -221,10 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn cancel_request_maps_to_tasks_cancel() {
+    fn chat_abort_maps_to_tasks_cancel() {
         let frame = RequestFrame {
             id: "r5".to_string(),
-            method: "cancel".to_string(),
+            method: "chat.abort".to_string(),
             params: Some(serde_json::json!({"task_id": "t1"})),
         };
         let a2a = openclaw_req_to_a2a(&frame).unwrap();
@@ -251,8 +278,9 @@ mod tests {
         };
         let oc = a2a_response_to_openclaw("r1", &a2a);
         assert_eq!(oc.id, "r1");
+        assert!(oc.ok);
+        assert_eq!(oc.payload.unwrap()["answer"], 42);
         assert!(oc.error.is_none());
-        assert_eq!(oc.result.unwrap()["answer"], 42);
     }
 
     #[test]
@@ -268,28 +296,29 @@ mod tests {
         };
         let oc = a2a_response_to_openclaw("r2", &a2a);
         assert_eq!(oc.id, "r2");
-        assert!(oc.result.is_none());
+        assert!(!oc.ok);
+        assert!(oc.payload.is_none());
         let err = oc.error.unwrap();
-        assert_eq!(err.code, -32601);
+        assert_eq!(err.code, "METHOD_NOT_FOUND");
     }
 
     #[test]
     fn a2a_to_openclaw_event_chat_stream() {
         let ev = a2a_event_to_openclaw("chat_stream", serde_json::json!({"text": "hi"}));
-        assert_eq!(ev.topic, "chat.delta");
+        assert_eq!(ev.event, "chat");
     }
 
     #[test]
     fn a2a_to_openclaw_event_broadcast() {
         let ev = a2a_event_to_openclaw("agent_broadcast", serde_json::json!({"status": "ready"}));
-        assert_eq!(ev.topic, "status");
+        assert_eq!(ev.event, "presence");
     }
 
     #[test]
     fn a2a_to_openclaw_req_message_send() {
         let req = A2aRequest::new("message/send", serde_json::json!({"content": "test"}));
         let frame = a2a_to_openclaw_req(&req);
-        assert_eq!(frame.method, "chat");
+        assert_eq!(frame.method, "chat.send");
         assert_eq!(frame.id, req.id.to_string());
     }
 
@@ -298,7 +327,8 @@ mod tests {
         let id = Uuid::new_v4();
         let frame = ResponseFrame {
             id: "oc-1".to_string(),
-            result: Some(serde_json::json!({"ok": true})),
+            ok: true,
+            payload: Some(serde_json::json!({"ok": true})),
             error: None,
         };
         let resp = openclaw_response_to_a2a(id, &frame);
@@ -318,9 +348,10 @@ mod tests {
         let id = Uuid::new_v4();
         let frame = ResponseFrame {
             id: "oc-2".to_string(),
-            result: None,
+            ok: false,
+            payload: None,
             error: Some(OpenClawError {
-                code: -1,
+                code: "INVALID_REQUEST".to_string(),
                 message: "fail".to_string(),
                 data: None,
             }),
@@ -328,7 +359,7 @@ mod tests {
         let resp = openclaw_response_to_a2a(id, &frame);
         match resp {
             A2aResponse::Error { error, .. } => {
-                assert_eq!(error.code, -1);
+                assert_eq!(error.code, -32600);
                 assert_eq!(error.message, "fail");
             }
             _ => panic!("expected error"),
@@ -345,5 +376,13 @@ mod tests {
         let a2a = openclaw_req_to_a2a(&frame).unwrap();
         assert_eq!(a2a.method, "message/send");
         assert!(a2a.params["request"]["metadata"]["source"] == "openclaw");
+    }
+
+    #[test]
+    fn error_code_round_trip() {
+        assert_eq!(a2a_error_code_to_string(-32601), "METHOD_NOT_FOUND");
+        assert_eq!(openclaw_error_code_to_int("METHOD_NOT_FOUND"), -32601);
+        assert_eq!(a2a_error_code_to_string(-32600), "INVALID_REQUEST");
+        assert_eq!(openclaw_error_code_to_int("INVALID_REQUEST"), -32600);
     }
 }
