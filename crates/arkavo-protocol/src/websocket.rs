@@ -9,6 +9,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use std::fs;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, oneshot};
@@ -35,6 +36,7 @@ pub struct WebSocketTransport {
     connection: Arc<RwLock<Option<WebSocketConnection>>>,
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
     pending_requests: Arc<DashMap<Uuid, oneshot::Sender<A2aResponse>>>,
+    connected: Arc<AtomicBool>,
 }
 
 impl WebSocketTransport {
@@ -44,6 +46,7 @@ impl WebSocketTransport {
             connection: Arc::new(RwLock::new(None)),
             endpoint: Arc::new(RwLock::new(None)),
             pending_requests: Arc::new(DashMap::new()),
+            connected: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -137,6 +140,7 @@ impl WebSocketTransport {
     fn start_reader_task(
         mut reader: WsReader,
         pending_requests: Arc<DashMap<Uuid, oneshot::Sender<A2aResponse>>>,
+        connected: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(msg_result) = reader.next().await {
@@ -159,10 +163,12 @@ impl WebSocketTransport {
                     }
                     Ok(Message::Close(_)) => {
                         info!("WebSocket connection closed by server");
+                        connected.store(false, Ordering::Relaxed);
                         break;
                     }
                     Err(e) => {
                         error!("WebSocket read error: {}", e);
+                        connected.store(false, Ordering::Relaxed);
                         break;
                     }
                     _ => {}
@@ -198,7 +204,11 @@ impl A2aTransport for WebSocketTransport {
         let ws_stream = self.connect_websocket(&endpoint.url).await?;
         let (writer, reader) = ws_stream.split();
 
-        let reader_task = Self::start_reader_task(reader, self.pending_requests.clone());
+        let reader_task = Self::start_reader_task(
+            reader,
+            self.pending_requests.clone(),
+            self.connected.clone(),
+        );
 
         let connection = WebSocketConnection {
             writer: Arc::new(RwLock::new(writer)),
@@ -215,6 +225,7 @@ impl A2aTransport for WebSocketTransport {
             *endpoint_guard = Some(endpoint.clone());
         }
 
+        self.connected.store(true, Ordering::Relaxed);
         info!("Successfully connected to {}", endpoint.url);
         Ok(())
     }
@@ -269,6 +280,7 @@ impl A2aTransport for WebSocketTransport {
 
     async fn close(&self) -> anyhow::Result<()> {
         info!("Closing WebSocket connection");
+        self.connected.store(false, Ordering::Relaxed);
 
         if let Some(connection) = self.connection.write().await.take() {
             // Send close frame
@@ -292,8 +304,7 @@ impl A2aTransport for WebSocketTransport {
     }
 
     fn is_connected(&self) -> bool {
-        let guard = futures::executor::block_on(self.connection.read());
-        guard.is_some()
+        self.connected.load(Ordering::Relaxed)
     }
 }
 

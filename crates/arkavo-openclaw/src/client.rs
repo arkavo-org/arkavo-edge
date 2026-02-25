@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use arkavo_protocol::error::A2aError;
@@ -57,6 +58,8 @@ pub struct OpenClawTransport {
     pending_requests: Arc<DashMap<String, (uuid::Uuid, oneshot::Sender<ResponseFrame>)>>,
     /// Broadcast channel for server-pushed events (chat deltas, presence, etc.).
     event_tx: broadcast::Sender<OpenClawEvent>,
+    /// Atomic flag for lock-free is_connected() checks (avoids block_on in async context).
+    connected: Arc<AtomicBool>,
 }
 
 impl OpenClawTransport {
@@ -70,6 +73,7 @@ impl OpenClawTransport {
             endpoint: Arc::new(RwLock::new(None)),
             pending_requests: Arc::new(DashMap::new()),
             event_tx,
+            connected: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -162,6 +166,7 @@ impl OpenClawTransport {
         mut reader: WsReader,
         pending: Arc<DashMap<String, (uuid::Uuid, oneshot::Sender<ResponseFrame>)>>,
         event_tx: broadcast::Sender<OpenClawEvent>,
+        connected: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(msg_result) = reader.next().await {
@@ -191,10 +196,12 @@ impl OpenClawTransport {
                     },
                     Ok(Message::Close(_)) => {
                         info!("OpenClaw connection closed by server");
+                        connected.store(false, Ordering::Relaxed);
                         break;
                     }
                     Err(e) => {
                         error!("OpenClaw WS read error: {e}");
+                        connected.store(false, Ordering::Relaxed);
                         break;
                     }
                     _ => {}
@@ -248,8 +255,12 @@ impl A2aTransport for OpenClawTransport {
         info!("OpenClaw handshake complete, conn_id={:?}", session.conn_id);
 
         let (writer, reader) = ws_stream.split();
-        let reader_task =
-            Self::start_reader_task(reader, self.pending_requests.clone(), self.event_tx.clone());
+        let reader_task = Self::start_reader_task(
+            reader,
+            self.pending_requests.clone(),
+            self.event_tx.clone(),
+            self.connected.clone(),
+        );
 
         let connection = OpenClawConnection {
             writer: Arc::new(RwLock::new(writer)),
@@ -258,6 +269,7 @@ impl A2aTransport for OpenClawTransport {
 
         *self.connection.write().await = Some(connection);
         *self.endpoint.write().await = Some(endpoint.clone());
+        self.connected.store(true, Ordering::Relaxed);
 
         Ok(())
     }
@@ -307,6 +319,7 @@ impl A2aTransport for OpenClawTransport {
 
     async fn close(&self) -> anyhow::Result<()> {
         info!("Closing OpenClaw connection");
+        self.connected.store(false, Ordering::Relaxed);
 
         let conn = self.connection.write().await.take();
         if let Some(conn) = conn {
@@ -322,8 +335,7 @@ impl A2aTransport for OpenClawTransport {
     }
 
     fn is_connected(&self) -> bool {
-        let guard = futures::executor::block_on(self.connection.read());
-        guard.is_some()
+        self.connected.load(Ordering::Relaxed)
     }
 }
 

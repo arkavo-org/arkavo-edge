@@ -108,11 +108,11 @@ impl ModelSelector {
         if prefer_larger {
             // GLM-4.7-Flash: 30B MoE, highest quality local model
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram_for_glm()
+                && Self::has_sufficient_ram(32)
             {
                 ModelChoice::LocalGlm47Flash
             } else if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
-                && Self::has_sufficient_ram_for_qwen35()
+                && Self::has_sufficient_ram(48)
             {
                 ModelChoice::LocalQwen35_27B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
@@ -139,8 +139,8 @@ impl ModelSelector {
         }
     }
 
-    /// Check if system has sufficient RAM for Qwen3.5-27B (48GB+)
-    fn has_sufficient_ram_for_qwen35() -> bool {
+    /// Check if system has at least `min_gb` of RAM
+    fn has_sufficient_ram(min_gb: u64) -> bool {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
@@ -148,32 +148,13 @@ impl ModelSelector {
                 && let Ok(mem_str) = String::from_utf8(output.stdout)
                 && let Ok(bytes) = mem_str.trim().parse::<u64>()
             {
-                return bytes >= 48 * 1024 * 1024 * 1024; // 48GB
+                return bytes >= min_gb * 1024 * 1024 * 1024;
             }
             false
         }
         #[cfg(not(target_os = "macos"))]
         {
-            true
-        }
-    }
-
-    /// Check if system has sufficient RAM for GLM-4.7-Flash (32GB+)
-    fn has_sufficient_ram_for_glm() -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            use std::process::Command;
-            if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output()
-                && let Ok(mem_str) = String::from_utf8(output.stdout)
-                && let Ok(bytes) = mem_str.trim().parse::<u64>()
-            {
-                return bytes >= 32 * 1024 * 1024 * 1024; // 32GB
-            }
-            false
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // On other platforms, check /proc/meminfo or assume true for now
+            let _ = min_gb;
             true
         }
     }
@@ -291,12 +272,12 @@ impl ModelSelector {
                 models.push(ModelChoice::LocalMinistral8B);
             }
             if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
-                && Self::has_sufficient_ram_for_qwen35()
+                && Self::has_sufficient_ram(48)
             {
                 models.push(ModelChoice::LocalQwen35_27B);
             }
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram_for_glm()
+                && Self::has_sufficient_ram(32)
             {
                 models.push(ModelChoice::LocalGlm47Flash);
             }

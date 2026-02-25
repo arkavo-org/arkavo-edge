@@ -297,7 +297,7 @@ mod tests {
             locale: None,
             user_agent: None,
         };
-        let connect = crate::protocol::connect_request("hs-test", params);
+        let connect = crate::protocol::connect_request("hs-test", params).unwrap();
         ws.send(Message::Text(serde_json::to_string(&connect).unwrap()))
             .await
             .unwrap();

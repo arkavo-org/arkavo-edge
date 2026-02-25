@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn test_delegation_token_json() {
         let token = make_test_token(&["https://arkavo.net/attr/role/value/admin"]);
-        let json = token.to_json();
+        let json = token.to_json().unwrap();
 
         let parsed = DelegationToken::from_json(&json).unwrap();
         assert_eq!(parsed.subject_did, token.subject_did);

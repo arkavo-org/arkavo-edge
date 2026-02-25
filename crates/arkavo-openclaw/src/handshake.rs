@@ -172,7 +172,8 @@ where
         user_agent: Some(format!("arkavo-openclaw/{}", env!("CARGO_PKG_VERSION"))),
     };
 
-    let connect_frame = crate::protocol::connect_request(&connect_id, params);
+    let connect_frame = crate::protocol::connect_request(&connect_id, params)
+        .map_err(|e| HandshakeError::Protocol(format!("connect request: {e}")))?;
     send_frame(ws, connect_frame).await?;
     debug!("sent connect request id={connect_id}");
 
@@ -364,7 +365,8 @@ where
 
     // Step 3: send hello-ok response
     let conn_id = uuid::Uuid::new_v4().to_string();
-    let hello = crate::protocol::hello_ok_response(&connect_id, PROTOCOL_VERSION, &conn_id);
+    let hello = crate::protocol::hello_ok_response(&connect_id, PROTOCOL_VERSION, &conn_id)
+        .map_err(|e| HandshakeError::Protocol(format!("hello-ok response: {e}")))?;
     send_frame(ws, hello).await?;
     debug!("handshake accepted, conn_id={conn_id}");
 

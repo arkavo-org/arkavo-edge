@@ -167,16 +167,23 @@ pub fn challenge_event(nonce: &str, ts: u64) -> OpenClawFrame {
 }
 
 /// Build a connect request frame (client -> server).
-pub fn connect_request(id: &str, params: ConnectParams) -> OpenClawFrame {
-    OpenClawFrame::Request(RequestFrame {
+pub fn connect_request(
+    id: &str,
+    params: ConnectParams,
+) -> Result<OpenClawFrame, serde_json::Error> {
+    Ok(OpenClawFrame::Request(RequestFrame {
         id: id.to_string(),
         method: "connect".to_string(),
-        params: Some(serde_json::to_value(params).unwrap_or_default()),
-    })
+        params: Some(serde_json::to_value(params)?),
+    }))
 }
 
 /// Build a hello-ok response frame (server -> client).
-pub fn hello_ok_response(id: &str, protocol: u32, conn_id: &str) -> OpenClawFrame {
+pub fn hello_ok_response(
+    id: &str,
+    protocol: u32,
+    conn_id: &str,
+) -> Result<OpenClawFrame, serde_json::Error> {
     let payload = HelloOkPayload {
         payload_type: "hello-ok".to_string(),
         protocol,
@@ -190,12 +197,12 @@ pub fn hello_ok_response(id: &str, protocol: u32, conn_id: &str) -> OpenClawFram
         })),
         features: None,
     };
-    OpenClawFrame::Response(ResponseFrame {
+    Ok(OpenClawFrame::Response(ResponseFrame {
         id: id.to_string(),
         ok: true,
-        payload: Some(serde_json::to_value(payload).unwrap_or_default()),
+        payload: Some(serde_json::to_value(payload)?),
         error: None,
-    })
+    }))
 }
 
 /// Build a success response frame.
@@ -355,7 +362,7 @@ mod tests {
             locale: None,
             user_agent: None,
         };
-        let frame = connect_request("hs-1", params);
+        let frame = connect_request("hs-1", params).unwrap();
         let json = serde_json::to_string(&frame).unwrap();
         assert!(json.contains(r#""method":"connect"#));
         assert!(json.contains(r#""minProtocol":3"#));
@@ -373,7 +380,7 @@ mod tests {
 
     #[test]
     fn hello_ok_response_construction() {
-        let frame = hello_ok_response("hs-1", 3, "conn-abc");
+        let frame = hello_ok_response("hs-1", 3, "conn-abc").unwrap();
         let json = serde_json::to_string(&frame).unwrap();
         assert!(json.contains(r#""ok":true"#));
         assert!(json.contains(r#""hello-ok"#));

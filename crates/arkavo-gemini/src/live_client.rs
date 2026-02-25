@@ -6,6 +6,7 @@ use crate::types::{
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, mpsc};
@@ -28,6 +29,7 @@ pub struct LiveSessionClient {
     ws_stream: Arc<RwLock<Option<WsStream>>>,
     tool_call_tx: mpsc::UnboundedSender<Vec<FunctionCall>>,
     tool_call_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<Vec<FunctionCall>>>>>,
+    connected: Arc<AtomicBool>,
 }
 
 impl LiveSessionClient {
@@ -48,6 +50,7 @@ impl LiveSessionClient {
             ws_stream: Arc::new(RwLock::new(None)),
             tool_call_tx: tx,
             tool_call_rx: Arc::new(RwLock::new(Some(rx))),
+            connected: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -92,6 +95,7 @@ impl LiveSessionClient {
         drop(stream_guard);
 
         self.send_setup().await?;
+        self.connected.store(true, Ordering::Relaxed);
 
         self.start_receiver_task();
 
@@ -146,6 +150,7 @@ impl LiveSessionClient {
     fn start_receiver_task(&self) {
         let ws_stream = self.ws_stream.clone();
         let tool_call_tx = self.tool_call_tx.clone();
+        let connected = self.connected.clone();
 
         tokio::spawn(async move {
             info!("Receiver task started");
@@ -168,10 +173,12 @@ impl LiveSessionClient {
                         }
                         Some(Err(e)) => {
                             error!("WebSocket error: {}", e);
+                            connected.store(false, Ordering::Relaxed);
                             break;
                         }
                         None => {
                             info!("WebSocket stream ended");
+                            connected.store(false, Ordering::Relaxed);
                             break;
                         }
                     }
@@ -214,6 +221,7 @@ impl LiveSessionClient {
                 };
 
                 if should_break {
+                    connected.store(false, Ordering::Relaxed);
                     break;
                 }
             }
@@ -340,6 +348,7 @@ impl LiveSessionClient {
     }
 
     pub async fn close(&self) -> Result<()> {
+        self.connected.store(false, Ordering::Relaxed);
         let mut stream_guard = self.ws_stream.write().await;
         if let Some(mut stream) = stream_guard.take() {
             let result = stream.send(Message::Close(None)).await;
@@ -350,7 +359,6 @@ impl LiveSessionClient {
     }
 
     pub fn is_connected(&self) -> bool {
-        let stream = futures::executor::block_on(self.ws_stream.read());
-        stream.is_some()
+        self.connected.load(Ordering::Relaxed)
     }
 }

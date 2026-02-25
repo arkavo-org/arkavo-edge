@@ -25,6 +25,13 @@ use super::policy_cache::PolicyCache;
 use super::synthesis;
 use super::tool_pattern_observer::ToolPatternObserver;
 
+/// Minimum success rate required before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_SUCCESS_RATE: f64 = 0.7;
+/// Minimum feedback count before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_FEEDBACK_COUNT: u32 = 5;
+/// Minimum applications before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_APPLICATIONS: u32 = 3;
+
 /// Configuration for learning thresholds and channel capacities
 #[derive(Debug, Clone)]
 pub struct LearningConfig {
@@ -739,7 +746,11 @@ impl LearningBus {
         // Quality threshold: only broadcast proven adjustments
         let quality_snapshots: Vec<_> = snapshots
             .into_iter()
-            .filter(|s| s.success_rate >= 0.7 && s.feedback_count >= 5 && s.applications >= 3)
+            .filter(|s| {
+                s.success_rate >= BROADCAST_MIN_SUCCESS_RATE
+                    && s.feedback_count >= BROADCAST_MIN_FEEDBACK_COUNT
+                    && s.applications >= BROADCAST_MIN_APPLICATIONS
+            })
             .collect();
 
         if quality_snapshots.is_empty() {
@@ -756,7 +767,7 @@ impl LearningBus {
 
         let mut broadcast_count = 0;
         for snap in &quality_snapshots {
-            let issue_str = format!("{:?}", snap.issue);
+            let issue_str = snap.issue.to_string();
             let mut ann = AdvisorAdjustmentAnnouncement::new(
                 self.agent_id.clone(),
                 snap.model_family.clone(),
@@ -797,13 +808,10 @@ impl LearningBus {
     async fn apply_remote_adjustment(&self, ann: &AdvisorAdjustmentAnnouncement) {
         use arkavo_router::prompt_advisor::{AdvisorIssue, DynamicSnapshot};
 
-        let issue = match ann.issue.as_str() {
-            "UnwantedCodeFence" => AdvisorIssue::UnwantedCodeFence,
-            "OutputLoop" => AdvisorIssue::OutputLoop,
-            "WrongExpert" => AdvisorIssue::WrongExpert,
-            "Timeout" => AdvisorIssue::Timeout,
-            other => {
-                tracing::warn!("Unknown advisor issue type from peer: {}", other);
+        let issue = match ann.issue.parse::<AdvisorIssue>() {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!("{}", e);
                 return;
             }
         };

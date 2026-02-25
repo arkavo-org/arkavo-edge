@@ -14,6 +14,31 @@ pub enum AdvisorIssue {
     Timeout,
 }
 
+impl std::fmt::Display for AdvisorIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnwantedCodeFence => write!(f, "UnwantedCodeFence"),
+            Self::OutputLoop => write!(f, "OutputLoop"),
+            Self::WrongExpert => write!(f, "WrongExpert"),
+            Self::Timeout => write!(f, "Timeout"),
+        }
+    }
+}
+
+impl std::str::FromStr for AdvisorIssue {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "UnwantedCodeFence" => Ok(Self::UnwantedCodeFence),
+            "OutputLoop" => Ok(Self::OutputLoop),
+            "WrongExpert" => Ok(Self::WrongExpert),
+            "Timeout" => Ok(Self::Timeout),
+            other => Err(format!("unknown AdvisorIssue: {other}")),
+        }
+    }
+}
+
 /// Advice returned to the caller for system-message injection
 #[derive(Debug, Clone)]
 pub struct PromptAdvice {
@@ -857,6 +882,27 @@ mod tests {
             .find(|s| s.label == "qwen-outputloop-dynamic")
             .unwrap();
         assert!(after.success_rate > 0.8); // Still high from feedback
+    }
+
+    #[test]
+    fn test_advisor_issue_display_roundtrip() {
+        for issue in [
+            AdvisorIssue::UnwantedCodeFence,
+            AdvisorIssue::OutputLoop,
+            AdvisorIssue::WrongExpert,
+            AdvisorIssue::Timeout,
+        ] {
+            let s = issue.to_string();
+            let parsed: AdvisorIssue = s.parse().unwrap();
+            assert_eq!(parsed, issue);
+        }
+    }
+
+    #[test]
+    fn test_advisor_issue_from_str_error() {
+        let result = "Unknown".parse::<AdvisorIssue>();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown AdvisorIssue"));
     }
 
     #[test]
