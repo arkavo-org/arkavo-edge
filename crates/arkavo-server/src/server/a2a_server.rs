@@ -858,6 +858,7 @@ impl A2aServer {
                             Some(&system_prompt),
                             None,
                             model_hint.as_ref(),
+                            None,
                         )
                         .await
                         {
@@ -1188,6 +1189,7 @@ impl A2aServer {
                     Some(&purpose),
                     Some(&mesh_state),
                     model_hint.as_ref(),
+                    None,
                 )
                 .await
                 {

@@ -17,6 +17,7 @@ pub mod prediction;
 pub mod preflight;
 pub mod prompt_advisor;
 pub mod provider;
+pub mod provider_info;
 pub(crate) mod quality_gate;
 pub mod response;
 pub mod rlm;
@@ -53,7 +54,7 @@ pub use preflight::{
     PreflightModerator, build_moderator_from_config, load_agent_config,
 };
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
-pub use provider::LlmInfo;
+pub use provider_info::LlmInfo;
 pub use rlm::{
     RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
     RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,

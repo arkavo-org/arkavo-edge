@@ -47,6 +47,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -69,6 +70,7 @@ pub async fn execute_with_conductor_and_learning(
     system_prompt: Option<&str>,
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     model_hint: Option<&arkavo_router::ModelChoice>,
+    images: Option<Vec<String>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -271,7 +273,7 @@ pub async fn execute_with_conductor_and_learning(
     messages.push(arkavo_llm::Message {
         role: arkavo_llm::Role::User,
         content: augmented_content,
-        images: None,
+        images,
     });
 
     let response = router

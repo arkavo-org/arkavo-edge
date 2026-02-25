@@ -3,15 +3,6 @@ use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
 
-/// Information about an available LLM
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LlmInfo {
-    pub name: String,
-    pub provider: String,
-    pub model: String,
-    pub available: bool,
-}
-
 impl super::Router {
     /// Get a provider for the given model choice (local or cloud)
     pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
@@ -44,50 +35,6 @@ impl super::Router {
         &self,
     ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
         arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
-    }
-
-    pub fn get_available_llms(&self) -> Vec<LlmInfo> {
-        let mut llms = Vec::new();
-        for (api_key, name, prov, model_key, default) in [
-            (
-                "ANTHROPIC_API_KEY",
-                "Claude",
-                "Anthropic",
-                "ANTHROPIC_MODEL",
-                "claude-sonnet-4-5-20250929",
-            ),
-            (
-                "GEMINI_API_KEY",
-                "Gemini",
-                "Google",
-                "GEMINI_MODEL",
-                "gemini-3-pro-preview",
-            ),
-            (
-                "MOONSHOT_API_KEY",
-                "Kimi",
-                "Moonshot",
-                "KIMI_MODEL",
-                "kimi-k2.5",
-            ),
-        ] {
-            if std::env::var(api_key).is_ok() {
-                let model = std::env::var(model_key).unwrap_or_else(|_| default.to_string());
-                llms.push(LlmInfo {
-                    name: name.to_string(),
-                    provider: prov.to_string(),
-                    model,
-                    available: true,
-                });
-            }
-        }
-        llms.push(LlmInfo {
-            name: "Local".to_string(),
-            provider: "Local".to_string(),
-            model: "qwen3-0.6b / ministral-3b".to_string(),
-            available: true,
-        });
-        llms
     }
 
     pub(crate) fn get_local_fallback(
@@ -183,6 +130,9 @@ impl super::Router {
     }
 
     /// Load a local model into the registry (if not already loaded) and create a provider.
+    ///
+    /// Automatically discovers and enables vision support when an mmproj file
+    /// is found alongside the model GGUF in the HuggingFace cache.
     #[cfg(feature = "llama-cpp")]
     pub(crate) async fn load_local_model(
         &self,
@@ -190,11 +140,13 @@ impl super::Router {
         repo: &str,
         filename: &str,
     ) -> Result<Box<dyn Provider>> {
-        if !self.model_registry.is_loaded(registry_name) {
-            let model_path = model_discovery::find_gguf_model(repo, filename)
-                .await
-                .map_err(Error::ModelExecution)?;
+        // Resolve model path unconditionally — hf_hub returns the cached path
+        // instantly when the model is already downloaded (local stat, no network).
+        let model_path = model_discovery::find_gguf_model(repo, filename)
+            .await
+            .map_err(Error::ModelExecution)?;
 
+        if !self.model_registry.is_loaded(registry_name) {
             tracing::info!(
                 model = registry_name,
                 path = %model_path.display(),
@@ -222,6 +174,16 @@ impl super::Router {
                 "Failed to create provider for {registry_name}: {e}"
             ))
         })?;
+
+        // Enable vision if mmproj file is found alongside the model
+        let provider =
+            if let Some(mmproj_path) = model_discovery::find_mmproj_for_model(&model_path) {
+                provider
+                    .enable_vision(&mmproj_path.to_string_lossy())
+                    .map_err(|e| Error::ModelExecution(format!("Failed to enable vision: {e}")))?
+            } else {
+                provider
+            };
 
         Ok(Box::new(provider))
     }

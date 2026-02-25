@@ -51,6 +51,28 @@ pub async fn handle_message_send(
         .collect::<Vec<_>>()
         .join("\n");
 
+    // Extract base64-encoded images from File parts with image/* MIME types
+    let images: Vec<String> = request
+        .message
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            MessagePart::File {
+                mime_type,
+                data,
+                is_uri,
+                ..
+            } if mime_type.starts_with("image/") && !is_uri => Some(data.clone()),
+            _ => None,
+        })
+        .collect();
+    let images = if images.is_empty() {
+        None
+    } else {
+        info!("Message contains {} image attachment(s)", images.len());
+        Some(images)
+    };
+
     // Preflight moderation: reject policy-violating requests before task submission
     if let Some(router) = router
         && let Some(arkavo_router::ModerationResult::Block {
@@ -137,6 +159,7 @@ pub async fn handle_message_send(
                         None,
                         None,
                         model_hint.as_ref(),
+                        images,
                     )
                     .await
                     {
