@@ -25,6 +25,8 @@ pub enum ModelChoice {
     LocalMinistral3B,
     /// Ministral-8B - TØRG-compatible, high quality
     LocalMinistral8B,
+    /// Qwen3.5-27B - 27B dense model, requires 48GB+ RAM
+    LocalQwen35_27B,
     /// GLM-4.7-Flash - 30B MoE reasoning model, requires 32GB+ RAM
     LocalGlm47Flash,
     /// Legacy: Gemma-3-270M (if cached)
@@ -52,6 +54,7 @@ impl ModelChoice {
             Self::LocalQwen3 => "qwen3-0.6b",
             Self::LocalMinistral3B => "ministral-3b",
             Self::LocalMinistral8B => "ministral-8b",
+            Self::LocalQwen35_27B => "qwen3.5-27b",
             Self::LocalGlm47Flash => "glm-4.7-flash",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
@@ -65,7 +68,7 @@ impl ModelChoice {
     /// Model family identifier for prompt advisor lookups
     pub fn family(&self) -> &str {
         match self {
-            Self::LocalQwen3 => "qwen",
+            Self::LocalQwen3 | Self::LocalQwen35_27B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
             Self::LocalGlm47Flash => "glm",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "gemma",
@@ -76,12 +79,36 @@ impl ModelChoice {
         }
     }
 
+    /// Resolve a model name string to a ModelChoice (reverse of `name()`).
+    /// Used as a hint from AGENTS.md `model:` field.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "qwen3-0.6b" => Some(Self::LocalQwen3),
+            "ministral-3b" => Some(Self::LocalMinistral3B),
+            "ministral-8b" => Some(Self::LocalMinistral8B),
+            "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
+            "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
+            "gemma-3-270m-it" => Some(Self::LocalGemma270M),
+            "gemma-3-4b-it" => Some(Self::LocalGemma4B),
+            "gemma-3-12b-it" => Some(Self::LocalGemma12B),
+            "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
+            "deepseek-chat" => Some(Self::DeepSeekV32),
+            "kimi-k2.5" => Some(Self::KimiK2),
+            "gemini-flash-latest" => Some(Self::GeminiFlash),
+            "gemini-3-pro-preview" => Some(Self::GeminiPro),
+            _ if name.contains("claude-sonnet") => Some(Self::ClaudeSonnet),
+            _ if name.contains("claude-opus") => Some(Self::ClaudeOpus),
+            _ => None,
+        }
+    }
+
     pub fn is_local(&self) -> bool {
         matches!(
             self,
             Self::LocalQwen3
                 | Self::LocalMinistral3B
                 | Self::LocalMinistral8B
+                | Self::LocalQwen35_27B
                 | Self::LocalGlm47Flash
                 | Self::LocalGemma270M
                 | Self::LocalGemma4B
@@ -117,7 +144,7 @@ impl ModelChoice {
         match self {
             Self::GeminiFlash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
-            Self::LocalQwen3 => "local-qwen",
+            Self::LocalQwen3 | Self::LocalQwen35_27B => "local-qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
             Self::LocalGlm47Flash => "local-glm",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
@@ -136,6 +163,7 @@ impl ModelChoice {
             Self::LocalMinistral3B | Self::LocalGemma4B => PlannerTier::Medium,
             // Large: > 7B parameters or cloud models
             Self::LocalMinistral8B
+            | Self::LocalQwen35_27B
             | Self::LocalGlm47Flash
             | Self::LocalGemma12B
             | Self::LocalDeepSeekCoder
@@ -238,6 +266,9 @@ impl RoutingDecision {
             }
             (ModelChoice::LocalMinistral3B, _) => vec![ModelChoice::LocalMinistral8B],
             (ModelChoice::LocalMinistral8B, _) => {
+                vec![ModelChoice::LocalQwen35_27B, ModelChoice::LocalGlm47Flash]
+            }
+            (ModelChoice::LocalQwen35_27B, _) => {
                 vec![ModelChoice::LocalGlm47Flash, ModelChoice::GeminiFlash]
             }
             (ModelChoice::LocalGlm47Flash, _) => vec![ModelChoice::GeminiFlash],
@@ -306,6 +337,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalQwen35_27B
             | ModelChoice::LocalGlm47Flash
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
@@ -323,6 +355,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3 => Duration::from_millis(500),
             ModelChoice::LocalMinistral3B => Duration::from_secs(2),
             ModelChoice::LocalMinistral8B => Duration::from_secs(4),
+            ModelChoice::LocalQwen35_27B => Duration::from_secs(10),
             ModelChoice::LocalGlm47Flash => Duration::from_secs(8),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
@@ -394,6 +427,38 @@ mod tests {
         assert_eq!(ModelChoice::ClaudeSonnet.family(), "anthropic");
         assert_eq!(ModelChoice::DeepSeekV32.family(), "deepseek");
         assert_eq!(ModelChoice::KimiK2.family(), "kimi");
+    }
+
+    #[test]
+    fn test_model_choice_from_name() {
+        assert_eq!(
+            ModelChoice::from_name("qwen3.5-27b"),
+            Some(ModelChoice::LocalQwen35_27B)
+        );
+        assert_eq!(
+            ModelChoice::from_name("glm-4.7-flash"),
+            Some(ModelChoice::LocalGlm47Flash)
+        );
+        assert_eq!(
+            ModelChoice::from_name("ministral-8b"),
+            Some(ModelChoice::LocalMinistral8B)
+        );
+        assert_eq!(ModelChoice::from_name("unknown-model"), None);
+        // Round-trip: name -> from_name -> name
+        for model in [
+            ModelChoice::LocalQwen3,
+            ModelChoice::LocalMinistral3B,
+            ModelChoice::LocalQwen35_27B,
+            ModelChoice::LocalGlm47Flash,
+            ModelChoice::KimiK2,
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(model.name()),
+                Some(model.clone()),
+                "Round-trip failed for {:?}",
+                model
+            );
+        }
     }
 
     #[test]

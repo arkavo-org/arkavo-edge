@@ -90,6 +90,29 @@ pub fn calculate_glm_max_context(total_ram_gb: u64, use_kv_quant: bool) -> Optio
     }
 }
 
+/// Calculate max context for Qwen3.5-27B based on available RAM
+///
+/// Qwen3.5-27B is a dense 27B model requiring ~23GB for Q6_K_XL weights.
+/// Trained context is 32K. Capped at 32768 (model's trained limit).
+pub fn calculate_qwen35_max_context(total_ram_gb: u64, use_kv_quant: bool) -> Option<u32> {
+    const MODEL_SIZE_GB: u64 = 23; // Q6_K_XL
+    const OVERHEAD_GB: u64 = 4;
+
+    let remaining = total_ram_gb.saturating_sub(MODEL_SIZE_GB + OVERHEAD_GB);
+    let effective = if use_kv_quant {
+        remaining * 2
+    } else {
+        remaining
+    };
+
+    match effective {
+        0..=3 => None,        // Cannot run Qwen3.5-27B
+        4..=7 => Some(8_192), // Minimal
+        8..=15 => Some(16_384),
+        _ => Some(32_768), // Qwen3.5 trained context cap
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +137,19 @@ mod tests {
         assert_eq!(calculate_glm_max_context(64, false), Some(65_536));
         // 128GB RAM - max context
         assert_eq!(calculate_glm_max_context(128, false), Some(131_072));
+    }
+
+    #[test]
+    fn test_qwen35_context_calculation() {
+        // 24GB RAM - cannot run (23GB model + 4GB overhead > 24GB)
+        assert_eq!(calculate_qwen35_max_context(24, false), None);
+        // 32GB RAM without KV quant - minimal context
+        assert_eq!(calculate_qwen35_max_context(32, false), Some(8_192));
+        // 48GB RAM without KV quant - full trained context
+        assert_eq!(calculate_qwen35_max_context(48, false), Some(32_768));
+        // 64GB RAM - full trained context
+        assert_eq!(calculate_qwen35_max_context(64, false), Some(32_768));
+        // 128GB RAM - full trained context (capped at 32K)
+        assert_eq!(calculate_qwen35_max_context(128, false), Some(32_768));
     }
 }

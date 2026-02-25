@@ -28,6 +28,7 @@ pub async fn handle_message_send(
     router: Option<&Arc<arkavo_router::Router>>,
     learning_bus: Option<&Arc<LearningBus>>,
     budget_manager: Option<&Arc<arkavo_budget::BudgetManager>>,
+    model_hint: Option<arkavo_router::ModelChoice>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -135,6 +136,7 @@ pub async fn handle_message_send(
                         None,
                         None,
                         None,
+                        model_hint.as_ref(),
                     )
                     .await
                     {

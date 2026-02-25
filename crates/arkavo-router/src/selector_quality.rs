@@ -59,6 +59,7 @@ impl ModelSelector {
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
+            ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
@@ -333,6 +334,12 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
             ("general", 4.0, 2.0),
             ("code_generation", 4.0, 2.0),
             ("test_generation", 4.0, 2.0),
+        ],
+        ModelChoice::LocalQwen35_27B => vec![
+            ("general", 5.0, 2.0),
+            ("code_generation", 5.0, 2.0),
+            ("test_generation", 4.0, 2.0),
+            ("refactoring", 4.0, 2.0),
         ],
         ModelChoice::DeepSeekV32 => {
             vec![("code_generation", 5.0, 2.0), ("backend_api", 4.0, 2.0)]

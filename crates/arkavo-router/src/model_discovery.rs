@@ -242,6 +242,7 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     // Priority order: prefer larger models first for better quality
     let preferred_repos = [
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+        "models--unsloth--Qwen3.5-27B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--Qwen--Qwen3-0.6B-GGUF",
     ];

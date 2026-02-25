@@ -28,71 +28,65 @@ impl super::Router {
         arkavo_llm::GeminiProvider::new().ok()
     }
 
-    /// Check if Gemini API is available
     pub fn is_gemini_available(&self) -> bool {
         std::env::var("GEMINI_API_KEY").is_ok()
     }
 
-    /// Check if Anthropic API is available
     pub fn is_anthropic_available(&self) -> bool {
         std::env::var("ANTHROPIC_API_KEY").is_ok()
     }
 
-    /// Check if Kimi API is available
     pub fn is_kimi_available(&self) -> bool {
         std::env::var("MOONSHOT_API_KEY").is_ok()
     }
 
-    /// Get Anthropic provider if configured
     pub fn get_anthropic_provider(
         &self,
     ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
         arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
     }
 
-    /// Get the list of available LLMs for status reporting
     pub fn get_available_llms(&self) -> Vec<LlmInfo> {
         let mut llms = Vec::new();
-
-        if self.is_anthropic_available() {
-            let model = std::env::var("ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
-            llms.push(LlmInfo {
-                name: "Claude".to_string(),
-                provider: "Anthropic".to_string(),
-                model,
-                available: true,
-            });
+        for (api_key, name, prov, model_key, default) in [
+            (
+                "ANTHROPIC_API_KEY",
+                "Claude",
+                "Anthropic",
+                "ANTHROPIC_MODEL",
+                "claude-sonnet-4-5-20250929",
+            ),
+            (
+                "GEMINI_API_KEY",
+                "Gemini",
+                "Google",
+                "GEMINI_MODEL",
+                "gemini-3-pro-preview",
+            ),
+            (
+                "MOONSHOT_API_KEY",
+                "Kimi",
+                "Moonshot",
+                "KIMI_MODEL",
+                "kimi-k2.5",
+            ),
+        ] {
+            if std::env::var(api_key).is_ok() {
+                let model = std::env::var(model_key).unwrap_or_else(|_| default.to_string());
+                llms.push(LlmInfo {
+                    name: name.to_string(),
+                    provider: prov.to_string(),
+                    model,
+                    available: true,
+                });
+            }
         }
-
-        if self.is_gemini_available() {
-            let model = std::env::var("GEMINI_MODEL")
-                .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
-            llms.push(LlmInfo {
-                name: "Gemini".to_string(),
-                provider: "Google".to_string(),
-                model,
-                available: true,
-            });
-        }
-
-        if self.is_kimi_available() {
-            let model = std::env::var("KIMI_MODEL").unwrap_or_else(|_| "kimi-k2.5".to_string());
-            llms.push(LlmInfo {
-                name: "Kimi".to_string(),
-                provider: "Moonshot".to_string(),
-                model,
-                available: true,
-            });
-        }
-
         llms.push(LlmInfo {
             name: "Local".to_string(),
             provider: "Local".to_string(),
             model: "qwen3-0.6b / ministral-3b".to_string(),
             available: true,
         });
-
         llms
     }
 
@@ -100,21 +94,22 @@ impl super::Router {
         &self,
         category: crate::classifier::TaskCategory,
     ) -> ModelChoice {
+        use crate::classifier::TaskCategory;
         match category {
-            crate::classifier::TaskCategory::FrontendUI
-            | crate::classifier::TaskCategory::BackendAPI
-            | crate::classifier::TaskCategory::Refactoring => ModelChoice::LocalMinistral3B,
-            crate::classifier::TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
+            TaskCategory::FrontendUI
+            | TaskCategory::BackendAPI
+            | TaskCategory::Refactoring
+            | TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
             _ => ModelChoice::LocalQwen3,
         }
     }
 
-    /// Upgrade to a more capable model, but only if it's available
     pub(crate) fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
         let candidate = match current {
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalGlm47Flash,
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_27B,
+            ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGlm47Flash => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
@@ -141,7 +136,6 @@ impl super::Router {
         }
     }
 
-    /// Check if a model is available (installed/cached or has API key)
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
@@ -176,6 +170,10 @@ impl super::Router {
             ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
                 "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+            ),
+            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
+                "unsloth/Qwen3.5-27B-GGUF",
+                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
             ),
             ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
                 "unsloth/GLM-4.7-Flash-GGUF",
@@ -353,6 +351,15 @@ impl super::Router {
                     "deepseek-coder-v2-lite-instruct",
                     "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                     "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+                )
+                .await
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalQwen35_27B => {
+                self.load_local_model(
+                    "qwen3.5-27b",
+                    "unsloth/Qwen3.5-27B-GGUF",
+                    "Qwen3.5-27B-UD-Q6_K_XL.gguf",
                 )
                 .await
             }

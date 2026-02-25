@@ -46,6 +46,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -67,6 +68,7 @@ pub async fn execute_with_conductor_and_learning(
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    model_hint: Option<&arkavo_router::ModelChoice>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -273,7 +275,7 @@ pub async fn execute_with_conductor_and_learning(
     });
 
     let response = router
-        .route_with_tools(&task_content, messages, Some(&registry_arc))
+        .route_with_tools_hinted(&task_content, messages, Some(&registry_arc), model_hint)
         .await
         .map_err(|e| format!("Router failed: {e}"))?;
 

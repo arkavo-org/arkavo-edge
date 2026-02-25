@@ -38,6 +38,8 @@ pub enum RecommendedModel {
     Ministral3B,
     /// Ministral 8B - larger, for desktops (~5GB)
     Ministral8B,
+    /// Qwen3.5-27B - 27B dense, requires 48GB+ RAM (~23GB)
+    Qwen35_27B,
     /// GLM-4.7-Flash - 30B MoE, requires 32GB+ RAM (~20GB)
     Glm47Flash,
 }
@@ -49,6 +51,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen/Qwen3-0.6B-GGUF",
             RecommendedModel::Ministral3B => "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
             RecommendedModel::Ministral8B => "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+            RecommendedModel::Qwen35_27B => "unsloth/Qwen3.5-27B-GGUF",
             RecommendedModel::Glm47Flash => "unsloth/GLM-4.7-Flash-GGUF",
         }
     }
@@ -59,6 +62,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen3-0.6B-Q8_0.gguf",
             RecommendedModel::Ministral3B => "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
             RecommendedModel::Ministral8B => "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
+            RecommendedModel::Qwen35_27B => "Qwen3.5-27B-UD-Q6_K_XL.gguf",
             RecommendedModel::Glm47Flash => "GLM-4.7-Flash-Q4_K_M.gguf",
         }
     }
@@ -69,6 +73,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => 650_000_000,    // ~650MB
             RecommendedModel::Ministral3B => 2_500_000_000, // ~2.5GB
             RecommendedModel::Ministral8B => 5_500_000_000, // ~5.5GB
+            RecommendedModel::Qwen35_27B => 23_000_000_000, // ~23GB Q6_K_XL
             RecommendedModel::Glm47Flash => 20_000_000_000, // ~20GB Q4_K_M
         }
     }
@@ -79,6 +84,7 @@ impl RecommendedModel {
             RecommendedModel::Qwen3_0_6B => "Qwen3 0.6B",
             RecommendedModel::Ministral3B => "Ministral 3B",
             RecommendedModel::Ministral8B => "Ministral 8B",
+            RecommendedModel::Qwen35_27B => "Qwen3.5 27B",
             RecommendedModel::Glm47Flash => "GLM-4.7-Flash",
         }
     }
@@ -107,6 +113,7 @@ pub fn is_first_run() -> bool {
         "models--Qwen--Qwen3-0.6B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+        "models--unsloth--Qwen3.5-27B-GGUF",
         "models--unsloth--GLM-4.7-Flash-GGUF",
     ];
 
@@ -191,7 +198,7 @@ pub fn detect_capabilities() -> SystemCapabilities {
         DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen3_0_6B,
         DeviceProfile::Desktop => RecommendedModel::Ministral8B,
         DeviceProfile::Workstation => RecommendedModel::Glm47Flash,
-        DeviceProfile::HighMemoryWorkstation => RecommendedModel::Glm47Flash,
+        DeviceProfile::HighMemoryWorkstation => RecommendedModel::Qwen35_27B,
     };
 
     // Warn about MoE performance on CPU-only systems

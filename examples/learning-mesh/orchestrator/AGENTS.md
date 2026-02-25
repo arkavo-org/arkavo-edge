@@ -17,7 +17,7 @@ purpose: |
   5. If quality < 0.5: extract lesson, update routing weights
   6. Gossip lessons to peers
 
-model:   glm-4.7-flash
+model:   qwen3.5-27b
 listen:  0.0.0.0:8410
 
 discovery:

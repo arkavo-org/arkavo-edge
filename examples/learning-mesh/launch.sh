@@ -42,10 +42,10 @@ check_prerequisites() {
     print_status "SUCCESS" "Arkavo binary found"
 
     local hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-    if [ -d "$hf_cache/models--unsloth--GLM-4.7-Flash-GGUF" ]; then
-        print_status "SUCCESS" "GLM-4.7-Flash model available"
+    if [ -d "$hf_cache/models--unsloth--Qwen3.5-27B-GGUF" ]; then
+        print_status "SUCCESS" "Qwen3.5-27B model available"
     else
-        print_status "WARNING" "GLM-4.7-Flash not found. Run: arkavo model download glm"
+        print_status "WARNING" "Qwen3.5-27B not found. Run: hf download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q6_K_XL.gguf"
     fi
 }
 

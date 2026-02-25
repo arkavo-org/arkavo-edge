@@ -762,6 +762,10 @@ impl A2aServer {
         let agent_plan = self.agent_plan.clone();
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
+        let model_hint = {
+            let metadata = self.agent_metadata.read().await;
+            arkavo_router::ModelChoice::from_name(&metadata.model)
+        };
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
@@ -853,6 +857,7 @@ impl A2aServer {
                             None,
                             Some(&system_prompt),
                             None,
+                            model_hint.as_ref(),
                         )
                         .await
                         {
@@ -1071,6 +1076,10 @@ impl A2aServer {
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
+            model_hint: {
+                let metadata = self.agent_metadata.read().await;
+                arkavo_router::ModelChoice::from_name(&metadata.model)
+            },
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
@@ -1123,6 +1132,10 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let orchestrator_tick = self.orchestrator_tick.clone();
         let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        let model_hint = {
+            let metadata = self.agent_metadata.read().await;
+            arkavo_router::ModelChoice::from_name(&metadata.model)
+        };
 
         info!("Starting orchestrator loop (observe → plan → act)");
 
@@ -1174,6 +1187,7 @@ impl A2aServer {
                     Some(&agent_memory),
                     Some(&purpose),
                     Some(&mesh_state),
+                    model_hint.as_ref(),
                 )
                 .await
                 {

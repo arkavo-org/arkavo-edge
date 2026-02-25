@@ -111,6 +111,10 @@ impl ModelSelector {
                 && Self::has_sufficient_ram_for_glm()
             {
                 ModelChoice::LocalGlm47Flash
+            } else if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+                && Self::has_sufficient_ram_for_qwen35()
+            {
+                ModelChoice::LocalQwen35_27B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 ModelChoice::LocalMinistral8B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
@@ -132,6 +136,25 @@ impl ModelSelector {
             ModelChoice::LocalMinistral3B
         } else {
             ModelChoice::LocalQwen3
+        }
+    }
+
+    /// Check if system has sufficient RAM for Qwen3.5-27B (48GB+)
+    fn has_sufficient_ram_for_qwen35() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output()
+                && let Ok(mem_str) = String::from_utf8(output.stdout)
+                && let Ok(bytes) = mem_str.trim().parse::<u64>()
+            {
+                return bytes >= 48 * 1024 * 1024 * 1024; // 48GB
+            }
+            false
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            true
         }
     }
 
@@ -168,6 +191,10 @@ impl ModelSelector {
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                 "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
+            ),
+            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
+                "unsloth/Qwen3.5-27B-GGUF",
+                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
             ),
             ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
                 "unsloth/GLM-4.7-Flash-GGUF",
@@ -262,6 +289,11 @@ impl ModelSelector {
             }
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
+            }
+            if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+                && Self::has_sufficient_ram_for_qwen35()
+            {
+                models.push(ModelChoice::LocalQwen35_27B);
             }
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram_for_glm()
