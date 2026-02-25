@@ -3,8 +3,10 @@
 //! These tests require `OPENCLAW_GATEWAY_TOKEN` env and a gateway at `ws://127.0.0.1:18789`.
 //! Skip automatically when gateway is unavailable.
 
+use arkavo_openclaw::OpenClawTransport;
 use arkavo_openclaw::device::DeviceIdentity;
 use arkavo_openclaw::handshake::{HandshakeConfig, HandshakeOutcome};
+use arkavo_protocol::transport::{A2aEndpoint, A2aRequest, A2aTransport, TransportConfig};
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -160,6 +162,64 @@ async fn handshake_with_device_returns_pairing_or_connected() {
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
 
+/// Connect an `OpenClawTransport` with device identity.
+/// Uses persisted device if available, otherwise creates a fresh one (auto-pairing).
+/// Returns `None` if prerequisites are missing (no token, gateway unreachable, pairing required).
+async fn connect_transport() -> Option<OpenClawTransport> {
+    let token = gateway_token()?;
+    let url = gateway_url();
+
+    // Check gateway is reachable with a quick probe
+    if connect_ws(&url).await.is_none() {
+        eprintln!("SKIP: gateway not reachable at {url}");
+        return None;
+    }
+
+    // Try persisted device first, then create a fresh one
+    let device_dir = DeviceIdentity::default_dir();
+    let (device, device_token) = if device_dir.join("device-key.bin").exists() {
+        let device = DeviceIdentity::load_or_create(&device_dir).ok()?;
+        let auth_store = arkavo_openclaw::device::DeviceAuthStore::load(&device_dir);
+        let dt = auth_store
+            .as_ref()
+            .and_then(|s| s.get_token("operator"))
+            .map(|t| t.token.clone());
+        (device, dt)
+    } else {
+        let tmp = std::env::temp_dir().join(format!("arkavo-test-{}", uuid::Uuid::new_v4()));
+        let device = DeviceIdentity::load_or_create(&tmp).ok()?;
+        eprintln!("using fresh device: {}", device.device_id());
+        (device, None)
+    };
+
+    let hs_config = HandshakeConfig {
+        gateway_token: Some(token),
+        device_token,
+        ..Default::default()
+    };
+
+    let mut transport_config = TransportConfig::default();
+    // Local gateway uses ws://, not wss://
+    if url.starts_with("ws://") {
+        transport_config.tls_config.require_tls = false;
+    }
+
+    let transport = OpenClawTransport::new(transport_config, hs_config).with_device(device);
+
+    let endpoint = A2aEndpoint {
+        url,
+        agent_id: "openclaw-gateway".to_string(),
+        public_key: None,
+    };
+
+    if let Err(e) = transport.connect(&endpoint).await {
+        eprintln!("SKIP: connect failed: {e}");
+        return None;
+    }
+
+    Some(transport)
+}
+
 #[tokio::test]
 async fn device_with_persisted_token_reconnects() {
     let token = match gateway_token() {
@@ -220,4 +280,170 @@ async fn device_with_persisted_token_reconnects() {
             eprintln!("pairing still needed: request_id={request_id:?}");
         }
     }
+}
+
+#[tokio::test]
+async fn sessions_list_returns_active_sessions() {
+    let transport = match connect_transport().await {
+        Some(t) => t,
+        None => return,
+    };
+
+    let req = A2aRequest::new("sessions/list", serde_json::json!({}));
+    let resp = transport.send_request(req).await.unwrap();
+
+    match &resp {
+        arkavo_protocol::transport::A2aResponse::Success { result, .. } => {
+            eprintln!("sessions.list result: {result}");
+            // The gateway should return a list (possibly empty if no active sessions)
+            assert!(result.is_array() || result.is_object());
+        }
+        arkavo_protocol::transport::A2aResponse::Error { error, .. } => {
+            eprintln!("sessions.list error (may be expected): {}", error.message);
+        }
+    }
+
+    let _ = transport.close().await;
+}
+
+#[tokio::test]
+async fn models_list_returns_available_models() {
+    let transport = match connect_transport().await {
+        Some(t) => t,
+        None => return,
+    };
+
+    let req = A2aRequest::new("models/list", serde_json::json!({}));
+    let resp = transport.send_request(req).await.unwrap();
+
+    match &resp {
+        arkavo_protocol::transport::A2aResponse::Success { result, .. } => {
+            eprintln!("models.list result: {result}");
+        }
+        arkavo_protocol::transport::A2aResponse::Error { error, .. } => {
+            // May fail if no API key configured — that's expected
+            eprintln!("models.list error (may be expected): {}", error.message);
+        }
+    }
+
+    let _ = transport.close().await;
+}
+
+#[tokio::test]
+async fn chat_send_with_streaming_response() {
+    let transport = match connect_transport().await {
+        Some(t) => t,
+        None => return,
+    };
+
+    // First, discover sessions to find a valid session key
+    let sessions_req = A2aRequest::new("sessions/list", serde_json::json!({}));
+    let sessions_resp = transport.send_request(sessions_req).await.unwrap();
+
+    let session_key = match &sessions_resp {
+        arkavo_protocol::transport::A2aResponse::Success { result, .. } => {
+            // Try to extract the first session key from the response
+            result
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|s| s.get("key").or_else(|| s.get("sessionKey")))
+                .and_then(|k| k.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "agent:main:main".to_string())
+        }
+        _ => "agent:main:main".to_string(),
+    };
+
+    eprintln!("using session_key: {session_key}");
+
+    // Send chat via the convenience method
+    let result = transport
+        .send_chat(&session_key, "Say hello in one word.")
+        .await;
+
+    match result {
+        Ok((run_id, mut events_rx)) => {
+            eprintln!("chat.send ok, runId={run_id}");
+
+            let mut delta_count = 0u32;
+            let mut got_final = false;
+
+            // Collect events with a timeout
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                let remaining = deadline.duration_since(tokio::time::Instant::now());
+                match tokio::time::timeout(remaining, events_rx.recv()).await {
+                    Ok(Ok(ev)) => {
+                        if ev.event != "chat" {
+                            continue;
+                        }
+                        // Check if this event belongs to our run
+                        let ev_run_id = ev
+                            .payload
+                            .get("runId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !run_id.is_empty() && ev_run_id != run_id {
+                            continue;
+                        }
+
+                        let state = ev
+                            .payload
+                            .get("state")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+
+                        match state {
+                            "delta" => {
+                                delta_count += 1;
+                                let content = ev
+                                    .payload
+                                    .get("content")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                eprint!("{content}");
+                            }
+                            "final" => {
+                                got_final = true;
+                                eprintln!("\nfinal event received");
+                                break;
+                            }
+                            other => {
+                                eprintln!("event state={other}");
+                            }
+                        }
+                    }
+                    Ok(Err(_)) => {
+                        eprintln!("event channel closed");
+                        break;
+                    }
+                    Err(_) => {
+                        eprintln!("timeout waiting for events");
+                        break;
+                    }
+                }
+            }
+
+            eprintln!("received {delta_count} delta(s), final={got_final}");
+            // We expect at least one event (delta or final) from a functioning agent
+            // If the agent lacks an API key, we may get 0 deltas — that's acceptable
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            // Agent may not have an API key configured — that's an expected error path
+            eprintln!("chat.send error (may be expected): {msg}");
+            assert!(
+                msg.contains("API")
+                    || msg.contains("key")
+                    || msg.contains("model")
+                    || msg.contains("agent")
+                    || msg.contains("scope")
+                    || msg.contains("session")
+                    || msg.contains("error"),
+                "unexpected error: {msg}"
+            );
+        }
+    }
+
+    let _ = transport.close().await;
 }

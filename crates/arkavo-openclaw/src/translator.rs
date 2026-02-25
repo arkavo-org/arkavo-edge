@@ -2,6 +2,7 @@ use arkavo_protocol::transport::{A2aRequest, A2aResponse, JsonRpcError};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::client::OpenClawEvent;
 use crate::protocol::{EventFrame, OpenClawError, RequestFrame, ResponseFrame};
 
 /// Translate an inbound OpenClaw request frame into an A2A JSON-RPC request.
@@ -42,6 +43,34 @@ pub fn openclaw_req_to_a2a(frame: &RequestFrame) -> Result<A2aRequest, Translato
                 .clone()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
             ("agent_discover", params)
+        }
+        "sessions.list" => {
+            let params = frame
+                .params
+                .clone()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
+            ("sessions/list", params)
+        }
+        "models.list" => {
+            let params = frame
+                .params
+                .clone()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
+            ("models/list", params)
+        }
+        "chat.history" => {
+            let params = frame
+                .params
+                .clone()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
+            ("chat/history", params)
+        }
+        "chat.inject" => {
+            let params = frame
+                .params
+                .clone()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::default()));
+            ("chat/inject", params)
         }
         "status" => {
             let params = frame
@@ -111,11 +140,35 @@ pub fn a2a_event_to_openclaw(method: &str, data: Value) -> EventFrame {
     }
 }
 
+/// Translate an inbound OpenClaw event into an A2A-style event representation.
+///
+/// Maps OpenClaw event names to A2A method equivalents:
+/// - `chat` → `message/stream` with content/state/seq
+/// - `presence` → `agent_broadcast`
+pub fn openclaw_event_to_a2a(event: &OpenClawEvent) -> (String, Value) {
+    let method = match event.event.as_str() {
+        "chat" => "message/stream",
+        "presence" => "agent_broadcast",
+        other => other,
+    };
+    let mut data = event.payload.clone();
+    if let Some(seq) = event.seq
+        && let Some(obj) = data.as_object_mut()
+    {
+        obj.insert("seq".to_string(), Value::from(seq));
+    }
+    (method.to_string(), data)
+}
+
 /// Translate an A2A JSON-RPC request into an OpenClaw request frame (outbound).
 pub fn a2a_to_openclaw_req(request: &A2aRequest) -> RequestFrame {
     let method = match request.method.as_str() {
         "message/send" => "chat.send",
         "agent_discover" => "agents.list",
+        "sessions/list" => "sessions.list",
+        "models/list" => "models.list",
+        "chat/history" => "chat.history",
+        "chat/inject" => "chat.inject",
         "tasks/get" => "status",
         "tasks/cancel" => "chat.abort",
         other => other,
@@ -384,5 +437,103 @@ mod tests {
         assert_eq!(openclaw_error_code_to_int("METHOD_NOT_FOUND"), -32601);
         assert_eq!(a2a_error_code_to_string(-32600), "INVALID_REQUEST");
         assert_eq!(openclaw_error_code_to_int("INVALID_REQUEST"), -32600);
+    }
+
+    #[test]
+    fn sessions_list_maps_bidirectionally() {
+        let frame = RequestFrame {
+            id: "r8".to_string(),
+            method: "sessions.list".to_string(),
+            params: None,
+        };
+        let a2a = openclaw_req_to_a2a(&frame).unwrap();
+        assert_eq!(a2a.method, "sessions/list");
+
+        let req = A2aRequest::new("sessions/list", serde_json::json!({}));
+        let oc = a2a_to_openclaw_req(&req);
+        assert_eq!(oc.method, "sessions.list");
+    }
+
+    #[test]
+    fn models_list_maps_bidirectionally() {
+        let frame = RequestFrame {
+            id: "r9".to_string(),
+            method: "models.list".to_string(),
+            params: None,
+        };
+        let a2a = openclaw_req_to_a2a(&frame).unwrap();
+        assert_eq!(a2a.method, "models/list");
+
+        let req = A2aRequest::new("models/list", serde_json::json!({}));
+        let oc = a2a_to_openclaw_req(&req);
+        assert_eq!(oc.method, "models.list");
+    }
+
+    #[test]
+    fn chat_history_maps_bidirectionally() {
+        let frame = RequestFrame {
+            id: "r10".to_string(),
+            method: "chat.history".to_string(),
+            params: Some(serde_json::json!({"sessionKey": "s1"})),
+        };
+        let a2a = openclaw_req_to_a2a(&frame).unwrap();
+        assert_eq!(a2a.method, "chat/history");
+
+        let req = A2aRequest::new("chat/history", serde_json::json!({"sessionKey": "s1"}));
+        let oc = a2a_to_openclaw_req(&req);
+        assert_eq!(oc.method, "chat.history");
+    }
+
+    #[test]
+    fn chat_inject_maps_bidirectionally() {
+        let frame = RequestFrame {
+            id: "r11".to_string(),
+            method: "chat.inject".to_string(),
+            params: Some(serde_json::json!({"text": "injected"})),
+        };
+        let a2a = openclaw_req_to_a2a(&frame).unwrap();
+        assert_eq!(a2a.method, "chat/inject");
+
+        let req = A2aRequest::new("chat/inject", serde_json::json!({"text": "injected"}));
+        let oc = a2a_to_openclaw_req(&req);
+        assert_eq!(oc.method, "chat.inject");
+    }
+
+    #[test]
+    fn openclaw_event_to_a2a_chat() {
+        let event = OpenClawEvent {
+            event: "chat".to_string(),
+            payload: serde_json::json!({"runId": "r1", "state": "delta", "content": "hello"}),
+            seq: Some(3),
+        };
+        let (method, data) = openclaw_event_to_a2a(&event);
+        assert_eq!(method, "message/stream");
+        assert_eq!(data["runId"], "r1");
+        assert_eq!(data["state"], "delta");
+        assert_eq!(data["seq"], 3);
+    }
+
+    #[test]
+    fn openclaw_event_to_a2a_presence() {
+        let event = OpenClawEvent {
+            event: "presence".to_string(),
+            payload: serde_json::json!({"agent": "main", "status": "online"}),
+            seq: None,
+        };
+        let (method, data) = openclaw_event_to_a2a(&event);
+        assert_eq!(method, "agent_broadcast");
+        assert_eq!(data["agent"], "main");
+        assert!(data.get("seq").is_none());
+    }
+
+    #[test]
+    fn openclaw_event_to_a2a_unknown_passes_through() {
+        let event = OpenClawEvent {
+            event: "custom.event".to_string(),
+            payload: serde_json::json!({"key": "val"}),
+            seq: None,
+        };
+        let (method, _) = openclaw_event_to_a2a(&event);
+        assert_eq!(method, "custom.event");
     }
 }

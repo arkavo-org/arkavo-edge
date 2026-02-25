@@ -10,8 +10,9 @@ use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use rustls::{ClientConfig, RootCertStore};
+use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{RwLock, broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
@@ -24,6 +25,14 @@ use crate::device::DeviceIdentity;
 use crate::handshake::{HandshakeConfig, HandshakeOutcome, client_handshake_with_device};
 use crate::protocol::{OpenClawFrame, ResponseFrame};
 use crate::translator;
+
+/// An event received from the OpenClaw gateway's event stream.
+#[derive(Debug, Clone)]
+pub struct OpenClawEvent {
+    pub event: String,
+    pub payload: Value,
+    pub seq: Option<u64>,
+}
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = SplitSink<WsStream, Message>;
@@ -46,10 +55,13 @@ pub struct OpenClawTransport {
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
     /// Maps OpenClaw request ID (string) -> oneshot sender for response routing.
     pending_requests: Arc<DashMap<String, (uuid::Uuid, oneshot::Sender<ResponseFrame>)>>,
+    /// Broadcast channel for server-pushed events (chat deltas, presence, etc.).
+    event_tx: broadcast::Sender<OpenClawEvent>,
 }
 
 impl OpenClawTransport {
     pub fn new(transport_config: TransportConfig, handshake_config: HandshakeConfig) -> Self {
+        let (event_tx, _) = broadcast::channel(256);
         Self {
             transport_config,
             handshake_config,
@@ -57,13 +69,62 @@ impl OpenClawTransport {
             connection: Arc::new(RwLock::new(None)),
             endpoint: Arc::new(RwLock::new(None)),
             pending_requests: Arc::new(DashMap::new()),
+            event_tx,
         }
+    }
+
+    /// Subscribe to the server-pushed event stream.
+    ///
+    /// Returns a receiver that yields `OpenClawEvent` for each event frame
+    /// received from the gateway (chat deltas, presence updates, etc.).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<OpenClawEvent> {
+        self.event_tx.subscribe()
     }
 
     /// Create transport with a device identity for scoped access.
     pub fn with_device(mut self, device: DeviceIdentity) -> Self {
         self.device = Some(device);
         self
+    }
+
+    /// Send a chat message and get back the run ID and an event receiver for streaming deltas.
+    ///
+    /// Sends a `chat.send` request with the given session key and message, then returns
+    /// the `runId` from the immediate response along with a broadcast receiver. The caller
+    /// should read events from the receiver and filter by matching `runId` in the payload.
+    pub async fn send_chat(
+        &self,
+        session_key: &str,
+        message: &str,
+    ) -> anyhow::Result<(String, broadcast::Receiver<OpenClawEvent>)> {
+        let rx = self.subscribe_events();
+
+        let idempotency_key = uuid::Uuid::new_v4().to_string();
+        let request = A2aRequest::new(
+            "message/send",
+            serde_json::json!({
+                "sessionKey": session_key,
+                "message": message,
+                "idempotencyKey": idempotency_key,
+            }),
+        );
+
+        let response = self.send_request(request).await?;
+
+        let run_id = match &response {
+            A2aResponse::Success { result, .. } => result
+                .get("runId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            A2aResponse::Error { error, .. } => {
+                return Err(
+                    A2aError::WebSocket(format!("chat.send failed: {}", error.message)).into(),
+                );
+            }
+        };
+
+        Ok((run_id, rx))
     }
 
     fn build_tls_connector(&self) -> Result<Connector, A2aError> {
@@ -100,6 +161,7 @@ impl OpenClawTransport {
     fn start_reader_task(
         mut reader: WsReader,
         pending: Arc<DashMap<String, (uuid::Uuid, oneshot::Sender<ResponseFrame>)>>,
+        event_tx: broadcast::Sender<OpenClawEvent>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(msg_result) = reader.next().await {
@@ -113,7 +175,12 @@ impl OpenClawTransport {
                             }
                         }
                         Ok(OpenClawFrame::Event(ev)) => {
-                            debug!("event: {}", ev.event);
+                            debug!("event: {} seq={:?}", ev.event, ev.seq);
+                            let _ = event_tx.send(OpenClawEvent {
+                                event: ev.event,
+                                payload: ev.payload,
+                                seq: ev.seq,
+                            });
                         }
                         Ok(_) => {
                             debug!("ignoring non-response frame");
@@ -181,7 +248,8 @@ impl A2aTransport for OpenClawTransport {
         info!("OpenClaw handshake complete, conn_id={:?}", session.conn_id);
 
         let (writer, reader) = ws_stream.split();
-        let reader_task = Self::start_reader_task(reader, self.pending_requests.clone());
+        let reader_task =
+            Self::start_reader_task(reader, self.pending_requests.clone(), self.event_tx.clone());
 
         let connection = OpenClawConnection {
             writer: Arc::new(RwLock::new(writer)),

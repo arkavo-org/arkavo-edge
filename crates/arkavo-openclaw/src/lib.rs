@@ -5,7 +5,7 @@ pub mod protocol;
 pub mod server;
 pub mod translator;
 
-pub use client::OpenClawTransport;
+pub use client::{OpenClawEvent, OpenClawTransport};
 pub use device::{ChallengeSignParams, DeviceAuthStore, DeviceIdentity, SignedDevice};
 pub use handshake::HandshakeConfig;
 pub use protocol::{
