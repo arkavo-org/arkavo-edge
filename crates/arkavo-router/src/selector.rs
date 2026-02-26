@@ -108,9 +108,13 @@ impl ModelSelector {
         if prefer_larger {
             // GLM-4.7-Flash: 30B MoE, highest quality local model
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram_for_glm()
+                && Self::has_sufficient_ram(32)
             {
                 ModelChoice::LocalGlm47Flash
+            } else if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+                && Self::has_sufficient_ram(48)
+            {
+                ModelChoice::LocalQwen35_27B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 ModelChoice::LocalMinistral8B
             } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
@@ -135,8 +139,8 @@ impl ModelSelector {
         }
     }
 
-    /// Check if system has sufficient RAM for GLM-4.7-Flash (32GB+)
-    fn has_sufficient_ram_for_glm() -> bool {
+    /// Check if system has at least `min_gb` of RAM
+    fn has_sufficient_ram(min_gb: u64) -> bool {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
@@ -144,13 +148,13 @@ impl ModelSelector {
                 && let Ok(mem_str) = String::from_utf8(output.stdout)
                 && let Ok(bytes) = mem_str.trim().parse::<u64>()
             {
-                return bytes >= 32 * 1024 * 1024 * 1024; // 32GB
+                return bytes >= min_gb * 1024 * 1024 * 1024;
             }
             false
         }
         #[cfg(not(target_os = "macos"))]
         {
-            // On other platforms, check /proc/meminfo or assume true for now
+            let _ = min_gb;
             true
         }
     }
@@ -168,6 +172,10 @@ impl ModelSelector {
             ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
                 "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                 "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
+            ),
+            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
+                "unsloth/Qwen3.5-27B-GGUF",
+                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
             ),
             ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
                 "unsloth/GLM-4.7-Flash-GGUF",
@@ -263,8 +271,13 @@ impl ModelSelector {
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
             }
+            if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+                && Self::has_sufficient_ram(48)
+            {
+                models.push(ModelChoice::LocalQwen35_27B);
+            }
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram_for_glm()
+                && Self::has_sufficient_ram(32)
             {
                 models.push(ModelChoice::LocalGlm47Flash);
             }

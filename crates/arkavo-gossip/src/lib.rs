@@ -11,6 +11,7 @@
 //! - **Anti-Entropy**: Periodic synchronization to ensure consistency
 //! - **Cross-Swarm Learning**: Lesson propagation and consensus
 
+pub mod advisor_message;
 mod consensus;
 pub mod context_message;
 mod error;
@@ -31,13 +32,13 @@ pub use learning_message::{
 };
 pub use lesson_consensus::{LessonConsensusState, LessonConsensusStatus};
 pub use message::{
-    AntiEntropyDigest, GossipMessage, PatchAnnouncement, PatchDelivery, PatchDigestEntry,
-    PatchRequest, PatchStatus, PatchVote,
+    AdvisorAdjustmentAnnouncement, AntiEntropyDigest, GossipMessage, PatchAnnouncement,
+    PatchDelivery, PatchDigestEntry, PatchRequest, PatchStatus, PatchVote,
 };
 pub use protocol::{
     DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT, GossipConfig, GossipProtocol, GossipStats,
 };
 pub use verification::{
-    KeyRegistry, PatchVerifier, compute_content_hash, sign_announcement, sign_lesson_announcement,
-    sign_lesson_vote, sign_vote,
+    KeyRegistry, PatchVerifier, compute_content_hash, sign_advisor_announcement, sign_announcement,
+    sign_lesson_announcement, sign_lesson_vote, sign_vote,
 };

@@ -5,7 +5,7 @@ set -e
 
 HOST="${1:-localhost}"
 RPC_PORT="${2:-8360}"
-HTTP_PORT="${3:-8361}"
+HTTP_PORT="${3:-${RPC_PORT}}"
 RPC_URL="http://${HOST}:${RPC_PORT}"
 HTTP_URL="http://${HOST}:${HTTP_PORT}"
 

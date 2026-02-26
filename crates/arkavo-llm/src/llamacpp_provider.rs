@@ -194,6 +194,28 @@ impl LlamaCppProvider {
         self.conversation_id.as_deref()
     }
 
+    /// Enable vision support by loading a multimodal projector file.
+    ///
+    /// Must be called after construction when the mmproj path is discovered
+    /// separately (e.g., by the router's model discovery). Fails gracefully:
+    /// logs a warning on load failure and returns Ok with text-only provider.
+    pub fn enable_vision(mut self, mmproj_path: &str) -> Result<Self> {
+        let model = self.get_model()?;
+        match MtmdContext::from_file(mmproj_path, &model) {
+            Ok(ctx) if ctx.supports_vision() => {
+                tracing::info!("Vision support enabled via mmproj: {mmproj_path}");
+                self.mtmd_ctx = Some(Arc::new(ctx));
+            }
+            Ok(_) => {
+                tracing::warn!("mmproj loaded but does not support vision, continuing text-only");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load mmproj ({mmproj_path}): {e}, continuing text-only");
+            }
+        }
+        Ok(self)
+    }
+
     /// Get the model reference, either from owned or registry
     fn get_model(&self) -> Result<Arc<LlamaModel>> {
         if let Some(ref model) = self.model {
@@ -245,6 +267,10 @@ impl LlamaCppProvider {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
         ))
+    }
+
+    pub fn enable_vision(self, _mmproj_path: &str) -> Result<Self> {
+        Ok(self)
     }
 }
 

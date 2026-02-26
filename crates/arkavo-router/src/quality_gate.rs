@@ -7,20 +7,47 @@ use arkavo_llm::{Message, ProviderResponse, Role};
 use arkavo_mcp_tools::ToolRegistry;
 
 impl super::Router {
-    /// Route with tools and Judge loop validation (local models only)
-    ///
-    /// Includes quality gate with:
-    /// - ResponseValidator for fast validation (hallucinated tools, missing params)
-    /// - ResponseJudge for LLM-based quality evaluation
-    /// - Automatic model escalation within LOCAL models only (up to 3 retries)
+    /// Route with tools and Judge loop validation (local models only).
     pub async fn route_with_tools(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
+        self.route_with_tools_hinted(task_description, messages, tool_registry, None)
+            .await
+    }
+
+    /// Route with a model hint from AGENTS.md configuration.
+    ///
+    /// If the hinted model is available, it biases the initial Thompson Sampling
+    /// selection. Escalation and quality gates still apply if inference fails.
+    pub async fn route_with_tools_hinted(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&crate::ModelChoice>,
+    ) -> Result<ProviderResponse> {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
+
+        if let Some(hint) = model_hint {
+            if self.is_model_available(hint) {
+                tracing::info!(
+                    hint = hint.name(),
+                    original = current_decision.recommended_model.name(),
+                    "Applying model hint from AGENTS.md"
+                );
+                current_decision.recommended_model = hint.clone();
+            } else {
+                tracing::debug!(
+                    hint = hint.name(),
+                    "Model hint not available, using default"
+                );
+            }
+        }
+
         let mut feedback_messages: Vec<Message> = Vec::new();
 
         let input_tokens = tool_extraction::estimate_tokens(task_description);

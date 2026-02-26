@@ -69,6 +69,7 @@ members = [
     "crates/arkavo-torg-circuits",
     "crates/arkavo-session",
     "crates/arkavo-kv-cache",
+    "crates/arkavo-openclaw",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -120,6 +121,7 @@ default-members = [
     "crates/arkavo-tasks",
     "crates/arkavo-torg-circuits",
     "crates/arkavo-session",
+    "crates/arkavo-openclaw",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -127,7 +129,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.62.0"
+version = "0.63.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

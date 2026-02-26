@@ -18,8 +18,8 @@ $ make launch
 OpenClaw A2A Bridge — Arkavo Agent
 ====================================
 
-  JSON-RPC : http://localhost:8360
-  Agent Card: http://localhost:8361/.well-known/agent.json
+  Endpoint : http://localhost:8360
+  Agent Card: http://localhost:8360/.well-known/agent.json
   KAS      : enabled (key: bridge-demo-key-1, ec:secp256r1)
   Preflight: 2 policies active (block_pii, block_shell_commands)
   Budget   : $1.00 session cap
@@ -202,7 +202,7 @@ Launches the agent, runs 6 automated tests, and stops the agent:
 OpenClaw A2A Bridge Tests
 =========================
 RPC endpoint : http://localhost:8360
-HTTP endpoint: http://localhost:8361
+HTTP endpoint: http://localhost:8360
 
 Test 1: Agent Card discovery
   [PASS] Agent Card returned (name: arkavo-bridge-agent)
@@ -232,11 +232,11 @@ Results: 7 passed, 0 failed (7 total)
 
 ### Agent fails to start
 
-Check if ports 8360-8361 are in use:
+Check if ports 8360-8360 are in use:
 
 ```bash
 lsof -i :8360
-lsof -i :8361
+lsof -i :8360
 ```
 
 Kill orphan processes:

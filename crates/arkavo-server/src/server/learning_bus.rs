@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use arkavo_crypto::{AgentKeypair, AgentPublicKey};
 use arkavo_gossip::{
-    GossipConfig, GossipMessage, GossipProtocol, KeyRegistry, LessonAnnouncement, LessonDigest,
+    AdvisorAdjustmentAnnouncement, GossipConfig, GossipMessage, GossipProtocol, KeyRegistry,
+    LessonAnnouncement, LessonDigest, advisor_message::AdjustmentStats, sign_advisor_announcement,
     sign_lesson_announcement,
 };
 use arkavo_router::Router;
@@ -23,6 +24,13 @@ use super::episode_buffer::{EpisodeBuffer, ToolObservation};
 use super::policy_cache::PolicyCache;
 use super::synthesis;
 use super::tool_pattern_observer::ToolPatternObserver;
+
+/// Minimum success rate required before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_SUCCESS_RATE: f64 = 0.7;
+/// Minimum feedback count before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_FEEDBACK_COUNT: u32 = 5;
+/// Minimum applications before broadcasting an advisor adjustment to peers
+const BROADCAST_MIN_APPLICATIONS: u32 = 3;
 
 /// Configuration for learning thresholds and channel capacities
 #[derive(Debug, Clone)]
@@ -218,9 +226,16 @@ impl LearningBus {
     ///
     /// For lesson announcements that pass signature verification, immediately
     /// adds the lesson to the local policy cache for behavior guidance injection.
+    /// For advisor adjustment announcements, applies keep-best merge to local advisor.
     pub async fn handle_gossip(&self, message: GossipMessage) -> Vec<GossipMessage> {
         // Capture announcement metadata before passing to gossip protocol
         let lesson_announce = if let GossipMessage::LessonAnnounce(ref ann) = message {
+            Some(ann.clone())
+        } else {
+            None
+        };
+
+        let advisor_announce = if let GossipMessage::AdvisorAdjustmentAnnounce(ref ann) = message {
             Some(ann.clone())
         } else {
             None
@@ -269,6 +284,11 @@ impl LearningBus {
                 originator = %ann.originator,
                 "Gossip lesson applied to policy cache for guidance injection"
             );
+        }
+
+        // If the advisor adjustment passed signature verification, apply keep-best merge
+        if let Some(ann) = advisor_announce {
+            self.apply_remote_adjustment(&ann).await;
         }
 
         responses
@@ -693,6 +713,130 @@ impl LearningBus {
     /// Get the number of cached tool format lessons
     pub async fn cached_tool_pattern_count(&self) -> usize {
         self.policy_cache.read().await.tool_format_lesson_count()
+    }
+
+    /// Get the router reference for advisor access
+    pub fn router(&self) -> &Arc<RwLock<Option<Arc<Router>>>> {
+        &self.router
+    }
+
+    /// Get the gossip outbound channel sender
+    pub fn gossip_out_tx(&self) -> &broadcast::Sender<(String, GossipMessage)> {
+        &self.gossip_out_tx
+    }
+
+    /// Broadcast proven advisor adjustments to the gossip network
+    ///
+    /// Reads the Router's advisor, filters by quality threshold, signs each
+    /// as an AdvisorAdjustmentAnnouncement, and sends via gossip.
+    pub async fn broadcast_advisor_adjustments(&self) {
+        let router_guard = self.router.read().await;
+        let router = match router_guard.as_ref() {
+            Some(r) => r,
+            None => return,
+        };
+
+        let snapshots = router.advisor().export_dynamic();
+        drop(router_guard);
+
+        if snapshots.is_empty() {
+            return;
+        }
+
+        // Quality threshold: only broadcast proven adjustments
+        let quality_snapshots: Vec<_> = snapshots
+            .into_iter()
+            .filter(|s| {
+                s.success_rate >= BROADCAST_MIN_SUCCESS_RATE
+                    && s.feedback_count >= BROADCAST_MIN_FEEDBACK_COUNT
+                    && s.applications >= BROADCAST_MIN_APPLICATIONS
+            })
+            .collect();
+
+        if quality_snapshots.is_empty() {
+            return;
+        }
+
+        let gossip = self.gossip.read().await;
+        let peers = gossip.select_propagation_peers(None).await;
+        drop(gossip);
+
+        if peers.is_empty() {
+            return;
+        }
+
+        let mut broadcast_count = 0;
+        for snap in &quality_snapshots {
+            let issue_str = snap.issue.to_string();
+            let mut ann = AdvisorAdjustmentAnnouncement::new(
+                self.agent_id.clone(),
+                snap.model_family.clone(),
+                issue_str,
+                snap.label.clone(),
+                snap.text.clone(),
+                AdjustmentStats {
+                    success_rate: snap.success_rate,
+                    feedback_count: snap.feedback_count,
+                    applications: snap.applications,
+                    updated_at: chrono::Utc::now(),
+                },
+            );
+
+            if sign_advisor_announcement(&mut ann, &self.keypair).is_err() {
+                continue;
+            }
+
+            for peer_id in &peers {
+                let _ = self.gossip_out_tx.send((
+                    peer_id.clone(),
+                    GossipMessage::AdvisorAdjustmentAnnounce(ann.clone()),
+                ));
+            }
+            broadcast_count += 1;
+        }
+
+        if broadcast_count > 0 {
+            tracing::info!(
+                "Broadcast {} advisor adjustments to {} peers",
+                broadcast_count,
+                peers.len()
+            );
+        }
+    }
+
+    /// Apply a remote advisor adjustment using keep-best merge
+    async fn apply_remote_adjustment(&self, ann: &AdvisorAdjustmentAnnouncement) {
+        use arkavo_router::prompt_advisor::{AdvisorIssue, DynamicSnapshot};
+
+        let issue = match ann.issue.parse::<AdvisorIssue>() {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!("{}", e);
+                return;
+            }
+        };
+
+        let snapshot = DynamicSnapshot {
+            label: ann.label.clone(),
+            model_family: ann.model_family.clone(),
+            issue,
+            text: ann.text.clone(),
+            success_rate: ann.stats.success_rate,
+            applications: ann.stats.applications,
+            feedback_count: ann.stats.feedback_count,
+        };
+
+        let router_guard = self.router.read().await;
+        if let Some(router) = router_guard.as_ref() {
+            router.advisor().import_dynamic_merge_best(vec![snapshot]);
+            tracing::info!(
+                "Applied remote advisor adjustment from {}: {} ({}, {})",
+                ann.originator,
+                ann.label,
+                ann.model_family,
+                ann.issue
+            );
+        }
     }
 }
 

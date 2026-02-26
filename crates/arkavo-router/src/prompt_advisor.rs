@@ -14,6 +14,31 @@ pub enum AdvisorIssue {
     Timeout,
 }
 
+impl std::fmt::Display for AdvisorIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnwantedCodeFence => write!(f, "UnwantedCodeFence"),
+            Self::OutputLoop => write!(f, "OutputLoop"),
+            Self::WrongExpert => write!(f, "WrongExpert"),
+            Self::Timeout => write!(f, "Timeout"),
+        }
+    }
+}
+
+impl std::str::FromStr for AdvisorIssue {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "UnwantedCodeFence" => Ok(Self::UnwantedCodeFence),
+            "OutputLoop" => Ok(Self::OutputLoop),
+            "WrongExpert" => Ok(Self::WrongExpert),
+            "Timeout" => Ok(Self::Timeout),
+            other => Err(format!("unknown AdvisorIssue: {other}")),
+        }
+    }
+}
+
 /// Advice returned to the caller for system-message injection
 #[derive(Debug, Clone)]
 pub struct PromptAdvice {
@@ -338,6 +363,45 @@ impl PromptAdvisor {
                 feedback_count: a.feedback_count,
             })
             .collect()
+    }
+
+    /// Import dynamic adjustments with keep-best merge strategy.
+    ///
+    /// Unlike `import_dynamic()` which skips duplicates, this replaces an
+    /// existing adjustment when the remote has a higher quality score
+    /// (`success_rate * feedback_count`).
+    pub fn import_dynamic_merge_best(&self, snapshots: Vec<DynamicSnapshot>) {
+        let Ok(mut adjustments) = self.adjustments.write() else {
+            return;
+        };
+
+        for snap in snapshots {
+            let remote_quality = snap.success_rate * f64::from(snap.feedback_count);
+
+            if let Some(existing) = adjustments.iter_mut().find(|a| {
+                a.model_family == snap.model_family && a.issue == snap.issue && !a.is_static
+            }) {
+                let local_quality = existing.success_rate * f64::from(existing.feedback_count);
+                if remote_quality > local_quality {
+                    existing.label = snap.label;
+                    existing.text = snap.text;
+                    existing.success_rate = snap.success_rate;
+                    existing.applications = snap.applications;
+                    existing.feedback_count = snap.feedback_count;
+                }
+            } else {
+                adjustments.push(Adjustment {
+                    label: snap.label,
+                    model_family: snap.model_family,
+                    issue: snap.issue,
+                    text: snap.text,
+                    success_rate: snap.success_rate,
+                    applications: snap.applications,
+                    feedback_count: snap.feedback_count,
+                    is_static: false,
+                });
+            }
+        }
     }
 
     /// Import previously persisted dynamic adjustments.
@@ -746,5 +810,117 @@ mod tests {
         // Import the same snapshots again — should not create duplicates
         advisor.import_dynamic(snapshots);
         assert_eq!(advisor.stats().len(), count_before);
+    }
+
+    #[test]
+    fn test_merge_best_replaces_lower_quality() {
+        let advisor = PromptAdvisor::new();
+        advisor.learn("glm", AdvisorIssue::Timeout, "Local fix.".into());
+        // Local: success_rate=0.5, feedback=0 → quality=0.0
+
+        let remote = vec![DynamicSnapshot {
+            label: "glm-timeout-dynamic".into(),
+            model_family: "glm".into(),
+            issue: AdvisorIssue::Timeout,
+            text: "Keep your response brief.".into(),
+            success_rate: 0.99,
+            applications: 150,
+            feedback_count: 290,
+        }];
+
+        advisor.import_dynamic_merge_best(remote);
+
+        let stats = advisor.stats();
+        let glm_timeout = stats
+            .iter()
+            .find(|s| s.model_family == "glm" && !s.is_static && s.label.contains("timeout"))
+            .unwrap();
+        assert!((glm_timeout.success_rate - 0.99).abs() < f64::EPSILON);
+        assert_eq!(glm_timeout.feedback_count, 290);
+    }
+
+    #[test]
+    fn test_merge_best_keeps_higher_quality_local() {
+        let advisor = PromptAdvisor::new();
+        advisor.learn(
+            "qwen",
+            AdvisorIssue::OutputLoop,
+            "Local high quality.".into(),
+        );
+        // Pump up the local quality
+        let labels = vec!["qwen-outputloop-dynamic".to_string()];
+        for _ in 0..50 {
+            advisor.record_feedback(&labels, true);
+        }
+
+        let stats_before = advisor.stats();
+        let local = stats_before
+            .iter()
+            .find(|s| s.label == "qwen-outputloop-dynamic")
+            .unwrap();
+        let local_quality = local.success_rate * f64::from(local.feedback_count);
+
+        // Remote has lower quality
+        let remote = vec![DynamicSnapshot {
+            label: "qwen-outputloop-dynamic".into(),
+            model_family: "qwen".into(),
+            issue: AdvisorIssue::OutputLoop,
+            text: "Remote worse fix.".into(),
+            success_rate: 0.6,
+            applications: 5,
+            feedback_count: 10,
+        }];
+        let remote_quality = 0.6 * 10.0;
+        assert!(local_quality > remote_quality);
+
+        advisor.import_dynamic_merge_best(remote);
+
+        // Local should be kept
+        let stats_after = advisor.stats();
+        let after = stats_after
+            .iter()
+            .find(|s| s.label == "qwen-outputloop-dynamic")
+            .unwrap();
+        assert!(after.success_rate > 0.8); // Still high from feedback
+    }
+
+    #[test]
+    fn test_advisor_issue_display_roundtrip() {
+        for issue in [
+            AdvisorIssue::UnwantedCodeFence,
+            AdvisorIssue::OutputLoop,
+            AdvisorIssue::WrongExpert,
+            AdvisorIssue::Timeout,
+        ] {
+            let s = issue.to_string();
+            let parsed: AdvisorIssue = s.parse().unwrap();
+            assert_eq!(parsed, issue);
+        }
+    }
+
+    #[test]
+    fn test_advisor_issue_from_str_error() {
+        let result = "Unknown".parse::<AdvisorIssue>();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown AdvisorIssue"));
+    }
+
+    #[test]
+    fn test_merge_best_imports_new() {
+        let advisor = PromptAdvisor::new();
+        let initial_count = advisor.stats().len();
+
+        let remote = vec![DynamicSnapshot {
+            label: "deepseek-timeout-dynamic".into(),
+            model_family: "deepseek".into(),
+            issue: AdvisorIssue::Timeout,
+            text: "Be brief.".into(),
+            success_rate: 0.95,
+            applications: 100,
+            feedback_count: 200,
+        }];
+
+        advisor.import_dynamic_merge_best(remote);
+        assert_eq!(advisor.stats().len(), initial_count + 1);
     }
 }

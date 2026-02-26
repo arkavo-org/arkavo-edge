@@ -3,15 +3,6 @@ use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
 
-/// Information about an available LLM
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LlmInfo {
-    pub name: String,
-    pub provider: String,
-    pub model: String,
-    pub available: bool,
-}
-
 impl super::Router {
     /// Get a provider for the given model choice (local or cloud)
     pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
@@ -28,93 +19,44 @@ impl super::Router {
         arkavo_llm::GeminiProvider::new().ok()
     }
 
-    /// Check if Gemini API is available
     pub fn is_gemini_available(&self) -> bool {
         std::env::var("GEMINI_API_KEY").is_ok()
     }
 
-    /// Check if Anthropic API is available
     pub fn is_anthropic_available(&self) -> bool {
         std::env::var("ANTHROPIC_API_KEY").is_ok()
     }
 
-    /// Check if Kimi API is available
     pub fn is_kimi_available(&self) -> bool {
         std::env::var("MOONSHOT_API_KEY").is_ok()
     }
 
-    /// Get Anthropic provider if configured
     pub fn get_anthropic_provider(
         &self,
     ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
         arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
     }
 
-    /// Get the list of available LLMs for status reporting
-    pub fn get_available_llms(&self) -> Vec<LlmInfo> {
-        let mut llms = Vec::new();
-
-        if self.is_anthropic_available() {
-            let model = std::env::var("ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
-            llms.push(LlmInfo {
-                name: "Claude".to_string(),
-                provider: "Anthropic".to_string(),
-                model,
-                available: true,
-            });
-        }
-
-        if self.is_gemini_available() {
-            let model = std::env::var("GEMINI_MODEL")
-                .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
-            llms.push(LlmInfo {
-                name: "Gemini".to_string(),
-                provider: "Google".to_string(),
-                model,
-                available: true,
-            });
-        }
-
-        if self.is_kimi_available() {
-            let model = std::env::var("KIMI_MODEL").unwrap_or_else(|_| "kimi-k2.5".to_string());
-            llms.push(LlmInfo {
-                name: "Kimi".to_string(),
-                provider: "Moonshot".to_string(),
-                model,
-                available: true,
-            });
-        }
-
-        llms.push(LlmInfo {
-            name: "Local".to_string(),
-            provider: "Local".to_string(),
-            model: "qwen3-0.6b / ministral-3b".to_string(),
-            available: true,
-        });
-
-        llms
-    }
-
     pub(crate) fn get_local_fallback(
         &self,
         category: crate::classifier::TaskCategory,
     ) -> ModelChoice {
+        use crate::classifier::TaskCategory;
         match category {
-            crate::classifier::TaskCategory::FrontendUI
-            | crate::classifier::TaskCategory::BackendAPI
-            | crate::classifier::TaskCategory::Refactoring => ModelChoice::LocalMinistral3B,
-            crate::classifier::TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
+            TaskCategory::FrontendUI
+            | TaskCategory::BackendAPI
+            | TaskCategory::Refactoring
+            | TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
             _ => ModelChoice::LocalQwen3,
         }
     }
 
-    /// Upgrade to a more capable model, but only if it's available
     pub(crate) fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
         let candidate = match current {
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalGlm47Flash,
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_27B,
+            ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGlm47Flash => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
@@ -141,7 +83,6 @@ impl super::Router {
         }
     }
 
-    /// Check if a model is available (installed/cached or has API key)
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
@@ -177,6 +118,10 @@ impl super::Router {
                 "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
             ),
+            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
+                "unsloth/Qwen3.5-27B-GGUF",
+                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
+            ),
             ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
                 "unsloth/GLM-4.7-Flash-GGUF",
                 "GLM-4.7-Flash-Q4_K_M.gguf",
@@ -185,6 +130,9 @@ impl super::Router {
     }
 
     /// Load a local model into the registry (if not already loaded) and create a provider.
+    ///
+    /// Automatically discovers and enables vision support when an mmproj file
+    /// is found alongside the model GGUF in the HuggingFace cache.
     #[cfg(feature = "llama-cpp")]
     pub(crate) async fn load_local_model(
         &self,
@@ -192,11 +140,13 @@ impl super::Router {
         repo: &str,
         filename: &str,
     ) -> Result<Box<dyn Provider>> {
-        if !self.model_registry.is_loaded(registry_name) {
-            let model_path = model_discovery::find_gguf_model(repo, filename)
-                .await
-                .map_err(Error::ModelExecution)?;
+        // Resolve model path unconditionally — hf_hub returns the cached path
+        // instantly when the model is already downloaded (local stat, no network).
+        let model_path = model_discovery::find_gguf_model(repo, filename)
+            .await
+            .map_err(Error::ModelExecution)?;
 
+        if !self.model_registry.is_loaded(registry_name) {
             tracing::info!(
                 model = registry_name,
                 path = %model_path.display(),
@@ -224,6 +174,16 @@ impl super::Router {
                 "Failed to create provider for {registry_name}: {e}"
             ))
         })?;
+
+        // Enable vision if mmproj file is found alongside the model
+        let provider =
+            if let Some(mmproj_path) = model_discovery::find_mmproj_for_model(&model_path) {
+                provider
+                    .enable_vision(&mmproj_path.to_string_lossy())
+                    .map_err(|e| Error::ModelExecution(format!("Failed to enable vision: {e}")))?
+            } else {
+                provider
+            };
 
         Ok(Box::new(provider))
     }
@@ -353,6 +313,15 @@ impl super::Router {
                     "deepseek-coder-v2-lite-instruct",
                     "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                     "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+                )
+                .await
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalQwen35_27B => {
+                self.load_local_model(
+                    "qwen3.5-27b",
+                    "unsloth/Qwen3.5-27B-GGUF",
+                    "Qwen3.5-27B-UD-Q6_K_XL.gguf",
                 )
                 .await
             }

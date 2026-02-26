@@ -28,6 +28,7 @@ pub async fn handle_message_send(
     router: Option<&Arc<arkavo_router::Router>>,
     learning_bus: Option<&Arc<LearningBus>>,
     budget_manager: Option<&Arc<arkavo_budget::BudgetManager>>,
+    model_hint: Option<arkavo_router::ModelChoice>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -49,6 +50,28 @@ pub async fn handle_message_send(
         })
         .collect::<Vec<_>>()
         .join("\n");
+
+    // Extract base64-encoded images from File parts with image/* MIME types
+    let images: Vec<String> = request
+        .message
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            MessagePart::File {
+                mime_type,
+                data,
+                is_uri,
+                ..
+            } if mime_type.starts_with("image/") && !is_uri => Some(data.clone()),
+            _ => None,
+        })
+        .collect();
+    let images = if images.is_empty() {
+        None
+    } else {
+        info!("Message contains {} image attachment(s)", images.len());
+        Some(images)
+    };
 
     // Preflight moderation: reject policy-violating requests before task submission
     if let Some(router) = router
@@ -135,6 +158,8 @@ pub async fn handle_message_send(
                         None,
                         None,
                         None,
+                        model_hint.as_ref(),
+                        images,
                     )
                     .await
                     {

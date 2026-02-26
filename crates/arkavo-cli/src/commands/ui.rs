@@ -1005,6 +1005,7 @@ async fn create_client_from_routing(
         ModelChoice::LocalQwen3
         | ModelChoice::LocalMinistral3B
         | ModelChoice::LocalMinistral8B
+        | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalGlm47Flash
         | ModelChoice::LocalGemma270M
         | ModelChoice::LocalGemma4B

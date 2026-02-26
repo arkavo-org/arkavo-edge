@@ -10,7 +10,9 @@
 #![allow(clippy::significant_drop_tightening)]
 
 use crate::http::HttpTransport;
-use crate::transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
+use crate::transport::{
+    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, A2aTransportRef, TransportConfig,
+};
 use crate::websocket::WebSocketTransport;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,6 +26,8 @@ pub enum TransportType {
     Http,
     /// WebSocket transport for stateful, streaming requests
     WebSocket,
+    /// Externally-provided transport (e.g., OpenClaw WS adapter)
+    Custom,
 }
 
 /// Configuration for peer manager
@@ -58,6 +62,7 @@ struct PeerConnection {
     url: String,
     http_transport: Option<Arc<HttpTransport>>,
     ws_transport: Option<Arc<WebSocketTransport>>,
+    custom_transport: Option<A2aTransportRef>,
     transport_type: TransportType,
 }
 
@@ -65,6 +70,7 @@ struct PeerConnection {
 enum TransportRef {
     Http(Arc<HttpTransport>),
     WebSocket(Arc<WebSocketTransport>),
+    Custom(A2aTransportRef),
 }
 
 impl PeerManager {
@@ -136,6 +142,7 @@ impl PeerManager {
                     format!("ws://{url}")
                 }
             }
+            TransportType::Custom => url.to_string(),
         };
 
         debug!(
@@ -164,6 +171,7 @@ impl PeerManager {
                         url: normalized_url,
                         http_transport: Some(Arc::new(transport)),
                         ws_transport: None,
+                        custom_transport: None,
                         transport_type: TransportType::Http,
                     },
                 );
@@ -186,9 +194,14 @@ impl PeerManager {
                         url: normalized_url,
                         http_transport: None,
                         ws_transport: Some(Arc::new(transport)),
+                        custom_transport: None,
                         transport_type: TransportType::WebSocket,
                     },
                 );
+            }
+            TransportType::Custom => {
+                // Custom transports are registered via register_transport()
+                return Err("Custom transports must be registered via register_transport()".into());
             }
         }
 
@@ -260,10 +273,12 @@ impl PeerManager {
                 if let Some(peer) = peers.get(&peer_url) {
                     if let Some(http) = &peer.http_transport {
                         Some(TransportRef::Http(Arc::clone(http)))
+                    } else if let Some(ws) = &peer.ws_transport {
+                        Some(TransportRef::WebSocket(Arc::clone(ws)))
                     } else {
-                        peer.ws_transport
+                        peer.custom_transport
                             .as_ref()
-                            .map(|ws| TransportRef::WebSocket(Arc::clone(ws)))
+                            .map(|c| TransportRef::Custom(Arc::clone(c)))
                     }
                 } else {
                     None
@@ -273,6 +288,7 @@ impl PeerManager {
             let result = match transport_ref {
                 Some(TransportRef::Http(http)) => http.send_request(request).await,
                 Some(TransportRef::WebSocket(ws)) => ws.send_request(request).await,
+                Some(TransportRef::Custom(custom)) => custom.send_request(request).await,
                 None => Err(anyhow::anyhow!("No transport available")),
             };
 
@@ -311,6 +327,8 @@ impl PeerManager {
                 Ok(TransportRef::Http(Arc::clone(http)))
             } else if let Some(ws) = &peer.ws_transport {
                 Ok(TransportRef::WebSocket(Arc::clone(ws)))
+            } else if let Some(custom) = &peer.custom_transport {
+                Ok(TransportRef::Custom(Arc::clone(custom)))
             } else {
                 Err("No transport available")
             }
@@ -319,6 +337,7 @@ impl PeerManager {
         let response = match transport_ref {
             TransportRef::Http(http) => http.send_request(request).await?,
             TransportRef::WebSocket(ws) => ws.send_request(request).await?,
+            TransportRef::Custom(custom) => custom.send_request(request).await?,
         };
 
         Ok(response)
@@ -355,6 +374,26 @@ impl PeerManager {
     pub fn get_peer_transport_type(&self, peer_url: &str) -> Option<TransportType> {
         let peers = self.peers.read().unwrap();
         peers.get(peer_url).map(|p| p.transport_type)
+    }
+
+    /// Register an externally-created transport for a peer.
+    ///
+    /// This allows protocol adapters (e.g., OpenClaw WS bridge) to provide
+    /// their own `A2aTransport` implementation without the `PeerManager`
+    /// needing to know about the specific transport type.
+    pub fn register_transport(&self, peer_url: &str, transport: A2aTransportRef) {
+        info!("Registering custom transport for peer: {}", peer_url);
+        let mut peers = self.peers.write().unwrap();
+        peers.insert(
+            peer_url.to_string(),
+            PeerConnection {
+                url: peer_url.to_string(),
+                http_transport: None,
+                ws_transport: None,
+                custom_transport: Some(transport),
+                transport_type: TransportType::Custom,
+            },
+        );
     }
 }
 

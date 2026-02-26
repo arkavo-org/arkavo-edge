@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use arkavo_crypto::{AgentKeypair, AgentPublicKey};
 use sha2::{Digest, Sha256};
 
+use crate::advisor_message::AdvisorAdjustmentAnnouncement;
 use crate::error::{GossipError, GossipResult};
 use crate::learning_message::{LessonAnnouncement, LessonVote};
 use crate::message::{PatchAnnouncement, PatchVote};
@@ -152,6 +153,24 @@ impl PatchVerifier {
         Ok(())
     }
 
+    /// Verify an advisor adjustment announcement signature
+    pub fn verify_advisor_announcement(
+        &self,
+        announcement: &AdvisorAdjustmentAnnouncement,
+    ) -> GossipResult<()> {
+        let pubkey = self
+            .registry
+            .get(&announcement.originator)
+            .ok_or_else(|| GossipError::UnknownOriginator(announcement.originator.clone()))?;
+
+        let content = announcement.content_to_sign();
+        pubkey
+            .verify(&content, &announcement.signature)
+            .map_err(GossipError::SignatureVerification)?;
+
+        Ok(())
+    }
+
     /// Get the underlying key registry
     #[must_use]
     pub fn registry(&self) -> &KeyRegistry {
@@ -199,6 +218,17 @@ pub fn sign_lesson_vote(vote: &mut LessonVote, keypair: &AgentKeypair) -> Gossip
     let content = vote.content_to_sign();
     let signature = keypair.sign(&content);
     vote.signature = signature;
+    Ok(())
+}
+
+/// Sign an advisor adjustment announcement
+pub fn sign_advisor_announcement(
+    announcement: &mut AdvisorAdjustmentAnnouncement,
+    keypair: &AgentKeypair,
+) -> GossipResult<()> {
+    let content = announcement.content_to_sign();
+    let signature = keypair.sign(&content);
+    announcement.signature = signature;
     Ok(())
 }
 

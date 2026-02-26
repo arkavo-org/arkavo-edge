@@ -70,14 +70,15 @@ pub struct DelegationToken {
 
 impl DelegationToken {
     /// Compute the canonical payload bytes for signing.
-    fn payload_bytes(&self) -> Vec<u8> {
+    fn payload_bytes(&self) -> Result<Vec<u8>, DelegationError> {
         let payload = serde_json::json!({
             "issuer_did": self.issuer_did,
             "subject_did": self.subject_did,
             "entitlements": self.entitlements,
             "expires_at": self.expires_at.to_rfc3339(),
         });
-        serde_json::to_vec(&payload).unwrap_or_default()
+        serde_json::to_vec(&payload)
+            .map_err(|e| DelegationError::ParseError(format!("payload serialization: {e}")))
     }
 
     /// Parse a delegation token from a JSON string.
@@ -86,8 +87,9 @@ impl DelegationToken {
     }
 
     /// Serialize the token to a JSON string.
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn to_json(&self) -> Result<String, DelegationError> {
+        serde_json::to_string(self)
+            .map_err(|e| DelegationError::ParseError(format!("token serialization: {e}")))
     }
 }
 
@@ -214,7 +216,7 @@ impl DelegationVerifier {
             .map_err(|e| DelegationError::SignatureInvalid(format!("Base64 decode error: {e}")))?;
 
         // Verify Ed25519 signature
-        let payload = token.payload_bytes();
+        let payload = token.payload_bytes()?;
         public_key
             .verify(&payload, &signature_bytes)
             .map_err(|e| DelegationError::ChainBroken {
@@ -258,7 +260,7 @@ mod tests {
             3600,
         );
 
-        let json = token.to_json();
+        let json = token.to_json().unwrap();
         let parsed = DelegationToken::from_json(&json).unwrap();
 
         assert_eq!(parsed.issuer_did, token.issuer_did);
@@ -343,8 +345,8 @@ mod tests {
             3600,
         );
 
-        let bytes1 = token.payload_bytes();
-        let bytes2 = token.payload_bytes();
+        let bytes1 = token.payload_bytes().unwrap();
+        let bytes2 = token.payload_bytes().unwrap();
 
         assert_eq!(bytes1, bytes2);
     }

@@ -232,6 +232,28 @@ fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
     None
 }
 
+/// Find the mmproj (vision projector) file for a given model GGUF path.
+///
+/// Scans the parent directory of the resolved model path for files matching
+/// `mmproj*.gguf`. In the HuggingFace cache layout, the mmproj file lives
+/// alongside the model GGUF in the same snapshot directory.
+pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
+    let parent = model_path.parent()?;
+    let entries = std::fs::read_dir(parent).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("mmproj")
+            && name.ends_with(".gguf")
+        {
+            tracing::info!("Found mmproj for vision support: {}", path.display());
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Scan entire HuggingFace cache for any .gguf file
 ///
 /// This is the ultimate fallback when no specific model is found.
@@ -242,6 +264,7 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     // Priority order: prefer larger models first for better quality
     let preferred_repos = [
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
+        "models--unsloth--Qwen3.5-27B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--Qwen--Qwen3-0.6B-GGUF",
     ];
@@ -275,6 +298,36 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_find_mmproj_for_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("Qwen3.5-27B-UD-Q6_K_XL.gguf");
+        let mmproj = dir.path().join("mmproj-Qwen2.5-VL-7B-f16.gguf");
+        std::fs::write(&model, b"model").unwrap();
+        std::fs::write(&mmproj, b"mmproj").unwrap();
+
+        let result = find_mmproj_for_model(&model);
+        assert!(result.is_some());
+        assert!(
+            result
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("mmproj")
+        );
+    }
+
+    #[test]
+    fn test_find_mmproj_none_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("model.gguf");
+        std::fs::write(&model, b"model").unwrap();
+
+        assert!(find_mmproj_for_model(&model).is_none());
+    }
 
     #[tokio::test]
     async fn test_find_gguf_model() {

@@ -33,7 +33,7 @@ One command: builds Arkavo, launches the agent, runs the five-act competitive na
 │  Encrypt: none      │         │  │ Tracker  │  │ (local, free)  │  │
 │                     │         │  └──────────┘  └────────────────┘  │
 └─────────────────────┘         └─────────────────────────────────────┘
-                                     :8361 /.well-known/agent.json
+                                     :8360 /.well-known/agent.json
 ```
 
 ## Security Comparison
@@ -66,7 +66,7 @@ Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
 | `bridge.sh` | Protocol bridge: curl-based A2A caller with security metadata |
 | `demo.sh` | Five-act competitive narrative with report generation |
 | `test-bridge.sh` | Automated A2A endpoint tests (6 tests) |
-| `launch.sh` | Start Arkavo agent on ports 8360-8361 |
+| `launch.sh` | Start Arkavo agent on port 8360 |
 | `stop.sh` | Stop Arkavo agent |
 | `tasks.json` | Demo task payloads (clean, PII, safe, budget-buster) |
 | `Makefile` | Single entry point: `make demo`, `make test`, `make clean` |
@@ -83,7 +83,7 @@ Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
 ### Discovery
 
 ```bash
-curl http://localhost:8361/.well-known/agent.json | jq .
+curl http://localhost:8360/.well-known/agent.json | jq .
 ```
 
 ### kas.publicKey

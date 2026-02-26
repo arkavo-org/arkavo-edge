@@ -22,8 +22,8 @@ pub use config_helpers::AgentMetadata;
 pub use episode_buffer::{EpisodeBuffer, ToolObservation};
 pub use event_loop::{start_event_processing_loop, start_lesson_application_loop};
 pub use gossip_transport::{
-    start_anti_entropy_loop, start_cleanup_loop, start_gossip_transport,
-    start_lesson_propagation_loop,
+    start_advisor_broadcast_loop, start_anti_entropy_loop, start_cleanup_loop,
+    start_gossip_transport, start_lesson_propagation_loop,
 };
 pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
 pub use mcp_bridge::McpBridgeTool;
@@ -277,6 +277,8 @@ pub struct A2aRpcImpl {
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
     /// Orchestrator tick counter (shared with orchestrator loop)
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
+    /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
+    pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -427,6 +429,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.router.as_ref(),
             self.learning_bus.as_ref(),
             self.budget_manager.as_ref(),
+            self.model_hint.clone(),
             request,
         )
         .await
