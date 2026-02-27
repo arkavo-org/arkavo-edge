@@ -16,6 +16,7 @@ pub mod health_check;
 pub mod mcp_connection;
 pub mod osv;
 pub mod registry;
+pub mod sandbox;
 pub mod semgrep;
 pub mod server;
 pub mod shell_exec;
@@ -58,6 +59,9 @@ pub enum ToolError {
 
     #[error("MCP error: {0}")]
     Mcp(String),
+
+    #[error("Policy denied: {0}")]
+    PolicyDenied(String),
 
     #[error("Other error: {0}")]
     Other(String),

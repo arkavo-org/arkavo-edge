@@ -1,5 +1,6 @@
 pub mod advisor_state;
 pub mod embeddings;
+pub mod encryption;
 pub mod error;
 pub mod event_store;
 pub mod federated_memory;

@@ -27,7 +27,10 @@ pub mod issue_analyzer;
 pub mod issue_router;
 pub mod orchestrator;
 pub mod planner_config;
+pub mod policy_events;
+pub mod spawn_guard;
 pub mod task_executor;
+pub mod task_policy_manager;
 pub mod types;
 pub mod webhook;
 
@@ -44,10 +47,16 @@ pub use arkavo_github::{GitHubApp, IssueOperations, IssueUpdate};
 pub use issue_analyzer::{Complexity, IssueAnalysis, IssueAnalyzer, IssueType};
 pub use issue_router::{ExecutionStrategy, IssueRouter, Priority, RoutingDecision};
 pub use orchestrator::Orchestrator;
+pub use policy_events::{PolicyEvent, PolicyEventHandler, PolicyEventStream, StreamStats};
+pub use spawn_guard::{SpawnCheckResult, SpawnGuard};
 pub use task_executor::{
     CollaborativePlanner, LocalTaskStrategy, MeshTaskStrategy, MessageType, MockUI,
     ModelCapability, ModelInfo, SelectedModels, TaskConfig, TaskExecutor, TaskPlan, TaskResult,
     TaskStrategy, TaskUI,
+};
+pub use task_policy_manager::{
+    Obligation, PolicyDecision, SandboxConfig, TaskContext, TaskPolicyManager, ToolEntitlement,
+    ToolRisk,
 };
 pub use types::{GitHubEvent, IssueEvent, PullRequestEvent};
 pub use webhook::WebhookServer;

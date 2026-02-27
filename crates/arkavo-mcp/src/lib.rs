@@ -3,6 +3,9 @@
 //! This crate provides the fundamental types and traits needed for MCP
 //! without any runtime dependencies.
 
+pub mod code_scanner;
+pub mod integrity;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

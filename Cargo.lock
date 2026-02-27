@@ -541,6 +541,7 @@ dependencies = [
  "arkavo-protocol",
  "arkavo-router",
  "arkavo-ui-generator",
+ "arkavo-validation",
  "async-trait",
  "axum",
  "chrono",
@@ -1172,8 +1173,11 @@ version = "0.63.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -1315,6 +1319,7 @@ dependencies = [
  "hnsw_rs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",

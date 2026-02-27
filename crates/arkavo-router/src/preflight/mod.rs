@@ -44,6 +44,7 @@ mod circuit;
 mod config;
 mod features;
 mod moderator;
+pub mod normalize;
 mod result;
 
 pub use config::{

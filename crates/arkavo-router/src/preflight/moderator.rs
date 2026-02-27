@@ -85,6 +85,9 @@ impl PreflightModerator {
 
     /// Evaluate all circuits against input text
     ///
+    /// Normalizes Unicode homoglyphs before feature extraction to prevent
+    /// bypass via Cyrillic, Greek, fullwidth, or mathematical character substitution.
+    ///
     /// Returns `Allow` if all circuits pass, or `Block` with the first failing policy
     #[must_use]
     pub fn check(&self, input: &str) -> ModerationResult {
@@ -92,12 +95,14 @@ impl PreflightModerator {
             return ModerationResult::Allow;
         }
 
+        let normalized = super::normalize::normalize(input);
+
         for entry in self.circuits.iter() {
             let policy_id = entry.key();
             let circuit = entry.value();
 
-            // Evaluate circuit using shared implementation
-            let (failing_output, feature_values) = circuit.evaluate_with_features(input);
+            // Evaluate circuit using normalized input
+            let (failing_output, feature_values) = circuit.evaluate_with_features(&normalized);
 
             if let Some(output_index) = failing_output {
                 tracing::warn!(
@@ -362,6 +367,34 @@ mod tests {
         );
         // Empty input should pass (no PII detected)
         assert!(moderator.check("").is_allowed());
+    }
+
+    #[test]
+    fn test_homoglyph_sql_injection_blocked() {
+        let moderator = PreflightModerator::new();
+        let graph = build_not_circuit();
+        moderator.register_graph(
+            PolicyId::new("block_injection"),
+            graph,
+            vec![PreflightFeature::InputContainsSQLKeywords],
+        );
+        // Cyrillic 'О' (U+041E) in "DROP" — moderator normalizes before check
+        let result = moderator.check("DR\u{041E}P TABLE users;");
+        assert!(result.is_blocked());
+    }
+
+    #[test]
+    fn test_homoglyph_shell_command_blocked() {
+        let moderator = PreflightModerator::new();
+        let graph = build_not_circuit();
+        moderator.register_graph(
+            PolicyId::new("block_shell"),
+            graph,
+            vec![PreflightFeature::InputContainsShellCommands],
+        );
+        // Fullwidth 's' (U+FF53) in "sudo"
+        let result = moderator.check("\u{FF53}udo rm -rf /");
+        assert!(result.is_blocked());
     }
 
     #[test]

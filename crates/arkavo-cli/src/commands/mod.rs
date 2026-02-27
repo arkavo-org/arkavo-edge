@@ -7,6 +7,7 @@ pub mod mesh;
 pub mod model;
 pub mod orchestrator;
 pub mod rlm_integration;
+pub mod security_audit;
 pub mod task;
 pub mod tdf;
 pub mod terminal;

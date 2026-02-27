@@ -55,6 +55,9 @@ pub struct AgentCard {
     pub name: String,
     pub capabilities: Vec<String>,
     pub endpoint: String,
+    /// FQN entitlements from delegation chain for policy evaluation
+    #[serde(default)]
+    pub entitlements: Vec<String>,
 }
 
 /// Task offer for agent negotiation

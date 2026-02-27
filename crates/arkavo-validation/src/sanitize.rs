@@ -1,6 +1,8 @@
 use serde_json::Value;
 
 const REDACTED: &str = "[REDACTED]";
+/// Sentinel value for round-trip preservation in UI redaction.
+pub const REDACTED_SENTINEL: &str = "__ARKAVO_REDACTED__";
 const MAX_LOG_PAYLOAD_CHARS: usize = 2048;
 const SENSITIVE_KEY_PATTERNS: &[&str] = &[
     "api_key",
@@ -59,6 +61,38 @@ pub fn sanitize_json_line_for_log(line: &str) -> String {
         Ok(value) => sanitize_json_value_for_log(&value),
         Err(_) => truncate_for_log("[non-json payload redacted]", MAX_LOG_PAYLOAD_CHARS),
     }
+}
+
+/// Check whether a key is sensitive (public for reuse).
+pub fn is_sensitive(key: &str) -> bool {
+    is_sensitive_key(key)
+}
+
+/// Redact sensitive values in a JSON object for UI display.
+///
+/// Uses `REDACTED_SENTINEL` instead of `[REDACTED]` so the UI can detect
+/// and preserve redacted values on round-trip (e.g., config saves).
+pub fn redact_for_ui(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut redacted = serde_json::Map::with_capacity(map.len());
+            for (key, val) in map {
+                if is_sensitive_key(key) {
+                    redacted.insert(key.clone(), Value::String(REDACTED_SENTINEL.to_string()));
+                } else {
+                    redacted.insert(key.clone(), redact_for_ui(val));
+                }
+            }
+            Value::Object(redacted)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(redact_for_ui).collect()),
+        _ => value.clone(),
+    }
+}
+
+/// Check if a value is the redacted sentinel (for round-trip preservation).
+pub fn is_redacted_sentinel(value: &str) -> bool {
+    value == REDACTED_SENTINEL
 }
 
 /// Sanitize a parsed JSON value for safe logging.
