@@ -44,14 +44,6 @@ fn get_vendor_commit(vendor_dir: &std::path::Path) -> Option<String> {
 }
 
 fn file_contains(vendor_dir: &std::path::Path, pattern: &str) -> bool {
-    // Search in the Metal device file specifically
-    let target_file = vendor_dir.join("ggml/src/ggml-metal/ggml-metal-device.m");
-    if target_file.exists() {
-        if let Ok(content) = std::fs::read_to_string(&target_file) {
-            return content.contains(pattern);
-        }
-    }
-    // Fallback: grep the whole vendor dir
     Command::new("grep")
         .args(["-rq", pattern])
         .current_dir(vendor_dir)
@@ -104,8 +96,9 @@ fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
         }
 
         // Check if patch is already applied by trying a reverse dry-run
+        // -f prevents interactive prompts that default to "yes" in non-tty contexts
         let reverse_check = Command::new("patch")
-            .args(["--dry-run", "-R", "-p1", "-i"])
+            .args(["--dry-run", "-R", "-f", "-p1", "-i"])
             .arg(&patch_path)
             .current_dir(vendor_dir)
             .output()
