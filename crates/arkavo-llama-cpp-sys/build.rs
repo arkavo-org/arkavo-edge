@@ -103,58 +103,47 @@ fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
             }
         }
 
-        // Check if patch is already applied by doing a dry-run
-        let check = Command::new("patch")
-            .args(["--dry-run", "-p1", "-N", "-i"])
+        // Check if patch is already applied by trying a reverse dry-run
+        let reverse_check = Command::new("patch")
+            .args(["--dry-run", "-R", "-p1", "-i"])
             .arg(&patch_path)
             .current_dir(vendor_dir)
             .output()
             .expect("Failed to run patch command");
 
-        if check.status.success() {
-            // Patch not yet applied, apply it
-            eprintln!("Applying patch: {}", patch_name);
-            let result = Command::new("patch")
-                .args(["-p1", "-N", "-i"])
-                .arg(&patch_path)
-                .current_dir(vendor_dir)
-                .output()
-                .expect("Failed to apply patch");
+        if reverse_check.status.success() {
+            // Reverse applies cleanly = patch is already applied
+            eprintln!("Patch already applied: {}", patch_name);
+            continue;
+        }
 
-            if !result.status.success() {
-                eprintln!("Patch output: {}", String::from_utf8_lossy(&result.stdout));
-                eprintln!("Patch stderr: {}", String::from_utf8_lossy(&result.stderr));
+        // Patch not yet applied, apply it
+        eprintln!("Applying patch: {}", patch_name);
+        let result = Command::new("patch")
+            .args(["-p1", "-N", "--no-backup-if-mismatch", "-i"])
+            .arg(&patch_path)
+            .current_dir(vendor_dir)
+            .output()
+            .expect("Failed to apply patch");
+
+        if !result.status.success() {
+            eprintln!("Patch output: {}", String::from_utf8_lossy(&result.stdout));
+            eprintln!("Patch stderr: {}", String::from_utf8_lossy(&result.stderr));
+            panic!(
+                "Failed to apply patch: {}. The upstream code may have changed. \
+                 Check if the fix was merged or if the patch needs updating.",
+                patch_name
+            );
+        }
+
+        // Verify patch was applied correctly
+        if let Some(ref present_text) = meta.verify_present {
+            if !file_contains(vendor_dir, present_text) {
                 panic!(
-                    "Failed to apply patch: {}. The upstream code may have changed. \
-                     Check if the fix was merged or if the patch needs updating.",
+                    "Patch {} applied but VERIFY_PRESENT text not found. \
+                     The patch may have applied incorrectly.",
                     patch_name
                 );
-            }
-
-            // Verify patch was applied correctly
-            if let Some(ref present_text) = meta.verify_present {
-                if !file_contains(vendor_dir, present_text) {
-                    panic!(
-                        "Patch {} applied but VERIFY_PRESENT text not found. \
-                         The patch may have applied incorrectly.",
-                        patch_name
-                    );
-                }
-            }
-        } else {
-            // Patch didn't apply - either already applied or conflicts
-            if let Some(ref present_text) = meta.verify_present {
-                if file_contains(vendor_dir, present_text) {
-                    eprintln!("Patch already applied: {}", patch_name);
-                } else {
-                    panic!(
-                        "Patch {} failed to apply and fix is not present. \
-                         The upstream code may have changed incompatibly.",
-                        patch_name
-                    );
-                }
-            } else {
-                eprintln!("Patch already applied (assumed): {}", patch_name);
             }
         }
     }

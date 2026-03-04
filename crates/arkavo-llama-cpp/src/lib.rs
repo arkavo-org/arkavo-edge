@@ -1339,6 +1339,56 @@ pub unsafe fn create_sampler_chain_with_dry(
     Ok(sampler)
 }
 
+/// Performance metrics from llama_perf_context
+#[cfg(not(target_env = "musl"))]
+pub struct PerfMetrics {
+    pub t_p_eval_ms: f64,
+    pub t_eval_ms: f64,
+    pub n_p_eval: i32,
+    pub n_eval: i32,
+}
+
+#[cfg(not(target_env = "musl"))]
+impl PerfMetrics {
+    /// Tokens per second during generation (eval phase)
+    pub fn tok_per_sec(&self) -> f64 {
+        if self.t_eval_ms > 0.0 {
+            (self.n_eval as f64 / self.t_eval_ms) * 1000.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Time to first token in milliseconds (prompt processing)
+    pub fn ttft_ms(&self) -> f64 {
+        self.t_p_eval_ms
+    }
+}
+
+/// Get performance metrics from a context
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context(ctx: &LlamaContext) -> PerfMetrics {
+    let data = unsafe { ffi::llama_perf_context(ctx.ptr) };
+    PerfMetrics {
+        t_p_eval_ms: data.t_p_eval_ms,
+        t_eval_ms: data.t_eval_ms,
+        n_p_eval: data.n_p_eval,
+        n_eval: data.n_eval,
+    }
+}
+
+/// Print performance metrics via llama.cpp's built-in logger
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context_print(ctx: &LlamaContext) {
+    unsafe { ffi::llama_perf_context_print(ctx.ptr) };
+}
+
+/// Reset performance counters on a context
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context_reset(ctx: &mut LlamaContext) {
+    unsafe { ffi::llama_perf_context_reset(ctx.ptr) };
+}
+
 /// Minimal FFI test harness to verify llama.cpp initialization
 #[cfg(not(target_env = "musl"))]
 pub fn test_minimal_init() -> Result<(), String> {
