@@ -5,6 +5,7 @@
 //! Outputs human-readable text or JSON for CI integration.
 
 use serde::Serialize;
+use std::fmt::Write;
 use std::path::PathBuf;
 
 /// Audit check status.
@@ -43,18 +44,18 @@ pub struct AuditSummary {
 impl AuditReport {
     /// Run all security audit checks.
     pub fn run() -> Self {
-        let mut results = Vec::new();
-
-        results.push(check_arkavo_dir_permissions());
-        results.push(check_tls_settings());
-        results.push(check_bind_config());
-        results.push(check_auth_requirements());
-        results.push(check_rate_limiting());
-        results.push(check_preflight_moderation());
-        results.push(check_memory_encryption());
-        results.push(check_agents_md_exists());
-        results.push(check_api_keys_in_env());
-        results.push(check_task_policy_manager());
+        let results = vec![
+            check_arkavo_dir_permissions(),
+            check_tls_settings(),
+            check_bind_config(),
+            check_auth_requirements(),
+            check_rate_limiting(),
+            check_preflight_moderation(),
+            check_memory_encryption(),
+            check_agents_md_exists(),
+            check_api_keys_in_env(),
+            check_task_policy_manager(),
+        ];
 
         let passed = results
             .iter()
@@ -91,8 +92,8 @@ impl AuditReport {
         let mut current_category = String::new();
         for result in &self.results {
             if result.category != current_category {
-                current_category = result.category.clone();
-                output.push_str(&format!("\n[{}]\n", current_category));
+                current_category.clone_from(&result.category);
+                write!(output, "\n[{current_category}]\n").unwrap();
             }
 
             let icon = match result.status {
@@ -100,13 +101,15 @@ impl AuditReport {
                 AuditStatus::Warn => "WARN",
                 AuditStatus::Fail => "FAIL",
             };
-            output.push_str(&format!("  {} {}: {}\n", icon, result.name, result.message));
+            writeln!(output, "  {icon} {}: {}", result.name, result.message).unwrap();
         }
 
-        output.push_str(&format!(
+        write!(
+            output,
             "\nSummary: {} total, {} passed, {} warnings, {} failures\n",
             self.summary.total, self.summary.passed, self.summary.warnings, self.summary.failures
-        ));
+        )
+        .unwrap();
 
         output
     }
@@ -150,7 +153,7 @@ fn check_arkavo_dir_permissions() -> AuditResult {
             return AuditResult {
                 name: "Config directory".to_string(),
                 status: AuditStatus::Fail,
-                message: format!("~/.arkavo/ has permissions {:o}, expected 0700", mode),
+                message: format!("~/.arkavo/ has permissions {mode:o}, expected 0700"),
                 category: "Filesystem".to_string(),
             };
         }
@@ -326,7 +329,7 @@ pub fn execute(json_output: bool) -> i32 {
         print!("{}", report.to_text());
     }
 
-    if report.summary.failures > 0 { 1 } else { 0 }
+    i32::from(report.summary.failures > 0)
 }
 
 #[cfg(test)]
