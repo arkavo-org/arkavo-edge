@@ -181,8 +181,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
+          # DeltaNet fused kernel patches (PR #20091) target this commit
+          git checkout 244641955
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -396,8 +396,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
+          # DeltaNet fused kernel patches (PR #20091) target this commit
+          git checkout 244641955
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -530,8 +530,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
+          # DeltaNet fused kernel patches (PR #20091) target this commit
+          git checkout 244641955
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -549,7 +549,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/ci/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-c3b87cebf
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-244641955
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -650,8 +650,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
+          # DeltaNet fused kernel patches (PR #20091) target this commit
+          git checkout 244641955
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -685,7 +685,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/ci/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-c3b87cebf
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-244641955
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -1190,8 +1190,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # Using commit with Metal shutdown assertion patch applied
-          git checkout c3b87cebf
+          # DeltaNet fused kernel patches (PR #20091) target this commit
+          git checkout 244641955
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -1512,7 +1512,7 @@ jobs:
       - name: Setup vendor/llama.cpp
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout c3b87cebf
+          cd vendor/llama.cpp && git checkout 244641955
 
       - name: Install build dependencies
         run: |
