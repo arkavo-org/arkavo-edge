@@ -324,6 +324,7 @@ async fn dispatch_event(
                 routing_history,
                 lesson_count,
                 agent_connections,
+                connections,
                 tx,
             )
             .await?;

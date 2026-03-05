@@ -79,10 +79,15 @@ impl CostHandler {
     }
 
     async fn get_cost_metrics(&self, time_range: &str) -> anyhow::Result<CostMetrics> {
-        let orchestrator = self
-            .orchestrator
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No orchestrator configured"))?;
+        let Some(orchestrator) = self.orchestrator.as_ref() else {
+            return Ok(CostMetrics {
+                time_range: time_range.to_string(),
+                total_cost: 0.0,
+                total_savings: 0.0,
+                cost_by_hour: vec![],
+                average_task_cost: 0.0,
+            });
+        };
 
         let orch_guard = orchestrator.read().await;
         let routing_metrics = orch_guard.get_routing_metrics().await;
@@ -107,16 +112,20 @@ impl CostHandler {
     }
 
     async fn get_roi_dashboard(&self) -> anyhow::Result<ROIDashboard> {
-        let orchestrator = self
-            .orchestrator
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No orchestrator configured"))?;
+        let (routing_metrics, orch_metrics) = if let Some(orchestrator) = self.orchestrator.as_ref()
+        {
+            let orch_guard = orchestrator.read().await;
+            (
+                orch_guard.get_routing_metrics().await,
+                orch_guard.get_orchestrator_metrics().await,
+            )
+        } else {
+            (
+                arkavo_router::RoutingMetrics::default(),
+                arkavo_router::OrchestratorMetrics::default(),
+            )
+        };
 
-        let orch_guard = orchestrator.read().await;
-        let routing_metrics = orch_guard.get_routing_metrics().await;
-        let orch_metrics = orch_guard.get_orchestrator_metrics().await;
-
-        // Query actual budget limits and spending from the budget manager
         let (session_limit, session_spent) = if let Some(ref manager) = self.budget_manager {
             let config = manager.get_config().await;
             let tracker = manager.tracker();
@@ -172,7 +181,10 @@ mod tests {
     async fn test_cost_metrics_without_orchestrator() {
         let handler = CostHandler::new();
         let result = handler.get_cost_metrics("24h").await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        let metrics = result.unwrap();
+        assert_eq!(metrics.total_cost, 0.0);
+        assert_eq!(metrics.time_range, "24h");
     }
 
     #[tokio::test]

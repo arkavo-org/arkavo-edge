@@ -271,11 +271,13 @@ pub(crate) async fn broadcast_event(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_request_learning_status(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_count: usize,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received RequestLearningStatus");
@@ -311,10 +313,15 @@ pub(crate) async fn handle_request_learning_status(
     }
     drop(lm);
 
-    // Query connected agents for their Thompson Sampling state
+    // Query connected agents for their Thompson Sampling state and routing history
     let local_ids: std::collections::HashSet<String> =
         agents.iter().map(|a| a.agent_id.clone()).collect();
+    let existing_task_ids: std::collections::HashSet<String> = {
+        let hist = routing_history.read().await;
+        hist.iter().map(|r| r.task_id.clone()).collect()
+    };
     let conns = agent_connections.read().await;
+    let mut new_records: Vec<RoutingRecord> = Vec::new();
     for (_id, conn) in conns.iter() {
         if !conn.is_connected().await {
             continue;
@@ -337,6 +344,18 @@ pub(crate) async fn handle_request_learning_status(
                         agents.push(parse_remote_agent_info(ra));
                     }
                 }
+                // Parse routing history from agent response (Bugs 2, 4, 5)
+                if let Some(remote_history) = resp.get("routingHistory").and_then(|v| v.as_array())
+                {
+                    for rh in remote_history {
+                        let record = parse_remote_routing_record(rh);
+                        if !record.task_id.is_empty()
+                            && !existing_task_ids.contains(&record.task_id)
+                        {
+                            new_records.push(record);
+                        }
+                    }
+                }
             }
             Err(e) => {
                 println!("AG-UI: Failed to query agent learning/status: {e}");
@@ -344,6 +363,46 @@ pub(crate) async fn handle_request_learning_status(
         }
     }
     drop(conns);
+
+    // Merge agent routing records and emit events for new ones
+    if !new_records.is_empty() {
+        let mut hist = routing_history.write().await;
+        for record in &new_records {
+            // Emit ModelSelected for Router Decisions tab (Bug 2)
+            let model_event = AgUiEvent::ModelSelected {
+                agent_id: record.selected_agent.clone(),
+                provider: "local".to_string(),
+                model: record.selected_agent.clone(),
+                estimated_cost: arkavo_budget::TokenCost::ZERO,
+                reason: record
+                    .category
+                    .clone()
+                    .unwrap_or_else(|| "agent-internal".to_string()),
+                event_id: uuid::Uuid::new_v4().to_string(),
+            };
+            broadcast_event(&model_event, connections).await;
+
+            // Emit TelemetryEvent for Telemetry tab (Bug 4)
+            let telemetry = AgUiEvent::TelemetryEvent {
+                event_type: "routing_decision".to_string(),
+                agent_id: record.selected_agent.clone(),
+                details: serde_json::json!({
+                    "taskId": record.task_id,
+                    "wasExploration": record.was_exploration,
+                    "category": record.category,
+                    "qualityScore": record.quality_score,
+                }),
+                timestamp: record.timestamp.clone(),
+            };
+            broadcast_event(&telemetry, connections).await;
+
+            hist.push_back(record.clone());
+        }
+        // Cap history at 200 entries
+        while hist.len() > 200 {
+            hist.pop_front();
+        }
+    }
 
     let history: Vec<RoutingRecord> = routing_history.read().await.iter().cloned().collect();
     let quality_trends = derive_quality_trends(&history);
@@ -358,6 +417,42 @@ pub(crate) async fn handle_request_learning_status(
     .await?;
 
     Ok(())
+}
+
+fn parse_remote_routing_record(v: &serde_json::Value) -> RoutingRecord {
+    RoutingRecord {
+        task_id: v
+            .get("taskId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        selected_agent: v
+            .get("selectedAgent")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        was_exploration: v
+            .get("wasExploration")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        outcome: v.get("outcome").and_then(|v| v.as_str()).map(String::from),
+        quality_score: v.get("qualityScore").and_then(|v| v.as_f64()),
+        quality_issues: v
+            .get("qualityIssues")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        category: v.get("category").and_then(|v| v.as_str()).map(String::from),
+        timestamp: v
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    }
 }
 
 fn parse_remote_agent_info(v: &serde_json::Value) -> AgentLearningInfo {

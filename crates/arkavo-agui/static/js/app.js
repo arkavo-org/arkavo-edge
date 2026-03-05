@@ -74,6 +74,9 @@ function routeEvent(event) {
         case 'systemNotification':
             handleSystemNotification(event);
             break;
+        case 'error':
+            handleChatError(event);
+            break;
         default:
             if (event.type) {
                 addTelemetry({

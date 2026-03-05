@@ -112,3 +112,22 @@ function handleAgentChatKeypress(agentId, event) {
         sendAgentChatMessage(agentId);
     }
 }
+
+function handleChatError(event) {
+    var msg = event.message || event.code || 'Unknown error';
+    showToast(msg, 'error');
+
+    // Show error in the active chat area
+    var openChats = Object.keys(agentChats).filter(function(id) {
+        return agentChats[id].isOpen;
+    });
+    openChats.forEach(function(agentId) {
+        var chat = getAgentChat(agentId);
+        chat.messages.push({
+            id: Date.now().toString(),
+            role: 'system',
+            content: '[Error] ' + msg
+        });
+        renderAgentChatMessages(agentId);
+    });
+}

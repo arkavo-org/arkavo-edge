@@ -184,6 +184,12 @@ pub mod mdns {
             });
 
             agents_list.push(agent_info);
+        } else if let Some(existing) = agents_list
+            .iter_mut()
+            .find(|a| a.get("id") == agent_info.get("id"))
+        {
+            // Update existing agent with fresh mDNS data (e.g. model change)
+            *existing = agent_info;
         }
     }
 
