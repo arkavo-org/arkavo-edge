@@ -71,6 +71,9 @@ function routeEvent(event) {
         case 'routingOutcome':
             handleRoutingOutcome(event);
             break;
+        case 'lessonExtracted':
+            handleLessonExtracted(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;

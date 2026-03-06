@@ -113,15 +113,30 @@ pub(crate) async fn update_task_status(
 
         // Extract lesson from low-quality judgments and propagate via gossip
         if let Some(ref j) = judgment {
+            let task_desc = {
+                let store = task_store.read().await;
+                store.get(task_id).map(|t| t.description.clone())
+            };
             let ctx = crate::lesson_extractor::LessonContext {
                 agent_id: aid.clone(),
                 task_category: task_cat.clone(),
+                task_description: task_desc,
+                response_snippet: result.as_deref().map(|r| r[..r.len().min(200)].to_string()),
             };
             if let Some(lesson) = crate::lesson_extractor::extract_lesson(j, &ctx) {
                 println!(
                     "AG-UI: Lesson extracted for {} on {}: {}",
                     aid, task_cat, lesson.pattern.condition
                 );
+                let lesson_event = AgUiEvent::LessonExtracted {
+                    agent_id: aid.clone(),
+                    category: task_cat.clone(),
+                    condition: lesson.pattern.condition.clone(),
+                    action: lesson.pattern.action.clone(),
+                    confidence: lesson.confidence,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                broadcast_event(&lesson_event, connections).await;
                 if let Some(tx) = lesson_tx {
                     let _ = tx.try_send(lesson);
                 }
@@ -279,6 +294,8 @@ pub(crate) async fn handle_request_learning_status(
     lesson_count: usize,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
+    lesson_store: &Arc<RwLock<Vec<Lesson>>>,
+    agents_registry: &Arc<RwLock<Vec<serde_json::Value>>>,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received RequestLearningStatus");
@@ -310,9 +327,40 @@ pub(crate) async fn handle_request_learning_status(
             success_rate: s.success_rate,
             probationary: s.probationary,
             category_stats,
+            model: None,
         });
     }
     drop(lm);
+
+    // Look up model from agent discovery data
+    {
+        let agents_list = agents_registry.read().await;
+        for agent_info in agents.iter_mut() {
+            agent_info.model = agents_list
+                .iter()
+                .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent_info.agent_id))
+                .and_then(|a| a.get("model").and_then(|v| v.as_str()))
+                .map(|s| s.to_string());
+        }
+    }
+
+    // Build lesson details from lesson store
+    let lessons: Vec<LessonInfo> = {
+        let store = lesson_store.read().await;
+        store
+            .iter()
+            .rev()
+            .take(20)
+            .map(|l| LessonInfo {
+                agent_id: l.agent_id.clone(),
+                category: l.category.clone(),
+                condition: l.pattern.condition.clone(),
+                action: l.pattern.action.clone(),
+                confidence: l.confidence,
+                timestamp: l.created_at.to_rfc3339(),
+            })
+            .collect()
+    };
 
     // Query connected agents for their Thompson Sampling state and routing history
     let local_ids: std::collections::HashSet<String> =
@@ -413,6 +461,7 @@ pub(crate) async fn handle_request_learning_status(
         routing_history: history,
         quality_trends,
         lesson_count,
+        lessons,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
     .await?;
@@ -503,6 +552,10 @@ fn parse_remote_agent_info(v: &serde_json::Value) -> AgentLearningInfo {
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
         category_stats: cat_stats,
+        model: v
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     }
 }
 

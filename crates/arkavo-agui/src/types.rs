@@ -392,6 +392,8 @@ pub enum AgUiEvent {
         quality_trends: Vec<QualityTrend>,
         #[serde(rename = "lessonCount", default)]
         lesson_count: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lessons: Vec<LessonInfo>,
         timestamp: String,
     },
     RoutingEvaluation {
@@ -418,6 +420,16 @@ pub enum AgUiEvent {
         quality_score: f64,
         #[serde(rename = "qualityIssues")]
         quality_issues: Vec<String>,
+        timestamp: String,
+    },
+
+    LessonExtracted {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        category: String,
+        condition: String,
+        action: String,
+        confidence: f64,
         timestamp: String,
     },
 
@@ -562,6 +574,8 @@ pub struct AgentLearningInfo {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub category_stats: Vec<CategoryStat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -584,6 +598,17 @@ pub struct RoutingRecord {
     pub quality_issues: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LessonInfo {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub category: String,
+    pub condition: String,
+    pub action: String,
+    pub confidence: f64,
     pub timestamp: String,
 }
 

@@ -382,6 +382,26 @@
 .trend-no-data { font-size: 10px; color: var(--text-secondary); }
 .lesson-count-badge { margin-top: 8px; text-align: center; font-size: 10px; color: var(--accent); padding: 4px; background: rgba(99, 102, 241, 0.1); border-radius: 4px; }
 
+/* Lesson visualization on connectome */
+.node-model { font-size: 8px; fill: var(--text-secondary); text-anchor: middle; opacity: 0.7; }
+.lesson-badge-circle { fill: #f59e0b; stroke: var(--bg-primary); stroke-width: 1.5; }
+.lesson-badge-text { font-size: 9px; fill: white; text-anchor: middle; font-weight: 700; dominant-baseline: central; }
+@keyframes lessonPulse { 0%,100% { filter: none; } 50% { filter: drop-shadow(0 0 8px #a78bfa); } }
+.lesson-pulse { animation: lessonPulse 0.6s ease-in-out 3; }
+
+/* Lesson list in beta card sidebar */
+.lesson-list-section { margin-top: 8px; }
+.lesson-item { padding: 4px 0; border-bottom: 1px solid var(--border-color); font-size: 11px; }
+.lesson-condition { color: var(--warning); word-break: break-word; }
+.lesson-action { color: var(--text-secondary); font-style: italic; word-break: break-word; }
+.lesson-meta { color: var(--text-secondary); font-size: 10px; margin-top: 2px; opacity: 0.7; }
+
+/* Lesson feed section */
+.lesson-feed-section { padding: 0 12px 12px; }
+.lesson-feed { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.lesson-feed-item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border-color); font-size: 11px; }
+.lesson-feed-condition { flex: 1; color: var(--warning); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Task Detail View */
 .task-card-clickable {
     cursor: pointer;

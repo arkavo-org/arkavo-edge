@@ -4,6 +4,8 @@ use arkavo_router::learning::{Lesson, LessonPattern};
 pub struct LessonContext {
     pub agent_id: String,
     pub task_category: String,
+    pub task_description: Option<String>,
+    pub response_snippet: Option<String>,
 }
 
 /// Extract a lesson from judge output (no LLM required)
@@ -17,9 +19,17 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
     }
 
     let primary = &judgment.failure_modes[0];
+    let task_hint = ctx
+        .task_description
+        .as_deref()
+        .map(|d| format!(" (task: {})", &d[..d.len().min(80)]))
+        .unwrap_or_default();
     let (condition, action, expected) = match primary {
         FailureMode::Empty => (
-            format!("Agent {} returns empty responses", ctx.agent_id),
+            format!(
+                "Agent {} returns empty responses for {}{}",
+                ctx.agent_id, ctx.task_category, task_hint
+            ),
             format!(
                 "Avoid routing {} tasks to {}",
                 ctx.task_category, ctx.agent_id
@@ -28,8 +38,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::Generic => (
             format!(
-                "Agent {} returns generic non-answers for {}",
-                ctx.agent_id, ctx.task_category
+                "Agent {} returns generic non-answers for {}{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!(
                 "Reduce routing weight for {} on {} tasks",
@@ -39,8 +49,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::TooShort => (
             format!(
-                "Agent {} produces overly brief {} responses",
-                ctx.agent_id, ctx.task_category
+                "Agent {} produces overly brief {} responses{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!("Prefer verbose agents for {} tasks", ctx.task_category),
             "Response proportional to task complexity".to_string(),
@@ -50,8 +60,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
             total_count,
         } => (
             format!(
-                "Agent {} has {}/{} tool call failures on {} tasks",
-                ctx.agent_id, error_count, total_count, ctx.task_category
+                "Agent {} has {}/{} tool call failures on {} tasks{}",
+                ctx.agent_id, error_count, total_count, ctx.task_category, task_hint
             ),
             format!(
                 "Route {} tasks to agents with reliable tool access",
@@ -61,8 +71,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::HallucinatedTool { count } => (
             format!(
-                "Agent {} hallucinated {} tools on {} tasks",
-                ctx.agent_id, count, ctx.task_category
+                "Agent {} hallucinated {} tools on {} tasks{}",
+                ctx.agent_id, count, ctx.task_category, task_hint
             ),
             format!(
                 "Avoid {} for tool-heavy {} tasks",
@@ -72,8 +82,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::OutputLoop => (
             format!(
-                "Agent {} enters output loops on {} tasks",
-                ctx.agent_id, ctx.task_category
+                "Agent {} enters output loops on {} tasks{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!(
                 "Reduce routing weight for {} on {}",
@@ -105,6 +115,8 @@ mod tests {
         LessonContext {
             agent_id: agent.to_string(),
             task_category: cat.to_string(),
+            task_description: None,
+            response_snippet: None,
         }
     }
 

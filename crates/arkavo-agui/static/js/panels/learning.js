@@ -36,7 +36,8 @@ function handleLearningStatusUpdate(event) {
     }
     AppState.routingHistory = event.routingHistory || [];
     AppState.qualityTrends = event.qualityTrends || [];
-    AppState.lessonCount = event.lessonCount || 0;
+    AppState.lessons = event.lessons || AppState.lessons || [];
+    AppState.lessonCount = AppState.lessons.length || event.lessonCount || 0;
     renderLearningPanel();
 
     // Keep polling while on the learning panel
@@ -136,10 +137,15 @@ function renderLearningPanel() {
             '<div class="timeline-header">Routing Timeline</div>' +
             '<div class="routing-timeline" id="routing-timeline"></div>' +
         '</div>' +
+        '<div class="lesson-feed-section">' +
+            '<div class="timeline-header">Lessons Learned</div>' +
+            '<div class="lesson-feed" id="lesson-feed"></div>' +
+        '</div>' +
         renderTeachingSection();
 
     renderConnectome(agentIds);
     renderTimeline();
+    renderLessonFeed();
 }
 
 function renderConnectome(agentIds) {
@@ -225,6 +231,19 @@ function renderConnectome(agentIds) {
         label.textContent = shortAgentName(agentIds[i]);
         g.appendChild(label);
 
+        // Model label below agent name
+        var agentInfo = AppState.agents[agentIds[i]];
+        var modelName = (agentInfo && agentInfo.model) ? shortModelName(agentInfo.model)
+            : (agent && agent.model ? shortModelName(agent.model) : '');
+        if (modelName) {
+            var modelLabel = document.createElementNS(ns, 'text');
+            modelLabel.setAttribute('x', x);
+            modelLabel.setAttribute('y', y + nodeR + 26);
+            modelLabel.setAttribute('class', 'node-model');
+            modelLabel.textContent = modelName;
+            g.appendChild(modelLabel);
+        }
+
         // EV text inside node
         var evText = document.createElementNS(ns, 'text');
         evText.setAttribute('x', x);
@@ -233,6 +252,27 @@ function renderConnectome(agentIds) {
         var ev = agent ? agent.expectedValue : 0.667;
         evText.textContent = ev.toFixed(2);
         g.appendChild(evText);
+
+        // Per-agent lesson count badge
+        var agentLessonCount = 0;
+        for (var li = 0; li < (AppState.lessons || []).length; li++) {
+            if (AppState.lessons[li].agentId === agentIds[i]) agentLessonCount++;
+        }
+        if (agentLessonCount > 0) {
+            var bx = x + nodeR * 0.7, by = y - nodeR * 0.7;
+            var bc = document.createElementNS(ns, 'circle');
+            bc.setAttribute('cx', bx);
+            bc.setAttribute('cy', by);
+            bc.setAttribute('r', '8');
+            bc.setAttribute('class', 'lesson-badge-circle');
+            g.appendChild(bc);
+            var bt = document.createElementNS(ns, 'text');
+            bt.setAttribute('x', bx);
+            bt.setAttribute('y', by + 3);
+            bt.setAttribute('class', 'lesson-badge-text');
+            bt.textContent = agentLessonCount;
+            g.appendChild(bt);
+        }
 
         // Click handler
         (function(aid) {
@@ -409,9 +449,22 @@ function renderBetaCard(agentId) {
     // Quality trends for this agent
     var trendsHtml = renderQualityTrends(agentId);
 
-    // Lesson count badge
+    // Lesson details for this agent
+    var agentLessons = (AppState.lessons || []).filter(function(l) { return l.agentId === agentId; });
     var lessonBadge = '';
-    if (AppState.lessonCount > 0) {
+    if (agentLessons.length > 0) {
+        lessonBadge = '<div class="lesson-list-section"><div class="category-breakdown-title">Lessons (' + agentLessons.length + ')</div>';
+        for (var li = 0; li < agentLessons.length && li < 5; li++) {
+            var lesson = agentLessons[li];
+            lessonBadge += '<div class="lesson-item">' +
+                '<div class="lesson-condition">' + escapeHtml(lesson.condition) + '</div>' +
+                '<div class="lesson-action">' + escapeHtml(lesson.action) + '</div>' +
+                '<div class="lesson-meta">' + escapeHtml(shortCategory(lesson.category)) +
+                    ' | conf: ' + lesson.confidence.toFixed(2) + '</div>' +
+                '</div>';
+        }
+        lessonBadge += '</div>';
+    } else if (AppState.lessonCount > 0) {
         lessonBadge = '<div class="lesson-count-badge">' + AppState.lessonCount + ' lessons cached</div>';
     }
 
@@ -556,6 +609,65 @@ function shortCategory(cat) {
         'general': 'general'
     };
     return map[cat] || cat;
+}
+
+function handleLessonExtracted(event) {
+    AppState.lessons.unshift({
+        agentId: event.agentId,
+        category: event.category,
+        condition: event.condition,
+        action: event.action,
+        confidence: event.confidence,
+        timestamp: event.timestamp
+    });
+    if (AppState.lessons.length > 50) AppState.lessons.pop();
+    AppState.lessonCount = AppState.lessons.length;
+
+    animateLesson(event);
+    renderLessonFeed();
+    var sidebar = document.getElementById('beta-sidebar');
+    if (sidebar && selectedLearningAgent === event.agentId) {
+        sidebar.innerHTML = renderBetaCard(event.agentId);
+    }
+}
+
+function animateLesson(event) {
+    var node = document.getElementById('node-' + event.agentId);
+    if (!node) return;
+    node.classList.add('lesson-pulse');
+    setTimeout(function() { node.classList.remove('lesson-pulse'); }, 2000);
+}
+
+function renderLessonFeed() {
+    var feed = document.getElementById('lesson-feed');
+    if (!feed) return;
+    var lessons = AppState.lessons || [];
+    if (lessons.length === 0) {
+        feed.innerHTML = '<span class="empty-timeline">No lessons extracted yet</span>';
+        return;
+    }
+    var html = '';
+    var limit = Math.min(lessons.length, 10);
+    for (var i = 0; i < limit; i++) {
+        var l = lessons[i];
+        var catBadge = l.category ? '<span class="category-badge">' + escapeHtml(shortCategory(l.category)) + '</span>' : '';
+        var confColor = l.confidence > 0.7 ? 'var(--error)' : 'var(--warning)';
+        html += '<div class="lesson-feed-item">' +
+            '<span class="route-agent">' + escapeHtml(shortAgentName(l.agentId)) + '</span>' +
+            catBadge +
+            '<span class="lesson-feed-condition">' + escapeHtml(l.condition) + '</span>' +
+            '<span style="color:' + confColor + ';font-size:10px">' + l.confidence.toFixed(2) + '</span>' +
+            '<span class="route-time">' + formatTime(l.timestamp) + '</span>' +
+            '</div>';
+    }
+    feed.innerHTML = html;
+}
+
+function shortModelName(model) {
+    if (!model) return '';
+    var name = model.split('/').pop().replace('.gguf', '');
+    if (name.length > 18) name = name.substring(0, 16) + '..';
+    return name;
 }
 
 function renderTeachingSection() {

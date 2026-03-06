@@ -9,6 +9,9 @@ purpose: |
   Before each task, inject behavior guidance learned from prior failures.
   After each task, judge response quality and extract lessons from poor results.
 
+  Use list_agents and send_task tools to delegate work to specialist agents.
+  Use get_task_status to poll for completion and collect results.
+
   Workflow per round:
   1. Select agent via Thompson Sampling (explore vs exploit)
   2. Inject accumulated behavior guidance into the prompt

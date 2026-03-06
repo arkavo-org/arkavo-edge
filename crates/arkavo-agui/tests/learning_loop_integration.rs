@@ -49,6 +49,8 @@ fn test_judge_to_lesson_pipeline() {
     let ctx = LessonContext {
         agent_id: "code-analyzer".to_string(),
         task_category: "security_scan".to_string(),
+        task_description: None,
+        response_snippet: None,
     };
     let lesson = extract_lesson(&judgment, &ctx).expect("should produce a lesson for low quality");
 
@@ -96,6 +98,8 @@ fn test_good_response_produces_no_lesson() {
     let ctx = LessonContext {
         agent_id: "code-analyzer".to_string(),
         task_category: "security_scan".to_string(),
+        task_description: None,
+        response_snippet: None,
     };
     assert!(
         extract_lesson(&judgment, &ctx).is_none(),
@@ -109,6 +113,8 @@ fn test_multi_round_lesson_accumulation() {
     let ctx = LessonContext {
         agent_id: "agent-1".to_string(),
         task_category: "code_review".to_string(),
+        task_description: None,
+        response_snippet: None,
     };
 
     // Round 1: three poor responses
@@ -174,6 +180,7 @@ fn test_learning_status_update_serde() {
             scores: vec![0.3, 0.7],
         }],
         lesson_count: 2,
+        lessons: vec![],
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
 

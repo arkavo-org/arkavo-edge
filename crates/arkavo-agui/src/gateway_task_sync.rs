@@ -58,6 +58,26 @@ pub fn spawn_agent_task_sync(
     });
 }
 
+async fn llm_judge(router: &arkavo_router::Router, objective: &str, response: &str) -> Option<f64> {
+    let prompt = format!(
+        "Rate the quality of this response on a scale of 0.0 to 1.0.\n\
+         Only output a single decimal number, nothing else.\n\n\
+         Task: {}\n\nResponse: {}",
+        &objective[..objective.len().min(500)],
+        &response[..response.len().min(2000)]
+    );
+    let messages = vec![arkavo_llm::Message::user(prompt)];
+    match router.route_chat(messages).await {
+        Ok(resp) => resp
+            .content
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|&v| (0.0..=1.0).contains(&v)),
+        Err(_) => None,
+    }
+}
+
 async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Option<String> {
     if objective.len() < 80 {
         return None;
@@ -88,14 +108,26 @@ async fn judge_agent_task(
     agent_id: &str,
     task_id: &str,
     objective: &str,
+    result_text: Option<&str>,
     is_success: bool,
+    router: Option<&Arc<arkavo_router::Router>>,
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<crate::types::RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<Lesson>>,
 ) {
     let judgment = if is_success {
-        let j = crate::response_judge::judge(objective, objective);
+        let response = result_text.unwrap_or("");
+        let mut j = crate::response_judge::judge(objective, response);
+        // If heuristic score is ambiguous, try LLM judge for semantic assessment
+        if j.quality_score > 0.3
+            && j.quality_score < 0.8
+            && !response.is_empty()
+            && let Some(r) = router
+            && let Some(llm_score) = llm_judge(r, objective, response).await
+        {
+            j.quality_score = j.quality_score * 0.4 + llm_score * 0.6;
+        }
         if !j.issues.is_empty() {
             println!(
                 "AG-UI: Agent task {} quality={:.2}, issues: {:?}",
@@ -116,8 +148,10 @@ async fn judge_agent_task(
     let quality_score = judgment.quality_score;
     let quality_issues = judgment.issues.clone();
 
-    // Feed into Thompson Sampling
-    let task_cat = "general".to_string();
+    // Feed into Thompson Sampling (classify by keywords for category-aware routing)
+    let task_cat = arkavo_router::classify_task_keywords(objective)
+        .as_str()
+        .to_string();
     let feedback = if is_success {
         arkavo_router::learning::BurstFeedback::success(uuid::Uuid::new_v4(), task_cat.clone(), 0)
             .with_quality(quality_score)
@@ -135,12 +169,23 @@ async fn judge_agent_task(
     let ctx = crate::lesson_extractor::LessonContext {
         agent_id: agent_id.to_string(),
         task_category: task_cat.clone(),
+        task_description: Some(objective.to_string()),
+        response_snippet: result_text.map(|r| r[..r.len().min(200)].to_string()),
     };
     if let Some(lesson) = crate::lesson_extractor::extract_lesson(&judgment, &ctx) {
         println!(
             "AG-UI: Lesson extracted for {} on {}: {}",
             agent_id, task_cat, lesson.pattern.condition
         );
+        let lesson_event = AgUiEvent::LessonExtracted {
+            agent_id: agent_id.to_string(),
+            category: task_cat.clone(),
+            condition: lesson.pattern.condition.clone(),
+            action: lesson.pattern.action.clone(),
+            confidence: lesson.confidence,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        broadcast_event(&lesson_event, connections).await;
         if let Some(tx) = lesson_tx {
             let _ = tx.try_send(lesson);
         }
@@ -295,11 +340,14 @@ async fn poll_agent_tasks(
 
                     // Judge tasks that arrive already terminal
                     if ui_status == "completed" || ui_status == "failed" {
+                        let result_text = fetch_result_text(&conn, task_id).await;
                         judge_agent_task(
                             &agent_id,
                             &composite_key,
                             objective,
+                            result_text.as_deref(),
                             ui_status == "completed",
+                            router,
                             connections,
                             learning_module,
                             routing_history,
@@ -355,11 +403,14 @@ async fn poll_agent_tasks(
 
                         // Judge when task transitions to terminal status
                         if status_changed && (ui_status == "completed" || ui_status == "failed") {
+                            let result_text = fetch_result_text(&conn, task_id).await;
                             judge_agent_task(
                                 &agent_id,
                                 &composite_key,
                                 objective,
+                                result_text.as_deref(),
                                 ui_status == "completed",
+                                router,
                                 connections,
                                 learning_module,
                                 routing_history,
@@ -398,6 +449,23 @@ async fn poll_agent_tasks(
         }
     }
     Ok(())
+}
+
+/// Fetch the actual result text from an agent task via tasks/get.
+async fn fetch_result_text(conn: &AgentConnection, task_id: &str) -> Option<String> {
+    let req = serde_json::json!({"task_id": task_id});
+    conn.send_request("tasks/get", req, "judge-fetch")
+        .await
+        .ok()
+        .and_then(|r| {
+            r.get("result")
+                .and_then(|r| r.get("parts"))
+                .and_then(|p| p.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|p| p.get("content"))
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string())
+        })
 }
 
 fn hrm_status_to_ui(hrm_status: &str) -> String {

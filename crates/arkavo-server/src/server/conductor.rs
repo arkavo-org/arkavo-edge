@@ -132,8 +132,37 @@ pub async fn execute_with_conductor_and_learning(
 
     update_progress("Setting up tools", 25);
 
-    // 4. Project MCP tools to ToolRegistry for Router
+    // 4. Build ToolRegistry with essential built-in tools + MCP bridge tools
     let mut tool_registry = ToolRegistry::empty();
+
+    // Register core built-in tools for code analysis agents
+    tool_registry.register(
+        "filesystem_tools",
+        Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
+    );
+    tool_registry.register(
+        "git_status",
+        Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
+    );
+    tool_registry.register(
+        "git_diff",
+        Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
+    );
+    tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
+    tool_registry.register(
+        "test_run",
+        Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
+    );
+    tool_registry.register(
+        "shell_exec",
+        Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
+    );
+    tool_registry.register(
+        "code_review",
+        Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
+    );
+
+    // Project additional MCP tools from external servers
     let mcp_tools = mcp_registry
         .list_all_tools()
         .await

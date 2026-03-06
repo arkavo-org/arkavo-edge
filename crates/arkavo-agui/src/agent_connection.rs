@@ -255,6 +255,9 @@ impl AgentConnection {
     }
 
     async fn notify_connection_lost(&self) {
+        // Clear stale session IDs so reconnection creates fresh sessions
+        self.chat_sessions.write().await.clear();
+
         let broadcasts = self.chat_broadcasts.read().await;
 
         for (agent_id, broadcast_tx) in broadcasts.iter() {
@@ -704,9 +707,6 @@ impl AgentConnection {
                 .clone()
         };
 
-        let _message_id = uuid::Uuid::new_v4().to_string();
-        let _trace_id = uuid::Uuid::new_v4().to_string();
-
         // Get the session ID for this agent
         let session_id = {
             let sessions = self.chat_sessions.read().await;
@@ -716,23 +716,77 @@ impl AgentConnection {
                 .ok_or("No active chat session for this agent")?
         };
 
-        let client_guard = self.client.read().await;
-        let client = client_guard.as_ref().ok_or("Not connected")?;
-
-        // Create user message
         let user_message = UserMessage {
-            content: text,
+            content: text.clone(),
             attachments: None,
             metadata: None,
         };
 
-        // Send the message to the session
-        client
-            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
-            .await
-            .map_err(|e| format!("Failed to send message: {e}"))?;
+        // Try sending with current session
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
 
-        Ok(())
+        let result = client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(e) if e.to_string().contains("Session not found") => {
+                drop(client_guard); // release read lock before reconnect
+
+                // Session is stale — open a fresh one and retry
+                tracing::info!(agent_id, "Stale chat session detected, opening new session");
+                let new_session_id = self.reopen_chat_session(agent_id).await?;
+
+                let client_guard = self.client.read().await;
+                let client = client_guard.as_ref().ok_or("Not connected")?;
+                let retry_msg = UserMessage {
+                    content: text,
+                    attachments: None,
+                    metadata: None,
+                };
+                client
+                    .request::<(), _>("chat_send", rpc_params![new_session_id, retry_msg])
+                    .await
+                    .map_err(|e| format!("Failed to send message after session refresh: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to send message: {e}").into()),
+        }
+    }
+
+    /// Re-open a chat session for an agent after the previous one became stale
+    async fn reopen_chat_session(
+        &self,
+        agent_id: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        let open_request = ChatOpenRequest {
+            token: None,
+            context: None,
+            metadata: None,
+        };
+
+        let session: ChatSession = client
+            .request("chat_open", rpc_params![open_request])
+            .await
+            .map_err(|e| format!("Failed to reopen chat session: {e}"))?;
+
+        self.chat_sessions
+            .write()
+            .await
+            .insert(agent_id.to_string(), session.session_id.clone());
+
+        tracing::info!(
+            agent_id,
+            session_id = %session.session_id,
+            "Reopened chat session after stale session"
+        );
+
+        Ok(session.session_id)
     }
 
     /// Unsubscribe from chat for a specific agent

@@ -4,6 +4,10 @@
 purpose: |
   Generate comprehensive tests for Rust code.
 
+  Use filesystem_tools to read existing test files and source code under test.
+  Use test_run to verify generated tests compile and pass.
+  Use git_status to see which files have been modified.
+
   Specializations:
   - Unit tests (inline #[cfg(test)] modules)
   - Integration tests (tests/ directory)

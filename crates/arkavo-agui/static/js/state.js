@@ -21,6 +21,7 @@ var AppState = {
     routingAnimations: [],
     pathWeights: {},
     qualityTrends: [],
+    lessons: [],
     lessonCount: 0,
     selectedTaskId: null,
     teachingEvents: []
