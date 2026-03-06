@@ -18,8 +18,8 @@ pub fn spawn_agent_task_sync(
         // Wait for agents to register before first poll
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-        // Track known agent tasks: composite key → last known status
-        let mut known: HashMap<String, String> = HashMap::new();
+        // Track known agent tasks: composite key → (status, progress)
+        let mut known: HashMap<String, (String, f64)> = HashMap::new();
 
         loop {
             if let Err(e) =
@@ -27,7 +27,7 @@ pub fn spawn_agent_task_sync(
             {
                 eprintln!("AG-UI: task sync error: {e}");
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     });
 }
@@ -36,7 +36,7 @@ async fn poll_agent_tasks(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
-    known: &mut HashMap<String, String>,
+    known: &mut HashMap<String, (String, f64)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let agents: Vec<(String, Arc<AgentConnection>)> = {
         let conns = agent_connections.read().await;
@@ -81,11 +81,12 @@ async fn poll_agent_tasks(
 
             let composite_key = format!("{}:{}", agent_id, task_id);
             let ui_status = hrm_status_to_ui(status);
+            let quality_score = task_val.get("quality_score").and_then(|v| v.as_f64());
 
             match known.get(&composite_key) {
                 None => {
                     // New task — insert and emit TaskSubmitted
-                    known.insert(composite_key.clone(), status.to_string());
+                    known.insert(composite_key.clone(), (status.to_string(), progress));
 
                     let tracked = super::gateway::TrackedTask {
                         id: composite_key.clone(),
@@ -122,40 +123,54 @@ async fn poll_agent_tasks(
                     )
                     .await;
                 }
-                Some(prev_status) if prev_status != status => {
-                    // Status changed — update and emit TaskStatusChanged
-                    known.insert(composite_key.clone(), status.to_string());
+                Some((prev_status, prev_progress)) => {
+                    let status_changed = prev_status != status;
+                    let progress_changed = (progress - prev_progress).abs() > 0.01;
 
-                    {
-                        let mut store = task_store.write().await;
-                        if let Some(tracked) = store.get_mut(&composite_key) {
-                            tracked.status = ui_status.clone();
-                            tracked.progress = Some(progress as f32);
-                            if ui_status == "completed" || ui_status == "failed" {
-                                tracked.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                    if status_changed || progress_changed {
+                        known.insert(composite_key.clone(), (status.to_string(), progress));
+
+                        {
+                            let mut store = task_store.write().await;
+                            if let Some(tracked) = store.get_mut(&composite_key) {
+                                tracked.status = ui_status.clone();
+                                tracked.progress = Some(progress as f32);
+                                if ui_status == "completed" || ui_status == "failed" {
+                                    tracked.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                                }
                             }
                         }
+
+                        let metrics = quality_score.map(|q| crate::types::TaskMetrics {
+                            tokens_generated: 0,
+                            tokens_per_sec: 0.0,
+                            ttft_ms: 0,
+                            inference_duration_ms: 0,
+                            energy_wh: 0.0,
+                            quality_score: Some(q),
+                        });
+
+                        let changed = AgUiEvent::TaskStatusChanged {
+                            task_id: composite_key.clone(),
+                            status: ui_status.clone(),
+                            progress: Some(progress as f32),
+                            result: None,
+                            metrics,
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        };
+                        broadcast_event(&changed, connections).await;
+
+                        if status_changed {
+                            emit_telemetry(
+                                &format!("agent-task-{ui_status}"),
+                                &agent_id,
+                                serde_json::json!({"taskId": task_id}),
+                                connections,
+                            )
+                            .await;
+                        }
                     }
-
-                    let changed = AgUiEvent::TaskStatusChanged {
-                        task_id: composite_key.clone(),
-                        status: ui_status.clone(),
-                        progress: Some(progress as f32),
-                        result: None,
-                        metrics: None,
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                    };
-                    broadcast_event(&changed, connections).await;
-
-                    emit_telemetry(
-                        &format!("agent-task-{ui_status}"),
-                        &agent_id,
-                        serde_json::json!({"taskId": task_id}),
-                        connections,
-                    )
-                    .await;
                 }
-                _ => {} // no change
             }
 
             // Emit telemetry for tool calls

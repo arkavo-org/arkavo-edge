@@ -232,6 +232,7 @@ fn compute_task_metrics(
         ttft_ms,
         inference_duration_ms,
         energy_wh,
+        quality_score: None,
     })
 }
 

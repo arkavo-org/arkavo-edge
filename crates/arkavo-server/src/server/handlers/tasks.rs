@@ -175,6 +175,11 @@ pub async fn handle_tasks_list(
             } else {
                 t.objective.clone()
             };
+            let quality_score = t
+                .subtasks
+                .iter()
+                .rev()
+                .find_map(|s| s.result.as_ref()?.quality_score);
             HrmTaskSummary {
                 id: t.id.to_string(),
                 objective,
@@ -183,6 +188,7 @@ pub async fn handle_tasks_list(
                 updated_at: t.updated_at.to_rfc3339(),
                 progress: t.progress(),
                 tool_calls: vec![],
+                quality_score,
             }
         })
         .collect();

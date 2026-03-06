@@ -23,7 +23,7 @@ function renderTaskDetail() {
         html += renderTaskResult(task);
     }
 
-    html += renderTaskRouting(taskId);
+    html += renderTaskRouting(taskId, task);
     html += renderTaskA2ATrace(taskId, task);
     html += renderTaskTelemetry(taskId, task);
 
@@ -88,7 +88,7 @@ function renderTaskSummary(task, taskId) {
 
     if (typeof task.progress === 'number' && task.status !== 'completed' && task.status !== 'failed') {
         var pct = Math.min(100, Math.max(0, task.progress * 100));
-        html += '<div class="task-progress"><div class="task-progress-bar" style="width: ' + pct + '%"></div></div>';
+        html += '<div class="task-progress"><div class="task-progress-bar" style="width:' + pct + '%"></div></div>';
     }
 
     html += '</div>';
@@ -150,7 +150,7 @@ function formatMetricMs(ms) {
     return mins + 'm ' + Math.floor(secs) + 's';
 }
 
-function renderTaskRouting(taskId) {
+function renderTaskRouting(taskId, task) {
     var routingEntry = null;
     for (var i = 0; i < AppState.routingHistory.length; i++) {
         if (AppState.routingHistory[i].taskId === taskId) {
@@ -161,8 +161,18 @@ function renderTaskRouting(taskId) {
 
     var html = '<div class="detail-section-title">Routing Decision</div>';
 
+    // Resolve quality score: routing entry > task metrics > null
+    var taskQuality = (task.metrics && task.metrics.qualityScore != null)
+        ? task.metrics.qualityScore : null;
+
     if (!routingEntry) {
-        html += '<div class="detail-empty">No routing data recorded for this task</div>';
+        if (taskQuality != null) {
+            html += '<div class="task-detail-routing"><div class="stats-grid">';
+            html += renderStatCard('Quality', (taskQuality * 100).toFixed(0) + '%', '');
+            html += '</div></div>';
+        } else {
+            html += '<div class="detail-empty">No routing data recorded for this task</div>';
+        }
         return html;
     }
 
@@ -175,9 +185,8 @@ function renderTaskRouting(taskId) {
     var outcomeClass = outcome === 'success' ? 'val-success' : (outcome === 'failed' ? 'val-error' : (outcome === 'degraded' ? 'val-warning' : ''));
     html += renderStatCard('Outcome', outcome, '');
 
-    var qScore = (routingEntry.qualityScore !== undefined && routingEntry.qualityScore !== null)
-        ? (routingEntry.qualityScore * 100).toFixed(0) + '%'
-        : 'Pending';
+    var qRaw = (routingEntry.qualityScore != null) ? routingEntry.qualityScore : taskQuality;
+    var qScore = (qRaw != null) ? (qRaw * 100).toFixed(0) + '%' : 'Pending';
     html += renderStatCard('Quality', qScore, '');
     html += '</div>';
 

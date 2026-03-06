@@ -458,16 +458,18 @@ pub enum AgUiEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskMetrics {
-    #[serde(rename = "tokensGenerated")]
+    #[serde(rename = "tokensGenerated", default)]
     pub tokens_generated: u32,
-    #[serde(rename = "tokensPerSec")]
+    #[serde(rename = "tokensPerSec", default)]
     pub tokens_per_sec: f64,
-    #[serde(rename = "ttftMs")]
+    #[serde(rename = "ttftMs", default)]
     pub ttft_ms: u64,
-    #[serde(rename = "inferenceDurationMs")]
+    #[serde(rename = "inferenceDurationMs", default)]
     pub inference_duration_ms: u64,
-    #[serde(rename = "energyWh")]
+    #[serde(rename = "energyWh", default)]
     pub energy_wh: f64,
+    #[serde(rename = "qualityScore", skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

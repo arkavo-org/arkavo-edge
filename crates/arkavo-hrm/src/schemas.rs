@@ -62,6 +62,9 @@ pub struct GlobalTaskState {
     pub max_total_subtasks: u32,
     pub recursion_depth: u32,
     pub failed_subtask_hashes: Vec<u64>,
+    /// Intra-subtask progress (0.0-1.0) for smooth UI reporting
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intra_progress: Option<f64>,
 }
 
 impl GlobalTaskState {
@@ -84,6 +87,7 @@ impl GlobalTaskState {
             max_total_subtasks: 50,
             recursion_depth: 0,
             failed_subtask_hashes: Vec::new(),
+            intra_progress: None,
         }
     }
 
@@ -109,11 +113,20 @@ impl GlobalTaskState {
     }
 
     /// Calculate overall progress (0.0 to 1.0)
+    ///
+    /// Blends subtask completion with intra-subtask progress for smooth UI updates.
     pub fn progress(&self) -> f64 {
         if self.subtasks.is_empty() {
-            return 0.0;
+            return self.intra_progress.unwrap_or(0.0);
         }
-        self.completed_count() as f64 / self.subtasks.len() as f64
+        let completed = self.completed_count() as f64;
+        let total = self.subtasks.len() as f64;
+        let partial = if self.status == TaskStatus::Running {
+            self.intra_progress.unwrap_or(0.0) / total
+        } else {
+            0.0
+        };
+        (completed / total) + partial
     }
 }
 
@@ -263,6 +276,8 @@ pub struct SubTaskResult {
     pub duration: Duration,
     pub steps_taken: u32,
     pub verification_status: VerificationStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f64>,
 }
 
 /// Verification outcome from the Critic
@@ -396,5 +411,34 @@ mod tests {
         assert!(!VerificationStatus::Pending.is_passed());
         assert!(VerificationStatus::Failed { reason: "x".into() }.is_failed());
         assert!(!VerificationStatus::Passed.is_failed());
+    }
+
+    #[test]
+    fn test_intra_progress_blending() {
+        let mut task = GlobalTaskState::new("t".to_string(), TaskBudget::default());
+        task.subtasks
+            .push(SubTask::new(task.id, 0, "a".to_string()));
+        task.status = TaskStatus::Running;
+
+        // No intra_progress → 0.0
+        assert!((task.progress() - 0.0).abs() < f64::EPSILON);
+
+        // 40% intra_progress on 1 subtask → 0.4
+        task.intra_progress = Some(0.4);
+        assert!((task.progress() - 0.4).abs() < f64::EPSILON);
+
+        // Completed task ignores intra_progress
+        task.status = TaskStatus::Completed;
+        task.subtasks[0].status = TaskStatus::Completed;
+        task.intra_progress = None;
+        assert!((task.progress() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_intra_progress_empty_subtasks() {
+        let mut task = GlobalTaskState::new("t".to_string(), TaskBudget::default());
+        assert!((task.progress() - 0.0).abs() < f64::EPSILON);
+        task.intra_progress = Some(0.25);
+        assert!((task.progress() - 0.25).abs() < f64::EPSILON);
     }
 }

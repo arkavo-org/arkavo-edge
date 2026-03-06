@@ -2,7 +2,9 @@ use super::learning_bus::{LearningBus, LearningEvent};
 use super::mcp_bridge::McpBridgeTool;
 use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 use super::tool_memory::ToolMemory;
-use arkavo_hrm::{Conductor, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore};
+use arkavo_hrm::{
+    Conductor, TaskStore, burst::BurstResult, schemas::TaskBudget, store::InMemoryTaskStore,
+};
 use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::types::TaskProgress;
@@ -74,8 +76,8 @@ pub async fn execute_with_conductor_and_learning(
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
-    // Helper to update progress (no-op if task tracking not available)
-    let update_progress = |msg: &str, pct: u8| {
+    // Helper to update UI progress (no-op if task tracking not available)
+    let update_ui_progress = |msg: &str, pct: u8| {
         if let (Some(id), Some(executor)) = (task_id, task_executor) {
             let progress = TaskProgress {
                 message: Some(msg.to_string()),
@@ -89,7 +91,7 @@ pub async fn execute_with_conductor_and_learning(
         }
     };
 
-    update_progress("Creating task structure", 10);
+    update_ui_progress("Creating task structure", 10);
 
     // 1. Create HRM task with default budget
     let budget = TaskBudget::default();
@@ -99,6 +101,18 @@ pub async fn execute_with_conductor_and_learning(
         .map_err(|e| format!("Failed to create HRM task: {e}"))?;
 
     info!("Created HRM task {}", hrm_task.id);
+
+    // Helper to update both HRM intra-progress and UI progress
+    let hrm_task_id = hrm_task.id;
+    let update_progress = |msg: &str, pct: u8| {
+        let cond = conductor.clone();
+        tokio::spawn(async move {
+            let _ = cond
+                .update_intra_progress(hrm_task_id, pct as f64 / 100.0)
+                .await;
+        });
+        update_ui_progress(msg, pct);
+    };
 
     // 2. Add single subtask (1:1 mapping)
     let subtask = conductor
@@ -518,12 +532,25 @@ pub async fn execute_with_conductor_and_learning(
     }
 
     // 7. Record result in Conductor
+    use arkavo_router::selector_quality::compute_response_quality;
+    let response_quality = compute_response_quality(&final_result, 0, "general");
+
     let burst_result =
         BurstResult::success(contract.id, serde_json::json!({ "content": final_result }));
     conductor
         .record_result(hrm_task.id, subtask.id, burst_result)
         .await
         .map_err(|e| format!("Failed to record result: {e}"))?;
+
+    // Store quality score on the subtask result for UI reporting
+    if let Ok(mut task) = conductor.get_task(hrm_task.id).await {
+        if let Some(st) = task.subtasks.iter_mut().find(|s| s.id == subtask.id)
+            && let Some(ref mut result) = st.result
+        {
+            result.quality_score = Some(response_quality);
+        }
+        let _ = conductor.store().save(&task).await;
+    }
 
     // 8. Retrospective credit assignment via FinalTaskReport
     //
@@ -532,9 +559,6 @@ pub async fn execute_with_conductor_and_learning(
     // quality (not just binary success/failure).
     if let Some(model_name) = &decision_model_name {
         use arkavo_router::learning::{AgentContribution, FinalTaskReport};
-        use arkavo_router::selector_quality::compute_response_quality;
-
-        let response_quality = compute_response_quality(&final_result, 0, "general");
         let contributions = vec![AgentContribution {
             agent_id: model_name.clone(),
             position: 0,
