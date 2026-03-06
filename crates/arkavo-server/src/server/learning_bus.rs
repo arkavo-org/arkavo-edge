@@ -8,7 +8,7 @@ use std::sync::Arc;
 use arkavo_crypto::AgentKeypair;
 use arkavo_gossip::{GossipConfig, GossipMessage, GossipProtocol, KeyRegistry};
 use arkavo_router::Router;
-use arkavo_router::learning::{AgentContribution, LearningModule};
+use arkavo_router::learning::{AgentContribution, LearningModule, LearningStore};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
@@ -148,6 +148,8 @@ pub struct LearningBus {
     pub(super) tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
     /// Case-based retrieval index for episodes
     pub(super) case_index: Arc<CaseIndex>,
+    /// SQLite-backed persistent store for lessons and episodes
+    pub(super) learning_store: Arc<RwLock<Option<Arc<LearningStore>>>>,
 }
 
 impl LearningBus {
@@ -217,6 +219,34 @@ impl LearningBus {
                 "unknown".to_string(),
             ))),
             case_index,
+            learning_store: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Initialize the persistent learning store and load existing lessons
+    pub async fn init_persistence(&self, db_path: &std::path::Path) {
+        match LearningStore::new(db_path).await {
+            Ok(store) => {
+                let store = Arc::new(store);
+                // Load existing lessons into policy cache
+                if let Ok(lessons) = store.get_lessons(&self.swarm_id).await
+                    && !lessons.is_empty()
+                {
+                    let mut cache = self.policy_cache.write().await;
+                    for lesson in &lessons {
+                        cache.add_lesson(lesson.clone());
+                    }
+                    tracing::info!(
+                        count = lessons.len(),
+                        "Loaded persisted lessons into policy cache"
+                    );
+                }
+                *self.learning_store.write().await = Some(store);
+                tracing::info!("Learning store initialized at {}", db_path.display());
+            }
+            Err(e) => {
+                tracing::warn!("Learning persistence unavailable: {e}");
+            }
         }
     }
 

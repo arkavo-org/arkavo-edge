@@ -211,6 +211,12 @@ impl LearningBus {
             scope = %lesson.scope,
             "Human instruction injected into policy cache"
         );
+        // Persist to SQLite before adding to in-memory cache
+        if let Some(ref store) = *self.learning_store.read().await
+            && let Err(e) = store.store_lesson(&lesson).await
+        {
+            tracing::warn!("Failed to persist human lesson: {e}");
+        }
         let mut cache = self.policy_cache.write().await;
         cache.add_lesson(lesson);
     }

@@ -1180,6 +1180,12 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             gossip_config,
         ))
     };
+    // Initialize persistent learning store (SQLite) for lessons
+    {
+        let db_path = std::path::PathBuf::from(".arkavo/learning/lessons.db");
+        learning_bus.init_persistence(&db_path).await;
+    }
+
     server.set_learning_bus(learning_bus.clone()).await;
 
     // Set agent metadata (this initializes the router which will be set on learning bus)
