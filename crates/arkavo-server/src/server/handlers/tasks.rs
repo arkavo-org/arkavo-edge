@@ -1,7 +1,9 @@
+use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{
-    Message, TaskCancelRequest, TaskCancelResponse, TaskGetRequest, TaskGetResponse, TaskStatus,
+    HrmTaskSummary, Message, TaskCancelRequest, TaskCancelResponse, TaskGetRequest,
+    TaskGetResponse, TaskListRequest, TaskListResponse, TaskStatus,
 };
 use arkavo_tasks::task_executor::TaskExecutor;
 use arkavo_tasks::task_store::TaskStore;
@@ -138,4 +140,55 @@ pub async fn handle_tasks_cancel(
             Ok(response)
         }
     }
+}
+
+pub async fn handle_tasks_list(
+    metrics: &Arc<MetricsCollector>,
+    rate_limiter: &RateLimiter,
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    request: TaskListRequest,
+) -> Result<TaskListResponse, ErrorObjectOwned> {
+    let timer = RpcTimer::new("tasks/list".to_string(), metrics.clone());
+
+    if let Err(e) = rate_limiter.check_rate_limit() {
+        metrics.record_rate_limit_blocked(None);
+        timer.error();
+        return Err(e);
+    }
+
+    let all_tasks = conductor.store().list_all().await;
+    let limit = request.limit.unwrap_or(50) as usize;
+
+    let mut tasks: Vec<HrmTaskSummary> = all_tasks
+        .iter()
+        .filter(|t| {
+            request
+                .since
+                .as_ref()
+                .is_none_or(|since| t.updated_at.to_rfc3339() > *since)
+        })
+        .rev()
+        .take(limit)
+        .map(|t| {
+            let objective = if t.objective.len() > 200 {
+                format!("{}...", &t.objective[..197])
+            } else {
+                t.objective.clone()
+            };
+            HrmTaskSummary {
+                id: t.id.to_string(),
+                objective,
+                status: format!("{:?}", t.status),
+                created_at: t.created_at.to_rfc3339(),
+                updated_at: t.updated_at.to_rfc3339(),
+                progress: t.progress(),
+                tool_calls: vec![],
+            }
+        })
+        .collect();
+
+    tasks.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    let total_count = tasks.len() as u32;
+    timer.success();
+    Ok(TaskListResponse { tasks, total_count })
 }

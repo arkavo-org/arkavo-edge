@@ -38,6 +38,8 @@ pub struct TrackedTask {
     pub completed_at: Option<String>,
     pub task_category: Option<String>,
     pub first_working_at: Option<String>,
+    /// "ui" for user-submitted, "agent" for autonomous agent tasks
+    pub source: String,
 }
 
 #[derive(Clone)]
@@ -376,6 +378,13 @@ impl AgUiGateway {
             lesson_tx: Some(lesson_tx),
             lesson_store,
         };
+
+        // Sync agent-internal HRM tasks into the UI dashboard
+        crate::gateway_task_sync::spawn_agent_task_sync(
+            state.connections.clone(),
+            state.agent_connections.clone(),
+            state.task_store.clone(),
+        );
 
         // Rate-limited API routes
         let api_routes = Router::new()

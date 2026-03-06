@@ -26,10 +26,11 @@ function handleTaskSubmitted(event) {
         id: event.taskId || event.task_id,
         description: event.description || _pendingTaskDescription || 'Task',
         status: event.status || 'submitted',
+        source: event.source || 'ui',
         created_at: event.timestamp,
         _events: []
     };
-    _pendingTaskDescription = null;
+    if (task.source === 'ui') _pendingTaskDescription = null;
     AppState.tasks[task.id] = task;
     AppState.taskCount++;
 
@@ -115,9 +116,10 @@ function renderTasks() {
         var agent = getTaskAgent(task, task.id);
         var agentDisplay = agent ? shortAgentName(agent) : 'Routing...';
         var progress = typeof task.progress === 'number' ? Math.min(100, Math.max(0, task.progress * 100)) : null;
+        var sourceBadge = task.source === 'agent' ? '<span class="source-badge agent">auto</span> ' : '';
         return '<div class="task-card task-card-clickable" data-task-id="' + escapeHtml(task.id) + '">' +
             '<div class="task-header">' +
-            '<span class="task-id">#' + taskId + '</span>' +
+            sourceBadge + '<span class="task-id">#' + taskId + '</span>' +
             '<span class="task-status ' + statusClass + '">' + status + '</span>' +
             '</div>' +
             '<div class="task-description">' + (escapeHtml(task.description) || 'Task') + '</div>' +

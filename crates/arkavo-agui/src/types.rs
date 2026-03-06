@@ -438,6 +438,8 @@ pub enum AgUiEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
         status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         timestamp: String,
     },
     TaskStatusChanged {
@@ -495,6 +497,8 @@ pub struct TaskInfo {
     pub created_at: String,
     #[serde(rename = "completedAt", skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

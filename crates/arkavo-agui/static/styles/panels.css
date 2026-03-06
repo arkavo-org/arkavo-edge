@@ -64,6 +64,16 @@
 .task-status.completed { background: var(--success); color: #000; }
 .task-status.failed { background: var(--error); color: #fff; }
 
+.source-badge.agent {
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: #2a6;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
 .task-description { font-size: 13px; margin-bottom: 6px; }
 .task-meta { font-size: 11px; color: var(--text-secondary); }
 

@@ -112,6 +112,7 @@ pub async fn handle_submit_task(
         completed_at: None,
         task_category: Some(category_str),
         first_working_at: None,
+        source: "ui".to_string(),
     };
     task_store.write().await.insert(task_id.clone(), tracked);
 
@@ -120,6 +121,7 @@ pub async fn handle_submit_task(
         task_id: task_id.clone(),
         description: Some(description.clone()),
         status: "submitted".to_string(),
+        source: Some("ui".to_string()),
         timestamp: now.clone(),
     })
     .await?;

@@ -60,7 +60,7 @@ use arkavo_protocol::types::{
     DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
     KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
-    TaskGetResponse, TaskResponse, UserMessage,
+    TaskGetResponse, TaskListRequest, TaskListResponse, TaskResponse, UserMessage,
 };
 use arkavo_tasks::task_executor::TaskExecutor;
 use arkavo_tasks::task_store::TaskStore;
@@ -121,6 +121,10 @@ pub trait A2aRpc {
     /// Cancel a running task
     #[method(name = "tasks/cancel")]
     async fn tasks_cancel(&self, request: TaskCancelRequest) -> RpcResult<TaskCancelResponse>;
+
+    /// List recent HRM tasks
+    #[method(name = "tasks/list")]
+    async fn tasks_list(&self, request: TaskListRequest) -> RpcResult<TaskListResponse>;
 
     /// Stream message updates
     #[subscription(name = "message/stream", unsubscribe = "message/stream/unsubscribe", item = MessageDelta)]
@@ -454,6 +458,16 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.task_store,
             &self.task_executor,
+            request,
+        )
+        .await
+    }
+
+    async fn tasks_list(&self, request: TaskListRequest) -> RpcResult<TaskListResponse> {
+        handlers::tasks::handle_tasks_list(
+            &self.metrics,
+            &self.rate_limiter,
+            &self.conductor,
             request,
         )
         .await

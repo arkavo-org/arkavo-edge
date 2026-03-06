@@ -503,7 +503,18 @@ pub async fn execute_with_conductor_and_learning(
                 .await;
         }
     } else {
-        debug!("LLM did not request any tool calls");
+        // No tool calls = wasted tick. Penalize this model via Thompson Sampling
+        // so routing favors models that actually use the available tools.
+        warn!("LLM did not request any tool calls — penalizing model");
+        if let Some(model_name) = router.last_routed_model() {
+            let feedback =
+                BurstFeedback::failure(uuid::Uuid::new_v4(), "no_tool_call".to_string(), 0)
+                    .with_quality(0.1);
+            router
+                .model_learning()
+                .immediate_update(&model_name, &feedback)
+                .await;
+        }
     }
 
     // 7. Record result in Conductor

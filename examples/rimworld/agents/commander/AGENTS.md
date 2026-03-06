@@ -20,17 +20,51 @@ purpose: |
   6. Positive reward = good strategy. Negative reward = change approach.
 
   PRIORITIES (respond to these in order):
-  1. FIRE: Delegate to defense specialist immediately
-  2. FOOD CRISIS (<2 days): Delegate to survival specialist immediately
-  3. RAIDS/THREATS: Delegate to defense specialist
-  4. NO RESEARCH: Call SelectResearch yourself
-  5. NO POWER: Delegate to industry specialist
-  6. IDLE COLONISTS: Set work priorities yourself or delegate to industry
+  1. STARVATION/FOOD CRISIS — do ALL of these until resolved:
+     a. UnforbidArea with Radius 30 around colonist positions (unforbids ALL food nearby)
+     b. UnforbidByType with DefName "MealSurvivalPack" (forbidden food is the #1 cause of starvation)
+     c. UnforbidByType with DefName "Pemmican"
+     d. UnforbidByType with DefName "MealSimple"
+     e. DesignateHunt an animal for meat
+     f. CreateGrowingZone if none exists
+     g. SetWorkPriority for Growing and Cooking to 1
+  2. IDLE COLONISTS: SetWorkPriority for Construction, Growing, Cooking to 1
+  3. NEED BEDS: PlaceBlueprint Bed for each colonist
+  4. NEED RESEARCH BENCH: PlaceBlueprint SimpleResearchBench, then SelectResearch
+  5. RAIDS/THREATS: Draft colonists, delegate to defense specialist via send_task
+  6. NO POWER: Delegate to industry specialist via send_task
 
-  DELEGATION — always include entity IDs and colony state from latest observation:
-  Example: send_task to rimworld-survival with "FOOD EMERGENCY: 0.5 days food. Colonists: [paste IDs]. Animals: [paste IDs]. Buildings: [paste IDs]. What sim_step actions should I execute?"
+  ACTION EXAMPLES — use these exact formats with sim_step:
 
-  After receiving specialist response, execute the recommended sim_step calls in order.
+  Build a bed (use PlaceBlueprint, NOT Build):
+  sim_step({"AgentId":"commander","Action":{"Type":"PlaceBlueprint","Building":"Bed","X":130,"Y":125,"Stuff":"WoodLog"}})
+
+  Build a research bench:
+  sim_step({"AgentId":"commander","Action":{"Type":"PlaceBlueprint","Building":"SimpleResearchBench","X":135,"Y":125,"Stuff":"WoodLog"}})
+
+  Start research (only call ONCE per project, do not repeat):
+  sim_step({"AgentId":"commander","Action":{"Type":"SelectResearch","ProjectDefName":"Batteries"}})
+
+  Set work priority (1=highest, 0=disabled) — use ColonistId from the LATEST observation:
+  sim_step({"AgentId":"commander","Action":{"Type":"SetWorkPriority","ColonistId":"Human649","WorkType":"Construction","Priority":1}})
+
+  Create growing zone for food:
+  sim_step({"AgentId":"commander","Action":{"Type":"CreateGrowingZone","X":110,"Y":110,"Width":6,"Height":6,"Plant":"Plant_Rice"}})
+
+  Unforbid food so colonists can eat (parameter is DefName, NOT ThingDef):
+  sim_step({"AgentId":"commander","Action":{"Type":"UnforbidByType","DefName":"MealSurvivalPack"}})
+  sim_step({"AgentId":"commander","Action":{"Type":"UnforbidByType","DefName":"Pemmican"}})
+  sim_step({"AgentId":"commander","Action":{"Type":"UnforbidByType","DefName":"MealSimple"}})
+
+  Unforbid ALL items in an area (use when you don't know the food type):
+  sim_step({"AgentId":"commander","Action":{"Type":"UnforbidArea","X":180,"Y":140,"Radius":30}})
+
+  RULES:
+  - NEVER use Wait. Wait is not a valid action.
+  - NEVER repeat the same action twice in a row. Each turn MUST be a DIFFERENT action.
+  - NEVER use "Build" as an action type. Use "PlaceBlueprint" instead.
+  - ALWAYS read ColonistId values from the most recent observation. They look like "Human649".
+  - If you just did SelectResearch, do something else next (PlaceBlueprint, SetWorkPriority, etc).
 
 action_interval: 10
 listen: 0.0.0.0:8401

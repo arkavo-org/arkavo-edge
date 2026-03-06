@@ -239,6 +239,9 @@ impl AgentConnection {
                     self.agent_id, consecutive_failures
                 );
 
+                // Clear the dead client so callers don't use a stale connection
+                *self.client.write().await = None;
+
                 // Send terminal deltas to all active chat broadcasts
                 self.notify_connection_lost().await;
                 break;
@@ -368,6 +371,30 @@ impl AgentConnection {
         ui_tx: mpsc::Sender<crate::types::AgUiEvent>, // Bounded channel
         auth_token: Option<String>,                   // JWT token for authenticated sessions
     ) -> Result<SubscriptionHandle, Box<dyn std::error::Error + Send + Sync>> {
+        // Wait for connection if agent is reconnecting (up to 10s)
+        let mut retries = 0;
+        loop {
+            let status = self.status.read().await.clone();
+            match status {
+                ConnectionStatus::Connected => break,
+                ConnectionStatus::Connecting | ConnectionStatus::Reconnecting { .. }
+                    if retries < 10 =>
+                {
+                    retries += 1;
+                    drop(status);
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                _ => {
+                    return Err(format!(
+                        "Agent {} not connected (status: {:?})",
+                        self.agent_id, status
+                    )
+                    .into());
+                }
+            }
+        }
+
         let client_guard = self.client.read().await;
         let client = client_guard.as_ref().ok_or("Not connected")?;
 

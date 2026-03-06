@@ -285,6 +285,7 @@ pub async fn handle_request_task_list(
             target_agent: t.target_agent.clone(),
             created_at: t.created_at.clone(),
             completed_at: t.completed_at.clone(),
+            source: Some(t.source.clone()),
         })
         .collect();
 

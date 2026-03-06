@@ -908,6 +908,45 @@ pub struct TaskCancelResponse {
     pub message: Option<String>,
 }
 
+/// Request to list recent HRM tasks from an agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskListRequest {
+    /// Only return tasks updated after this timestamp (ISO 8601)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// Maximum number of tasks to return (default: 50)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Response containing a list of HRM tasks
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskListResponse {
+    pub tasks: Vec<HrmTaskSummary>,
+    pub total_count: u32,
+}
+
+/// Summary of an HRM task for the dashboard
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HrmTaskSummary {
+    pub id: String,
+    pub objective: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub progress: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<HrmToolCallSummary>,
+}
+
+/// A tool call within an HRM task
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HrmToolCallSummary {
+    pub name: String,
+    pub success: bool,
+    pub timestamp: String,
+}
+
 /// Configuration management error types
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
