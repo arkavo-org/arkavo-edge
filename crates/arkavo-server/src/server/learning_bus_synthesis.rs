@@ -107,6 +107,30 @@ impl LearningBus {
         observer.set_model_name(model_name);
     }
 
+    /// Retrieve similar past episodes as context for prompt injection
+    ///
+    /// Returns formatted text with successful similar cases and failure warnings.
+    /// Returns empty string if no relevant cases found or embeddings unavailable.
+    pub async fn get_case_context(&self, task_description: &str, category: Option<&str>) -> String {
+        let case_index = self.case_index.clone();
+
+        let successes = case_index
+            .retrieve_similar(task_description, category, 3, 0.5)
+            .await
+            .unwrap_or_default();
+
+        let failures = case_index
+            .retrieve_failures(task_description, 2)
+            .await
+            .unwrap_or_default();
+
+        if successes.is_empty() && failures.is_empty() {
+            return String::new();
+        }
+
+        arkavo_memory::CaseIndex::format_as_context(&successes, &failures)
+    }
+
     /// Record a quality score for an (agent, category) pair
     pub async fn record_quality(&self, agent_id: &str, category: &str, score: f64) {
         let mut cache = self.policy_cache.write().await;

@@ -17,6 +17,9 @@ use super::episode_buffer::EpisodeBuffer;
 use super::policy_cache::PolicyCache;
 use super::tool_pattern_observer::ToolPatternObserver;
 
+use arkavo_memory::case_retrieval::CaseIndex;
+use arkavo_memory::embeddings::EmbeddingService;
+
 /// Minimum success rate required before broadcasting an advisor adjustment to peers
 pub(super) const BROADCAST_MIN_SUCCESS_RATE: f64 = 0.7;
 /// Minimum feedback count before broadcasting an advisor adjustment to peers
@@ -143,6 +146,8 @@ pub struct LearningBus {
     pub(super) router: Arc<RwLock<Option<Arc<Router>>>>,
     /// Observer for capturing tool call patterns
     pub(super) tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
+    /// Case-based retrieval index for episodes
+    pub(super) case_index: Arc<CaseIndex>,
 }
 
 impl LearningBus {
@@ -188,6 +193,8 @@ impl LearningBus {
 
         let gossip = Arc::new(RwLock::new(gossip_protocol));
         let learning = Arc::new(RwLock::new(LearningModule::new()));
+        let embedding_service = Arc::new(EmbeddingService::new());
+        let case_index = Arc::new(CaseIndex::new(embedding_service));
 
         Self {
             agent_id,
@@ -209,6 +216,7 @@ impl LearningBus {
             tool_pattern_observer: Arc::new(RwLock::new(ToolPatternObserver::new(
                 "unknown".to_string(),
             ))),
+            case_index,
         }
     }
 
@@ -275,6 +283,11 @@ impl LearningBus {
     /// Get the gossip outbound channel sender
     pub fn gossip_out_tx(&self) -> &broadcast::Sender<(String, GossipMessage)> {
         &self.gossip_out_tx
+    }
+
+    /// Get the case-based retrieval index
+    pub fn case_index(&self) -> &Arc<CaseIndex> {
+        &self.case_index
     }
 
     /// Add a peer to gossip protocol with their public key

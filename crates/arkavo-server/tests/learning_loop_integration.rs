@@ -218,6 +218,35 @@ fn test_policy_cache_ring_buffer_newest_retained() {
     assert!(guidance.contains("condition-7"));
 }
 
+/// Anti-patterns recorded from tool errors appear in behavior guidance
+#[tokio::test]
+async fn test_anti_pattern_in_guidance() {
+    let bus = make_bus();
+
+    // Record a tool failure as anti-pattern
+    bus.record_human_correction("don't hunt wolves", None, Some("model-a"))
+        .await;
+
+    let guidance = bus.get_behavior_guidance(None).await;
+    assert!(
+        guidance.contains("AVOID"),
+        "Anti-pattern should appear as avoidance warning in guidance: {guidance}"
+    );
+}
+
+/// Case retrieval returns empty when no episodes indexed
+#[tokio::test]
+async fn test_case_retrieval_empty_index() {
+    let bus = make_bus();
+    let context = bus
+        .get_case_context("how do I fix food shortage?", None)
+        .await;
+    assert!(
+        context.is_empty(),
+        "Empty case index should return empty context"
+    );
+}
+
 /// EpisodeBuffer: observations + episodes flow through thresholds correctly
 #[test]
 fn test_episode_buffer_full_lifecycle() {

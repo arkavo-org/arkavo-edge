@@ -158,6 +158,32 @@ pub async fn start_event_processing_loop(
                                         episode.outcome.success
                                     );
 
+                                    // Index in case retrieval for similarity search
+                                    let summary = format!(
+                                        "{}: {}",
+                                        episode.observation.action_taken,
+                                        if episode.outcome.success {
+                                            "succeeded"
+                                        } else {
+                                            "failed"
+                                        }
+                                    );
+                                    let quality = episode.outcome.quality_metrics.overall();
+                                    let case_index = learning_bus.case_index().clone();
+                                    let ep_id = episode.id;
+                                    let ep_cat = episode.task_category.clone();
+                                    let ep_success = episode.outcome.success;
+                                    tokio::spawn(async move {
+                                        if let Err(e) = case_index
+                                            .index_episode(
+                                                ep_id, &summary, &ep_cat, quality, ep_success,
+                                            )
+                                            .await
+                                        {
+                                            tracing::debug!("Case indexing skipped: {e}");
+                                        }
+                                    });
+
                                     // Add to buffer
                                     {
                                         let mut buffer =
