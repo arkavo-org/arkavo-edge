@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
-use crate::learning::LearningModule;
+use crate::learning::{DecisionTrace, LearningModule};
 use crate::selector::ModelSelector;
 
 impl ModelSelector {
@@ -177,6 +177,12 @@ impl ModelSelector {
                 decision.reasoning
             );
 
+            decision.trace = DecisionTrace::budget_constrained(
+                classification.category,
+                f64::from(classification.confidence),
+                local_fallback.name(),
+                budget_usage_percent,
+            );
             decision.recommended_model = local_fallback;
             decision.estimated_cost_usd = 0.0;
         }
@@ -212,17 +218,27 @@ impl ModelSelector {
             feasible.push(ModelChoice::LocalQwen3);
         }
 
+        let excluded_names: Vec<String> = excluded.to_vec();
+
         if feasible.len() == 1 {
             let model = feasible
                 .into_iter()
                 .next()
                 .unwrap_or(ModelChoice::LocalQwen3);
             let reasoning = format!("Single feasible model: {}", model.name());
-            return Ok(RoutingDecision::new(
+            let trace = DecisionTrace::single_feasible(
+                classification.category,
+                f64::from(classification.confidence),
+                model.name(),
+                budget_usage,
+                excluded_names,
+            );
+            return Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
                 classification.confidence,
                 reasoning,
+                trace,
             ));
         }
 
@@ -261,11 +277,22 @@ impl ModelSelector {
                 score,
                 classification.category.as_str()
             );
-            Ok(RoutingDecision::new(
+            let trace = DecisionTrace::thompson(
+                classification.category,
+                f64::from(classification.confidence),
+                model_ids,
+                ranked.clone(),
+                model.name(),
+                0,
+                budget_usage,
+                excluded_names,
+            );
+            Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
                 classification.confidence,
                 reasoning,
+                trace,
             ))
         } else {
             self.select(classification, "")

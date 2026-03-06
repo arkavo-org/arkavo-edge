@@ -634,7 +634,7 @@ pub enum MessageDeltaContent {
         #[serde(rename = "isError")]
         is_error: bool,
     },
-    /// Internal metadata (never serialized to frontend)
+    /// Metadata (selectively forwarded to frontend, e.g. teaching_intent)
     Metadata {
         key: String,
         value: serde_json::Value,

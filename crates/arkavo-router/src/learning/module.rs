@@ -1,7 +1,8 @@
 //! LearningModule - Thompson Sampling for agent/model selection
 
-use super::agent_utility::{AgentUtility, BetaPrior, BurstFeedback, FinalTaskReport};
+use super::agent_utility::{AgentUtility, BetaPrior};
 use super::config::LearningConfig;
+use super::feedback_types::{BurstFeedback, FinalTaskReport};
 use super::tool_patterns::ToolCallFormat;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -123,35 +124,45 @@ impl LearningModule {
     ///
     /// Called after a complete task finishes. Distributes reward backward
     /// through the contribution chain with discount factor γ.
+    /// When `per_step_rewards` is non-empty, uses those instead of uniform
+    /// discounted final_reward (backward compat when empty).
     pub async fn retrospective_update(&self, report: &FinalTaskReport) {
         let contributions = &report.agent_contributions;
         if contributions.is_empty() {
             return;
         }
 
+        let use_per_step = report.per_step_rewards.len() == contributions.len();
+
         // Find max position to calculate discounts correctly (handles unsorted contributions)
         let max_position = contributions.iter().map(|c| c.position).max().unwrap_or(0);
         let mut agents = self.agents.write().await;
 
         // Apply discounted rewards based on actual position (later agents get more credit)
-        for contribution in contributions {
+        for (idx, contribution) in contributions.iter().enumerate() {
             let utility = agents
                 .entry(contribution.agent_id.clone())
                 .or_insert_with(|| AgentUtility::new(contribution.agent_id.clone()));
 
-            // Discount factor raised to position from end (using actual position)
-            // Last agent (position = max_position) gets γ^0 = 1.0
-            // First agent (position = 0) gets γ^max_position
-            let position_from_end = max_position - contribution.position;
-            #[allow(clippy::cast_possible_wrap)]
-            let discount = self.config.discount_factor.powi(position_from_end as i32);
+            let combined = if use_per_step {
+                // Use per-step reward directly (already incorporates quality)
+                let step_reward = report.per_step_rewards[idx];
+                0.5f64.mul_add(contribution.immediate_reward, 0.5 * step_reward)
+            } else {
+                // Discount factor raised to position from end (using actual position)
+                // Last agent (position = max_position) gets γ^0 = 1.0
+                // First agent (position = 0) gets γ^max_position
+                let position_from_end = max_position - contribution.position;
+                #[allow(clippy::cast_possible_wrap)]
+                let discount = self.config.discount_factor.powi(position_from_end as i32);
 
-            // Combine immediate reward with discounted final reward
-            let immediate = contribution.immediate_reward;
-            let retrospective = report.final_reward * discount;
+                // Combine immediate reward with discounted final reward
+                let immediate = contribution.immediate_reward;
+                let retrospective = report.final_reward * discount;
 
-            // Weight: 50% immediate, 50% retrospective
-            let combined = 0.5f64.mul_add(immediate, 0.5 * retrospective);
+                // Weight: 50% immediate, 50% retrospective
+                0.5f64.mul_add(immediate, 0.5 * retrospective)
+            };
 
             // Apply as fractional update (centered around 0.5)
             let weight = (combined - 0.5) * 2.0; // -1.0 to 1.0

@@ -234,6 +234,9 @@ fn test_episode_buffer_full_lifecycle() {
         success: true,
         latency_ms: 50,
         timestamp: chrono::Utc::now(),
+        decision_trace_id: None,
+        step_index: 0,
+        model_name: None,
     });
     assert!(buffer.ready_for_episode_synthesis().is_none());
 
@@ -244,6 +247,9 @@ fn test_episode_buffer_full_lifecycle() {
         success: true,
         latency_ms: 30,
         timestamp: chrono::Utc::now(),
+        decision_trace_id: None,
+        step_index: 0,
+        model_name: None,
     });
     assert_eq!(
         buffer.ready_for_episode_synthesis(),

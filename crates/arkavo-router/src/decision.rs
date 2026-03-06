@@ -1,4 +1,5 @@
 use crate::classifier::TaskCategory;
+use crate::learning::DecisionTrace;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -287,6 +288,8 @@ pub struct RoutingDecision {
     pub task_category: TaskCategory,
     pub should_compress: bool,
     pub compression_target: Option<f64>,
+    /// Full decision trace for learning
+    pub trace: DecisionTrace,
 }
 
 impl RoutingDecision {
@@ -295,6 +298,17 @@ impl RoutingDecision {
         category: TaskCategory,
         confidence: f32,
         reasoning: String,
+    ) -> Self {
+        let trace = DecisionTrace::fallback(category, f64::from(confidence), model.name());
+        Self::with_trace(model, category, confidence, reasoning, trace)
+    }
+
+    pub fn with_trace(
+        model: ModelChoice,
+        category: TaskCategory,
+        confidence: f32,
+        reasoning: String,
+        trace: DecisionTrace,
     ) -> Self {
         let fallback_chain = Self::default_fallback_chain(&model, category);
         let estimated_cost = Self::estimate_cost(&model, category);
@@ -311,6 +325,7 @@ impl RoutingDecision {
             task_category: category,
             should_compress,
             compression_target,
+            trace,
         }
     }
 

@@ -23,6 +23,23 @@ use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
+/// A teaching event emitted when the chat path detects a human teaching intent
+#[derive(Debug, Clone)]
+pub enum ChatTeachingEvent {
+    /// Human gave a behavioral instruction
+    Instruction {
+        text: String,
+        scope: arkavo_router::learning::LessonScope,
+    },
+    /// Human corrected a recent action
+    Correction {
+        text: String,
+        trace_id: Option<Uuid>,
+    },
+    /// Human reinforced a recent action
+    Reinforcement { trace_id: Option<Uuid> },
+}
+
 /// Manages active chat sessions
 pub struct ChatSessionManager {
     sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
@@ -37,6 +54,10 @@ pub struct ChatSessionManager {
     /// Shared learning context string, updated by the server from LearningBus.
     /// Prepended as a system message before each chat inference.
     learning_context: Option<Arc<RwLock<String>>>,
+    /// Channel for emitting human teaching events to the learning bus
+    teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
+    /// Agent purpose/system prompt from AGENTS.md, prepended to every chat context
+    system_prompt: Option<String>,
 }
 
 struct ChatSessionState {
@@ -136,6 +157,8 @@ impl ChatSessionManager {
             _ttl_seconds: ttl_seconds,
             buffer_config,
             learning_context: None,
+            teaching_tx: None,
+            system_prompt: None,
         }
     }
 
@@ -143,6 +166,19 @@ impl ChatSessionManager {
     /// The server updates this string from LearningBus (lessons, quality trends).
     pub fn set_learning_context(&mut self, context: Arc<RwLock<String>>) {
         self.learning_context = Some(context);
+    }
+
+    /// Set the teaching event channel for human teaching through chat.
+    pub fn set_teaching_tx(&mut self, tx: mpsc::Sender<ChatTeachingEvent>) {
+        self.teaching_tx = Some(tx);
+    }
+
+    /// Set the agent's purpose/system prompt from AGENTS.md.
+    /// Prepended as a system message to every chat context window.
+    pub fn set_system_prompt(&mut self, prompt: String) {
+        if !prompt.is_empty() {
+            self.system_prompt = Some(prompt);
+        }
     }
 
     /// Create a new chat session with optional authentication
@@ -225,6 +261,8 @@ impl ChatSessionManager {
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
             let learning_context = self.learning_context.clone();
+            let teaching_tx = self.teaching_tx.clone();
+            let system_prompt = self.system_prompt.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -238,6 +276,8 @@ impl ChatSessionManager {
                         session_metrics,
                         metrics_collector,
                         learning_context,
+                        teaching_tx,
+                        system_prompt,
                     )
                     .await;
                 });
@@ -768,7 +808,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -780,6 +820,8 @@ impl ChatSessionManager {
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
         learning_context: Option<Arc<RwLock<String>>>,
+        teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
+        system_prompt: Option<String>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -827,6 +869,85 @@ impl ChatSessionManager {
                                 images: None,
                             });
                         }
+                    }
+
+                    // Prepend agent purpose/system prompt from AGENTS.md (always first)
+                    if let Some(ref prompt) = system_prompt {
+                        windowed_context.insert(0, Message {
+                            role: Role::System,
+                            content: prompt.clone(),
+                            images: None,
+                        });
+                    }
+
+                    // Classify human teaching intent before routing
+                    let last_trace = router.last_decision_trace().map(|t| t.trace_id);
+                    let intent = arkavo_router::learning::human_teaching::classify_intent(
+                        &user_message.content,
+                        last_trace,
+                    );
+
+                    if intent != arkavo_router::learning::TeachingIntent::Question {
+                        // Emit intent metadata delta so the UI can display it
+                        let intent_label = match &intent {
+                            arkavo_router::learning::TeachingIntent::Instruction { scope } => {
+                                format!("instruction ({scope})")
+                            }
+                            arkavo_router::learning::TeachingIntent::Correction { .. } => {
+                                "correction".to_string()
+                            }
+                            arkavo_router::learning::TeachingIntent::Reinforcement => {
+                                "reinforcement".to_string()
+                            }
+                            arkavo_router::learning::TeachingIntent::Question => unreachable!(),
+                        };
+                        let intent_delta = MessageDelta {
+                            session_id: session_id.clone(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Metadata {
+                                key: "teaching_intent".to_string(),
+                                value: serde_json::json!({
+                                    "intent": intent_label,
+                                    "text": &user_message.content,
+                                }),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = delta_tx.send(intent_delta);
+
+                        // Forward teaching event to learning bus
+                        if let Some(ref tx) = teaching_tx {
+                            let event = match &intent {
+                                arkavo_router::learning::TeachingIntent::Instruction { scope } => {
+                                    Some(ChatTeachingEvent::Instruction {
+                                        text: user_message.content.clone(),
+                                        scope: *scope,
+                                    })
+                                }
+                                arkavo_router::learning::TeachingIntent::Correction { trace_id } => {
+                                    Some(ChatTeachingEvent::Correction {
+                                        text: user_message.content.clone(),
+                                        trace_id: *trace_id,
+                                    })
+                                }
+                                arkavo_router::learning::TeachingIntent::Reinforcement => {
+                                    Some(ChatTeachingEvent::Reinforcement {
+                                        trace_id: last_trace,
+                                    })
+                                }
+                                _ => None,
+                            };
+                            if let Some(evt) = event {
+                                let _ = tx.send(evt).await;
+                            }
+                        }
+
+                        info!(
+                            session.id = %session_id,
+                            intent = %intent_label,
+                            "Teaching intent detected in chat"
+                        );
                     }
 
                     let model = router.fastest_local_model();

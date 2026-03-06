@@ -7,6 +7,7 @@ pub mod federated_memory;
 pub mod ledger;
 #[cfg(feature = "vector-search")]
 pub mod mcp_tools;
+pub mod memory_lifecycle;
 pub mod models;
 pub mod orchestrator_state;
 pub mod plan_state;
@@ -21,6 +22,7 @@ pub use federated_memory::{
     MemoryAttribute, MemoryPolicy, evaluate_entitlements,
 };
 pub use ledger::ContextLedger;
+pub use memory_lifecycle::{LifecycleConfig, LifecycleReport, LifecycleRules};
 pub use models::{AgentConversation, AgentDomain, CreateMemoryRequest, Memory, SearchResult};
 pub use orchestrator_state::{
     IssueProcessingStatus, OrchestratorStateStore, OrgStats, ProcessedIssue, RepoState, RepoStatus,

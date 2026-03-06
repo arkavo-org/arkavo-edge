@@ -397,6 +397,11 @@ impl super::Router {
                 *guard = Some(current_decision.recommended_model.name().to_string());
             }
 
+            // Store the decision trace for downstream attribution
+            if let Ok(mut guard) = self.last_decision_trace.write() {
+                *guard = Some(current_decision.trace.clone());
+            }
+
             return Ok(response);
         }
 

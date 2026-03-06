@@ -527,7 +527,20 @@ impl AgentConnection {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     let _ = ui_tx_clone.try_send(telemetry);
-                    continue; // Don't forward Metadata as MessageDelta
+
+                    // Forward teaching_intent as MessageDelta so chat UI can render badges
+                    if key == "teaching_intent" {
+                        let teaching_event = crate::types::AgUiEvent::MessageDelta {
+                            agent_id: agent_id_for_forward.clone(),
+                            message_id: ordered_delta.delta.message_id.clone(),
+                            delta: crate::types::MessageDeltaContent::Metadata {
+                                key: key.clone(),
+                                value: value.clone(),
+                            },
+                        };
+                        let _ = ui_tx_clone.try_send(teaching_event);
+                    }
+                    continue; // Don't forward other Metadata as MessageDelta
                 }
 
                 let event = crate::types::AgUiEvent::MessageDelta {

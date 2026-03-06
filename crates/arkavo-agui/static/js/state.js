@@ -22,7 +22,8 @@ var AppState = {
     pathWeights: {},
     qualityTrends: [],
     lessonCount: 0,
-    selectedTaskId: null
+    selectedTaskId: null,
+    teachingEvents: []
 };
 
 var MAX_TELEMETRY = 200;

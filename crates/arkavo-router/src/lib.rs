@@ -129,6 +129,8 @@ pub struct Router {
     /// The conductor reads this after tool execution to attribute
     /// reward-based corrective feedback to the right Thompson Sampling prior.
     last_routed_model: Arc<std::sync::RwLock<Option<String>>>,
+    /// Last routing decision trace for downstream attribution
+    last_decision_trace: Arc<std::sync::RwLock<Option<learning::DecisionTrace>>>,
 }
 
 impl Router {
@@ -164,6 +166,7 @@ impl Router {
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
+            last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -199,6 +202,7 @@ impl Router {
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
+            last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
         })
     }
 
@@ -304,6 +308,12 @@ impl Router {
     /// to attribute reward-based corrective feedback to the right model.
     pub fn last_routed_model(&self) -> Option<String> {
         self.last_routed_model.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Get the trace from the last routing decision.
+    /// Used by the conductor to attribute trace IDs to tool call events.
+    pub fn last_decision_trace(&self) -> Option<learning::DecisionTrace> {
+        self.last_decision_trace.read().ok().and_then(|g| g.clone())
     }
 
     /// Extract model family from a model name (e.g., "glm-4.7-flash" → "glm").

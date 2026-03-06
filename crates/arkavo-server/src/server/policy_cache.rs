@@ -10,6 +10,7 @@ use arkavo_router::learning::Lesson;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::anti_pattern::AntiPatternStore;
 use super::tool_pattern_observer::TOOL_FORMAT_CATEGORY;
 
 const MAX_BEHAVIOR_LESSONS_PER_KEY: usize = 5;
@@ -37,6 +38,8 @@ pub struct PolicyCache {
     behavior_lessons: HashMap<(String, String), Vec<Lesson>>,
     /// Quality score history per (agent_id, category), ring buffer of max 20
     quality_history: HashMap<(String, String), Vec<f64>>,
+    /// Anti-patterns for known failure modes
+    pub anti_patterns: AntiPatternStore,
 }
 
 impl Default for PolicyCache {
@@ -54,6 +57,7 @@ impl PolicyCache {
             tool_format_lessons: HashMap::new(),
             behavior_lessons: HashMap::new(),
             quality_history: HashMap::new(),
+            anti_patterns: AntiPatternStore::new(),
         }
     }
 
@@ -262,10 +266,10 @@ impl PolicyCache {
             .collect()
     }
 
-    /// Build behavior guidance text from cached non-tool_format lessons
+    /// Build behavior guidance text from cached lessons and anti-patterns
     ///
     /// Optionally filters by category. Returns up to 5 lessons formatted
-    /// as guidance for prompt injection.
+    /// as guidance for prompt injection, plus any active anti-pattern warnings.
     pub fn get_behavior_guidance(&self, category: Option<&str>) -> String {
         let mut seen_conditions = HashSet::new();
         let lessons: Vec<&Lesson> = self
@@ -277,18 +281,34 @@ impl PolicyCache {
             .take(MAX_GUIDANCE_LESSONS)
             .collect();
 
-        if lessons.is_empty() {
-            return String::new();
+        let mut lines = Vec::new();
+
+        if !lessons.is_empty() {
+            lines.push("Learned behavior guidance:".to_string());
+            for lesson in &lessons {
+                lines.push(format!(
+                    "- When: {} | Do: {} | Expect: {}",
+                    lesson.pattern.condition,
+                    lesson.pattern.action,
+                    lesson.pattern.expected_outcome
+                ));
+            }
         }
 
-        let mut lines = vec!["Learned behavior guidance:".to_string()];
-        for lesson in lessons {
-            lines.push(format!(
-                "- When: {} | Do: {} | Expect: {}",
-                lesson.pattern.condition, lesson.pattern.action, lesson.pattern.expected_outcome
-            ));
+        // Include active anti-pattern warnings
+        let anti_pattern_warnings = self.anti_patterns.active_warnings(category);
+        if !anti_pattern_warnings.is_empty() {
+            lines.push("Known failure patterns to avoid:".to_string());
+            for warning in anti_pattern_warnings.iter().take(3) {
+                lines.push(format!("- AVOID: {warning}"));
+            }
         }
-        lines.join("\n")
+
+        if lines.is_empty() {
+            String::new()
+        } else {
+            lines.join("\n")
+        }
     }
 
     /// Get behavior lesson count

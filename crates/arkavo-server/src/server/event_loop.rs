@@ -99,6 +99,9 @@ pub async fn start_event_processing_loop(
                         result,
                         success,
                         latency_ms,
+                        decision_trace_id,
+                        step_index,
+                        model_name,
                     } => {
                         tracing::debug!(
                             "Event processing: tool={} success={} latency={}ms",
@@ -115,6 +118,9 @@ pub async fn start_event_processing_loop(
                             success,
                             latency_ms,
                             timestamp: Utc::now(),
+                            decision_trace_id,
+                            step_index,
+                            model_name,
                         };
 
                         // Add to buffer
@@ -251,6 +257,24 @@ pub async fn start_event_processing_loop(
                     }
                     LearningEvent::GossipReceived(_) => {
                         // Gossip messages are handled separately via handle_gossip
+                    }
+                    LearningEvent::HumanCorrection {
+                        text,
+                        trace_id,
+                        model_name,
+                    } => {
+                        tracing::info!(
+                            "Human correction received: {} (trace={:?})",
+                            &text[..text.len().min(60)],
+                            trace_id
+                        );
+                        learning_bus
+                            .record_human_correction(&text, trace_id, model_name.as_deref())
+                            .await;
+                    }
+                    LearningEvent::HumanReinforcement { trace_id, .. } => {
+                        tracing::info!("Human reinforcement received (trace={:?})", trace_id);
+                        learning_bus.record_human_reinforcement(trace_id).await;
                     }
                 }
             }

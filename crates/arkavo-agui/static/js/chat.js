@@ -64,6 +64,35 @@ function handleMessageDelta(event) {
 
     var chat = getAgentChat(agentId);
     var delta = event.delta;
+
+    // Handle teaching intent metadata
+    if (delta && delta.type === 'metadata' && delta.key === 'teaching_intent') {
+        var intentData = delta.value || {};
+        var intentLabel = intentData.intent || 'unknown';
+
+        // Add a system message showing the detected intent
+        chat.messages.push({
+            id: Date.now().toString(),
+            role: 'system',
+            content: '',
+            teachingIntent: intentLabel
+        });
+
+        // Track teaching event in AppState for the learning panel
+        if (!AppState.teachingEvents) AppState.teachingEvents = [];
+        AppState.teachingEvents.push({
+            intent: intentLabel,
+            text: intentData.text || '',
+            timestamp: new Date().toISOString()
+        });
+        while (AppState.teachingEvents.length > 20) {
+            AppState.teachingEvents.shift();
+        }
+
+        renderAgentChatMessages(agentId);
+        return;
+    }
+
     if (delta && delta.type === 'text') {
         var msgId = event.messageId || event.message_id;
         var existingMsg = chat.messages.find(function(m) { return m.id === msgId; });
@@ -82,6 +111,11 @@ function renderAgentChatMessages(agentId) {
 
     var chat = getAgentChat(agentId);
     container.innerHTML = chat.messages.map(function(msg) {
+        // Teaching intent system messages get special rendering
+        if (msg.teachingIntent) {
+            return renderTeachingBadge(msg.teachingIntent);
+        }
+
         var role = escapeHtml(msg.role || 'unknown');
         var roleClass = role.replace(/[^a-zA-Z0-9-]/g, '');
         return '<div class="chat-message ' + roleClass + '">' +
@@ -90,6 +124,28 @@ function renderAgentChatMessages(agentId) {
             '</div>';
     }).join('');
     container.scrollTop = container.scrollHeight;
+}
+
+function renderTeachingBadge(intentLabel) {
+    var icon = '';
+    var badgeClass = 'teaching-badge';
+    if (intentLabel.indexOf('instruction') === 0) {
+        icon = '&#x1F4DD;';
+        badgeClass += ' instruction';
+    } else if (intentLabel === 'correction') {
+        icon = '&#x26D4;';
+        badgeClass += ' correction';
+    } else if (intentLabel === 'reinforcement') {
+        icon = '&#x2705;';
+        badgeClass += ' reinforcement';
+    }
+
+    return '<div class="chat-message system">' +
+        '<div class="' + badgeClass + '">' +
+            '<span class="teaching-icon">' + icon + '</span>' +
+            '<span class="teaching-label">Teaching: ' + escapeHtml(intentLabel) + '</span>' +
+        '</div>' +
+    '</div>';
 }
 
 function sendAgentChatMessage(agentId) {

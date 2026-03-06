@@ -135,7 +135,8 @@ function renderLearningPanel() {
         '<div class="routing-timeline-section">' +
             '<div class="timeline-header">Routing Timeline</div>' +
             '<div class="routing-timeline" id="routing-timeline"></div>' +
-        '</div>';
+        '</div>' +
+        renderTeachingSection();
 
     renderConnectome(agentIds);
     renderTimeline();
@@ -555,4 +556,45 @@ function shortCategory(cat) {
         'general': 'general'
     };
     return map[cat] || cat;
+}
+
+function renderTeachingSection() {
+    var events = AppState.teachingEvents || [];
+    if (events.length === 0) return '';
+
+    var html = '<div class="teaching-section">' +
+        '<div class="timeline-header">Human Teaching</div>' +
+        '<div class="teaching-event-list">';
+
+    for (var i = events.length - 1; i >= 0; i--) {
+        var evt = events[i];
+        var intent = evt.intent || 'unknown';
+        var badgeClass = 'teaching-badge';
+        var icon = '';
+        if (intent.indexOf('instruction') === 0) {
+            badgeClass += ' instruction';
+            icon = '&#x1F4DD;';
+        } else if (intent === 'correction') {
+            badgeClass += ' correction';
+            icon = '&#x26D4;';
+        } else if (intent === 'reinforcement') {
+            badgeClass += ' reinforcement';
+            icon = '&#x2705;';
+        }
+
+        var preview = escapeHtml((evt.text || '').substring(0, 60));
+        if ((evt.text || '').length > 60) preview += '...';
+
+        html += '<div class="teaching-event-item">' +
+            '<span class="' + badgeClass + '">' +
+                '<span class="teaching-icon">' + icon + '</span>' +
+                '<span class="teaching-label">' + escapeHtml(intent) + '</span>' +
+            '</span>' +
+            '<span class="teaching-event-text">' + preview + '</span>' +
+            '<span class="teaching-event-time">' + formatTime(evt.timestamp) + '</span>' +
+            '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
 }

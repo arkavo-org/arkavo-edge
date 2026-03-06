@@ -544,6 +544,16 @@ impl A2aServer {
                 if let Some(bus) = self.learning_bus.read().await.as_ref() {
                     bus.set_router(router.clone()).await;
                     info!("✓ Router configured for learning synthesis");
+
+                    // Load AGENTS.md lessons into policy cache at startup
+                    if let Some(ref name) = agent_config.name {
+                        // Use the purpose field as AGENTS.md content if available
+                        let agents_md_content = Self::read_agents_md_content().await;
+                        if !agents_md_content.is_empty() {
+                            bus.load_agents_md_lessons(&agents_md_content).await;
+                        }
+                        let _ = name; // used for agent_config context
+                    }
                 }
 
                 // Initialize federated memory service for cross-agent retrieval
@@ -555,6 +565,18 @@ impl A2aServer {
                 error!(error = %e, "✗ Failed to initialize router");
             }
         }
+    }
+
+    /// Read AGENTS.md content from disk for teaching lesson injection.
+    async fn read_agents_md_content() -> String {
+        let path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+            ".arkavo/AGENTS.md"
+        } else if std::path::Path::new("AGENTS.md").exists() {
+            "AGENTS.md"
+        } else {
+            return String::new();
+        };
+        tokio::fs::read_to_string(path).await.unwrap_or_default()
     }
 
     /// Create the advisor state store alongside the workspace memory DB.
@@ -878,6 +900,9 @@ impl A2aServer {
                                         result: result.clone(),
                                         success: true,
                                         latency_ms,
+                                        decision_trace_id: None,
+                                        step_index: 0,
+                                        model_name: None,
                                     };
                                     let _ = bus.sender().send(event).await;
                                 }
@@ -895,6 +920,9 @@ impl A2aServer {
                                         result: format!("Error: {e}"),
                                         success: false,
                                         latency_ms,
+                                        decision_trace_id: None,
+                                        step_index: 0,
+                                        model_name: None,
                                     };
                                     let _ = bus.sender().send(event).await;
                                 }
@@ -1044,6 +1072,36 @@ impl A2aServer {
                 self.buffer_config.clone(),
             );
             mgr.set_learning_context(learning_context.clone());
+
+            // Inject agent purpose from AGENTS.md as system prompt for chat context
+            {
+                let metadata = self.agent_metadata.read().await;
+                mgr.set_system_prompt(metadata.purpose.clone());
+            }
+
+            // Wire teaching intent from chat → learning bus
+            if let Some(bus) = self.learning_bus().await {
+                let (teaching_tx, mut teaching_rx) =
+                    tokio::sync::mpsc::channel::<chat_session::ChatTeachingEvent>(64);
+                mgr.set_teaching_tx(teaching_tx);
+                tokio::spawn(async move {
+                    while let Some(evt) = teaching_rx.recv().await {
+                        match evt {
+                            chat_session::ChatTeachingEvent::Instruction { text, scope } => {
+                                bus.inject_human_instruction(&text, scope, "chat").await;
+                            }
+                            chat_session::ChatTeachingEvent::Correction { text, trace_id } => {
+                                bus.record_human_correction(&text, trace_id, None).await;
+                            }
+                            chat_session::ChatTeachingEvent::Reinforcement { trace_id } => {
+                                bus.record_human_reinforcement(trace_id).await;
+                            }
+                        }
+                    }
+                });
+                info!("✓ Human teaching wired: chat → learning bus");
+            }
+
             Arc::new(mgr)
         } else if llm_adapter.is_some() {
             info!("✓ ChatSessionManager will be created WITH LLM adapter");

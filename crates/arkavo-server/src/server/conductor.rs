@@ -281,6 +281,11 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map_err(|e| format!("Router failed: {e}"))?;
 
+    // Capture decision trace for attribution in learning events
+    let decision_trace = router.last_decision_trace();
+    let decision_trace_id = decision_trace.as_ref().map(|t| t.trace_id);
+    let decision_model_name = router.last_routed_model();
+
     info!("LLM response received, {} chars", response.content.len());
 
     update_progress("Processing response", 60);
@@ -322,7 +327,7 @@ pub async fn execute_with_conductor_and_learning(
 
         let mut tool_results = Vec::new();
         let mut reward_signals: Vec<f64> = Vec::new();
-        for tool_call in &response.tool_calls {
+        for (step_idx, tool_call) in response.tool_calls.iter().enumerate() {
             let args = tool_call.arguments.clone();
             debug!(
                 "Tool call: {} with args: {}",
@@ -382,6 +387,9 @@ pub async fn execute_with_conductor_and_learning(
                             result: result_str.clone(),
                             success: tool_success,
                             latency_ms,
+                            decision_trace_id,
+                            step_index: step_idx as u16,
+                            model_name: decision_model_name.clone(),
                         };
                         let _ = bus.sender().send(event).await;
                     }
@@ -413,6 +421,9 @@ pub async fn execute_with_conductor_and_learning(
                             result: format!("Error: {err_str}"),
                             success: false,
                             latency_ms,
+                            decision_trace_id,
+                            step_index: step_idx as u16,
+                            model_name: decision_model_name.clone(),
                         };
                         let _ = bus.sender().send(event).await;
                     }
@@ -426,6 +437,19 @@ pub async fn execute_with_conductor_and_learning(
                             &err_str,
                             &args,
                         );
+
+                        // Record anti-pattern so routing penalizes this model+category
+                        if let Some(bus) = learning_bus {
+                            use super::anti_pattern::AntiPatternStore;
+                            let signature =
+                                AntiPatternStore::classify_failure(&tool_call.tool_name, &err_str);
+                            bus.record_human_correction(
+                                &signature,
+                                decision_trace_id,
+                                Some(&model_name),
+                            )
+                            .await;
+                        }
                     }
 
                     tool_results.push(format!(

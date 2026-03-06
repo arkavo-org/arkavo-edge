@@ -526,6 +526,7 @@ impl super::Router {
             inference_semaphore: self.inference_semaphore.clone(),
             chat_semaphore: self.chat_semaphore.clone(),
             last_routed_model: self.last_routed_model.clone(),
+            last_decision_trace: self.last_decision_trace.clone(),
         })
     }
 }

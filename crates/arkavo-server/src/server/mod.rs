@@ -1,4 +1,5 @@
 mod a2a_server;
+mod anti_pattern;
 mod conductor;
 mod config_helpers;
 mod episode_buffer;
@@ -6,6 +7,8 @@ mod event_loop;
 mod gossip_transport;
 mod handlers;
 mod learning_bus;
+mod learning_bus_gossip;
+mod learning_bus_synthesis;
 mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;

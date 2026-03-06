@@ -7,6 +7,7 @@
 mod inner {
     use super::super::{AgentUtility, Episode, Lesson};
     use crate::learning::coordination::CoordinationMetrics;
+    use crate::learning::decision_trace::DecisionTrace;
     use sqlx::Row;
     use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
     use std::path::Path;
@@ -165,6 +166,35 @@ mod inner {
             .execute(&self.pool)
             .await?;
 
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS decision_traces (
+                    id TEXT PRIMARY KEY,
+                    task_category TEXT NOT NULL,
+                    feasible_models TEXT NOT NULL,
+                    thompson_scores TEXT NOT NULL,
+                    selected_model TEXT NOT NULL,
+                    selection_reason TEXT NOT NULL,
+                    budget_usage REAL NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+                "#,
+            )
+            .execute(&self.pool)
+            .await?;
+
+            sqlx::query(
+                r#"CREATE INDEX IF NOT EXISTS idx_traces_model ON decision_traces(selected_model)"#,
+            )
+            .execute(&self.pool)
+            .await?;
+
+            sqlx::query(
+                r#"CREATE INDEX IF NOT EXISTS idx_traces_category ON decision_traces(task_category)"#,
+            )
+            .execute(&self.pool)
+            .await?;
+
             Ok(())
         }
 
@@ -248,6 +278,10 @@ mod inner {
             let mut context_hash = [0u8; 32];
             context_hash.copy_from_slice(&context_hash_bytes[..32.min(context_hash_bytes.len())]);
 
+            // Read tier column if it exists (migration-safe)
+            let tier_str: Option<String> = row.try_get("tier").ok();
+            let tier = tier_str.and_then(|s| s.parse().ok()).unwrap_or_default();
+
             Ok(Episode {
                 id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::new_v4()),
                 agent_id: row.get("agent_id"),
@@ -260,6 +294,7 @@ mod inner {
                     .map(|dt| dt.with_timezone(&chrono::Utc))
                     .unwrap_or_else(|_| chrono::Utc::now()),
                 context_hash,
+                tier,
             })
         }
 
@@ -350,6 +385,9 @@ mod inner {
             let updated_at_str: String = row.get("updated_at");
             let propagated: i32 = row.get("propagated");
 
+            let tier_str: Option<String> = row.try_get("tier").ok();
+            let tier = tier_str.and_then(|s| s.parse().ok()).unwrap_or_default();
+
             Ok(Lesson {
                 id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::new_v4()),
                 agent_id: row.get("agent_id"),
@@ -366,6 +404,9 @@ mod inner {
                     .unwrap_or_else(|_| chrono::Utc::now()),
                 propagated: propagated != 0,
                 signature: row.get("signature"),
+                tier,
+                source: crate::learning::LessonSource::default(),
+                scope: crate::learning::LessonScope::default(),
             })
         }
 
@@ -454,6 +495,80 @@ mod inner {
                 .map(|row| {
                     let json: String = row.get("metrics_json");
                     serde_json::from_str(&json).map_err(StoreError::from)
+                })
+                .collect()
+        }
+
+        /// Store a decision trace
+        pub async fn store_decision_trace(&self, trace: &DecisionTrace) -> Result<()> {
+            let feasible_json = serde_json::to_string(&trace.feasible_models)?;
+            let scores_json = serde_json::to_string(&trace.thompson_scores)?;
+            let reason_json = serde_json::to_string(&trace.selection_reason)?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO decision_traces (id, task_category, feasible_models, thompson_scores,
+                    selected_model, selection_reason, budget_usage, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(trace.trace_id.to_string())
+            .bind(trace.task_category.as_str())
+            .bind(&feasible_json)
+            .bind(&scores_json)
+            .bind(&trace.selected_model)
+            .bind(&reason_json)
+            .bind(trace.budget_usage_pct)
+            .bind(trace.timestamp.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+
+            Ok(())
+        }
+
+        /// Get recent decision traces for a model
+        #[allow(clippy::cast_possible_wrap)]
+        pub async fn get_traces_by_model(
+            &self,
+            model: &str,
+            limit: usize,
+        ) -> Result<Vec<DecisionTrace>> {
+            let rows = sqlx::query(
+                r#"
+                SELECT * FROM decision_traces
+                WHERE selected_model = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(model)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?;
+
+            rows.iter()
+                .map(|row| {
+                    let id_str: String = row.get("id");
+                    let task_cat: String = row.get("task_category");
+                    let feasible_json: String = row.get("feasible_models");
+                    let scores_json: String = row.get("thompson_scores");
+                    let reason_json: String = row.get("selection_reason");
+                    let timestamp_str: String = row.get("timestamp");
+
+                    Ok(DecisionTrace {
+                        trace_id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::new_v4()),
+                        timestamp: chrono::DateTime::parse_from_rfc3339(&timestamp_str)
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .unwrap_or_else(|_| chrono::Utc::now()),
+                        task_category: crate::classifier::TaskCategory::from_string(&task_cat),
+                        classification_confidence: 0.0,
+                        feasible_models: serde_json::from_str(&feasible_json)?,
+                        thompson_scores: serde_json::from_str(&scores_json)?,
+                        selected_model: row.get("selected_model"),
+                        selection_reason: serde_json::from_str(&reason_json)?,
+                        budget_usage_pct: row.get("budget_usage"),
+                        excluded_models: vec![],
+                    })
                 })
                 .collect()
         }
