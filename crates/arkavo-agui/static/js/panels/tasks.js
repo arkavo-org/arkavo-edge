@@ -25,6 +25,7 @@ function handleTaskSubmitted(event) {
     var task = {
         id: event.taskId || event.task_id,
         description: event.description || _pendingTaskDescription || 'Task',
+        summary: event.summary || null,
         status: event.status || 'submitted',
         source: event.source || 'ui',
         created_at: event.timestamp,
@@ -158,7 +159,7 @@ function renderTasks() {
             sourceBadge + '<span class="task-id">#' + taskId + '</span>' +
             '<span class="task-status ' + statusClass + '">' + status + '</span>' +
             '</div>' +
-            '<div class="task-description">' + (escapeHtml(task.description) || 'Task') + '</div>' +
+            '<div class="task-description">' + escapeHtml(task.summary || task.description || 'Task') + '</div>' +
             '<div class="task-meta">' +
             escapeHtml(agentDisplay) +
             ((task.created_at || task.createdAt) ? ' | ' + escapeHtml(formatTime(task.created_at || task.createdAt)) : '') +

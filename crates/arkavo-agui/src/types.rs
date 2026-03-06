@@ -437,6 +437,8 @@ pub enum AgUiEvent {
         task_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
         status: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
@@ -492,6 +494,8 @@ pub struct MeshAgentInfo {
 pub struct TaskInfo {
     pub id: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub status: String,
     #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
     pub target_agent: Option<String>,

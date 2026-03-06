@@ -113,6 +113,7 @@ pub async fn handle_submit_task(
         task_category: Some(category_str),
         first_working_at: None,
         source: "ui".to_string(),
+        summary: None,
     };
     task_store.write().await.insert(task_id.clone(), tracked);
 
@@ -120,6 +121,7 @@ pub async fn handle_submit_task(
     tx.send(AgUiEvent::TaskSubmitted {
         task_id: task_id.clone(),
         description: Some(description.clone()),
+        summary: None,
         status: "submitted".to_string(),
         source: Some("ui".to_string()),
         timestamp: now.clone(),

@@ -281,6 +281,7 @@ pub async fn handle_request_task_list(
         .map(|t| TaskInfo {
             id: t.id.clone(),
             description: t.description.clone(),
+            summary: t.summary.clone(),
             status: t.status.clone(),
             target_agent: t.target_agent.clone(),
             created_at: t.created_at.clone(),

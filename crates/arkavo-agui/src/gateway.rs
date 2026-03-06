@@ -40,6 +40,8 @@ pub struct TrackedTask {
     pub first_working_at: Option<String>,
     /// "ui" for user-submitted, "agent" for autonomous agent tasks
     pub source: String,
+    /// LLM-generated short summary for task list display
+    pub summary: Option<String>,
 }
 
 #[derive(Clone)]

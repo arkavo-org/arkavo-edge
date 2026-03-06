@@ -18,12 +18,30 @@ pub fn spawn_agent_task_sync(
         // Wait for agents to register before first poll
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
+        // Create router for task summarization (best-effort)
+        let router = match arkavo_router::Router::new().await {
+            Ok(r) => {
+                println!("AG-UI: task summarizer ready");
+                Some(Arc::new(r))
+            }
+            Err(e) => {
+                eprintln!("AG-UI: task summarizer unavailable: {e}");
+                None
+            }
+        };
+
         // Track known agent tasks: composite key → (status, progress)
         let mut known: HashMap<String, (String, f64)> = HashMap::new();
 
         loop {
-            if let Err(e) =
-                poll_agent_tasks(&connections, &agent_connections, &task_store, &mut known).await
+            if let Err(e) = poll_agent_tasks(
+                &connections,
+                &agent_connections,
+                &task_store,
+                router.as_ref(),
+                &mut known,
+            )
+            .await
             {
                 eprintln!("AG-UI: task sync error: {e}");
             }
@@ -32,10 +50,34 @@ pub fn spawn_agent_task_sync(
     });
 }
 
+async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Option<String> {
+    if objective.len() < 80 {
+        return None;
+    }
+    let truncated = &objective[..objective.len().min(2000)];
+    let prompt = format!(
+        "Summarize this agent task in one short sentence (max 15 words). \
+         Only output the summary, nothing else.\n\n{truncated}"
+    );
+    let messages = vec![arkavo_llm::Message::user(prompt)];
+    match router.route_chat(messages).await {
+        Ok(resp) if !resp.content.is_empty() => {
+            let summary = resp.content.trim().to_string();
+            if summary.is_empty() {
+                None
+            } else {
+                Some(summary)
+            }
+        }
+        _ => None,
+    }
+}
+
 async fn poll_agent_tasks(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    router: Option<&Arc<arkavo_router::Router>>,
     known: &mut HashMap<String, (String, f64)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let agents: Vec<(String, Arc<AgentConnection>)> = {
@@ -88,6 +130,12 @@ async fn poll_agent_tasks(
                     // New task — insert and emit TaskSubmitted
                     known.insert(composite_key.clone(), (status.to_string(), progress));
 
+                    let summary = if let Some(r) = router {
+                        summarize_task(r, objective).await
+                    } else {
+                        None
+                    };
+
                     let tracked = super::gateway::TrackedTask {
                         id: composite_key.clone(),
                         description: objective.to_string(),
@@ -100,6 +148,7 @@ async fn poll_agent_tasks(
                         task_category: None,
                         first_working_at: None,
                         source: "agent".to_string(),
+                        summary: summary.clone(),
                     };
                     task_store
                         .write()
@@ -109,11 +158,34 @@ async fn poll_agent_tasks(
                     let submitted = AgUiEvent::TaskSubmitted {
                         task_id: composite_key.clone(),
                         description: Some(objective.to_string()),
+                        summary,
                         status: ui_status.clone(),
                         source: Some("agent".to_string()),
                         timestamp: created_at.to_string(),
                     };
                     broadcast_event(&submitted, connections).await;
+
+                    // If the task already has quality data or non-zero progress,
+                    // emit TaskStatusChanged so the UI gets metrics on first sync.
+                    if quality_score.is_some() || progress > 0.0 {
+                        let metrics = quality_score.map(|q| crate::types::TaskMetrics {
+                            tokens_generated: 0,
+                            tokens_per_sec: 0.0,
+                            ttft_ms: 0,
+                            inference_duration_ms: 0,
+                            energy_wh: 0.0,
+                            quality_score: Some(q),
+                        });
+                        let changed = AgUiEvent::TaskStatusChanged {
+                            task_id: composite_key.clone(),
+                            status: ui_status.clone(),
+                            progress: Some(progress as f32),
+                            result: None,
+                            metrics,
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        };
+                        broadcast_event(&changed, connections).await;
+                    }
 
                     emit_telemetry(
                         "agent-task-created",
