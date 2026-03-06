@@ -1,18 +1,23 @@
 use crate::agent_connection::AgentConnection;
 use crate::gateway_routing::broadcast_event;
 use crate::types::AgUiEvent;
-use std::collections::HashMap;
+use arkavo_router::learning::{LearningModule, Lesson};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 /// Poll connected agents for their internal HRM tasks and sync into the UI dashboard.
 ///
 /// Emits TaskSubmitted/TaskStatusChanged/TelemetryEvent so browser sessions
-/// see agent-internal work in real-time.
+/// see agent-internal work in real-time. Runs the response judge on terminal
+/// tasks to feed quality scores into Thompson Sampling.
 pub fn spawn_agent_task_sync(
     connections: Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     task_store: Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    learning_module: Arc<RwLock<LearningModule>>,
+    routing_history: Arc<RwLock<VecDeque<crate::types::RoutingRecord>>>,
+    lesson_tx: Option<mpsc::Sender<Lesson>>,
 ) {
     tokio::spawn(async move {
         // Wait for agents to register before first poll
@@ -38,6 +43,9 @@ pub fn spawn_agent_task_sync(
                 &connections,
                 &agent_connections,
                 &task_store,
+                &learning_module,
+                &routing_history,
+                &lesson_tx,
                 router.as_ref(),
                 &mut known,
             )
@@ -73,10 +81,108 @@ async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Opti
     }
 }
 
+/// Run the response judge on a terminal agent task and feed quality back
+/// into Thompson Sampling + lesson extraction.
+#[allow(clippy::too_many_arguments)]
+async fn judge_agent_task(
+    agent_id: &str,
+    task_id: &str,
+    objective: &str,
+    is_success: bool,
+    connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
+    learning_module: &Arc<RwLock<LearningModule>>,
+    routing_history: &Arc<RwLock<VecDeque<crate::types::RoutingRecord>>>,
+    lesson_tx: &Option<mpsc::Sender<Lesson>>,
+) {
+    let judgment = if is_success {
+        let j = crate::response_judge::judge(objective, objective);
+        if !j.issues.is_empty() {
+            println!(
+                "AG-UI: Agent task {} quality={:.2}, issues: {:?}",
+                crate::gateway_events::short_id(task_id),
+                j.quality_score,
+                j.issues
+            );
+        }
+        j
+    } else {
+        crate::response_judge::TaskJudgment {
+            quality_score: 0.0,
+            issues: vec!["Task failed".into()],
+            failure_modes: vec![],
+        }
+    };
+
+    let quality_score = judgment.quality_score;
+    let quality_issues = judgment.issues.clone();
+
+    // Feed into Thompson Sampling
+    let task_cat = "general".to_string();
+    let feedback = if is_success {
+        arkavo_router::learning::BurstFeedback::success(uuid::Uuid::new_v4(), task_cat.clone(), 0)
+            .with_quality(quality_score)
+    } else {
+        arkavo_router::learning::BurstFeedback::failure(uuid::Uuid::new_v4(), task_cat.clone(), 0)
+            .with_quality(0.0)
+    };
+    learning_module
+        .write()
+        .await
+        .immediate_update(agent_id, &feedback)
+        .await;
+
+    // Extract lesson from low-quality judgments
+    let ctx = crate::lesson_extractor::LessonContext {
+        agent_id: agent_id.to_string(),
+        task_category: task_cat.clone(),
+    };
+    if let Some(lesson) = crate::lesson_extractor::extract_lesson(&judgment, &ctx) {
+        println!(
+            "AG-UI: Lesson extracted for {} on {}: {}",
+            agent_id, task_cat, lesson.pattern.condition
+        );
+        if let Some(tx) = lesson_tx {
+            let _ = tx.try_send(lesson);
+        }
+    }
+
+    // Emit RoutingOutcome so the UI shows quality feedback
+    let outcome_event = AgUiEvent::RoutingOutcome {
+        task_id: task_id.to_string(),
+        agent_id: agent_id.to_string(),
+        success: is_success,
+        quality_score,
+        quality_issues: quality_issues.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    broadcast_event(&outcome_event, connections).await;
+
+    // Update routing history with quality data
+    let outcome_str = if is_success && quality_score > 0.5 {
+        "success"
+    } else if is_success {
+        "degraded"
+    } else {
+        "failed"
+    };
+    let mut history = routing_history.write().await;
+    for record in history.iter_mut() {
+        if record.task_id == task_id {
+            record.outcome = Some(outcome_str.to_string());
+            record.quality_score = Some(quality_score);
+            record.quality_issues = quality_issues.clone();
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn poll_agent_tasks(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    learning_module: &Arc<RwLock<LearningModule>>,
+    routing_history: &Arc<RwLock<VecDeque<crate::types::RoutingRecord>>>,
+    lesson_tx: &Option<mpsc::Sender<Lesson>>,
     router: Option<&Arc<arkavo_router::Router>>,
     known: &mut HashMap<String, (String, f64)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -187,6 +293,21 @@ async fn poll_agent_tasks(
                         broadcast_event(&changed, connections).await;
                     }
 
+                    // Judge tasks that arrive already terminal
+                    if ui_status == "completed" || ui_status == "failed" {
+                        judge_agent_task(
+                            &agent_id,
+                            &composite_key,
+                            objective,
+                            ui_status == "completed",
+                            connections,
+                            learning_module,
+                            routing_history,
+                            lesson_tx,
+                        )
+                        .await;
+                    }
+
                     emit_telemetry(
                         "agent-task-created",
                         &agent_id,
@@ -231,6 +352,21 @@ async fn poll_agent_tasks(
                             timestamp: chrono::Utc::now().to_rfc3339(),
                         };
                         broadcast_event(&changed, connections).await;
+
+                        // Judge when task transitions to terminal status
+                        if status_changed && (ui_status == "completed" || ui_status == "failed") {
+                            judge_agent_task(
+                                &agent_id,
+                                &composite_key,
+                                objective,
+                                ui_status == "completed",
+                                connections,
+                                learning_module,
+                                routing_history,
+                                lesson_tx,
+                            )
+                            .await;
+                        }
 
                         if status_changed {
                             emit_telemetry(

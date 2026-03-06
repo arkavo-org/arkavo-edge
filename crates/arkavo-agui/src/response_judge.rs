@@ -142,18 +142,34 @@ fn is_generic_response(lower: &str) -> bool {
 
 /// Count tool success/failure markers in result text
 ///
-/// The conductor formats tool results as:
-/// - `## Tool: name` (success)
-/// - `## Tool: name (Error)` (failure)
+/// Detects two formats:
+/// - Conductor: `## Tool: name` (success), `## Tool: name (Error)` (failure)
+/// - Agent HRM: `1. tool_name {...} → result` (success), `→ Error:` (failure)
 fn count_tool_results(text: &str) -> (usize, usize) {
-    let errors = text.matches("(Error)").count();
-    let total = text.matches("## Tool:").count();
-    (errors, total.max(errors))
+    // Conductor format
+    let conductor_errors = text.matches("(Error)").count();
+    let conductor_total = text.matches("## Tool:").count();
+
+    // Agent HRM format: numbered action items with → arrow results
+    let arrow_errors = text.matches("→ Error:").count();
+    let arrow_total = text.matches("→ ").count();
+
+    let errors = conductor_errors + arrow_errors;
+    let total = (conductor_total + arrow_total).max(errors);
+    (errors, total)
 }
 
-/// Count hallucinated tool calls (Rust/Python stdlib methods used as tool names)
+/// Count hallucinated tool calls (non-existent tools called)
+///
+/// Counts occurrences of "not found in any MCP server" to detect how many
+/// tool calls targeted non-existent tools. Also checks for common stdlib
+/// method names used as tool names.
 fn count_hallucinated_tools(text: &str) -> usize {
-    let hallucination_patterns = [
+    // Count actual occurrences of MCP-not-found errors
+    let mcp_not_found = text.matches("not found in any MCP server").count();
+
+    // Named hallucination patterns (stdlib methods as tool names)
+    let named_patterns = [
         "Tool 'open' not found",
         "Tool 'unwrap' not found",
         "Tool 'exit' not found",
@@ -168,13 +184,12 @@ fn count_hallucinated_tools(text: &str) -> usize {
         "Tool 'map_err' not found",
         "Tool 'parse_numbers' not found",
         "Tool 'read_file' not found",
-        "not found in any MCP server",
     ];
 
-    hallucination_patterns
-        .iter()
-        .filter(|p| text.contains(*p))
-        .count()
+    let named_count = named_patterns.iter().filter(|p| text.contains(*p)).count();
+
+    // Use whichever count is higher (MCP errors subsume named patterns)
+    mcp_not_found.max(named_count)
 }
 
 /// Detect repetitive patterns indicating an output loop
@@ -339,6 +354,47 @@ mod tests {
         assert_eq!(
             count_tool_results("## Tool: a (Error)\n## Tool: b (Error)"),
             (2, 2)
+        );
+    }
+
+    #[test]
+    fn test_count_tool_results_arrow_format() {
+        // Agent HRM format: numbered actions with → arrow results
+        let text = "1. tool_name {\"Action\":...} → Error: Tool not found\n2. other_tool {} → {\"result\":\"ok\"}";
+        let (errors, total) = count_tool_results(text);
+        assert_eq!(errors, 1, "should detect 1 arrow error");
+        assert_eq!(total, 2, "should detect 2 arrow tool calls");
+    }
+
+    #[test]
+    fn test_count_tool_results_all_arrow_errors() {
+        let text = "1. tool_a {} → Error: not found\n2. tool_b {} → Error: not found";
+        let (errors, total) = count_tool_results(text);
+        assert_eq!(errors, 2);
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn test_hallucination_counts_occurrences() {
+        // Two distinct MCP-not-found errors should count as 2
+        let text = "Tool 'tool_name' not found in any MCP server\nTool 'other' not found in any MCP server";
+        assert_eq!(count_hallucinated_tools(text), 2);
+    }
+
+    #[test]
+    fn test_agent_task_with_tool_errors_scores_low() {
+        let objective = "\n\n## Recent Actions\n1. tool_name {\"Action\":{}} → Error: Tool 'tool_name' not found in any MCP server\n2. tool_name {\"Action\":{}} → Error: Tool 'tool_name' not found in any MCP server";
+        let j = judge(objective, objective);
+        assert!(
+            j.quality_score < 0.5,
+            "Agent task with all tool errors should score low: {}",
+            j.quality_score
+        );
+        assert!(
+            j.failure_modes
+                .iter()
+                .any(|f| matches!(f, FailureMode::ToolError { .. })),
+            "Should detect ToolError failure mode"
         );
     }
 

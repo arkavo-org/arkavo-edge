@@ -386,6 +386,9 @@ impl AgUiGateway {
             state.connections.clone(),
             state.agent_connections.clone(),
             state.task_store.clone(),
+            state.learning_module.clone(),
+            state.routing_history.clone(),
+            state.lesson_tx.clone(),
         );
 
         // Rate-limited API routes
