@@ -52,9 +52,10 @@ async fn find_ministral_model() -> Option<String> {
 
 /// Find Qwen3 model dynamically from HuggingFace cache
 async fn find_qwen3_model() -> Option<String> {
-    if let Ok(path) =
-        model_discovery::find_gguf_model("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf").await
-    {
+    use arkavo_router::decision::ModelChoice;
+    let repo = ModelChoice::LocalQwen3.repo_id().unwrap();
+    let file = ModelChoice::LocalQwen3.gguf_filename().unwrap();
+    if let Ok(path) = model_discovery::find_gguf_model(repo, file).await {
         return Some(path.to_string_lossy().to_string());
     }
     None
@@ -263,7 +264,7 @@ async fn test_format_learning_qwen() {
         Some(path) => path,
         None => {
             eprintln!("Qwen3 0.6B model not found in HuggingFace cache");
-            eprintln!("Download with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
+            eprintln!("Download with: huggingface-cli download unsloth/Qwen3.5-0.8B-GGUF");
             return;
         }
     };
@@ -281,11 +282,11 @@ async fn test_format_learning_qwen() {
     };
 
     let provider =
-        LlamaCppProvider::new_with_config("qwen3-0.6b".to_string(), model_path, None, config)
+        LlamaCppProvider::new_with_config("qwen3.5-0.8b".to_string(), model_path, None, config)
             .expect("Failed to load Qwen3 0.6B model");
 
     let learning = LearningModule::new();
-    let model_id = "qwen3-0.6b";
+    let model_id = "qwen3.5-0.8b";
 
     println!("\n=== Testing Qwen3 0.6B Format Learning ===\n");
 
@@ -390,10 +391,10 @@ async fn test_format_learning_comparison() {
         };
 
         if let Ok(provider) =
-            LlamaCppProvider::new_with_config("qwen3-0.6b".to_string(), model_path, None, config)
+            LlamaCppProvider::new_with_config("qwen3.5-0.8b".to_string(), model_path, None, config)
         {
             for format in ToolCallFormat::all() {
-                let _ = test_format_with_model(&provider, "qwen3-0.6b", *format, &learning).await;
+                let _ = test_format_with_model(&provider, "qwen3.5-0.8b", *format, &learning).await;
             }
         }
     }
@@ -401,7 +402,7 @@ async fn test_format_learning_comparison() {
     // Print comparison
     println!("\n=== Final Format Statistics ===\n");
 
-    for model_id in &["ministral-3b", "qwen3-0.6b"] {
+    for model_id in &["ministral-3b", "qwen3.5-0.8b"] {
         let stats = learning.get_format_stats(model_id).await;
         if !stats.is_empty() {
             println!("{}:", model_id);

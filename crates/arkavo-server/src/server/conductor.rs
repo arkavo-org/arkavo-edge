@@ -417,6 +417,17 @@ pub async fn execute_with_conductor_and_learning(
                         let _ = bus.sender().send(event).await;
                     }
 
+                    // Learn tool error correction for future prompts
+                    if let Some(model_name) = router.last_routed_model() {
+                        let model_family = arkavo_router::Router::detect_model_family(&model_name);
+                        router.advisor().observe_tool_error(
+                            &model_family,
+                            &tool_call.tool_name,
+                            &err_str,
+                            &args,
+                        );
+                    }
+
                     tool_results.push(format!(
                         "## Tool: {} (Error)\n{}",
                         tool_call.tool_name, err_str

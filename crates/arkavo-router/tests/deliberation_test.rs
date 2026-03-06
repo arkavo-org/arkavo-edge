@@ -34,9 +34,10 @@ async fn find_ministral_model() -> Option<String> {
 
 /// Find Qwen3 model dynamically from HuggingFace cache
 async fn find_qwen3_model() -> Option<String> {
-    if let Ok(path) =
-        model_discovery::find_gguf_model("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf").await
-    {
+    use arkavo_router::decision::ModelChoice;
+    let repo = ModelChoice::LocalQwen3.repo_id().unwrap();
+    let file = ModelChoice::LocalQwen3.gguf_filename().unwrap();
+    if let Ok(path) = model_discovery::find_gguf_model(repo, file).await {
         return Some(path.to_string_lossy().to_string());
     }
     None
@@ -176,13 +177,13 @@ async fn test_qwen3_math() {
         Some(path) => path,
         None => {
             eprintln!("Qwen3-0.6B model not found in HuggingFace cache");
-            eprintln!("Download with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
+            eprintln!("Download with: huggingface-cli download unsloth/Qwen3.5-0.8B-GGUF");
             return;
         }
     };
 
     println!("Loading Qwen3-0.6B model from: {}", model_path);
-    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), model_path)
+    let provider = LlamaCppProvider::new("qwen3.5-0.8b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);
@@ -234,7 +235,7 @@ async fn test_qwen3_coding() {
     };
 
     println!("Loading Qwen3-0.6B model from: {}", model_path);
-    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), model_path)
+    let provider = LlamaCppProvider::new("qwen3.5-0.8b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
     let provider: Arc<dyn Provider> = Arc::new(provider);

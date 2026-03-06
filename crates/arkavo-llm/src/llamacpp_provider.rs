@@ -49,6 +49,18 @@ use crate::ModelRegistry;
 /// Type alias for conversation identifiers
 type ConversationId = String;
 
+/// Check if a model name indicates a sub-1B parameter model.
+/// Sub-1B models lack capacity for useful chain-of-thought reasoning.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn is_small_model(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    // Match sub-1B size indicators: "0.6b", "0.8b", "270m", "500m", etc.
+    lower.contains("0.6b")
+        || lower.contains("0.8b")
+        || lower.contains("270m")
+        || lower.contains("500m")
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct LlamaCppProvider {
     /// Model reference - either owned directly or accessed via registry
@@ -293,8 +305,18 @@ impl LlamaCppProvider {
         // Detect model format from model name
         let format = detect_model_format(&self.name);
 
-        let prompt_bytes = apply_chat_template_with_format(&llama_messages, true, format)
+        let mut prompt_bytes = apply_chat_template_with_format(&llama_messages, true, format)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
+
+        // Disable thinking for sub-1B Qwen models by pre-filling an empty think block.
+        // Small models lack capacity for useful chain-of-thought; thinking tokens just
+        // waste compute and degrade output quality. Matches Qwen's upstream recommendation.
+        if format == ModelFormat::Qwen3
+            && is_small_model(&self.name)
+            && prompt_bytes.ends_with(b"assistant\n")
+        {
+            prompt_bytes.extend_from_slice(b"<think>\n\n</think>\n\n");
+        }
 
         if crate::llamacpp_streaming::is_debug()
             && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
@@ -672,5 +694,25 @@ impl Provider for LlamaCppProvider {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    use super::is_small_model;
+
+    #[test]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn test_is_small_model() {
+        assert!(is_small_model("qwen3.5-0.8b"));
+        assert!(is_small_model("Qwen3-0.6B"));
+        assert!(is_small_model("gemma-3-270m-it"));
+        assert!(is_small_model("custom-500m-model"));
+
+        assert!(!is_small_model("qwen3.5-27b"));
+        assert!(!is_small_model("ministral-3b"));
+        assert!(!is_small_model("ministral-8b"));
+        assert!(!is_small_model("glm-4.7-flash"));
     }
 }

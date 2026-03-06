@@ -91,55 +91,27 @@ impl super::Router {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
             ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
-            ModelChoice::LocalQwen3 => {
-                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
-            }
-            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalGemma270M => model_discovery::is_model_cached(
-                "unsloth/gemma-3-270m-it-GGUF",
-                "gemma-3-270m-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalGemma4B => model_discovery::is_model_cached(
-                "unsloth/gemma-3-4b-it-GGUF",
-                "gemma-3-4b-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalGemma12B => model_discovery::is_model_cached(
-                "unsloth/gemma-3-12b-it-GGUF",
-                "gemma-3-12b-it-Q4_0.gguf",
-            ),
-            ModelChoice::LocalDeepSeekCoder => model_discovery::is_model_cached(
-                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
-            ),
-            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
-                "unsloth/Qwen3.5-27B-GGUF",
-                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
-            ),
-            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
-                "unsloth/GLM-4.7-Flash-GGUF",
-                "GLM-4.7-Flash-Q4_K_M.gguf",
-            ),
+            m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
+                (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
+                _ => false,
+            },
+            _ => false,
         }
     }
 
     /// Load a local model into the registry (if not already loaded) and create a provider.
     ///
-    /// Automatically discovers and enables vision support when an mmproj file
-    /// is found alongside the model GGUF in the HuggingFace cache.
+    /// Vision is enabled only for models that declare support via
+    /// [`ModelChoice::supports_vision`] and have an mmproj file alongside
+    /// the model GGUF in the HuggingFace cache.
     #[cfg(feature = "llama-cpp")]
     pub(crate) async fn load_local_model(
         &self,
-        registry_name: &str,
+        model: &ModelChoice,
         repo: &str,
         filename: &str,
     ) -> Result<Box<dyn Provider>> {
+        let registry_name = model.name();
         // Resolve model path unconditionally — hf_hub returns the cached path
         // instantly when the model is already downloaded (local stat, no network).
         let model_path = model_discovery::find_gguf_model(repo, filename)
@@ -175,15 +147,18 @@ impl super::Router {
             ))
         })?;
 
-        // Enable vision if mmproj file is found alongside the model
-        let provider =
+        // Enable vision only for models that declare support (e.g., 27B, not 0.8B)
+        let provider = if model.supports_vision() {
             if let Some(mmproj_path) = model_discovery::find_mmproj_for_model(&model_path) {
                 provider
                     .enable_vision(&mmproj_path.to_string_lossy())
                     .map_err(|e| Error::ModelExecution(format!("Failed to enable vision: {e}")))?
             } else {
                 provider
-            };
+            }
+        } else {
+            provider
+        };
 
         Ok(Box::new(provider))
     }
@@ -215,11 +190,13 @@ impl super::Router {
                 } else {
                     #[cfg(feature = "llama-cpp")]
                     {
-                        let model_path = model_discovery::find_any_gguf()
-                            .await
-                            .ok_or_else(|| Error::ModelExecution(
-                                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
-                            ))?;
+                        let hint = ModelChoice::LocalQwen3.download_hint().unwrap_or_default();
+                        let model_path =
+                            model_discovery::find_any_gguf().await.ok_or_else(|| {
+                                Error::ModelExecution(format!(
+                                    "No local GGUF models found. Download with: {hint}"
+                                ))
+                            })?;
 
                         let model_name = model_path
                             .file_stem()
@@ -258,81 +235,14 @@ impl super::Router {
                 }
             }
             #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalQwen3 => {
-                self.load_local_model("qwen3-0.6b", "Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
-                    .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalMinistral3B => {
-                self.load_local_model(
-                    "ministral-3b",
-                    "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                    "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalMinistral8B => {
-                self.load_local_model(
-                    "ministral-8b",
-                    "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-                    "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalGemma270M => {
-                self.load_local_model(
-                    "gemma-3-270m-it",
-                    "unsloth/gemma-3-270m-it-GGUF",
-                    "gemma-3-270m-it-Q4_0.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalGemma4B => {
-                self.load_local_model(
-                    "gemma-3-4b-it",
-                    "unsloth/gemma-3-4b-it-GGUF",
-                    "gemma-3-4b-it-Q4_0.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalGemma12B => {
-                self.load_local_model(
-                    "gemma-3-12b-it",
-                    "unsloth/gemma-3-12b-it-GGUF",
-                    "gemma-3-12b-it-Q4_0.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalDeepSeekCoder => {
-                self.load_local_model(
-                    "deepseek-coder-v2-lite-instruct",
-                    "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-                    "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalQwen35_27B => {
-                self.load_local_model(
-                    "qwen3.5-27b",
-                    "unsloth/Qwen3.5-27B-GGUF",
-                    "Qwen3.5-27B-UD-Q6_K_XL.gguf",
-                )
-                .await
-            }
-            #[cfg(feature = "llama-cpp")]
-            ModelChoice::LocalGlm47Flash => {
-                self.load_local_model(
-                    "glm-4.7-flash",
-                    "unsloth/GLM-4.7-Flash-GGUF",
-                    "GLM-4.7-Flash-Q4_K_M.gguf",
-                )
-                .await
+            m if m.is_local() => {
+                let repo = m
+                    .repo_id()
+                    .ok_or_else(|| Error::ModelExecution(format!("No repo_id for {m:?}")))?;
+                let file = m
+                    .gguf_filename()
+                    .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {m:?}")))?;
+                self.load_local_model(m, repo, file).await
             }
             #[cfg(feature = "kimi")]
             ModelChoice::KimiK2 => {

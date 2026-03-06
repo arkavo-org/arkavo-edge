@@ -19,7 +19,7 @@ pub enum ModelChoice {
     GeminiPro,
     ClaudeSonnet,
     ClaudeOpus,
-    /// Qwen3-0.6B - fast, TØRG-compatible (preferred default)
+    /// Qwen3.5-0.8B - fast DeltaNet, TØRG-compatible (preferred default)
     LocalQwen3,
     /// Ministral-3B - TØRG-compatible, higher quality
     LocalMinistral3B,
@@ -51,7 +51,7 @@ impl ModelChoice {
             Self::GeminiPro => "gemini-3-pro-preview",
             Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
             Self::ClaudeOpus => "claude-opus-4-5-20251101",
-            Self::LocalQwen3 => "qwen3-0.6b",
+            Self::LocalQwen3 => "qwen3.5-0.8b",
             Self::LocalMinistral3B => "ministral-3b",
             Self::LocalMinistral8B => "ministral-8b",
             Self::LocalQwen35_27B => "qwen3.5-27b",
@@ -83,7 +83,7 @@ impl ModelChoice {
     /// Used as a hint from AGENTS.md `model:` field.
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "qwen3-0.6b" => Some(Self::LocalQwen3),
+            "qwen3.5-0.8b" | "qwen3-0.6b" => Some(Self::LocalQwen3),
             "ministral-3b" => Some(Self::LocalMinistral3B),
             "ministral-8b" => Some(Self::LocalMinistral8B),
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
@@ -174,6 +174,104 @@ impl ModelChoice {
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
             | Self::KimiK2 => PlannerTier::Large,
+        }
+    }
+
+    /// HuggingFace repo ID for local models (None for cloud)
+    pub fn repo_id(&self) -> Option<&'static str> {
+        match self {
+            Self::LocalQwen3 => Some("unsloth/Qwen3.5-0.8B-GGUF"),
+            Self::LocalMinistral3B => Some("mistralai/Ministral-3-3B-Instruct-2512-GGUF"),
+            Self::LocalMinistral8B => Some("mistralai/Ministral-3-8B-Instruct-2512-GGUF"),
+            Self::LocalQwen35_27B => Some("unsloth/Qwen3.5-27B-GGUF"),
+            Self::LocalGlm47Flash => Some("unsloth/GLM-4.7-Flash-GGUF"),
+            Self::LocalGemma270M => Some("unsloth/gemma-3-270m-it-GGUF"),
+            Self::LocalGemma4B => Some("unsloth/gemma-3-4b-it-GGUF"),
+            Self::LocalGemma12B => Some("unsloth/gemma-3-12b-it-GGUF"),
+            Self::LocalDeepSeekCoder => Some("bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF"),
+            _ => None,
+        }
+    }
+
+    /// GGUF filename in the HuggingFace repo (None for cloud)
+    pub fn gguf_filename(&self) -> Option<&'static str> {
+        match self {
+            Self::LocalQwen3 => Some("Qwen3.5-0.8B-Q4_K_M.gguf"),
+            Self::LocalMinistral3B => Some("Ministral-3-3B-Instruct-2512-Q5_K_M.gguf"),
+            Self::LocalMinistral8B => Some("Ministral-3-8B-Instruct-2512-Q5_K_M.gguf"),
+            Self::LocalQwen35_27B => Some("Qwen3.5-27B-UD-Q6_K_XL.gguf"),
+            Self::LocalGlm47Flash => Some("GLM-4.7-Flash-Q4_K_M.gguf"),
+            Self::LocalGemma270M => Some("gemma-3-270m-it-Q4_0.gguf"),
+            Self::LocalGemma4B => Some("gemma-3-4b-it-Q4_0.gguf"),
+            Self::LocalGemma12B => Some("gemma-3-12b-it-Q4_0.gguf"),
+            Self::LocalDeepSeekCoder => Some("DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"),
+            _ => None,
+        }
+    }
+
+    /// Cache directory name derived from repo_id ("org/repo" → "models--org--repo")
+    pub fn cache_dir_name(&self) -> Option<String> {
+        self.repo_id()
+            .map(|r| format!("models--{}", r.replace('/', "--")))
+    }
+
+    /// Download instruction for error messages
+    pub fn download_hint(&self) -> Option<String> {
+        match (self.repo_id(), self.gguf_filename()) {
+            (Some(repo), Some(file)) => Some(format!("huggingface-cli download {repo} {file}")),
+            _ => None,
+        }
+    }
+
+    /// Approximate model size in bytes
+    pub fn size_bytes(&self) -> u64 {
+        match self {
+            Self::LocalQwen3 => 550_000_000,
+            Self::LocalMinistral3B => 2_500_000_000,
+            Self::LocalMinistral8B => 5_500_000_000,
+            Self::LocalQwen35_27B => 23_000_000_000,
+            Self::LocalGlm47Flash => 20_000_000_000,
+            Self::LocalGemma270M => 200_000_000,
+            Self::LocalGemma4B => 2_500_000_000,
+            Self::LocalGemma12B => 7_000_000_000,
+            Self::LocalDeepSeekCoder => 9_000_000_000,
+            _ => 0,
+        }
+    }
+
+    /// Whether this model supports vision (multimodal) via mmproj
+    ///
+    /// Only models with dedicated vision projector support should auto-load
+    /// mmproj files. Small routing models skip vision to avoid overhead.
+    pub fn supports_vision(&self) -> bool {
+        matches!(
+            self,
+            Self::LocalQwen35_27B
+                | Self::LocalGemma4B
+                | Self::LocalGemma12B
+                | Self::LocalMinistral8B
+        )
+    }
+
+    /// Human-readable display name
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::LocalQwen3 => "Qwen3.5 0.8B",
+            Self::LocalMinistral3B => "Ministral 3B",
+            Self::LocalMinistral8B => "Ministral 8B",
+            Self::LocalQwen35_27B => "Qwen3.5 27B",
+            Self::LocalGlm47Flash => "GLM-4.7-Flash",
+            Self::LocalGemma270M => "Gemma 270M",
+            Self::LocalGemma4B => "Gemma 4B",
+            Self::LocalGemma12B => "Gemma 12B",
+            Self::LocalDeepSeekCoder => "DeepSeek Coder",
+            Self::GeminiFlash => "Gemini Flash",
+            Self::GeminiPro => "Gemini Pro",
+            Self::ClaudeSonnet => "Claude Sonnet",
+            Self::ClaudeOpus => "Claude Opus",
+            Self::DeepSeekV32 => "DeepSeek V3.2",
+            Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
+            Self::KimiK2 => "Kimi K2.5",
         }
     }
 }

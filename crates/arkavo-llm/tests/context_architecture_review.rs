@@ -108,7 +108,7 @@ fn test_corrected_model_registry_design() {
 
     println!("Request Flow:");
     println!("-------------");
-    println!("  1. Request arrives for 'qwen3-0.6b'");
+    println!("  1. Request arrives for 'qwen3.5-0.8b'");
     println!("  2. Get (or create) a context from pool");
     println!("  3. Use context for this request's lifetime");
     println!("  4. Return context to pool when done");

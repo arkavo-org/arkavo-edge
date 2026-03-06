@@ -790,9 +790,10 @@ fn execute_ai_task_legacy(
         eprintln!("Error: No models available");
         eprintln!("Please either:");
         eprintln!("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
-        eprintln!(
-            "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf"
-        );
+        let hint = arkavo_router::decision::ModelChoice::LocalQwen3
+            .download_hint()
+            .unwrap_or_default();
+        eprintln!("  - Download a local model with: {hint}");
         return Err("No models available".into());
     }
 
@@ -1046,7 +1047,9 @@ fn detect_available_llms() -> Vec<LlmInfo> {
     llms.push(LlmInfo {
         name: "Local Qwen3".to_string(),
         provider: "Local".to_string(),
-        model: "qwen3-0.6b".to_string(),
+        model: arkavo_router::decision::ModelChoice::LocalQwen3
+            .name()
+            .to_string(),
     });
 
     llms

@@ -117,11 +117,14 @@ pub struct Router {
     tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
     #[cfg(feature = "tdf-encrypt")]
     tdf_audit_store: Option<Arc<arkavo_memory::TdfAuditStore>>,
-    /// Serializes concurrent LLM inference calls.
+    /// Serializes concurrent LLM inference calls for task/orchestrator work.
     /// Local models (llama-cpp) share a single KV cache and cannot handle
     /// concurrent context allocation. This semaphore queues requests so the
     /// second caller waits instead of failing with an OOM/slot error.
     inference_semaphore: Arc<Semaphore>,
+    /// Separate semaphore for chat inference so chat never blocks game ticks.
+    /// Uses the fastest local model (0.8B/3B) which has its own context pool.
+    chat_semaphore: Arc<Semaphore>,
     /// Tracks which model was last selected by route_with_tools().
     /// The conductor reads this after tool execution to attribute
     /// reward-based corrective feedback to the right Thompson Sampling prior.
@@ -159,6 +162,7 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
         })
     }
@@ -193,6 +197,7 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
         })
     }
@@ -242,6 +247,7 @@ impl Router {
                         "OutputLoop" => AdvisorIssue::OutputLoop,
                         "WrongExpert" => AdvisorIssue::WrongExpert,
                         "Timeout" => AdvisorIssue::Timeout,
+                        "ToolError" => AdvisorIssue::ToolError,
                         _ => return None,
                     };
                     Some(prompt_advisor::DynamicSnapshot {
@@ -298,6 +304,30 @@ impl Router {
     /// to attribute reward-based corrective feedback to the right model.
     pub fn last_routed_model(&self) -> Option<String> {
         self.last_routed_model.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Extract model family from a model name (e.g., "glm-4.7-flash" → "glm").
+    ///
+    /// Simple heuristic: take the first segment before any dash-digit pattern.
+    pub fn detect_model_family(model_name: &str) -> String {
+        let lower = model_name.to_lowercase();
+        // Common model family prefixes
+        for family in &[
+            "glm",
+            "qwen",
+            "gemma",
+            "ministral",
+            "mistral",
+            "deepseek",
+            "llama",
+            "phi",
+        ] {
+            if lower.starts_with(family) {
+                return (*family).to_string();
+            }
+        }
+        // Fallback: take first segment before '-'
+        lower.split('-').next().unwrap_or(&lower).to_string()
     }
 
     /// Log the full Thompson Sampling state for all tracked models.
@@ -530,7 +560,7 @@ impl Router {
     /// Route using the fastest available local model, skipping classification.
     ///
     /// Designed for internal ML Brain tasks (episode synthesis, lesson extraction)
-    /// that need speed over quality. Uses qwen3-0.6b or ministral-3b directly.
+    /// that need speed over quality. Uses qwen3.5-0.8b or ministral-3b directly.
     pub async fn route_fast(
         &self,
         task_description: &str,
@@ -564,6 +594,39 @@ impl Router {
         };
 
         Ok(RouteStream::from_response(response))
+    }
+
+    /// Route a chat message using the fastest local model on a separate semaphore.
+    ///
+    /// Chat inference never blocks task/orchestrator work. Uses the smallest
+    /// available model (0.8B/3B) which avoids <think> tag issues from larger
+    /// reasoning models. Strips think blocks from the response.
+    pub async fn route_chat(&self, messages: Vec<Message>) -> Result<arkavo_llm::ProviderResponse> {
+        let model = self.selector.fastest_local_model();
+        tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+
+        let provider = self.instantiate_provider(&model).await?;
+
+        let _permit = self
+            .chat_semaphore
+            .acquire()
+            .await
+            .map_err(|_| Error::ModelExecution("Chat semaphore closed".to_string()))?;
+
+        let content = provider
+            .complete(messages)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("chat: {e}")))?;
+
+        // Strip <think> blocks that small models may still emit
+        let content = crate::response::strip_think_blocks(&content);
+
+        Ok(arkavo_llm::ProviderResponse {
+            content,
+            reasoning_content: None,
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".to_string()),
+        })
     }
 
     /// Get the fastest available local model choice (for callers that need to know)
@@ -604,7 +667,7 @@ impl Router {
             tokio::spawn(async move {
                 let to_save: Vec<arkavo_memory::PersistedAdjustment> = snapshots
                     .iter()
-                    .filter(|s| s.feedback_count >= 3 && s.success_rate > 0.5)
+                    .filter(|s| s.feedback_count >= 3 && s.success_rate >= 0.5)
                     .map(|s| arkavo_memory::PersistedAdjustment {
                         label: s.label.clone(),
                         model_family: s.model_family.clone(),

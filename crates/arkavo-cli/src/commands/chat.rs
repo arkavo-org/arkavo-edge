@@ -68,19 +68,13 @@ pub fn parse_command(input: &str) -> Option<ChatCommand> {
     }
 }
 
-// Global runtime to prevent multiple runtime creation issues
-static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
-
-fn get_or_create_runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
-            .thread_name("arkavo-chat-worker")
-            .thread_stack_size(3 * 1024 * 1024)
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime")
-    })
+fn create_runtime() -> std::io::Result<Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_name("arkavo-chat-worker")
+        .thread_stack_size(3 * 1024 * 1024)
+        .enable_all()
+        .build()
 }
 
 /// Execute the chat command
@@ -160,9 +154,15 @@ fn print_usage() {
 }
 
 /// Execute A2A chat mode using ChatSession from arkavo-protocol
+///
+/// Uses a local runtime (not `'static`) so that all Rust objects — including
+/// the Router's ModelRegistry and its Metal-backed llama.cpp contexts — are
+/// dropped deterministically before C++ static destructors run at process exit.
+/// A `'static` runtime would keep `Arc<Router>` alive past `main()`, causing
+/// `ggml_metal_device_free` to assert on non-empty residual sets.
 #[allow(clippy::disallowed_methods)]
 fn execute_a2a_chat(prompt: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = get_or_create_runtime();
+    let runtime = create_runtime()?;
 
     runtime.block_on(async {
         // Initialize router
@@ -281,7 +281,7 @@ fn execute_a2a_direct_chat(
     println!("Connecting to {} ({})...", agent.name, agent.agent_id);
     println!("  Address: {address}");
 
-    let runtime = get_or_create_runtime();
+    let runtime = create_runtime()?;
     runtime.block_on(async {
         let transport_config = TransportConfig {
             timeout_ms: 60000,

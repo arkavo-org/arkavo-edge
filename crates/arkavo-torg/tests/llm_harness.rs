@@ -43,7 +43,7 @@ fn find_any_gguf_sync() -> Option<PathBuf> {
 
     // Priority order: prefer TØRG-compatible models (Qwen3, Ministral)
     let preferred_repos = [
-        "models--Qwen--Qwen3-0.6B-GGUF",
+        "models--unsloth--Qwen3.5-0.8B-GGUF",
         "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
         "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
     ];

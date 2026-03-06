@@ -265,10 +265,15 @@ impl AgentUtility {
         self.get_prior(category).sample_default()
     }
 
+    /// Minimum selection probability floor.
+    /// Prevents any model from being starved after heavy beta accumulation.
+    const EXPLORATION_FLOOR: f64 = 0.05;
+
     /// Sample blending global and windowed priors for concept drift adaptation
     ///
     /// Uses weighted average: `(1 - window_weight) * global + window_weight * windowed`
     /// The `window_weight` increases as windowed observations accumulate.
+    /// Applies an exploration floor so no model drops below 5% selection probability.
     pub fn sample_blended(&self, category: Option<&str>) -> f64 {
         let global_prior = self.get_prior(category);
 
@@ -276,15 +281,18 @@ impl AgentUtility {
         let window_obs = (self.window_successes + self.window_failures) as f64;
         let window_weight = (window_obs / 20.0).min(0.5); // Max 50% weight at 20+ observations
 
-        if window_weight < 0.01 {
+        let raw_sample = if window_weight < 0.01 {
             // Not enough windowed data, use global only
-            return global_prior.sample_default();
-        }
+            global_prior.sample_default()
+        } else {
+            let global_sample = global_prior.sample_default();
+            let window_sample = self.window_prior.sample_default();
+            global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+        };
 
-        let global_sample = global_prior.sample_default();
-        let window_sample = self.window_prior.sample_default();
-
-        global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+        // Apply exploration floor: blend raw sample with floor to guarantee
+        // minimum selection probability even for heavily penalized models
+        raw_sample.max(Self::EXPLORATION_FLOOR)
     }
 
     /// Total observations for this agent
@@ -612,6 +620,35 @@ mod tests {
         assert!(
             (utility4.prior.alpha - initial_alpha - 1.0).abs() < 0.01,
             "No quality should add full 1.0 to alpha"
+        );
+    }
+
+    #[test]
+    fn test_exploration_floor_prevents_starvation() {
+        let mut utility = AgentUtility::new("starved-model".to_string());
+
+        // Accumulate heavy failures to drive expected value very low
+        for _ in 0..200 {
+            utility.prior.record_failure();
+            utility.window_prior.record_failure();
+            utility.window_failures += 1;
+            utility.total_failures += 1;
+        }
+
+        // Expected value should be very low: 2 / (2 + 201) ≈ 0.01
+        assert!(
+            utility.prior.expected_value() < 0.02,
+            "Expected value should be near zero after 200 failures"
+        );
+
+        // But blended sample should never drop below the exploration floor
+        let samples: Vec<f64> = (0..1000).map(|_| utility.sample_blended(None)).collect();
+        let min_sample = samples.iter().cloned().fold(f64::INFINITY, f64::min);
+
+        assert!(
+            min_sample >= AgentUtility::EXPLORATION_FLOOR,
+            "No sample should be below exploration floor {}, got {min_sample}",
+            AgentUtility::EXPLORATION_FLOOR,
         );
     }
 }

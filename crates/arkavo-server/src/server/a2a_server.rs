@@ -999,17 +999,52 @@ impl A2aServer {
         let router = self.router.read().await.clone();
         let tool_registry = self.tool_registry.read().await.clone();
 
+        // Create shared learning context for chat — updated from LearningBus
+        let learning_context: Arc<tokio::sync::RwLock<String>> =
+            Arc::new(tokio::sync::RwLock::new(String::new()));
+        if let Some(bus) = self.learning_bus().await {
+            let lc = learning_context.clone();
+            tokio::spawn(async move {
+                loop {
+                    let guidance = bus.get_behavior_guidance(None).await;
+                    let trends = bus.get_quality_trends().await;
+                    let lesson_count = bus.behavior_lesson_count().await;
+
+                    let mut ctx = String::new();
+                    if !guidance.is_empty() {
+                        ctx.push_str("Lessons learned:\n");
+                        ctx.push_str(&guidance);
+                        ctx.push('\n');
+                    }
+                    if !trends.is_empty() {
+                        use std::fmt::Write;
+                        let _ = write!(ctx, "Quality trends: {} tracked. ", trends.len());
+                    }
+                    if lesson_count > 0 {
+                        use std::fmt::Write;
+                        let _ = write!(ctx, "Total lessons: {lesson_count}. ");
+                    }
+                    // Cap at 512 tokens (~2048 chars)
+                    ctx.truncate(2048);
+                    *lc.write().await = ctx;
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                }
+            });
+        }
+
         let chat_sessions = if let Some(router_instance) = router.clone() {
             info!(
                 "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
             );
-            Arc::new(chat_session::ChatSessionManager::with_config(
+            let mut mgr = chat_session::ChatSessionManager::with_config(
                 None,
                 Some(router_instance),
                 tool_registry.clone(),
                 3600,
                 self.buffer_config.clone(),
-            ))
+            );
+            mgr.set_learning_context(learning_context.clone());
+            Arc::new(mgr)
         } else if llm_adapter.is_some() {
             info!("✓ ChatSessionManager will be created WITH LLM adapter");
             Arc::new(chat_session::ChatSessionManager::with_config(

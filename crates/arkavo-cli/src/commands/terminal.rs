@@ -379,27 +379,31 @@ async fn initialize_llm_client(
     {
         use hf_hub::api::tokio::Api;
 
-        // Select model based on parameter
-        let (model_repo, model_file, display_name) = match model_name {
-            "gemma-2-2b" | "gemma-2b" => (
+        // Select model based on parameter — resolve via ModelChoice for single source of truth
+        use arkavo_router::decision::ModelChoice;
+        let model_choice = match model_name {
+            "gemma-2-2b" | "gemma-2b" => None, // legacy, no ModelChoice variant
+            _ => ModelChoice::from_name(model_name),
+        };
+
+        let (model_repo, model_file, display_name) = if let Some(mc) = &model_choice
+            && let Some(repo) = mc.repo_id()
+            && let Some(file) = mc.gguf_filename()
+        {
+            (repo, file, mc.name())
+        } else if model_name == "gemma-2-2b" || model_name == "gemma-2b" {
+            (
                 "bartowski/gemma-2-2b-it-GGUF",
                 "gemma-2-2b-it-Q4_K_M.gguf",
                 "gemma-2-2b-it",
-            ),
-            "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
-                ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
-            }
-            "ministral-3b" | "ministral3b" | "ministral" => (
-                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
-                "ministral-3-3b",
-            ),
-            _ => (
-                // Default to Qwen3-0.6B (TØRG-compatible)
-                "Qwen/Qwen3-0.6B-GGUF",
-                "Qwen3-0.6B-Q8_0.gguf",
-                "qwen3-0.6b",
-            ),
+            )
+        } else {
+            // Default to smallest TØRG-compatible model
+            (
+                ModelChoice::LocalQwen3.repo_id().unwrap(),
+                ModelChoice::LocalQwen3.gguf_filename().unwrap(),
+                ModelChoice::LocalQwen3.name(),
+            )
         };
 
         if !print_mode {

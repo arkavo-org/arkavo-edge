@@ -263,7 +263,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             let caps = detect_capabilities();
 
             let model = match name.as_deref() {
-                Some("qwen3-0.6b" | "qwen" | "qwen3") => RecommendedModel::Qwen3_0_6B,
+                Some("qwen3.5-0.8b" | "qwen3-0.6b" | "qwen" | "qwen3") => {
+                    RecommendedModel::Qwen35_0_8B
+                }
                 Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
                 Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
                 Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
@@ -271,7 +273,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     println!("Unknown model: {other}");
                     println!();
                     println!("Available models:");
-                    println!("  qwen3-0.6b    - Qwen3 0.6B (~650 MB) - Best for embedded");
+                    println!("  qwen3.5-0.8b  - Qwen3.5 0.8B (~550 MB) - Best for embedded");
                     println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
                     println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
                     println!(

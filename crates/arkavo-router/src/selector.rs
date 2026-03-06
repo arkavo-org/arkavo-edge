@@ -161,26 +161,8 @@ impl ModelSelector {
 
     /// Check if a local model is cached (static helper)
     fn is_local_model_cached(model: &ModelChoice) -> bool {
-        match model {
-            ModelChoice::LocalQwen3 => {
-                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
-            }
-            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
-                "unsloth/Qwen3.5-27B-GGUF",
-                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
-            ),
-            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
-                "unsloth/GLM-4.7-Flash-GGUF",
-                "GLM-4.7-Flash-Q4_K_M.gguf",
-            ),
+        match (model.repo_id(), model.gguf_filename()) {
+            (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
             _ => false,
         }
     }

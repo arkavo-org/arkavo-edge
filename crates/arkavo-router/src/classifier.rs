@@ -3,6 +3,13 @@ use crate::{Error, Result};
 use arkavo_llm::Message;
 use serde::{Deserialize, Serialize};
 
+/// Match a keyword as a whole word (not as a substring).
+/// "ui" matches " ui " or "ui " at start, but NOT "build" or "blueprint".
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|w| w == word)
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::{Provider, Role};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -243,14 +250,14 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("tailwind")
         || lower.contains("component")
         || lower.contains("frontend")
-        || lower.contains("ui")
+        || contains_word(&lower, "ui")
     {
         TaskCategory::FrontendUI
-    } else if lower.contains("api")
+    } else if contains_word(&lower, "api")
         || lower.contains("endpoint")
         || lower.contains("backend")
         || lower.contains("database")
-        || lower.contains("auth")
+        || contains_word(&lower, "auth")
     {
         TaskCategory::BackendAPI
     } else if lower.contains("search")
@@ -324,9 +331,14 @@ impl TaskClassifier {
         // Use model discovery to find any available model (prefers Qwen3/Ministral)
         let model_path = crate::model_discovery::find_any_gguf()
             .await
-            .ok_or_else(|| Error::Classification(
-                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
-            ))?;
+            .ok_or_else(|| {
+                Error::Classification(format!(
+                    "No local GGUF models found. Download with: {}",
+                    crate::decision::ModelChoice::LocalQwen3
+                        .download_hint()
+                        .unwrap_or_default()
+                ))
+            })?;
 
         let model_name = model_path
             .file_stem()
@@ -403,18 +415,18 @@ impl TaskClassifier {
             || task_lower.contains("tailwind")
             || task_lower.contains("component")
             || task_lower.contains("frontend")
-            || task_lower.contains("ui")
+            || contains_word(&task_lower, "ui")
         {
             (
                 TaskCategory::FrontendUI,
                 0.90,
                 "Keywords match frontend development".to_string(),
             )
-        } else if task_lower.contains("api")
+        } else if contains_word(&task_lower, "api")
             || task_lower.contains("endpoint")
             || task_lower.contains("backend")
             || task_lower.contains("database")
-            || task_lower.contains("auth")
+            || contains_word(&task_lower, "auth")
         {
             (
                 TaskCategory::BackendAPI,
@@ -632,18 +644,18 @@ impl TaskClassifier {
             || task_lower.contains("tailwind")
             || task_lower.contains("component")
             || task_lower.contains("frontend")
-            || task_lower.contains("ui")
+            || contains_word(&task_lower, "ui")
         {
             (
                 TaskCategory::FrontendUI,
                 0.90,
                 "Keywords match frontend development".to_string(),
             )
-        } else if task_lower.contains("api")
+        } else if contains_word(&task_lower, "api")
             || task_lower.contains("endpoint")
             || task_lower.contains("backend")
             || task_lower.contains("database")
-            || task_lower.contains("auth")
+            || contains_word(&task_lower, "auth")
         {
             (
                 TaskCategory::BackendAPI,
@@ -829,6 +841,16 @@ mod tests {
             TaskCategory::Refactoring
         );
         assert_eq!(classify_task_keywords("Hello world"), TaskCategory::General);
+        // "ui" as substring in "build"/"blueprint" must NOT match frontend_ui
+        assert_eq!(
+            classify_task_keywords("Build a bed blueprint"),
+            TaskCategory::General
+        );
+        // "ui" as whole word should match
+        assert_eq!(
+            classify_task_keywords("Create a new UI layout"),
+            TaskCategory::FrontendUI
+        );
     }
 
     #[tokio::test]

@@ -635,6 +635,21 @@ pub async fn process_with_tools(
                 }
             }
 
+            // Learn from tool errors: feed domain-specific failures into the
+            // prompt advisor so future prompts include corrections
+            if !result.success
+                && let Some(ref error_msg) = result.error
+                && let Some(model_name) = router.last_routed_model()
+            {
+                let model_family = Router::detect_model_family(&model_name);
+                router.advisor().observe_tool_error(
+                    &model_family,
+                    &tool_call.tool_name,
+                    error_msg,
+                    &tool_call.arguments,
+                );
+            }
+
             tool_results.push(result.clone());
             all_tool_executions.push(result);
         }

@@ -45,9 +45,14 @@ impl ResponseJudge {
     pub async fn new_local() -> crate::Result<Self> {
         let model_path = crate::model_discovery::find_any_gguf()
             .await
-            .ok_or_else(|| crate::Error::ModelExecution(
-                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
-            ))?;
+            .ok_or_else(|| {
+                crate::Error::ModelExecution(format!(
+                    "No local GGUF models found. Download with: {}",
+                    crate::decision::ModelChoice::LocalQwen3
+                        .download_hint()
+                        .unwrap_or_default()
+                ))
+            })?;
 
         let model_name = model_path
             .file_stem()

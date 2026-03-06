@@ -117,7 +117,7 @@ mod tests {
             name: name.to_string(),
             bin_path: format!("/tmp/ctx/{name}.bin"),
             bin_hash: "abc123".to_string(),
-            model_id: "qwen3-0.6b".to_string(),
+            model_id: "qwen3.5-0.8b".to_string(),
             model_hash: "model_hash_v1".to_string(),
             built_at: "2026-02-22T00:00:00Z".to_string(),
             token_count: 512,

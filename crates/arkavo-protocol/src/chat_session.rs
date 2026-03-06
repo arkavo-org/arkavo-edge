@@ -34,6 +34,9 @@ pub struct ChatSessionManager {
     task_tracker: ObservableTaskTracker,
     _ttl_seconds: u64,
     buffer_config: BufferConfig,
+    /// Shared learning context string, updated by the server from LearningBus.
+    /// Prepended as a system message before each chat inference.
+    learning_context: Option<Arc<RwLock<String>>>,
 }
 
 struct ChatSessionState {
@@ -132,7 +135,14 @@ impl ChatSessionManager {
             task_tracker,
             _ttl_seconds: ttl_seconds,
             buffer_config,
+            learning_context: None,
         }
+    }
+
+    /// Set a shared learning context that will be prepended to chat messages.
+    /// The server updates this string from LearningBus (lessons, quality trends).
+    pub fn set_learning_context(&mut self, context: Arc<RwLock<String>>) {
+        self.learning_context = Some(context);
     }
 
     /// Create a new chat session with optional authentication
@@ -214,6 +224,7 @@ impl ChatSessionManager {
             let sessions = self.sessions.clone();
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
+            let learning_context = self.learning_context.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -226,6 +237,7 @@ impl ChatSessionManager {
                         sessions,
                         session_metrics,
                         metrics_collector,
+                        learning_context,
                     )
                     .await;
                 });
@@ -756,7 +768,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -767,6 +779,7 @@ impl ChatSessionManager {
         sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
+        learning_context: Option<Arc<RwLock<String>>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -795,55 +808,58 @@ impl ChatSessionManager {
 
                     let mut final_response;
 
-                    // Classify first to get routing decision for telemetry
-                    let inference_start = std::time::Instant::now();
-                    let decision = router.classify(&user_message.content).await;
+                    // Chat path: fastest local model on separate semaphore
+                    // Sliding window prevents unbounded context growth
+                    const CHAT_WINDOW_SIZE: usize = 8;
+                    let mut windowed_context: Vec<Message> = if conversation_context.len() > CHAT_WINDOW_SIZE {
+                        conversation_context[conversation_context.len() - CHAT_WINDOW_SIZE..].to_vec()
+                    } else {
+                        conversation_context.clone()
+                    };
 
-                    let route_result = match decision {
-                        Ok(decision) => {
-                            // Emit model_selected metadata delta
-                            let metadata_delta = MessageDelta {
-                                session_id: session_id.clone(),
-                                message_id: message_id.clone(),
-                                sequence: 0,
-                                delta: MessageDeltaContent::Metadata {
-                                    key: "model_selected".to_string(),
-                                    value: serde_json::json!({
-                                        "model": decision.recommended_model.name(),
-                                        "category": decision.task_category.as_str(),
-                                        "reasoning": decision.reasoning,
-                                        "estimated_cost_usd": decision.estimated_cost_usd,
-                                    }),
-                                },
-                                timestamp: chrono::Utc::now(),
-                            };
-                            let _ = delta_tx.send(metadata_delta);
-
-                            // Route with pre-computed decision (max 3 retries with model escalation)
-                            // Timeout prevents hanging when LLM inference stalls
-                            let inner = tokio::time::timeout(
-                                std::time::Duration::from_secs(120),
-                                router.route_with_quality_gate_from(
-                                    decision,
-                                    &user_message.content,
-                                    conversation_context.clone(),
-                                    tool_registry.as_deref(),
-                                    3, // max_retries
-                                ),
-                            )
-                            .await;
-
-                            match inner {
-                                Ok(result) => result,
-                                Err(_elapsed) => {
-                                    error!(session.id = %session_id, "LLM inference timed out after 120s");
-                                    Err(arkavo_router::Error::ModelExecution(
-                                        "LLM inference timed out after 120s".to_string(),
-                                    ))
-                                }
-                            }
+                    // Prepend learning context as system message (lessons, quality trends)
+                    if let Some(ref lc) = learning_context {
+                        let ctx = lc.read().await;
+                        if !ctx.is_empty() {
+                            windowed_context.insert(0, Message {
+                                role: Role::System,
+                                content: ctx.clone(),
+                                images: None,
+                            });
                         }
-                        Err(e) => Err(e),
+                    }
+
+                    let model = router.fastest_local_model();
+                    let metadata_delta = MessageDelta {
+                        session_id: session_id.clone(),
+                        message_id: message_id.clone(),
+                        sequence: 0,
+                        delta: MessageDeltaContent::Metadata {
+                            key: "model_selected".to_string(),
+                            value: serde_json::json!({
+                                "model": model.name(),
+                                "category": "chat",
+                                "reasoning": "Chat path: fastest local model, separate semaphore",
+                            }),
+                        },
+                        timestamp: chrono::Utc::now(),
+                    };
+                    let _ = delta_tx.send(metadata_delta);
+
+                    let inference_start = std::time::Instant::now();
+                    let route_result = match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        router.route_chat(windowed_context),
+                    )
+                    .await
+                    {
+                        Ok(inner) => inner,
+                        Err(_elapsed) => {
+                            error!(session.id = %session_id, "Chat inference timed out after 30s");
+                            Err(arkavo_router::Error::ModelExecution(
+                                "Chat inference timed out after 30s".to_string(),
+                            ))
+                        }
                     };
 
                     match route_result {

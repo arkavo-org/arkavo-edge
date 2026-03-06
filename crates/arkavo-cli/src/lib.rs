@@ -270,7 +270,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     }
 
     // Small model for classification, large model based on system
-    let small_model = RecommendedModel::Qwen3_0_6B;
+    let small_model = RecommendedModel::Qwen35_0_8B;
     let large_model = caps.recommended_model;
 
     let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;

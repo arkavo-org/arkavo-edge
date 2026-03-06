@@ -326,9 +326,12 @@ impl TaskStrategy for LocalTaskStrategy {
             ui.error("No models available");
             ui.error("Please either:");
             ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
-            ui.error(
-                "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF",
-            );
+            ui.error(&format!(
+                "  - Download a local model with: {}",
+                arkavo_router::decision::ModelChoice::LocalQwen3
+                    .download_hint()
+                    .unwrap_or_default()
+            ));
             Error::Model {
                 operation: "select models for task".to_string(),
                 details: "no local or cloud models available".to_string(),

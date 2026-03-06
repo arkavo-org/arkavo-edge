@@ -21,6 +21,8 @@ pub enum FeedbackIssue {
     WrongExpertRouting,
     /// Model output was empty or timed out
     EmptyOrTimeout,
+    /// Tool returned a domain-specific error (wrong entity name, missing param, etc.)
+    ToolError,
     /// Response was correct
     #[default]
     Correct,

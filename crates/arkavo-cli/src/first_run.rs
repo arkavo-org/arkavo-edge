@@ -32,8 +32,8 @@ impl std::fmt::Display for DeviceProfile {
 /// Recommended model based on device capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecommendedModel {
-    /// Qwen3 0.6B - smallest, for RPi5 (~600MB)
-    Qwen3_0_6B,
+    /// Qwen3.5 0.8B - smallest, for RPi5 (~550MB)
+    Qwen35_0_8B,
     /// Ministral 3B - medium, for desktops (~2GB)
     Ministral3B,
     /// Ministral 8B - larger, for desktops (~5GB)
@@ -45,48 +45,38 @@ pub enum RecommendedModel {
 }
 
 impl RecommendedModel {
-    /// HuggingFace repository ID
-    pub fn repo_id(&self) -> &'static str {
+    /// Corresponding ModelChoice for metadata delegation
+    fn model_choice(self) -> arkavo_router::decision::ModelChoice {
+        use arkavo_router::decision::ModelChoice;
         match self {
-            RecommendedModel::Qwen3_0_6B => "Qwen/Qwen3-0.6B-GGUF",
-            RecommendedModel::Ministral3B => "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-            RecommendedModel::Ministral8B => "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-            RecommendedModel::Qwen35_27B => "unsloth/Qwen3.5-27B-GGUF",
-            RecommendedModel::Glm47Flash => "unsloth/GLM-4.7-Flash-GGUF",
+            Self::Qwen35_0_8B => ModelChoice::LocalQwen3,
+            Self::Ministral3B => ModelChoice::LocalMinistral3B,
+            Self::Ministral8B => ModelChoice::LocalMinistral8B,
+            Self::Qwen35_27B => ModelChoice::LocalQwen35_27B,
+            Self::Glm47Flash => ModelChoice::LocalGlm47Flash,
         }
     }
 
-    /// GGUF filename to download
+    /// HuggingFace repository ID — delegates to [`ModelChoice::repo_id`].
+    pub fn repo_id(&self) -> &'static str {
+        // SAFETY: all RecommendedModel variants map to local ModelChoice variants
+        // which always return Some from repo_id().
+        self.model_choice().repo_id().unwrap_or("")
+    }
+
+    /// GGUF filename to download — delegates to [`ModelChoice::gguf_filename`].
     pub fn filename(&self) -> &'static str {
-        match self {
-            RecommendedModel::Qwen3_0_6B => "Qwen3-0.6B-Q8_0.gguf",
-            RecommendedModel::Ministral3B => "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-            RecommendedModel::Ministral8B => "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-            RecommendedModel::Qwen35_27B => "Qwen3.5-27B-UD-Q6_K_XL.gguf",
-            RecommendedModel::Glm47Flash => "GLM-4.7-Flash-Q4_K_M.gguf",
-        }
+        self.model_choice().gguf_filename().unwrap_or("")
     }
 
     /// Approximate size in bytes
     pub fn size_bytes(&self) -> u64 {
-        match self {
-            RecommendedModel::Qwen3_0_6B => 650_000_000,    // ~650MB
-            RecommendedModel::Ministral3B => 2_500_000_000, // ~2.5GB
-            RecommendedModel::Ministral8B => 5_500_000_000, // ~5.5GB
-            RecommendedModel::Qwen35_27B => 23_000_000_000, // ~23GB Q6_K_XL
-            RecommendedModel::Glm47Flash => 20_000_000_000, // ~20GB Q4_K_M
-        }
+        self.model_choice().size_bytes()
     }
 
     /// Human-readable display name
     pub fn display_name(&self) -> &'static str {
-        match self {
-            RecommendedModel::Qwen3_0_6B => "Qwen3 0.6B",
-            RecommendedModel::Ministral3B => "Ministral 3B",
-            RecommendedModel::Ministral8B => "Ministral 8B",
-            RecommendedModel::Qwen35_27B => "Qwen3.5 27B",
-            RecommendedModel::Glm47Flash => "GLM-4.7-Flash",
-        }
+        self.model_choice().display_name()
     }
 }
 
@@ -109,16 +99,20 @@ pub fn is_first_run() -> bool {
     };
 
     // Quick check for preferred model directories
-    let preferred_repos = [
-        "models--Qwen--Qwen3-0.6B-GGUF",
-        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
-        "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
-        "models--unsloth--Qwen3.5-27B-GGUF",
-        "models--unsloth--GLM-4.7-Flash-GGUF",
-    ];
+    use arkavo_router::decision::ModelChoice;
+    let preferred_repos: Vec<String> = [
+        ModelChoice::LocalQwen3,
+        ModelChoice::LocalMinistral3B,
+        ModelChoice::LocalMinistral8B,
+        ModelChoice::LocalQwen35_27B,
+        ModelChoice::LocalGlm47Flash,
+    ]
+    .iter()
+    .filter_map(ModelChoice::cache_dir_name)
+    .collect();
 
     for repo_name in &preferred_repos {
-        let repo_path = cache.join(repo_name);
+        let repo_path = cache.join(repo_name.as_str());
         if repo_path.exists() && has_gguf_file(&repo_path) {
             return false;
         }
@@ -195,7 +189,7 @@ pub fn detect_capabilities() -> SystemCapabilities {
     };
 
     let recommended_model = match device_profile {
-        DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen3_0_6B,
+        DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen35_0_8B,
         DeviceProfile::Desktop => RecommendedModel::Ministral8B,
         DeviceProfile::Workstation => RecommendedModel::Glm47Flash,
         DeviceProfile::HighMemoryWorkstation => RecommendedModel::Qwen35_27B,
@@ -385,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_model_info() {
-        let model = RecommendedModel::Qwen3_0_6B;
+        let model = RecommendedModel::Qwen35_0_8B;
         assert!(!model.repo_id().is_empty());
         assert!(!model.filename().is_empty());
         assert!(model.size_bytes() > 0);
