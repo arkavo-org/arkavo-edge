@@ -34,6 +34,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     INIT.call_once(|| {
         use tracing_subscriber::{EnvFilter, fmt};
         fmt()
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
             .with_env_filter(
                 // Default to error-only for clean CLI output; use RUST_LOG for more
                 EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error")),

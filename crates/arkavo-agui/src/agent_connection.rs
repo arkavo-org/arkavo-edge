@@ -197,11 +197,11 @@ impl AgentConnection {
     }
 
     async fn wait_for_disconnection(&self) {
-        // Monitor connection health with exponential backoff
-        let mut check_interval = Duration::from_secs(5);
-        let max_interval = Duration::from_secs(30);
+        // Monitor connection health — detect dead connections quickly
+        let mut check_interval = Duration::from_secs(2);
+        let max_interval = Duration::from_secs(15);
         let mut consecutive_failures = 0;
-        const MAX_FAILURES: u32 = 3;
+        const MAX_FAILURES: u32 = 2;
 
         loop {
             sleep(check_interval).await;
@@ -215,7 +215,7 @@ impl AgentConnection {
                 {
                     Ok(_) => {
                         consecutive_failures = 0;
-                        check_interval = Duration::from_secs(5); // Reset to fast check
+                        check_interval = Duration::from_secs(2); // Reset to fast check
                         true
                     }
                     Err(e) => {
@@ -286,16 +286,13 @@ impl AgentConnection {
         self.client.read().await.is_some()
     }
 
-    /// Send a JSON-RPC request to the agent
+    /// Send a JSON-RPC request to the agent, retrying once after reconnect on connection errors
     pub async fn send_request(
         &self,
         method: &str,
         params: Value,
         session_id: &str,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let client_guard = self.client.read().await;
-        let client = client_guard.as_ref().ok_or("Not connected")?;
-
         // Emit telemetry for outbound message
         let _ = self
             .telemetry_tx
@@ -308,9 +305,50 @@ impl AgentConnection {
             })
             .await;
 
-        let result = client.request(method, rpc_params![params]).await?;
+        // First attempt
+        let first_err = {
+            let client_guard = self.client.read().await;
+            let client = match client_guard.as_ref() {
+                Some(c) => c,
+                None => return Err("Not connected".into()),
+            };
+            match client.request(method, rpc_params![params.clone()]).await {
+                Ok(result) => {
+                    self.emit_response_telemetry(method, session_id).await;
+                    return Ok(result);
+                }
+                Err(e) => e,
+            }
+        }; // read lock dropped
 
-        // Emit telemetry for inbound response
+        // Only retry on connection-level errors (not application errors like invalid params)
+        if !is_connection_error(&first_err) {
+            return Err(first_err.into());
+        }
+
+        eprintln!(
+            "Agent {} request {method} failed with connection error, reconnecting: {first_err}",
+            self.agent_id
+        );
+
+        // Reconnect and retry once
+        if let Err(e) = self.connect().await {
+            return Err(format!(
+                "Reconnect failed after connection error: {e} (original: {first_err})"
+            )
+            .into());
+        }
+
+        let client_guard = self.client.read().await;
+        let client = client_guard
+            .as_ref()
+            .ok_or("Not connected after reconnect")?;
+        let result = client.request(method, rpc_params![params]).await?;
+        self.emit_response_telemetry(method, session_id).await;
+        Ok(result)
+    }
+
+    async fn emit_response_telemetry(&self, method: &str, session_id: &str) {
         let _ = self
             .telemetry_tx
             .send(TelemetryEvent::MessageRouted {
@@ -321,8 +359,6 @@ impl AgentConnection {
                 timestamp: chrono::Utc::now(),
             })
             .await;
-
-        Ok(result)
     }
 
     /// Subscribe to chat streaming for a given agent with optional authentication
@@ -793,6 +829,15 @@ impl AgentConnection {
 
         Ok(response)
     }
+}
+
+/// Check if a jsonrpsee error indicates the connection is dead (vs an application-level error)
+fn is_connection_error(err: &jsonrpsee::core::ClientError) -> bool {
+    use jsonrpsee::core::ClientError;
+    matches!(
+        err,
+        ClientError::Transport(_) | ClientError::RestartNeeded(_) | ClientError::RequestTimeout
+    )
 }
 
 impl Drop for AgentConnection {
