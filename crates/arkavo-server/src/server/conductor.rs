@@ -514,6 +514,28 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map_err(|e| format!("Failed to record result: {e}"))?;
 
+    // 8. Retrospective credit assignment via FinalTaskReport
+    //
+    // Compute per-step quality from the overall response and feed it into
+    // Thompson Sampling so models get credit proportional to actual outcome
+    // quality (not just binary success/failure).
+    if let Some(model_name) = &decision_model_name {
+        use arkavo_router::learning::{AgentContribution, FinalTaskReport};
+        use arkavo_router::selector_quality::compute_response_quality;
+
+        let response_quality = compute_response_quality(&final_result, 0, "general");
+        let contributions = vec![AgentContribution {
+            agent_id: model_name.clone(),
+            position: 0,
+            immediate_reward: response_quality,
+        }];
+
+        let report =
+            FinalTaskReport::success(hrm_task.id, contributions).with_reward(response_quality);
+
+        router.model_learning().retrospective_update(&report).await;
+    }
+
     update_progress("Finalizing", 95);
 
     info!("Task {} completed via Conductor", hrm_task.id);

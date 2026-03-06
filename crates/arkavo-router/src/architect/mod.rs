@@ -142,6 +142,74 @@ impl ArchitectResult {
             0.0
         }
     }
+
+    /// Compute a PlannerScore from subtask results.
+    ///
+    /// Converts each `SubtaskResult` into a `SubtaskOutcome` with heuristic
+    /// quality scoring and failure attribution, then delegates to `PlannerScore::compute`.
+    pub fn compute_planner_score(
+        &self,
+        task_id: Uuid,
+        planner_model: &str,
+    ) -> crate::learning::PlannerScore {
+        use crate::learning::{PlannerScore, SubtaskOutcome};
+        use crate::selector_quality::compute_response_quality;
+
+        let outcomes: Vec<SubtaskOutcome> = self
+            .subtask_results
+            .iter()
+            .map(|r| {
+                let quality = if r.success {
+                    compute_response_quality(
+                        &r.response,
+                        0, // latency not tracked per-subtask currently
+                        &self.plan.subtasks[r.index].category.as_str(),
+                    )
+                } else {
+                    0.0
+                };
+
+                let outcome = SubtaskOutcome {
+                    subtask_id: r.subtask_id,
+                    worker_model: r.model_used.name().to_string(),
+                    success: r.success,
+                    quality,
+                    was_plan_flaw: None,
+                };
+
+                if let Some(err) = &r.error {
+                    outcome.with_failure_attribution(err)
+                } else {
+                    outcome.with_failure_attribution("")
+                }
+            })
+            .collect();
+
+        PlannerScore::compute(self.plan.id, task_id, planner_model.to_string(), outcomes)
+    }
+
+    /// Compute per-step quality rewards for retrospective credit assignment.
+    ///
+    /// Returns a `Vec<f64>` with one quality score per subtask result,
+    /// suitable for `FinalTaskReport.per_step_rewards`.
+    pub fn per_step_rewards(&self) -> Vec<f64> {
+        use crate::selector_quality::compute_response_quality;
+
+        self.subtask_results
+            .iter()
+            .map(|r| {
+                if r.success {
+                    compute_response_quality(
+                        &r.response,
+                        0,
+                        &self.plan.subtasks[r.index].category.as_str(),
+                    )
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
 }
 
 /// Cost tracking metadata for architect mode spending records
@@ -185,6 +253,7 @@ impl Default for ArchitectCostMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use executor::SubtaskResult;
 
     #[test]
     fn test_architect_plan_savings() {
@@ -204,5 +273,146 @@ mod tests {
         assert_eq!(subtask.index, 0);
         assert_eq!(subtask.assigned_model, ModelChoice::GeminiFlash);
         assert!(subtask.dependencies.is_empty());
+    }
+
+    fn make_plan_with_subtasks(count: usize) -> ArchitectPlan {
+        let mut plan = ArchitectPlan::new("multi-step task".to_string(), ComplexityScore::simple());
+        for i in 0..count {
+            plan.add_subtask(
+                Subtask::new(i, format!("subtask {i}"), TaskCategory::General)
+                    .with_model(ModelChoice::GeminiFlash, 0.01),
+            );
+        }
+        plan
+    }
+
+    fn make_result(
+        plan: ArchitectPlan,
+        successes: &[(usize, &str)],
+        failures: &[(usize, &str)],
+    ) -> ArchitectResult {
+        let mut results = Vec::new();
+        for &(idx, response) in successes {
+            results.push(SubtaskResult {
+                subtask_id: Uuid::new_v4(),
+                index: idx,
+                model_used: ModelChoice::GeminiFlash,
+                response: response.to_string(),
+                reasoning_content: None,
+                tool_calls: vec![],
+                actual_cost_usd: 0.01,
+                success: true,
+                error: None,
+                retry_count: 0,
+            });
+        }
+        for &(idx, error_msg) in failures {
+            results.push(SubtaskResult {
+                subtask_id: Uuid::new_v4(),
+                index: idx,
+                model_used: ModelChoice::GeminiFlash,
+                response: String::new(),
+                reasoning_content: None,
+                tool_calls: vec![],
+                actual_cost_usd: 0.0,
+                success: false,
+                error: Some(error_msg.to_string()),
+                retry_count: 2,
+            });
+        }
+        // Sort by index so plan.subtasks[r.index] works
+        results.sort_by_key(|r| r.index);
+
+        ArchitectResult {
+            plan,
+            subtask_results: results,
+            final_response: "done".to_string(),
+            actual_cost_usd: 0.02,
+            actual_savings_usd: 0.08,
+            was_cost_effective: true,
+        }
+    }
+
+    #[test]
+    fn test_planner_score_all_success() {
+        let plan = make_plan_with_subtasks(2);
+        let result = make_result(
+            plan,
+            &[
+                (
+                    0,
+                    "A full implementation of the UI component with proper styling and tests",
+                ),
+                (
+                    1,
+                    "Complete backend API with validation, error handling, and documentation",
+                ),
+            ],
+            &[],
+        );
+
+        let score = result.compute_planner_score(Uuid::new_v4(), "deepseek-planner");
+        assert_eq!(score.subtask_count, 2);
+        assert!((score.coverage - 1.0).abs() < 0.01);
+        assert!(score.overall_score > 0.8, "score={}", score.overall_score);
+    }
+
+    #[test]
+    fn test_planner_score_with_plan_flaw() {
+        let plan = make_plan_with_subtasks(2);
+        let result = make_result(
+            plan,
+            &[(
+                0,
+                "Implemented the full feature with tests and documentation",
+            )],
+            &[(1, "Error: unknown tool 'nonexistent_tool'")],
+        );
+
+        let score = result.compute_planner_score(Uuid::new_v4(), "deepseek-planner");
+        assert_eq!(score.subtask_count, 2);
+        // Plan flaw should be detected and penalize the score
+        assert!(
+            score.subtask_outcomes[1].was_plan_flaw == Some(true),
+            "unknown tool should be attributed as plan flaw"
+        );
+        assert!(
+            score.overall_score < 0.5,
+            "plan flaw penalty: {}",
+            score.overall_score
+        );
+    }
+
+    #[test]
+    fn test_per_step_rewards_mixed() {
+        let plan = make_plan_with_subtasks(3);
+        let result = make_result(
+            plan,
+            &[
+                (
+                    0,
+                    "Good response with enough content to score well in quality heuristic",
+                ),
+                (
+                    2,
+                    "Another detailed response covering the implementation thoroughly",
+                ),
+            ],
+            &[(1, "timeout after 30s")],
+        );
+
+        let rewards = result.per_step_rewards();
+        assert_eq!(rewards.len(), 3);
+        assert!(rewards[0] > 0.5, "successful subtask should score >0.5");
+        assert_eq!(rewards[1], 0.0, "failed subtask should score 0.0");
+        assert!(rewards[2] > 0.5, "successful subtask should score >0.5");
+    }
+
+    #[test]
+    fn test_per_step_rewards_empty_plan() {
+        let plan = make_plan_with_subtasks(0);
+        let result = ArchitectResult::single_task("done".to_string(), 0.01);
+        assert!(result.per_step_rewards().is_empty());
+        let _ = plan; // suppress unused warning
     }
 }

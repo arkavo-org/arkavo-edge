@@ -316,3 +316,47 @@ fn test_episode_buffer_full_lifecycle() {
     assert_eq!(episodes.len(), 2);
     assert!(buffer.ready_for_lesson_synthesis().is_none());
 }
+
+/// Retrospective update with per-step rewards applies correct credit
+#[tokio::test]
+async fn test_retrospective_per_step_rewards() {
+    use arkavo_router::learning::{AgentContribution, FinalTaskReport, LearningModule};
+
+    let module = LearningModule::default();
+
+    // Two-step task: first step high quality, second step low quality
+    let contributions = vec![
+        AgentContribution {
+            agent_id: "model-a".to_string(),
+            position: 0,
+            immediate_reward: 0.8,
+        },
+        AgentContribution {
+            agent_id: "model-b".to_string(),
+            position: 1,
+            immediate_reward: 0.3,
+        },
+    ];
+    let mut report = FinalTaskReport::success(uuid::Uuid::new_v4(), contributions);
+    report.per_step_rewards = vec![0.9, 0.2]; // model-a did great, model-b did poorly
+
+    module.retrospective_update(&report).await;
+
+    // Sample many times — model-a should have higher average Thompson score
+    // model-a blended: 0.5*0.8 + 0.5*0.9 = 0.85 → weight = +0.7 (alpha boost)
+    // model-b blended: 0.5*0.3 + 0.5*0.2 = 0.25 → weight = -0.5 (beta boost)
+    let n = 100;
+    let mut sum_a = 0.0;
+    let mut sum_b = 0.0;
+    for _ in 0..n {
+        sum_a += module.thompson_sample("model-a", None).await;
+        sum_b += module.thompson_sample("model-b", None).await;
+    }
+    let avg_a = sum_a / n as f64;
+    let avg_b = sum_b / n as f64;
+
+    assert!(
+        avg_a > avg_b,
+        "model-a ({avg_a:.3}) should sample higher than model-b ({avg_b:.3})"
+    );
+}
