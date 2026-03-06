@@ -310,6 +310,16 @@ pub fn compute_response_quality(response: &str, latency_ms: u64, category: &str)
 
     let mut score: f64 = 1.0;
 
+    // Error responses should not score high
+    let lower = response.to_lowercase();
+    if lower.starts_with("error:")
+        || lower.contains("tool execution error")
+        || lower.contains("serialization error")
+        || lower.contains("failed to execute")
+    {
+        score -= 0.6;
+    }
+
     if response.len() < 20 {
         score -= 0.3;
     }
@@ -572,6 +582,27 @@ mod tests {
         assert!(
             quality > 0.9,
             "Adequate response should score high: {quality}"
+        );
+    }
+
+    #[test]
+    fn test_compute_response_quality_error_detection() {
+        let error_resp = "Error: Tool execution error: Serialization error: data did not match any variant of untagged enum";
+        let quality = compute_response_quality(error_resp, 500, "general");
+        assert!(quality < 0.5, "Error response should score low: {quality}");
+
+        let tool_error = "Something happened then tool execution error occurred in the process";
+        let quality2 = compute_response_quality(tool_error, 500, "general");
+        assert!(
+            quality2 < 0.5,
+            "Tool error response should score low: {quality2}"
+        );
+
+        let failed = "failed to execute the requested tool call";
+        let quality3 = compute_response_quality(failed, 500, "general");
+        assert!(
+            quality3 < 0.5,
+            "Failed execution should score low: {quality3}"
         );
     }
 
