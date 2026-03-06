@@ -296,6 +296,7 @@ pub(crate) async fn handle_request_learning_status(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     lesson_store: &Arc<RwLock<Vec<Lesson>>>,
     agents_registry: &Arc<RwLock<Vec<serde_json::Value>>>,
+    task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received RequestLearningStatus");
@@ -387,7 +388,12 @@ pub(crate) async fn handle_request_learning_status(
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_string();
-                        if agent_id.is_empty() || local_ids.contains(&agent_id) {
+                        if agent_id.is_empty()
+                            || local_ids.contains(&agent_id)
+                            || agent_id.contains(".gguf")
+                            || agent_id.contains('/')
+                            || is_model_name(&agent_id)
+                        {
                             continue;
                         }
                         agents.push(parse_remote_agent_info(ra));
@@ -412,6 +418,27 @@ pub(crate) async fn handle_request_learning_status(
         }
     }
     drop(conns);
+
+    // Classify records missing a category using task descriptions from store
+    if !new_records.is_empty() {
+        let tasks = task_store.read().await;
+        // Build a description lookup from task store keyed by agent
+        let agent_descs: Vec<&str> = tasks.values().map(|t| t.description.as_str()).collect();
+        for record in &mut new_records {
+            if record.category.is_none() || record.category.as_deref() == Some("general") {
+                // Try to classify from any task description belonging to this agent's domain
+                for desc in &agent_descs {
+                    let classified = arkavo_router::classify_task_keywords(desc);
+                    let cat = classified.as_str();
+                    if cat != "general" {
+                        record.category = Some(cat.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+        drop(tasks);
+    }
 
     // Merge agent routing records and emit events for new ones
     if !new_records.is_empty() {
@@ -503,6 +530,21 @@ fn parse_remote_routing_record(v: &serde_json::Value) -> RoutingRecord {
             .unwrap_or_default()
             .to_string(),
     }
+}
+
+fn is_model_name(id: &str) -> bool {
+    // Model names end with parameter size like "8b", "27b", "0.8b"
+    if let Some(pos) = id.rfind(|c: char| c.is_ascii_digit())
+        && (pos + 1 == id.len() || (pos + 2 == id.len() && id.ends_with('b')))
+    {
+        let prefix = &id[..pos];
+        if prefix.ends_with('-') || prefix.ends_with('.') {
+            return true;
+        }
+    }
+    // Model names contain known suffixes
+    let suffixes = ["-flash", "-turbo", "-pro", "-ultra", "-nano", "-micro"];
+    suffixes.iter().any(|s| id.ends_with(s))
 }
 
 fn parse_remote_agent_info(v: &serde_json::Value) -> AgentLearningInfo {

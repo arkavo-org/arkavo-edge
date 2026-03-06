@@ -327,6 +327,7 @@ async fn dispatch_event(
                 connections,
                 lesson_store,
                 agents,
+                task_store,
                 tx,
             )
             .await?;

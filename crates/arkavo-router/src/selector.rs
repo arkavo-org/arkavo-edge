@@ -230,8 +230,10 @@ impl ModelSelector {
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
-            // General tasks use larger local model for better tool calling and reasoning
-            TaskCategory::General => self.best_available_local_model(true),
+            // Game/simulation and general tasks use larger local model
+            TaskCategory::GameSimulation | TaskCategory::General => {
+                self.best_available_local_model(true)
+            }
 
             // Other tasks: prefer larger models when GPU available for better tool calling
             _ => self.best_available_local_model(self.gpu_available),

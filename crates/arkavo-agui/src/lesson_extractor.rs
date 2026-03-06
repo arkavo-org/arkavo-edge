@@ -1,6 +1,38 @@
 use crate::response_judge::{FailureMode, TaskJudgment};
 use arkavo_router::learning::{Lesson, LessonPattern};
 
+/// Remove JSON object fragments from text to keep lesson conditions readable
+fn strip_json_fragments(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut depth = 0i32;
+    for ch in s.chars() {
+        if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth = (depth - 1).max(0);
+        } else if depth == 0 {
+            result.push(ch);
+        }
+    }
+    // Collapse multiple spaces left by removed JSON
+    let mut prev_space = false;
+    let collapsed: String = result
+        .chars()
+        .filter(|c| {
+            if *c == ' ' {
+                if prev_space {
+                    return false;
+                }
+                prev_space = true;
+            } else {
+                prev_space = false;
+            }
+            true
+        })
+        .collect();
+    collapsed.trim().to_string()
+}
+
 pub struct LessonContext {
     pub agent_id: String,
     pub task_category: String,
@@ -22,7 +54,10 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
     let task_hint = ctx
         .task_description
         .as_deref()
-        .map(|d| format!(" (task: {})", &d[..d.len().min(80)]))
+        .map(|d| {
+            let cleaned = strip_json_fragments(d);
+            format!(" (task: {})", &cleaned[..cleaned.len().min(80)])
+        })
         .unwrap_or_default();
     let (condition, action, expected) = match primary {
         FailureMode::Empty => (
@@ -118,6 +153,19 @@ mod tests {
             task_description: None,
             response_snippet: None,
         }
+    }
+
+    #[test]
+    fn test_strip_json_fragments() {
+        assert_eq!(strip_json_fragments("hello world"), "hello world");
+        assert_eq!(
+            strip_json_fragments(r#"Plant rice {"Action":{"Height":6,"Plant":"Plant_Rice"}}"#),
+            "Plant rice"
+        );
+        assert_eq!(
+            strip_json_fragments(r#"do {"a":1} and {"b":2} things"#),
+            "do and things"
+        );
     }
 
     #[test]

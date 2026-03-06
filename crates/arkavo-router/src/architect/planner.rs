@@ -235,8 +235,8 @@ Guidelines:
                 }
             }
 
-            // General: Use balanced default
-            TaskCategory::General => {
+            // Game/simulation and general: Use balanced default
+            TaskCategory::GameSimulation | TaskCategory::General => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {

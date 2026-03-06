@@ -211,11 +211,29 @@ async fn judge_agent_task(
         "failed"
     };
     let mut history = routing_history.write().await;
+    let mut found = false;
     for record in history.iter_mut() {
         if record.task_id == task_id {
             record.outcome = Some(outcome_str.to_string());
             record.quality_score = Some(quality_score);
             record.quality_issues = quality_issues.clone();
+            found = true;
+        }
+    }
+    // Agent-sourced tasks bypass gateway dispatch, so create a routing record
+    if !found {
+        history.push_back(crate::types::RoutingRecord {
+            task_id: task_id.to_string(),
+            selected_agent: agent_id.to_string(),
+            was_exploration: false,
+            outcome: Some(outcome_str.to_string()),
+            quality_score: Some(quality_score),
+            quality_issues,
+            category: Some(task_cat),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+        while history.len() > 200 {
+            history.pop_front();
         }
     }
 }
@@ -275,6 +293,10 @@ async fn poll_agent_tasks(
             let composite_key = format!("{}:{}", agent_id, task_id);
             let ui_status = hrm_status_to_ui(status);
             let quality_score = task_val.get("quality_score").and_then(|v| v.as_f64());
+            let result_text = task_val
+                .get("result_text")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             match known.get(&composite_key) {
                 None => {
@@ -340,7 +362,6 @@ async fn poll_agent_tasks(
 
                     // Judge tasks that arrive already terminal
                     if ui_status == "completed" || ui_status == "failed" {
-                        let result_text = fetch_result_text(&conn, task_id).await;
                         judge_agent_task(
                             &agent_id,
                             &composite_key,
@@ -403,7 +424,6 @@ async fn poll_agent_tasks(
 
                         // Judge when task transitions to terminal status
                         if status_changed && (ui_status == "completed" || ui_status == "failed") {
-                            let result_text = fetch_result_text(&conn, task_id).await;
                             judge_agent_task(
                                 &agent_id,
                                 &composite_key,
@@ -449,23 +469,6 @@ async fn poll_agent_tasks(
         }
     }
     Ok(())
-}
-
-/// Fetch the actual result text from an agent task via tasks/get.
-async fn fetch_result_text(conn: &AgentConnection, task_id: &str) -> Option<String> {
-    let req = serde_json::json!({"task_id": task_id});
-    conn.send_request("tasks/get", req, "judge-fetch")
-        .await
-        .ok()
-        .and_then(|r| {
-            r.get("result")
-                .and_then(|r| r.get("parts"))
-                .and_then(|p| p.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|p| p.get("content"))
-                .and_then(|c| c.as_str())
-                .map(|s| s.to_string())
-        })
 }
 
 fn hrm_status_to_ui(hrm_status: &str) -> String {

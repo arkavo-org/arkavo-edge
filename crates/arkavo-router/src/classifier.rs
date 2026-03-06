@@ -32,6 +32,7 @@ pub enum TaskCategory {
     Refactoring,
     CodeGeneration,
     VisionAnalysis,
+    GameSimulation,
     General,
 }
 
@@ -48,6 +49,7 @@ impl TaskCategory {
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
+            "game_simulation" | "game" | "colony" | "simulation" => Self::GameSimulation,
             _ => Self::General,
         }
     }
@@ -64,6 +66,7 @@ impl TaskCategory {
             Self::Refactoring => "refactoring",
             Self::CodeGeneration => "code_generation",
             Self::VisionAnalysis => "vision_analysis",
+            Self::GameSimulation => "game_simulation",
             Self::General => "general",
         }
     }
@@ -109,6 +112,10 @@ impl TaskCategory {
             Self::VisionAnalysis => TokenEstimate {
                 input: 2000,
                 output: 3000,
+            },
+            Self::GameSimulation => TokenEstimate {
+                input: 400,
+                output: 1500,
             },
             Self::General => TokenEstimate {
                 input: 300,
@@ -301,6 +308,20 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("ui from")
     {
         TaskCategory::VisionAnalysis
+    } else if lower.contains("colony")
+        || lower.contains("colonist")
+        || contains_word(&lower, "zone")
+        || lower.contains("defend")
+        || contains_word(&lower, "raid")
+        || lower.contains("harvest")
+        || contains_word(&lower, "craft")
+        || lower.contains("caravan")
+        || lower.contains("rimworld")
+        || lower.contains("pawns")
+        || lower.contains("plant_")
+        || lower.contains("stockpile")
+    {
+        TaskCategory::GameSimulation
     } else {
         TaskCategory::General
     }
@@ -504,6 +525,24 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
+        } else if task_lower.contains("colony")
+            || task_lower.contains("colonist")
+            || contains_word(&task_lower, "zone")
+            || task_lower.contains("defend")
+            || contains_word(&task_lower, "raid")
+            || task_lower.contains("harvest")
+            || contains_word(&task_lower, "craft")
+            || task_lower.contains("caravan")
+            || task_lower.contains("rimworld")
+            || task_lower.contains("pawns")
+            || task_lower.contains("plant_")
+            || task_lower.contains("stockpile")
+        {
+            (
+                TaskCategory::GameSimulation,
+                0.80,
+                "Keywords match game/simulation tasks".to_string(),
+            )
         } else {
             (
                 TaskCategory::General,
@@ -546,6 +585,7 @@ Categories:
 - code_review: Code review, anti-patterns, error handling, code quality
 - documentation: README, API docs, comments, guides
 - refactoring: Code cleanup, optimization, restructuring
+- game_simulation: Colony management, game AI, simulation tasks, crafting, building, defense
 - general: Other coding tasks
 
 Task: {task}
@@ -733,6 +773,24 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
+        } else if task_lower.contains("colony")
+            || task_lower.contains("colonist")
+            || contains_word(&task_lower, "zone")
+            || task_lower.contains("defend")
+            || contains_word(&task_lower, "raid")
+            || task_lower.contains("harvest")
+            || contains_word(&task_lower, "craft")
+            || task_lower.contains("caravan")
+            || task_lower.contains("rimworld")
+            || task_lower.contains("pawns")
+            || task_lower.contains("plant_")
+            || task_lower.contains("stockpile")
+        {
+            (
+                TaskCategory::GameSimulation,
+                0.80,
+                "Keywords match game/simulation tasks".to_string(),
+            )
         } else {
             (
                 TaskCategory::General,
@@ -850,6 +908,23 @@ mod tests {
         assert_eq!(
             classify_task_keywords("Create a new UI layout"),
             TaskCategory::FrontendUI
+        );
+        // Game/simulation tasks
+        assert_eq!(
+            classify_task_keywords("Build a defensive perimeter around the colony"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Plant_Rice in growing zone 1"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Manage colonist work priorities"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Send a caravan to trade"),
+            TaskCategory::GameSimulation
         );
     }
 

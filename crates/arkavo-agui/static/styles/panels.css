@@ -291,6 +291,35 @@
 .empty-state h3 { font-size: 14px; margin-bottom: 8px; }
 .empty-state p { font-size: 12px; }
 
+/* Summary bar */
+.summary-bar { display: flex; gap: 8px; padding: 12px; justify-content: space-around; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); }
+.summary-stat { text-align: center; flex: 1; }
+.summary-stat-value { font-size: 18px; font-weight: 700; font-family: monospace; color: var(--text-primary); }
+.summary-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-top: 2px; }
+.slope-up { color: var(--success); }
+.slope-down { color: var(--error); }
+.slope-flat { color: var(--text-secondary); }
+
+/* Quality chart */
+.quality-chart-section { padding: 8px 12px; }
+.quality-chart-svg { width: 100%; height: 160px; background: var(--bg-tertiary); border-radius: 6px; border: 1px solid var(--border-color); }
+.quality-ref-line { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.4; }
+.chart-axis-label { fill: var(--text-secondary); font-size: 9px; }
+.quality-legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 0; font-size: 11px; }
+.quality-legend-item { display: flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.quality-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.quality-legend-dot.dot-good { background-color: var(--success); }
+.quality-legend-dot.dot-mid { background-color: var(--warning); }
+.quality-legend-dot.dot-bad { background-color: var(--error); }
+.quality-chart-empty { text-align: center; color: var(--text-secondary); font-size: 12px; padding: 16px; }
+.lesson-count { font-size: 9px; padding: 1px 4px; border-radius: 3px; background: rgba(234, 179, 8, 0.15); color: var(--warning); font-family: monospace; font-weight: 600; }
+.ev-good { color: var(--success); }
+.ev-mid { color: var(--warning); }
+.ev-bad { color: var(--error); }
+.lesson-conf { font-size: 10px; }
+.conf-high { color: var(--error); }
+.conf-mid { color: var(--warning); }
+
 /* Learning panel - Cortical Routing Map */
 .learning-layout { display: flex; gap: 12px; padding: 12px; min-height: 420px; }
 .connectome-area { flex: 1; min-width: 0; }

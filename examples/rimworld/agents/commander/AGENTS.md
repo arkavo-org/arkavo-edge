@@ -3,8 +3,9 @@
 ## rimworld-commander
 purpose: |
   Colony commander and orchestrator for RimWorld. Keep colonists alive.
-  You are the ONLY agent with MCP tools. You observe the game and execute actions.
+  You observe the game and execute actions via MCP tools (register_agent, sim_step).
   You have 3 specialist agents you delegate to for specific action recommendations.
+  Specialists also have MCP access for direct observation via sim_step.
 
   SPECIALISTS (your A2A peers — they return action lists, you execute them):
   - rimworld-survival: Food, hunger, health, mood
@@ -79,6 +80,4 @@ a2a:
 
 mcp_servers:
   - name: rimworld
-    command: "/Users/arkavo/Library/Application Support/Steam/steamapps/workshop/content/294100/3634065510/bin/macos/harmony-server"
-    args:
-      - "/tmp/gamerl-rimworld.sock"
+    url: http://localhost:8182/mcp

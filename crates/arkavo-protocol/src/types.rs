@@ -939,6 +939,8 @@ pub struct HrmTaskSummary {
     pub tool_calls: Vec<HrmToolCallSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_text: Option<String>,
 }
 
 /// A tool call within an HRM task

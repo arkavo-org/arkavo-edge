@@ -125,6 +125,8 @@ function renderLearningPanel() {
     }
 
     container.innerHTML =
+        renderSummaryBar() +
+        renderQualityChart() +
         '<div class="learning-layout">' +
             '<div class="connectome-area">' +
                 '<svg id="connectome-svg" class="connectome-svg" viewBox="0 0 ' + CONNECTOME_SIZE + ' ' + CONNECTOME_SIZE + '"></svg>' +
@@ -151,6 +153,16 @@ function renderLearningPanel() {
 function renderConnectome(agentIds) {
     var svg = document.getElementById('connectome-svg');
     if (!svg) return;
+
+    // Filter out model names that may appear as agent IDs
+    // Model names contain patterns like "8b", "27b", "0.8b", "3.5", "flash"
+    agentIds = agentIds.filter(function(id) {
+        if (id.indexOf('.gguf') !== -1 || id.indexOf('/') !== -1) return false;
+        if (/\d+[\.\d]*b$/i.test(id)) return false;
+        if (/^\w+-\d+\.\d+/.test(id)) return false;
+        if (/-(flash|turbo|pro|ultra|nano|micro|mini|base|large|medium|small)$/i.test(id)) return false;
+        return true;
+    });
 
     var ns = 'http://www.w3.org/2000/svg';
     svg.innerHTML = '';
@@ -368,10 +380,14 @@ function renderTimeline() {
             qualityBadge = ' <span class="quality-badge ' + qClass + '">' + (r.qualityScore * 100).toFixed(0) + '%</span>';
         }
 
-        // Category badge
+        // Category badge — infer from agent context when router returns "general"
+        var displayCat = r.category;
+        if ((!displayCat || displayCat === 'general') && inferredDomainCategory()) {
+            displayCat = inferredDomainCategory();
+        }
         var categoryBadge = '';
-        if (r.category) {
-            categoryBadge = ' <span class="category-badge">' + escapeHtml(shortCategory(r.category)) + '</span>';
+        if (displayCat) {
+            categoryBadge = ' <span class="category-badge">' + escapeHtml(shortCategory(displayCat)) + '</span>';
         }
 
         // Quality issues tooltip
@@ -438,9 +454,9 @@ function renderBetaCard(agentId) {
             '<table class="category-table"><thead><tr><th>Category</th><th>E[V]</th><th>Obs</th></tr></thead><tbody>';
         for (var ci = 0; ci < catStats.length; ci++) {
             var cs = catStats[ci];
-            var evColor = cs.expectedValue > 0.7 ? 'var(--success)' : (cs.expectedValue > 0.4 ? 'var(--warning)' : 'var(--error)');
+            var evClass = cs.expectedValue > 0.7 ? 'ev-good' : (cs.expectedValue > 0.4 ? 'ev-mid' : 'ev-bad');
             catHtml += '<tr><td>' + escapeHtml(shortCategory(cs.category)) + '</td>' +
-                '<td style="color:' + evColor + '">' + cs.expectedValue.toFixed(3) + '</td>' +
+                '<td class="' + evClass + '">' + cs.expectedValue.toFixed(3) + '</td>' +
                 '<td>' + cs.observations + '</td></tr>';
         }
         catHtml += '</tbody></table></div>';
@@ -457,7 +473,7 @@ function renderBetaCard(agentId) {
         for (var li = 0; li < agentLessons.length && li < 5; li++) {
             var lesson = agentLessons[li];
             lessonBadge += '<div class="lesson-item">' +
-                '<div class="lesson-condition">' + escapeHtml(lesson.condition) + '</div>' +
+                '<div class="lesson-condition">' + escapeHtml(sanitizeCondition(lesson.condition)) + '</div>' +
                 '<div class="lesson-action">' + escapeHtml(lesson.action) + '</div>' +
                 '<div class="lesson-meta">' + escapeHtml(shortCategory(lesson.category)) +
                     ' | conf: ' + lesson.confidence.toFixed(2) + '</div>' +
@@ -490,50 +506,7 @@ function renderBetaCard(agentId) {
     '</div>';
 }
 
-function renderSparkline(scores) {
-    if (!scores || scores.length < 2) return '<span class="trend-no-data">-</span>';
 
-    var w = 80, h = 20, pad = 2;
-    var min = Math.min.apply(null, scores);
-    var max = Math.max.apply(null, scores);
-    var range = max - min || 1;
-
-    var points = [];
-    for (var i = 0; i < scores.length; i++) {
-        var x = pad + (i / (scores.length - 1)) * (w - 2 * pad);
-        var y = (h - pad) - ((scores[i] - min) / range) * (h - 2 * pad);
-        points.push(x.toFixed(1) + ',' + y.toFixed(1));
-    }
-
-    var last = scores[scores.length - 1];
-    var color = last > 0.7 ? 'var(--success)' : (last > 0.3 ? 'var(--warning)' : 'var(--error)');
-
-    return '<svg class="sparkline-svg" viewBox="0 0 ' + w + ' ' + h + '">' +
-        '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" />' +
-        '</svg>';
-}
-
-function renderQualityTrends(agentId) {
-    var trends = AppState.qualityTrends || [];
-    var agentTrends = [];
-    for (var i = 0; i < trends.length; i++) {
-        if (trends[i].agentId === agentId) {
-            agentTrends.push(trends[i]);
-        }
-    }
-
-    if (agentTrends.length === 0) return '';
-
-    var html = '<div class="quality-trend-section"><div class="category-breakdown-title">Quality Trends</div>';
-    for (var j = 0; j < agentTrends.length; j++) {
-        html += '<div class="trend-row">' +
-            '<span class="trend-label">' + escapeHtml(shortCategory(agentTrends[j].category)) + '</span>' +
-            renderSparkline(agentTrends[j].scores) +
-            '</div>';
-    }
-    html += '</div>';
-    return html;
-}
 
 function selectLearningAgent(agentId) {
     selectedLearningAgent = agentId;
@@ -575,14 +548,23 @@ function lnGamma(x) {
     return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(w) - w + Math.log(t);
 }
 
-function successRateColor(rate) {
-    // Interpolate from error (red) through warning (yellow) to success (green)
-    if (rate < 0.5) {
-        return 'var(--error)';
-    } else if (rate < 0.75) {
-        return 'var(--warning)';
+
+
+function inferredDomainCategory() {
+    // If connected agents belong to a specific domain, infer that for "general" records
+    var agentIds = Object.keys(AppState.agents || {});
+    if (agentIds.length === 0) return null;
+    var gameCount = 0;
+    for (var i = 0; i < agentIds.length; i++) {
+        var id = agentIds[i].toLowerCase();
+        if (id.indexOf('rimworld') !== -1 || id.indexOf('colony') !== -1 || id.indexOf('game') !== -1) {
+            gameCount++;
+        }
     }
-    return 'var(--success)';
+    if (gameCount > 0 && gameCount >= agentIds.length / 2) {
+        return 'game_simulation';
+    }
+    return null;
 }
 
 function shortAgentName(id) {
@@ -606,6 +588,7 @@ function shortCategory(cat) {
         'refactoring': 'refactor',
         'code_generation': 'codegen',
         'vision_analysis': 'vision',
+        'game_simulation': 'game',
         'general': 'general'
     };
     return map[cat] || cat;
@@ -638,6 +621,32 @@ function animateLesson(event) {
     setTimeout(function() { node.classList.remove('lesson-pulse'); }, 2000);
 }
 
+function lessonFailureType(condition) {
+    if (condition.indexOf('empty responses') !== -1) return 'empty';
+    if (condition.indexOf('generic non-answers') !== -1) return 'generic';
+    if (condition.indexOf('overly brief') !== -1) return 'too_short';
+    if (condition.indexOf('tool call failures') !== -1) return 'tool_error';
+    if (condition.indexOf('hallucinated') !== -1) return 'hallucinated';
+    if (condition.indexOf('output loops') !== -1) return 'output_loop';
+    return condition.substring(0, 30);
+}
+
+function sanitizeCondition(text) {
+    if (!text) return '';
+    // Strip "(task: ...)" suffix that may contain JSON noise
+    var taskIdx = text.indexOf(' (task: ');
+    if (taskIdx !== -1) {
+        var taskPart = text.substring(taskIdx + 7);
+        // Remove JSON fragments from task part
+        taskPart = taskPart.replace(/\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
+        taskPart = taskPart.replace(/\)$/, '');
+        if (taskPart.length > 60) taskPart = taskPart.substring(0, 58) + '..';
+        text = text.substring(0, taskIdx) + (taskPart ? ' (' + taskPart + ')' : '');
+    }
+    if (text.length > 120) text = text.substring(0, 118) + '..';
+    return text;
+}
+
 function renderLessonFeed() {
     var feed = document.getElementById('lesson-feed');
     if (!feed) return;
@@ -646,18 +655,39 @@ function renderLessonFeed() {
         feed.innerHTML = '<span class="empty-timeline">No lessons extracted yet</span>';
         return;
     }
-    var html = '';
-    var limit = Math.min(lessons.length, 10);
-    for (var i = 0; i < limit; i++) {
+
+    // Deduplicate by (agentId, failureType) — keep highest confidence, count occurrences
+    var groups = {};
+    for (var i = 0; i < lessons.length; i++) {
         var l = lessons[i];
-        var catBadge = l.category ? '<span class="category-badge">' + escapeHtml(shortCategory(l.category)) + '</span>' : '';
-        var confColor = l.confidence > 0.7 ? 'var(--error)' : 'var(--warning)';
+        var key = l.agentId + '|' + lessonFailureType(l.condition);
+        if (!groups[key] || l.confidence > groups[key].confidence) {
+            groups[key] = { agentId: l.agentId, category: l.category, condition: l.condition, action: l.action, confidence: l.confidence, timestamp: l.timestamp, count: (groups[key] ? groups[key].count : 0) + 1 };
+        } else {
+            groups[key].count++;
+        }
+    }
+
+    // Sort by confidence descending
+    var deduped = [];
+    var keys = Object.keys(groups);
+    for (var j = 0; j < keys.length; j++) deduped.push(groups[keys[j]]);
+    deduped.sort(function(a, b) { return b.confidence - a.confidence; });
+
+    var html = '';
+    var limit = Math.min(deduped.length, 10);
+    for (var k = 0; k < limit; k++) {
+        var d = deduped[k];
+        var catBadge = d.category ? '<span class="category-badge">' + escapeHtml(shortCategory(d.category)) + '</span>' : '';
+        var confClass = d.confidence > 0.7 ? 'conf-high' : 'conf-mid';
+        var countBadge = d.count > 1 ? '<span class="lesson-count">x' + d.count + '</span>' : '';
         html += '<div class="lesson-feed-item">' +
-            '<span class="route-agent">' + escapeHtml(shortAgentName(l.agentId)) + '</span>' +
+            '<span class="route-agent">' + escapeHtml(shortAgentName(d.agentId)) + '</span>' +
+            countBadge +
             catBadge +
-            '<span class="lesson-feed-condition">' + escapeHtml(l.condition) + '</span>' +
-            '<span style="color:' + confColor + ';font-size:10px">' + l.confidence.toFixed(2) + '</span>' +
-            '<span class="route-time">' + formatTime(l.timestamp) + '</span>' +
+            '<span class="lesson-feed-condition">' + escapeHtml(sanitizeCondition(d.condition)) + '</span>' +
+            '<span class="lesson-conf ' + confClass + '">' + d.confidence.toFixed(2) + '</span>' +
+            '<span class="route-time">' + formatTime(d.timestamp) + '</span>' +
             '</div>';
     }
     feed.innerHTML = html;

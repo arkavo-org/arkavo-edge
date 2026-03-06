@@ -1315,19 +1315,20 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                 }
             }
         } else if let Some(url) = &mcp_config.url {
-            // Create external MCP connection
+            // Create external MCP connection (HTTP streamable or subprocess)
             use crate::mcp_integration::McpConnection;
             match McpConnection::new_external(Some(url.clone())) {
                 Ok(connection) => {
+                    let tool_count = connection.list_tools().map(|t| t.len()).unwrap_or(0);
                     let wrapped = McpConnectionWrapper::new(connection);
                     mcp_registry
                         .register(mcp_config.name.clone(), Box::new(wrapped))
                         .await;
 
-                    if debug_mode {
+                    if !quiet || debug_mode {
                         println!(
-                            "[MCP] External server connected: name={} url={}",
-                            mcp_config.name, url
+                            "[MCP] External server connected: name={} url={} tools={}",
+                            mcp_config.name, url, tool_count
                         );
                     }
                 }

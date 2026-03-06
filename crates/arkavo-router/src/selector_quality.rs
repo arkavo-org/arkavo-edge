@@ -48,6 +48,9 @@ impl ModelSelector {
             (TaskCategory::General, ModelChoice::LocalQwen3) => {
                 "General task: Fast local Qwen3 for quick responses"
             }
+            (TaskCategory::GameSimulation, _) => {
+                "Game/simulation task: Local model for domain-specific reasoning"
+            }
             (TaskCategory::General, _) => "General task: Local model for efficiency",
         };
 
@@ -140,7 +143,7 @@ impl ModelSelector {
                     ModelChoice::LocalMinistral3B
                 }
             }
-            TaskCategory::General => ModelChoice::LocalQwen3,
+            TaskCategory::GameSimulation | TaskCategory::General => ModelChoice::LocalQwen3,
             #[allow(unreachable_patterns)]
             _ => {
                 if self.availability.anthropic {
