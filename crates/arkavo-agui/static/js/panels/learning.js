@@ -13,7 +13,7 @@ var learningPollInterval = null;
 function startLearningPolling() {
     stopLearningPolling();
     learningPollInterval = setInterval(function() {
-        if (AppState.activeView === 'learning') {
+        if (AppState.activeView === 'learning' || AppState.activeView === 'router') {
             wsSend({ type: 'requestLearningStatus' });
         } else {
             stopLearningPolling();

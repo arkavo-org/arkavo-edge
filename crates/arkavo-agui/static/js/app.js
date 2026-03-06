@@ -114,13 +114,13 @@ function switchView(viewId) {
         requestBudgetData();
     } else if (viewId === 'security') {
         requestSecurityData();
-    } else if (viewId === 'learning') {
+    } else if (viewId === 'learning' || viewId === 'router') {
         wsSend({ type: 'requestLearningStatus' });
         startLearningPolling();
     }
 
     // Stop learning polling when navigating away
-    if (viewId !== 'learning') {
+    if (viewId !== 'learning' && viewId !== 'router') {
         stopLearningPolling();
     }
 }

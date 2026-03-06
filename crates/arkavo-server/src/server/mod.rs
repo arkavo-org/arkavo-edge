@@ -818,11 +818,32 @@ impl A2aRpcServer for A2aRpcImpl {
             .orchestrator_tick
             .load(std::sync::atomic::Ordering::Relaxed);
 
+        // Include recent routing decisions for the UI dashboard
+        let routing_history: Vec<serde_json::Value> = router
+            .recent_decision_traces(20)
+            .into_iter()
+            .map(|t| {
+                let was_exploration = matches!(
+                    t.selection_reason,
+                    arkavo_router::learning::SelectionReason::Probationary
+                );
+                serde_json::json!({
+                    "taskId": t.trace_id.to_string(),
+                    "selectedAgent": t.selected_model,
+                    "wasExploration": was_exploration,
+                    "category": t.task_category.as_str(),
+                    "qualityScore": null,
+                    "timestamp": t.timestamp.to_rfc3339(),
+                })
+            })
+            .collect();
+
         timer.success();
         Ok(serde_json::json!({
             "agents": agents,
             "selectedModel": router.last_routed_model(),
             "tickCount": tick,
+            "routingHistory": routing_history,
         }))
     }
 

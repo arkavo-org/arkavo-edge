@@ -402,6 +402,14 @@ impl super::Router {
                 *guard = Some(current_decision.trace.clone());
             }
 
+            // Append to recent traces ring buffer for UI dashboard
+            if let Ok(mut guard) = self.recent_traces.write() {
+                guard.push_back(current_decision.trace.clone());
+                while guard.len() > 50 {
+                    guard.pop_front();
+                }
+            }
+
             return Ok(response);
         }
 

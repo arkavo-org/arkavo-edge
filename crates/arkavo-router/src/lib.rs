@@ -131,6 +131,8 @@ pub struct Router {
     last_routed_model: Arc<std::sync::RwLock<Option<String>>>,
     /// Last routing decision trace for downstream attribution
     last_decision_trace: Arc<std::sync::RwLock<Option<learning::DecisionTrace>>>,
+    /// Recent decision traces for UI dashboard (ring buffer, max 50)
+    recent_traces: Arc<std::sync::RwLock<std::collections::VecDeque<learning::DecisionTrace>>>,
 }
 
 impl Router {
@@ -167,6 +169,7 @@ impl Router {
             chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
+            recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
         })
     }
 
@@ -203,6 +206,7 @@ impl Router {
             chat_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
+            recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
         })
     }
 
@@ -314,6 +318,15 @@ impl Router {
     /// Used by the conductor to attribute trace IDs to tool call events.
     pub fn last_decision_trace(&self) -> Option<learning::DecisionTrace> {
         self.last_decision_trace.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Get recent decision traces for the UI dashboard.
+    pub fn recent_decision_traces(&self, limit: usize) -> Vec<learning::DecisionTrace> {
+        self.recent_traces
+            .read()
+            .ok()
+            .map(|g| g.iter().rev().take(limit).cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Extract model family from a model name (e.g., "glm-4.7-flash" → "glm").
