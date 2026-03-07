@@ -113,7 +113,30 @@ pub async fn execute_with_conductor_and_learning(
         update_ui_progress(msg, pct);
     };
 
-    // 2. Add single subtask (1:1 mapping)
+    // 2a. Check if task is complex enough to decompose into multiple subtasks
+    let (is_complex, _) =
+        arkavo_router::classifier::Classification::detect_complexity(&task_content);
+    if is_complex {
+        match super::conductor_planner::execute_with_plan(
+            conductor,
+            router,
+            mcp_registry,
+            &task_content,
+            hrm_task.id,
+            model_hint,
+            learning_bus,
+            tool_memory,
+            system_prompt,
+            mesh_state,
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(e) => warn!("Task decomposition failed, falling back to 1:1: {e}"),
+        }
+    }
+
+    // 2b. Add single subtask (1:1 mapping — simple tasks or decomposition fallback)
     let subtask = conductor
         .add_subtask(hrm_task.id, task_content.clone(), vec![])
         .await

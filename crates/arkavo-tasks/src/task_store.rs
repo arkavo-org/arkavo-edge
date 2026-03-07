@@ -422,6 +422,7 @@ mod tests {
                 name: "Test Agent".to_string(),
                 capabilities: vec!["text-generation".to_string()],
                 endpoint: endpoint.to_string(),
+                entitlements: vec![],
             }),
             result: None,
         }
@@ -790,6 +791,7 @@ mod tests {
                 "web-search".to_string(),
             ],
             endpoint: "http://localhost:8080".to_string(),
+            entitlements: vec![],
         };
 
         let task = Task {

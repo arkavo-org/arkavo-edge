@@ -166,7 +166,7 @@ impl Classification {
     }
 
     /// Detect complexity indicators in a task description
-    fn detect_complexity(task: &str) -> (bool, u8) {
+    pub fn detect_complexity(task: &str) -> (bool, u8) {
         let task_lower = task.to_lowercase();
 
         // Multi-step indicators
@@ -926,6 +926,59 @@ mod tests {
             classify_task_keywords("Send a caravan to trade"),
             TaskCategory::GameSimulation
         );
+    }
+
+    #[test]
+    fn test_detect_complexity_simple_task() {
+        let (is_complex, subtasks) = Classification::detect_complexity("What time is it?");
+        assert!(!is_complex);
+        assert_eq!(subtasks, 1);
+    }
+
+    #[test]
+    fn test_detect_complexity_multi_step_patterns() {
+        let task = "First search for X, and then filter results, finally summarize";
+        let (is_complex, subtasks) = Classification::detect_complexity(task);
+        assert!(is_complex);
+        assert!(subtasks >= 2);
+    }
+
+    #[test]
+    fn test_detect_complexity_keyword() {
+        let (is_complex, _) =
+            Classification::detect_complexity("Comprehensive refactor of the auth module");
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_many_verbs() {
+        let task = "Create the API endpoint. Build the frontend component. \
+                    Write tests for both. Generate documentation for the module.";
+        let (is_complex, subtasks) = Classification::detect_complexity(task);
+        assert!(is_complex);
+        assert!(subtasks >= 2);
+    }
+
+    #[test]
+    fn test_detect_complexity_long_task() {
+        let task = "a ".repeat(200); // 400 chars > 300 threshold
+        let (is_complex, _) = Classification::detect_complexity(&task);
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_step_numbered() {
+        let task = "Step 1: Read the file. Step 2: Parse the data.";
+        let (is_complex, _) = Classification::detect_complexity(task);
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_single_action() {
+        let (is_complex, subtasks) =
+            Classification::detect_complexity("Fix the null pointer bug in parser.rs");
+        assert!(!is_complex);
+        assert_eq!(subtasks, 1);
     }
 
     #[tokio::test]

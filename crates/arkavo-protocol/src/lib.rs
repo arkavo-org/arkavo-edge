@@ -47,7 +47,6 @@ pub mod security;
 pub mod security_fixes;
 pub mod session_persistence;
 pub mod task_executor;
-pub mod task_planner;
 pub mod task_store;
 pub mod transport;
 pub mod types;

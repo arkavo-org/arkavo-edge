@@ -371,7 +371,7 @@ const SMALL_MODEL_SUMMARIZE_THRESHOLD: usize = 1500;
 /// Use the smallest available local model to distill large tool results into
 /// a brief summary of noteworthy items. Returns `None` if no small model is
 /// available, letting the caller fall back to structural summarization.
-async fn distill_with_small_model(
+pub(super) async fn distill_with_small_model(
     router: &Arc<arkavo_router::Router>,
     raw_results: &str,
 ) -> Option<String> {

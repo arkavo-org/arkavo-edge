@@ -38,6 +38,7 @@
 
 pub mod agent_registry;
 pub mod error;
+pub mod intent_analyzer;
 pub mod task_executor;
 pub mod task_planner;
 pub mod task_store;
@@ -46,6 +47,7 @@ pub mod types;
 // Re-export main types
 pub use agent_registry::{AgentInfo, AgentRegistry};
 pub use error::{Result, TaskError};
+pub use intent_analyzer::{Entity, IntentAnalysis, IntentAnalyzer, RuleBasedAnalyzer, SubTaskSpec};
 pub use task_executor::{MetricsCollector, TaskEvent, TaskExecutor, TaskExecutorConfig};
 pub use task_planner::{SubTask, SubTaskStatus, TaskPlan, TaskPlanError, TaskPlanner};
 pub use task_store::{SqliteTaskStore, TaskStore};
