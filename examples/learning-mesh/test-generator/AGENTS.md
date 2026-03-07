@@ -21,7 +21,7 @@ purpose: |
   - Edge cases (empty input, overflow, None values)
   - Both positive and negative test cases
 
-model:   qwen3.5-27b
+model:   glm-4.7-flash
 listen:  0.0.0.0:8414
 
 discovery:

@@ -147,12 +147,22 @@ impl super::Router {
             ))
         })?;
 
-        // Enable vision only for models that declare support (e.g., 27B, not 0.8B)
+        // Enable vision only for models that declare support (e.g., 27B, not 0.8B).
+        // The MtmdContext is cached in the registry so the CLIP model is loaded once,
+        // not on every inference call.
         let provider = if model.supports_vision() {
-            if let Some(mmproj_path) = model_discovery::find_mmproj_for_model(&model_path) {
-                provider
+            if let Some(cached_ctx) = self.model_registry.get_vision_ctx(registry_name) {
+                tracing::debug!(model = registry_name, "Using cached vision context");
+                provider.enable_vision_cached(cached_ctx)
+            } else if let Some(mmproj_path) = model_discovery::find_mmproj_for_model(&model_path) {
+                let p = provider
                     .enable_vision(&mmproj_path.to_string_lossy())
-                    .map_err(|e| Error::ModelExecution(format!("Failed to enable vision: {e}")))?
+                    .map_err(|e| Error::ModelExecution(format!("Failed to enable vision: {e}")))?;
+                // Cache the vision context for future calls
+                if let Some(ctx) = p.vision_ctx() {
+                    self.model_registry.store_vision_ctx(registry_name, ctx);
+                }
+                p
             } else {
                 provider
             }

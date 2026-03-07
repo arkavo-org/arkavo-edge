@@ -284,14 +284,16 @@ impl PolicyCache {
         let mut lines = Vec::new();
 
         if !lessons.is_empty() {
-            lines.push("Learned behavior guidance:".to_string());
+            lines.push("RULES (follow these strictly):".to_string());
             for lesson in &lessons {
-                lines.push(format!(
-                    "- When: {} | Do: {} | Expect: {}",
-                    lesson.pattern.condition,
-                    lesson.pattern.action,
-                    lesson.pattern.expected_outcome
-                ));
+                if lesson.pattern.condition == "human_instruction" {
+                    lines.push(format!("- {}", lesson.pattern.action));
+                } else {
+                    lines.push(format!(
+                        "- When {}, then {}.",
+                        lesson.pattern.condition, lesson.pattern.action
+                    ));
+                }
             }
         }
 
@@ -455,9 +457,9 @@ mod tests {
         cache.add_lesson(lesson);
 
         let guidance = cache.get_behavior_guidance(None);
-        assert!(guidance.contains("Learned behavior guidance:"));
+        assert!(guidance.contains("RULES (follow these strictly):"));
         assert!(guidance.contains("generic non-answers"));
-        assert!(guidance.contains("Substantive response"));
+        assert!(guidance.contains("Reduce routing weight"));
     }
 
     #[test]
@@ -629,10 +631,10 @@ mod tests {
             cache.add_lesson(lesson);
         }
         let guidance = cache.get_behavior_guidance(None);
-        // Count "- When:" lines (each lesson produces one)
+        // Count "- When " lines (each synthesized lesson produces one)
         let line_count = guidance
             .lines()
-            .filter(|l| l.starts_with("- When:"))
+            .filter(|l| l.starts_with("- When "))
             .count();
         assert!(
             line_count <= super::MAX_GUIDANCE_LESSONS,

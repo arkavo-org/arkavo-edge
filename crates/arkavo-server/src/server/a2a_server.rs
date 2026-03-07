@@ -1238,6 +1238,8 @@ impl A2aServer {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
             let mut tick: u64 = 0;
+            let mut consecutive_no_action_ticks: u32 = 0;
+            let mut last_broadcast_tick: u64 = 0;
             loop {
                 tick += 1;
                 orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
@@ -1251,19 +1253,75 @@ impl A2aServer {
                 }
 
                 // Read short-term memory (recent tool calls from previous ticks)
-                let recent_actions = agent_memory.read().await.format_for_prompt();
+                let memory_guard = agent_memory.read().await;
+                let recent_actions = memory_guard.format_for_prompt();
+                let variety_warning = memory_guard.action_variety_warning();
+                drop(memory_guard);
 
-                // Purpose goes as System message so the LLM treats tool examples
-                // and planning workflow as authoritative instructions.
+                // Pre-fetch completed specialist responses so the commander
+                // can act on advice immediately without wasting iterations on
+                // get_task_status polling.
+                let completed = mesh_state.collect_completed().await;
+                let specialist_context = if completed.is_empty() {
+                    String::new()
+                } else {
+                    use std::fmt::Write as _;
+                    let mut ctx =
+                        String::from("\n\n## Specialist Responses (ready — EXECUTE these now)\n");
+                    for c in &completed {
+                        let _ = write!(
+                            ctx,
+                            "### From {} specialist:\n{}\n\n",
+                            c.agent_id, c.response
+                        );
+                    }
+                    ctx.push_str(
+                        "IMPORTANT: The above specialist advice is ready. \
+                         Skip CONSULT/MONITOR steps and go straight to EXECUTE \
+                         Execute the recommended actions NOW.\n",
+                    );
+                    info!(
+                        "Injecting {} specialist response(s) into tick prompt",
+                        completed.len()
+                    );
+                    ctx
+                };
+
+                // Dead-man's switch: escalating warnings when agent is stuck
+                let dead_man_warning = match consecutive_no_action_ticks {
+                    3..=4 => "\n\nWARNING: You have NOT taken any action for 3 ticks. \
+                              You MUST take an action NOW. \
+                              Pick the most urgent alert and act on it.\n"
+                        .to_string(),
+                    5.. => {
+                        let mem_guard = agent_memory.read().await;
+                        let recent_types = mem_guard.recent_action_types();
+                        drop(mem_guard);
+                        let avoid = if recent_types.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " You have been repeating: {}. Try a DIFFERENT action type.",
+                                recent_types.join(", ")
+                            )
+                        };
+                        format!(
+                            "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_ticks}+ ticks.{avoid} \
+                             Read the alerts and pick the MOST URGENT need. \
+                             Take an action NOW.\n"
+                        )
+                    }
+                    _ => String::new(),
+                };
+
                 // Tick-specific instruction goes as User message.
+                // Purpose (AGENTS.md) goes as System message via execute_with_conductor_and_learning.
                 let tick_prompt = if tick == 1 {
                     "Begin your startup workflow now.".to_string()
                 } else {
                     format!(
-                        "{recent_actions}\n\n\
-                         ## Autonomous Tick {tick}\n\
-                         Initialization is complete. Do not repeat setup steps.\n\
-                         Continue from where you left off. Take the next action.",
+                        "{recent_actions}{variety_warning}{specialist_context}{dead_man_warning}\n\n\
+                         Tick {tick}. Follow your WORKFLOW.",
                     )
                 };
 
@@ -1288,6 +1346,34 @@ impl A2aServer {
                 {
                     Ok(result) => {
                         let elapsed = start.elapsed();
+                        // Check if this tick produced a meaningful action
+                        let memory_guard = agent_memory.read().await;
+                        let had_action = memory_guard.had_meaningful_action();
+
+                        // Broadcast state to specialists (rate-limited, non-blocking)
+                        if tick - last_broadcast_tick >= 3
+                            && let Some(observe_data) = memory_guard.last_observe_full()
+                        {
+                            let mesh = mesh_state.clone();
+                            let data = observe_data.to_string();
+                            tokio::spawn(async move {
+                                broadcast_state_to_peers(&mesh, &data).await;
+                            });
+                            last_broadcast_tick = tick;
+                        }
+                        drop(memory_guard);
+
+                        if had_action {
+                            consecutive_no_action_ticks = 0;
+                        } else {
+                            consecutive_no_action_ticks += 1;
+                            if consecutive_no_action_ticks >= 3 {
+                                warn!(
+                                    "Dead-man's switch: {} consecutive ticks without meaningful action",
+                                    consecutive_no_action_ticks
+                                );
+                            }
+                        }
                         info!(
                             "Orchestrator tick {tick} completed in {:.1}s: {} chars",
                             elapsed.as_secs_f64(),
@@ -1295,12 +1381,13 @@ impl A2aServer {
                         );
                     }
                     Err(e) => {
+                        consecutive_no_action_ticks += 1;
                         warn!("Orchestrator tick {tick} failed: {e}");
                     }
                 }
 
                 // Wait between ticks — gives the environment time to advance
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
     }
@@ -1363,4 +1450,166 @@ fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget:
     }
 
     config
+}
+
+// --- Peer state broadcast ---
+
+/// Broadcast observation state to all discovered peer agents for proactive analysis.
+///
+/// Called after the orchestrator's tool loop completes. Sends the full observation
+/// to every known peer agent. Each peer's own prompt/purpose handles domain filtering.
+async fn broadcast_state_to_peers(
+    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
+    observation: &str,
+) {
+    let peer_ids: Vec<String> = mesh_state
+        .agent_addresses
+        .read()
+        .await
+        .keys()
+        .cloned()
+        .collect();
+
+    if peer_ids.is_empty() {
+        return;
+    }
+
+    let task = format!(
+        "PROACTIVE ANALYSIS — Review this state update and respond \
+         with urgent action recommendations ONLY if you see problems \
+         in your domain of expertise.\n\
+         If everything looks fine, respond with 'No issues detected.'\n\n\
+         {observation}"
+    );
+
+    for agent_id in &peer_ids {
+        match send_advisory_task(mesh_state, agent_id, &task).await {
+            Ok(_) => info!("State broadcast to {agent_id}"),
+            Err(e) => debug!("Could not reach {agent_id}: {e}"),
+        }
+    }
+}
+
+/// Send an advisory task to a specialist via message/send RPC.
+///
+/// Lightweight — short timeout, no retries. Tracks PendingDelegation
+/// so `collect_completed()` picks up the response.
+async fn send_advisory_task(
+    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
+    agent_id: &str,
+    task: &str,
+) -> std::result::Result<(), String> {
+    use arkavo_protocol::transport::TlsConfig;
+    use arkavo_protocol::types::{Message, MessagePart, MessageSendRequest, MessageSendResponse};
+    use arkavo_protocol::{
+        A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
+    };
+
+    let address = {
+        let addrs = mesh_state.agent_addresses.read().await;
+        addrs.get(agent_id).cloned()
+    };
+    let address = match address {
+        Some(a) => a,
+        None => return Err(format!("Agent {agent_id} not discovered")),
+    };
+
+    let transport_config = TransportConfig {
+        timeout_ms: 10000,
+        max_retries: 0,
+        tls_config: TlsConfig {
+            require_tls: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| e.to_string())?);
+
+    let endpoint = A2aEndpoint {
+        url: address.clone(),
+        agent_id: agent_id.to_string(),
+        public_key: None,
+    };
+
+    transport
+        .connect(&endpoint)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let message = Message {
+        parts: vec![MessagePart::Text {
+            content: task.to_string(),
+        }],
+        metadata: Some(serde_json::json!({
+            "source": "state_broadcast",
+            "task_type": "advisory"
+        })),
+    };
+
+    let send_request = MessageSendRequest {
+        message,
+        task_id: None,
+    };
+
+    let rpc_request = A2aRequest::new("message/send", serde_json::json!([send_request]));
+
+    let response = transport
+        .send_request(rpc_request)
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = transport.close().await;
+
+    match response {
+        A2aResponse::Success { result, .. } => {
+            let send_response: MessageSendResponse =
+                serde_json::from_value(result).map_err(|e| e.to_string())?;
+
+            if !send_response.task_id.is_empty() {
+                mesh_state.pending_delegations.write().await.push(
+                    arkavo_mcp_mesh::PendingDelegation {
+                        task_id: send_response.task_id,
+                        agent_id: agent_id.to_string(),
+                        address,
+                        sent_at: std::time::Instant::now(),
+                    },
+                );
+            }
+            Ok(())
+        }
+        A2aResponse::Error { error, .. } => Err(format!("{}: {}", error.code, error.message)),
+    }
+}
+
+#[cfg(test)]
+mod broadcast_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_broadcast_skips_when_no_peers() {
+        let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        // No peers discovered — should return without error
+        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#).await;
+        // No pending delegations created
+        assert!(mesh.pending_delegations.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_creates_task_per_peer() {
+        let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        // Register fake peers (send will fail since no server, but we test the attempt)
+        mesh.agent_addresses
+            .write()
+            .await
+            .insert("peer-a".to_string(), "http://127.0.0.1:19999".to_string());
+        mesh.agent_addresses
+            .write()
+            .await
+            .insert("peer-b".to_string(), "http://127.0.0.1:19998".to_string());
+
+        // Broadcast — will fail to connect but should not panic
+        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#).await;
+        // Peers unreachable, so no pending delegations
+        assert!(mesh.pending_delegations.read().await.is_empty());
+    }
 }

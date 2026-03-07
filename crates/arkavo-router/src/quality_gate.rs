@@ -34,12 +34,20 @@ impl super::Router {
 
         if let Some(hint) = model_hint {
             if self.is_model_available(hint) {
-                tracing::info!(
-                    hint = hint.name(),
-                    original = current_decision.recommended_model.name(),
-                    "Applying model hint from AGENTS.md"
-                );
-                current_decision.recommended_model = hint.clone();
+                let excluded = self.get_excluded_models().await;
+                if excluded.iter().any(|e| e == hint.name()) {
+                    tracing::info!(
+                        hint = hint.name(),
+                        "Model hint on cooldown, falling back to Thompson Sampling"
+                    );
+                } else {
+                    tracing::info!(
+                        hint = hint.name(),
+                        original = current_decision.recommended_model.name(),
+                        "Applying model hint from AGENTS.md"
+                    );
+                    current_decision.recommended_model = hint.clone();
+                }
             } else {
                 tracing::debug!(
                     hint = hint.name(),

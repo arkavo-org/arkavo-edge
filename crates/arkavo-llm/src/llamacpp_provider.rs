@@ -228,6 +228,17 @@ impl LlamaCppProvider {
         Ok(self)
     }
 
+    /// Enable vision with a pre-loaded context (avoids reloading mmproj from disk).
+    pub fn enable_vision_cached(mut self, ctx: Arc<MtmdContext>) -> Self {
+        self.mtmd_ctx = Some(ctx);
+        self
+    }
+
+    /// Get the vision context (for caching in the registry).
+    pub fn vision_ctx(&self) -> Option<Arc<MtmdContext>> {
+        self.mtmd_ctx.clone()
+    }
+
     /// Get the model reference, either from owned or registry
     fn get_model(&self) -> Result<Arc<LlamaModel>> {
         if let Some(ref model) = self.model {

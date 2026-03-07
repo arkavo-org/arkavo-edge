@@ -880,6 +880,29 @@ impl ChatSessionManager {
                         });
                     }
 
+                    // Inject available tool names so LLM is aware of its capabilities
+                    if let Some(ref registry) = tool_registry {
+                        let tools = registry.list_tools();
+                        if !tools.is_empty() {
+                            let tool_list: String = tools
+                                .iter()
+                                .map(|t| format!("- {}: {}", t.name, t.description))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let tool_msg = format!(
+                                "You have access to these tools:\n{tool_list}\n\n\
+                                 When asked to perform actions, use the appropriate tool."
+                            );
+                            let insert_pos =
+                                usize::from(system_prompt.is_some());
+                            windowed_context.insert(insert_pos, Message {
+                                role: Role::System,
+                                content: tool_msg,
+                                images: None,
+                            });
+                        }
+                    }
+
                     // Classify human teaching intent before routing
                     let last_trace = router.last_decision_trace().map(|t| t.trace_id);
                     let intent = arkavo_router::learning::human_teaching::classify_intent(

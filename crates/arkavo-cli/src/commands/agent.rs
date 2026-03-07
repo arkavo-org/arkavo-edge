@@ -1169,16 +1169,21 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
     server.set_public_key(public_key_b64.clone()).await;
 
+    // Create pain signal channel before LearningBus (lock-free hot path)
+    let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);
+
     // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
         let keypair = Arc::new(AgentKeypair::generate());
         let gossip_config = GossipConfig::default();
-        Arc::new(LearningBus::new(
+        let mut bus = LearningBus::new(
             config.name.clone(),
             "default-swarm".to_string(),
             keypair,
             gossip_config,
-        ))
+        );
+        bus.set_pain_sender(pain_tx);
+        Arc::new(bus)
     };
     // Initialize persistent learning store (SQLite) for lessons
     {
@@ -1187,6 +1192,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     }
 
     server.set_learning_bus(learning_bus.clone()).await;
+
+    // Register learning pipeline health reporter for self-check
+    arkavo_server::LearningPipelineReporter::register(learning_bus.clone()).await;
 
     // Set agent metadata (this initializes the router which will be set on learning bus)
     server
@@ -1369,8 +1377,8 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let (handle, actual_port) = server.start_with_port().await?;
 
-    // Start orchestrator loop if this agent has MCP tools configured
-    if !config.mcp_servers.is_empty() {
+    // Start orchestrator loop for any agent with a purpose
+    if !config.purpose.is_empty() {
         server.start_orchestrator_loop().await;
     }
 
@@ -1667,6 +1675,21 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                 }
             }
         }));
+
+        // Start AutoLearner self-healing loop
+        match arkavo_server::AutoLearnBridge::new(
+            config.name.clone(),
+            learning_bus.clone(),
+            pain_rx,
+        ) {
+            Ok(bridge) => {
+                gossip_handles.push(bridge.handle);
+                tracing::info!("AutoLearn self-healing loop started");
+            }
+            Err(e) => {
+                tracing::warn!("AutoLearn unavailable: {e}");
+            }
+        }
 
         if !quiet {
             println!("Gossip learning: background tasks started");

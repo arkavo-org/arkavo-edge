@@ -238,6 +238,72 @@ impl HealthReporter for AguiHealthReporter {
     }
 }
 
+/// Dashboard-side health reporter for the agent learning pipeline.
+///
+/// Checks the gateway's shared stores (tasks, lessons, routing history)
+/// to determine if the learning pipeline is flowing across connected agents.
+pub struct LearningPipelineHealthReporter {
+    task_store: Arc<RwLock<HashMap<String, crate::gateway::TrackedTask>>>,
+    lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    routing_history: Arc<RwLock<std::collections::VecDeque<crate::types::RoutingRecord>>>,
+    started_at: std::time::Instant,
+}
+
+impl LearningPipelineHealthReporter {
+    pub fn new(
+        task_store: Arc<RwLock<HashMap<String, crate::gateway::TrackedTask>>>,
+        lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+        routing_history: Arc<RwLock<std::collections::VecDeque<crate::types::RoutingRecord>>>,
+    ) -> Self {
+        Self {
+            task_store,
+            lesson_store,
+            routing_history,
+            started_at: std::time::Instant::now(),
+        }
+    }
+}
+
+#[async_trait]
+impl HealthReporter for LearningPipelineHealthReporter {
+    async fn check_health(&self) -> HealthReport {
+        let task_count = self.task_store.read().await.len();
+        let lesson_count = self.lesson_store.read().await.len();
+        let routing_count = self.routing_history.read().await.len();
+        let uptime_secs = self.started_at.elapsed().as_secs();
+
+        let status = if task_count > 0 && (lesson_count > 0 || uptime_secs < 300) {
+            HealthStatus::Healthy
+        } else if task_count > 0 {
+            HealthStatus::Degraded
+        } else if uptime_secs < 60 {
+            HealthStatus::Healthy
+        } else {
+            HealthStatus::Degraded
+        };
+
+        let message = format!("tasks={task_count}, lessons={lesson_count}, routes={routing_count}");
+
+        let mut details = HashMap::new();
+        details.insert("tasks".to_string(), serde_json::json!(task_count));
+        details.insert("lessons".to_string(), serde_json::json!(lesson_count));
+        details.insert("routes".to_string(), serde_json::json!(routing_count));
+        details.insert("uptime_secs".to_string(), serde_json::json!(uptime_secs));
+
+        HealthReport {
+            component: "learning_pipeline".to_string(),
+            status,
+            message,
+            details: Some(details),
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn component_name(&self) -> &str {
+        "learning_pipeline"
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {

@@ -379,7 +379,7 @@ async fn synthesize_and_broadcast(
     sleep(Duration::from_millis(500)).await;
 
     // For demo purposes, we create the healed graph directly
-    // In production, this would use MinistralSynthesizer::with_model()
+    // In production, this would use PolicySynthesizer::with_model()
     let healed_graph = create_healed_graph();
     agent.healed_graph = Some(healed_graph.clone());
 

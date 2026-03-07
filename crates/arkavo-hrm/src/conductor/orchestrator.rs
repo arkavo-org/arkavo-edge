@@ -186,6 +186,17 @@ impl<S: TaskStore> Conductor<S> {
             .ok_or(Error::TaskNotFound(task_id))
     }
 
+    /// Transition a task from Pending to Running
+    pub async fn start_task(&self, task_id: Uuid) -> Result<()> {
+        let mut task = self.get_task(task_id).await?;
+        if task.status == TaskStatus::Pending {
+            task.status = TaskStatus::Running;
+            task.updated_at = Utc::now();
+            self.store.save(&task).await?;
+        }
+        Ok(())
+    }
+
     /// Add a subtask to a task
     ///
     /// Checks loop detection and subtask limits before adding.

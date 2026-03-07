@@ -92,6 +92,7 @@ pub async fn start_event_processing_loop(
     loop {
         match event_rx.recv().await {
             Some(event) => {
+                learning_bus.record_event();
                 match event {
                     LearningEvent::ToolCall {
                         tool_name,
@@ -152,6 +153,7 @@ pub async fn start_event_processing_loop(
                                 .await
                             {
                                 Ok(episode) => {
+                                    learning_bus.record_episode_synthesized();
                                     tracing::info!(
                                         "Episode synthesized: {} (success={})",
                                         episode.id,

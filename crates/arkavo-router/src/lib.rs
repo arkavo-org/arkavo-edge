@@ -89,6 +89,10 @@ const MODEL_COOLDOWN_BASE_SECS: u64 = 300;
 /// Maximum cooldown duration regardless of consecutive failures (1 hour).
 const MODEL_COOLDOWN_MAX_SECS: u64 = 3600;
 
+/// Short cooldown for quality failures (timeout, no tool calls).
+/// Shorter than availability cooldown to allow faster model rotation.
+const MODEL_QUALITY_COOLDOWN_BASE_SECS: u64 = 30;
+
 /// Intelligent router for cost-optimized model selection
 pub struct Router {
     classifier: Arc<TaskClassifier>,
@@ -256,6 +260,7 @@ impl Router {
                         "WrongExpert" => AdvisorIssue::WrongExpert,
                         "Timeout" => AdvisorIssue::Timeout,
                         "ToolError" => AdvisorIssue::ToolError,
+                        "NoToolCalls" => AdvisorIssue::NoToolCalls,
                         _ => return None,
                     };
                     Some(prompt_advisor::DynamicSnapshot {
@@ -387,7 +392,7 @@ impl Router {
     /// operational events, not learning events. Cooldown duration doubles on
     /// each consecutive failure (5 → 10 → 20 → 40 → 60 min cap), then resets
     /// after the first successful response from that model.
-    async fn record_model_cooldown(&self, model_name: &str) {
+    pub async fn record_model_cooldown(&self, model_name: &str) {
         let mut cooldowns = self.model_cooldowns.write().await;
         let consecutive = cooldowns
             .get(model_name)
@@ -404,6 +409,38 @@ impl Router {
             "Model cooled down for {}s (availability failure)",
             duration
         );
+    }
+
+    /// Record a quality-based cooldown (timeout, no tool calls).
+    ///
+    /// Uses a shorter base (30s) than availability cooldown (5min) to allow
+    /// faster model rotation while still breaking retry loops. Progression:
+    /// 30s → 60s → 120s → 240s → ... → 3600s cap.
+    pub async fn record_quality_cooldown(&self, model_name: &str) {
+        let mut cooldowns = self.model_cooldowns.write().await;
+        let consecutive = cooldowns
+            .get(model_name)
+            .map(|(_, count)| count + 1)
+            .unwrap_or(1);
+        cooldowns.insert(
+            model_name.to_string(),
+            (std::time::Instant::now(), consecutive),
+        );
+        let duration = Self::quality_cooldown_duration_secs(consecutive);
+        tracing::info!(
+            model = model_name,
+            consecutive,
+            "Model cooled down for {duration}s (quality failure)"
+        );
+    }
+
+    /// Quality cooldown duration: shorter base (30s) with exponential backoff.
+    fn quality_cooldown_duration_secs(consecutive: u32) -> u64 {
+        let shift = consecutive.saturating_sub(1).min(10);
+        let multiplier = 1u64 << shift;
+        MODEL_QUALITY_COOLDOWN_BASE_SECS
+            .saturating_mul(multiplier)
+            .min(MODEL_COOLDOWN_MAX_SECS)
     }
 
     /// Clear cooldown for a model after a successful response.
@@ -423,7 +460,7 @@ impl Router {
     }
 
     /// Get model names currently on cooldown (expired entries are pruned)
-    async fn get_excluded_models(&self) -> Vec<String> {
+    pub async fn get_excluded_models(&self) -> Vec<String> {
         let mut cooldowns = self.model_cooldowns.write().await;
         cooldowns.retain(|_, (since, consecutive)| {
             let duration =

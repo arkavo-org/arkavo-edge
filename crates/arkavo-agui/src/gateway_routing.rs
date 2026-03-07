@@ -195,7 +195,7 @@ pub(crate) async fn update_task_status(
 /// GPU power draw in watts for energy calculations (configurable default)
 const DEFAULT_GPU_WATTS: f64 = 150.0;
 
-fn compute_task_metrics(
+pub(crate) fn compute_task_metrics(
     created_at: &str,
     first_working_at: &Option<String>,
     result_text: Option<&str>,

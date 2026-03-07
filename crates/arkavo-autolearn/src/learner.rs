@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
@@ -23,7 +24,8 @@ use crate::error::{AutoLearnError, AutoLearnResult};
 use crate::network::{GossipNetworkBridge, IncomingPatch};
 use crate::patchlet::{PainTrigger, Patchlet, VerificationSummary};
 use crate::signals::{PainAggregator, PainSignal};
-use crate::synthesizer::MinistralSynthesizer;
+use crate::store::AutoLearnStore;
+use crate::synthesizer::PolicySynthesizer;
 use crate::verifier::{ImmuneVerifier, VerifierConfig};
 
 /// Configuration for the auto-learning loop
@@ -58,7 +60,7 @@ impl Default for AutoLearnConfig {
 }
 
 /// Statistics from the auto-learning loop
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AutoLearnStats {
     /// Total pain signals processed
     pub signals_processed: u64,
@@ -96,14 +98,14 @@ struct SynthesisResult {
 ///
 /// Coordinates the four-step learning cycle:
 /// 1. Pain Signal aggregation
-/// 2. LLM Synthesis via Ministral-3B
+/// 2. LLM Synthesis via PolicySynthesizer
 /// 3. Immune Response verification
 /// 4. Swarm Propagation via gossip
 pub struct AutoLearner<C: CostFunction> {
     /// Configuration
     config: AutoLearnConfig,
-    /// The synthesizer (Ministral-3B) - wrapped in Arc for concurrent access
-    synthesizer: Arc<MinistralSynthesizer>,
+    /// The policy synthesizer - wrapped in Arc for concurrent access
+    synthesizer: Arc<PolicySynthesizer>,
     /// The immune verifier
     verifier: ImmuneVerifier,
     /// Network bridge for gossip
@@ -116,8 +118,12 @@ pub struct AutoLearner<C: CostFunction> {
     probe_scheduler: Option<ProbeScheduler>,
     /// Receiver for incoming patches
     patch_rx: Option<mpsc::Receiver<IncomingPatch>>,
+    /// Receiver for external pain signals (from quality failures in conductor)
+    pain_rx: Option<mpsc::Receiver<PainSignal>>,
     /// Statistics
     stats: AutoLearnStats,
+    /// Persistence store for stats and patch audit log
+    store: Option<AutoLearnStore>,
     /// Sender for probe tasks
     probe_task_tx: Option<mpsc::Sender<ProbeTask>>,
     /// Receiver for probe results
@@ -136,7 +142,7 @@ impl<C: CostFunction> AutoLearner<C> {
     /// Create a new auto-learner
     pub fn new(
         config: AutoLearnConfig,
-        synthesizer: Arc<MinistralSynthesizer>,
+        synthesizer: Arc<PolicySynthesizer>,
         verifier: ImmuneVerifier,
         network: Arc<GossipNetworkBridge>,
         ensemble: PolicyEnsemble<C>,
@@ -153,7 +159,9 @@ impl<C: CostFunction> AutoLearner<C> {
             aggregator: PainAggregator::new(),
             probe_scheduler: None,
             patch_rx: None,
+            pain_rx: None,
             stats: AutoLearnStats::default(),
+            store: None,
             probe_task_tx: None,
             probe_result_rx: None,
             model_id: String::new(),
@@ -175,9 +183,21 @@ impl<C: CostFunction> AutoLearner<C> {
         self
     }
 
+    /// Set the pain signal receiver for external quality failure signals
+    pub fn with_pain_receiver(mut self, rx: mpsc::Receiver<PainSignal>) -> Self {
+        self.pain_rx = Some(rx);
+        self
+    }
+
     /// Set the model ID for pain signal context
     pub fn with_model_id(mut self, model_id: String) -> Self {
         self.model_id = model_id;
+        self
+    }
+
+    /// Set the persistence store for stats and patch audit log
+    pub fn with_store(mut self, store: AutoLearnStore) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -221,6 +241,13 @@ impl<C: CostFunction> AutoLearner<C> {
 
     /// Run the main auto-learning loop
     pub async fn run(&mut self, cancel: CancellationToken) -> AutoLearnResult<()> {
+        // Restore stats from store if available
+        if let Some(ref store) = self.store
+            && let Ok(Some(loaded)) = store.load_stats()
+        {
+            self.stats = loaded;
+        }
+
         // Start the probe scheduler if configured
         let _probe_handle = self.start_probe_scheduler();
 
@@ -245,6 +272,13 @@ impl<C: CostFunction> AutoLearner<C> {
             } else {
                 None
             };
+
+            // Drain external pain signals into the aggregator
+            if let Some(ref mut rx) = self.pain_rx {
+                while let Ok(signal) = rx.try_recv() {
+                    self.aggregator.push(signal);
+                }
+            }
 
             if let Some(patch) = incoming_patch {
                 if let Err(e) = self.handle_remote_patch(patch).await {
@@ -297,6 +331,13 @@ impl<C: CostFunction> AutoLearner<C> {
             }
         }
 
+        // Persist stats on shutdown
+        if let Some(ref store) = self.store
+            && let Err(e) = store.save_stats(&self.stats)
+        {
+            tracing::warn!("Failed to save stats: {}", e);
+        }
+
         Ok(())
     }
 
@@ -308,7 +349,7 @@ impl<C: CostFunction> AutoLearner<C> {
         // Step 2: Synthesis via Ministral-3B
         let graph = match tokio::time::timeout(
             self.config.synthesis_timeout,
-            self.synthesizer.synthesize_patchlet(&signal),
+            self.synthesizer.synthesize_patchlet_nonblocking(&signal),
         )
         .await
         {
@@ -378,6 +419,33 @@ impl<C: CostFunction> AutoLearner<C> {
             id
         };
 
+        // Record to audit log
+        if let Some(ref store) = self.store {
+            let record = crate::store::PatchRecord {
+                patch_id,
+                timestamp: chrono::Utc::now(),
+                status: if self.config.dry_run {
+                    crate::store::PatchRecordStatus::DryRun
+                } else {
+                    crate::store::PatchRecordStatus::Broadcast
+                },
+                signal_description: signal.source.description(),
+                verification_summary: format!(
+                    "passed={}, invariants={}, sat_probes={}",
+                    verification.passed,
+                    verification.invariant_violations.len(),
+                    verification
+                        .stress_stats
+                        .as_ref()
+                        .map(|s| s.inputs_tested)
+                        .unwrap_or(0)
+                ),
+            };
+            if let Err(e) = store.append_patch_record(&record) {
+                tracing::warn!("Failed to write patch record: {}", e);
+            }
+        }
+
         // Add to local ensemble for counterfactual evaluation
         let policy = PolicyLayer::new(graph);
         if let Err(e) = self.ensemble.add_candidate(
@@ -422,6 +490,15 @@ impl<C: CostFunction> AutoLearner<C> {
 
         let approve = verification.passed;
 
+        if self.config.dry_run {
+            tracing::info!(
+                "[DRY-RUN] Would {} remote patch {}",
+                if approve { "accept" } else { "reject" },
+                incoming.patch_id
+            );
+            return Ok(());
+        }
+
         // Vote on the patch
         self.network
             .vote_on_patch(incoming.patch_id, approve)
@@ -445,6 +522,23 @@ impl<C: CostFunction> AutoLearner<C> {
         } else {
             self.stats.patches_rejected += 1;
             tracing::info!("Rejected remote patch {}", incoming.patch_id);
+        }
+
+        if let Some(ref store) = self.store {
+            let record = crate::store::PatchRecord {
+                patch_id: incoming.patch_id,
+                timestamp: chrono::Utc::now(),
+                status: if approve {
+                    crate::store::PatchRecordStatus::Accepted
+                } else {
+                    crate::store::PatchRecordStatus::Rejected
+                },
+                signal_description: incoming.patchlet.trigger.description.clone(),
+                verification_summary: format!("passed={}", approve),
+            };
+            if let Err(e) = store.append_patch_record(&record) {
+                tracing::warn!("Failed to write patch record: {}", e);
+            }
         }
 
         Ok(())
@@ -609,7 +703,7 @@ impl<C: CostFunction> AutoLearner<C> {
 /// without requiring mutable access to the AutoLearner.
 async fn run_synthesis_pipeline(
     signal: PainSignal,
-    synthesizer: Arc<MinistralSynthesizer>,
+    synthesizer: Arc<PolicySynthesizer>,
     verifier: ImmuneVerifier,
     network: Arc<GossipNetworkBridge>,
     config: AutoLearnConfig,
@@ -619,7 +713,7 @@ async fn run_synthesis_pipeline(
     // Step 1: Synthesis via Ministral-3B
     let graph = match tokio::time::timeout(
         config.synthesis_timeout,
-        synthesizer.synthesize_patchlet(&signal),
+        synthesizer.synthesize_patchlet_nonblocking(&signal),
     )
     .await
     {
@@ -763,14 +857,16 @@ async fn run_synthesis_pipeline(
 /// Builder for AutoLearner with sensible defaults
 pub struct AutoLearnerBuilder<C: CostFunction> {
     config: AutoLearnConfig,
-    synthesizer: Option<Arc<MinistralSynthesizer>>,
+    synthesizer: Option<Arc<PolicySynthesizer>>,
     invariant_layer: Option<Arc<InvariantLayer>>,
     verifier_config: VerifierConfig,
     network: Option<Arc<GossipNetworkBridge>>,
     ensemble: Option<PolicyEnsemble<C>>,
     probe_scheduler: Option<ProbeScheduler>,
     patch_rx: Option<mpsc::Receiver<IncomingPatch>>,
+    pain_rx: Option<mpsc::Receiver<PainSignal>>,
     model_id: String,
+    store: Option<AutoLearnStore>,
 }
 
 impl<C: CostFunction> AutoLearnerBuilder<C> {
@@ -785,7 +881,9 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
             ensemble: None,
             probe_scheduler: None,
             patch_rx: None,
+            pain_rx: None,
             model_id: String::new(),
+            store: None,
         }
     }
 
@@ -796,7 +894,7 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
     }
 
     /// Set the synthesizer (wrapped in Arc for concurrent access)
-    pub fn synthesizer(mut self, synthesizer: Arc<MinistralSynthesizer>) -> Self {
+    pub fn synthesizer(mut self, synthesizer: Arc<PolicySynthesizer>) -> Self {
         self.synthesizer = Some(synthesizer);
         self
     }
@@ -837,9 +935,21 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
         self
     }
 
+    /// Set the pain signal receiver for external quality failure signals
+    pub fn with_pain_receiver(mut self, rx: mpsc::Receiver<PainSignal>) -> Self {
+        self.pain_rx = Some(rx);
+        self
+    }
+
     /// Set the model ID for pain signal context
     pub fn model_id(mut self, model_id: String) -> Self {
         self.model_id = model_id;
+        self
+    }
+
+    /// Set the persistence store
+    pub fn store(mut self, store: AutoLearnStore) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -872,6 +982,14 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
 
         if let Some(rx) = self.patch_rx {
             learner = learner.with_patch_receiver(rx);
+        }
+
+        if let Some(rx) = self.pain_rx {
+            learner = learner.with_pain_receiver(rx);
+        }
+
+        if let Some(store) = self.store {
+            learner = learner.with_store(store);
         }
 
         Ok(learner)
@@ -931,7 +1049,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
         let verifier = ImmuneVerifier::new(invariant_layer);
 
         let keypair = AgentKeypair::generate();
@@ -966,7 +1084,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(crate::network::GossipNetworkBridge::new(
             "test-agent".to_string(),
@@ -995,7 +1113,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(crate::network::GossipNetworkBridge::new(
             "test-agent".to_string(),
@@ -1035,7 +1153,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(crate::network::GossipNetworkBridge::new(
             "test-agent".to_string(),
@@ -1064,6 +1182,69 @@ mod tests {
             3,
             "Semaphore should have max_concurrent_synthesis permits"
         );
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_no_vote() {
+        use crate::patchlet::{PainTrigger, VerificationSummary};
+        use chrono::Utc;
+
+        let graph = create_simple_graph();
+        let production = PolicyLayer::new(graph.clone());
+        let invariant_layer = Arc::new(InvariantLayer::new());
+        let cost = ConstantCost::new(1.0);
+        let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
+
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
+        let verifier = ImmuneVerifier::new(invariant_layer);
+
+        let keypair = AgentKeypair::generate();
+        let mut bridge = crate::network::GossipNetworkBridge::new(
+            "test-agent".to_string(),
+            keypair,
+            NetworkConfig::default(),
+        );
+        let mut outbox = bridge.take_outbox().unwrap();
+        let network = Arc::new(bridge);
+
+        let config = AutoLearnConfig {
+            dry_run: true,
+            ..AutoLearnConfig::default()
+        };
+
+        let mut learner = AutoLearner::new(config, synthesizer, verifier, network, ensemble);
+
+        let trigger = PainTrigger {
+            anomaly_id: Uuid::new_v4(),
+            description: "test anomaly".to_string(),
+            severity: 0.5,
+            timestamp: Utc::now(),
+        };
+        let patchlet = crate::patchlet::Patchlet::new(graph, trigger, GenerationMethod::Manual)
+            .with_verification(VerificationSummary {
+                passed: true,
+                invariant_checks: 1,
+                sat_probes: 10,
+            });
+
+        let incoming = IncomingPatch {
+            patch_id: Uuid::new_v4(),
+            patchlet,
+            votes: vec![],
+        };
+
+        learner.handle_remote_patch(incoming).await.unwrap();
+
+        // No messages should have been sent (no vote)
+        assert!(
+            outbox.try_recv().is_err(),
+            "No messages should be sent in dry-run mode"
+        );
+
+        // Should count as received but not accepted or rejected
+        assert_eq!(learner.stats().patches_received, 1);
+        assert_eq!(learner.stats().patches_accepted, 0);
+        assert_eq!(learner.stats().patches_rejected, 0);
     }
 
     #[test]

@@ -4,6 +4,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+use arkavo_autolearn::{GossipNetworkBridge, PainSignal, PainSource};
+use arkavo_ensemble::SynthesisContext;
 
 use arkavo_crypto::AgentKeypair;
 use arkavo_gossip::{GossipConfig, GossipMessage, GossipProtocol, KeyRegistry};
@@ -118,6 +124,16 @@ pub enum BehaviorAdvice {
     },
 }
 
+/// Snapshot of learning pipeline health metrics
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LearningBusStats {
+    pub events_received: u64,
+    pub episodes_synthesized: u64,
+    pub lessons_stored: u64,
+    pub gossip_peers: usize,
+    pub last_event_secs_ago: Option<u64>,
+}
+
 /// Central bus connecting event capture to learning and gossip
 pub struct LearningBus {
     pub(super) agent_id: String,
@@ -150,6 +166,16 @@ pub struct LearningBus {
     pub(super) case_index: Arc<CaseIndex>,
     /// SQLite-backed persistent store for lessons and episodes
     pub(super) learning_store: Arc<RwLock<Option<Arc<LearningStore>>>>,
+    /// Atomic counter for events received
+    events_received: Arc<AtomicU64>,
+    /// Atomic counter for episodes synthesized
+    episodes_synthesized: Arc<AtomicU64>,
+    /// Timestamp of last event received
+    last_event_at: Arc<RwLock<Option<Instant>>>,
+    /// Lock-free pain signal sender for AutoLearner (set once before Arc wrapping)
+    pain_tx: Option<mpsc::Sender<PainSignal>>,
+    /// Lock-free bridge for patchlet message forwarding (set once at startup)
+    patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
 }
 
 impl LearningBus {
@@ -220,6 +246,11 @@ impl LearningBus {
             ))),
             case_index,
             learning_store: Arc::new(RwLock::new(None)),
+            events_received: Arc::new(AtomicU64::new(0)),
+            episodes_synthesized: Arc::new(AtomicU64::new(0)),
+            last_event_at: Arc::new(RwLock::new(None)),
+            pain_tx: None,
+            patchlet_bridge: OnceLock::new(),
         }
     }
 
@@ -378,6 +409,152 @@ impl LearningBus {
     pub async fn peer_count(&self) -> usize {
         self.gossip.read().await.peer_count().await
     }
+
+    /// Record that an event was received
+    pub fn record_event(&self) {
+        self.events_received.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut last) = self.last_event_at.try_write() {
+            *last = Some(Instant::now());
+        }
+    }
+
+    /// Record that an episode was synthesized
+    pub fn record_episode_synthesized(&self) {
+        self.episodes_synthesized.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Set the pain signal sender (call before Arc wrapping — takes &mut self, no lock)
+    pub fn set_pain_sender(&mut self, tx: mpsc::Sender<PainSignal>) {
+        self.pain_tx = Some(tx);
+    }
+
+    /// Register the AutoLearner's gossip bridge for patchlet forwarding (OnceLock, lock-free reads)
+    pub fn set_autolearn_bridge(&self, bridge: Arc<GossipNetworkBridge>) {
+        let _ = self.patchlet_bridge.set(bridge);
+    }
+
+    /// Get the AutoLearner's patchlet bridge (lock-free read)
+    pub(super) fn patchlet_bridge(&self) -> Option<&Arc<GossipNetworkBridge>> {
+        self.patchlet_bridge.get()
+    }
+
+    /// Report a quality failure as an AutoLearner pain signal (sync, non-blocking)
+    pub fn report_autolearn_pain(&self, severity: f64, model_name: &str, description: &str) {
+        if let Some(tx) = &self.pain_tx {
+            let ctx = SynthesisContext::new(model_name.to_string(), description.to_string());
+            let signal = PainSignal::new(
+                PainSource::External {
+                    description: description.to_string(),
+                },
+                severity,
+                ctx,
+            );
+            let _ = tx.try_send(signal);
+        }
+    }
+
+    /// Get a snapshot of pipeline health stats
+    pub async fn stats(&self) -> LearningBusStats {
+        let last_event_secs_ago = self
+            .last_event_at
+            .read()
+            .await
+            .map(|t| t.elapsed().as_secs());
+        let lessons_stored = self.policy_cache.read().await.len() as u64;
+        let gossip_peers = self.gossip.read().await.peer_count().await;
+
+        LearningBusStats {
+            events_received: self.events_received.load(Ordering::Relaxed),
+            episodes_synthesized: self.episodes_synthesized.load(Ordering::Relaxed),
+            lessons_stored,
+            gossip_peers,
+            last_event_secs_ago,
+        }
+    }
+}
+
+/// HealthReporter implementation for the learning pipeline
+pub struct LearningPipelineReporter {
+    bus: Arc<LearningBus>,
+    started_at: Instant,
+}
+
+impl LearningPipelineReporter {
+    pub fn new(bus: Arc<LearningBus>) -> Self {
+        Self {
+            bus,
+            started_at: Instant::now(),
+        }
+    }
+
+    /// Register this reporter in the global HealthRegistry
+    pub async fn register(bus: Arc<LearningBus>) {
+        use arkavo_observability::health_reporter::HealthRegistry;
+        let reporter = Arc::new(Self::new(bus));
+        HealthRegistry::global().register(reporter).await;
+        tracing::info!("Registered learning_pipeline health reporter");
+    }
+}
+
+#[async_trait::async_trait]
+impl arkavo_observability::health_reporter::HealthReporter for LearningPipelineReporter {
+    async fn check_health(&self) -> arkavo_observability::health_reporter::HealthReport {
+        use arkavo_observability::health_reporter::HealthReport;
+        let stats = self.bus.stats().await;
+        let uptime_secs = self.started_at.elapsed().as_secs();
+
+        let status_str =
+            if stats.events_received > 0 && (stats.lessons_stored > 0 || uptime_secs < 300) {
+                "healthy"
+            } else if stats.events_received > 0 {
+                "degraded"
+            } else if uptime_secs < 60 {
+                "healthy" // warming up
+            } else {
+                "stalled"
+            };
+
+        let message = format!(
+            "events={}, episodes={}, lessons={}, peers={}",
+            stats.events_received,
+            stats.episodes_synthesized,
+            stats.lessons_stored,
+            stats.gossip_peers
+        );
+
+        let mut details = std::collections::HashMap::new();
+        details.insert(
+            "events_received".to_string(),
+            serde_json::json!(stats.events_received),
+        );
+        details.insert(
+            "episodes_synthesized".to_string(),
+            serde_json::json!(stats.episodes_synthesized),
+        );
+        details.insert(
+            "lessons_stored".to_string(),
+            serde_json::json!(stats.lessons_stored),
+        );
+        details.insert(
+            "gossip_peers".to_string(),
+            serde_json::json!(stats.gossip_peers),
+        );
+        if let Some(secs) = stats.last_event_secs_ago {
+            details.insert("last_event_secs_ago".to_string(), serde_json::json!(secs));
+        }
+
+        match status_str {
+            "healthy" => HealthReport::healthy("learning_pipeline", message).with_details(details),
+            "degraded" => {
+                HealthReport::degraded("learning_pipeline", message).with_details(details)
+            }
+            _ => HealthReport::unhealthy("learning_pipeline", message).with_details(details),
+        }
+    }
+
+    fn component_name(&self) -> &'static str {
+        "learning_pipeline"
+    }
 }
 
 #[cfg(test)]
@@ -512,5 +689,30 @@ mod tests {
             guidance.contains("empty responses"),
             "guidance should contain lesson condition text"
         );
+    }
+
+    #[tokio::test]
+    async fn test_stats_initial() {
+        let bus = make_bus();
+        let stats = bus.stats().await;
+        assert_eq!(stats.events_received, 0);
+        assert_eq!(stats.episodes_synthesized, 0);
+        assert_eq!(stats.lessons_stored, 0);
+        assert_eq!(stats.gossip_peers, 0);
+        assert!(stats.last_event_secs_ago.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stats_after_events() {
+        let bus = make_bus();
+        bus.record_event();
+        bus.record_event();
+        bus.record_episode_synthesized();
+
+        let stats = bus.stats().await;
+        assert_eq!(stats.events_received, 2);
+        assert_eq!(stats.episodes_synthesized, 1);
+        assert!(stats.last_event_secs_ago.is_some());
+        assert!(stats.last_event_secs_ago.unwrap() < 2);
     }
 }

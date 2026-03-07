@@ -381,6 +381,17 @@ impl AgUiGateway {
             lesson_store,
         };
 
+        // Register learning pipeline health reporter (uses gateway shared stores)
+        {
+            use arkavo_observability::health_reporter::HealthRegistry;
+            let reporter = Arc::new(crate::health::LearningPipelineHealthReporter::new(
+                state.task_store.clone(),
+                state.lesson_store.clone(),
+                state.routing_history.clone(),
+            ));
+            HealthRegistry::global().register(reporter).await;
+        }
+
         // Sync agent-internal HRM tasks into the UI dashboard
         crate::gateway_task_sync::spawn_agent_task_sync(
             state.connections.clone(),

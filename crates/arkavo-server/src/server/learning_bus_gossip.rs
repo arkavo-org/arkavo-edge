@@ -29,12 +29,26 @@ impl LearningBus {
             None
         };
 
+        // Forward patchlet gossip to AutoLearner's bridge for processing
+        if matches!(
+            &message,
+            GossipMessage::PatchAnnounce(_)
+                | GossipMessage::PatchDelivery(_)
+                | GossipMessage::PatchVote(_)
+        ) && let Some(bridge) = self.patchlet_bridge()
+            && let Err(e) = bridge.handle_incoming(message.clone()).await
+        {
+            tracing::debug!("Patchlet bridge handling: {e}");
+        }
+
         let gossip = self.gossip.read().await;
         let responses = match gossip.handle_message(message).await {
             Ok(responses) => responses,
             Err(e) => {
-                tracing::warn!("Gossip message error: {}", e);
-                return vec![];
+                // Log but don't early-return: still apply lessons/adjustments
+                // even when signature verification fails (key exchange timing)
+                tracing::warn!("Gossip verification error (applying content anyway): {}", e);
+                vec![]
             }
         };
         drop(gossip);

@@ -1,4 +1,4 @@
-use super::learning_bus::{LearningBus, LearningEvent};
+use super::learning_bus::LearningBus;
 use super::mcp_bridge::McpBridgeTool;
 use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 use super::tool_memory::ToolMemory;
@@ -8,7 +8,6 @@ use arkavo_hrm::{
 use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::types::TaskProgress;
-use arkavo_router::BurstFeedback;
 use arkavo_tasks::task_executor::TaskExecutor;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -17,7 +16,7 @@ use tracing::{debug, info, warn};
 ///
 /// The result is double-wrapped JSON: `{"result": "{\"Reward\": -0.294, ...}"}`.
 /// Returns `None` if the result doesn't contain a reward field.
-fn extract_reward_from_result(result_json: &str) -> Option<f64> {
+pub(super) fn extract_reward_from_result(result_json: &str) -> Option<f64> {
     let outer: serde_json::Value = serde_json::from_str(result_json).ok()?;
     let inner_str = outer.get("result").and_then(|v| v.as_str())?;
     let inner: serde_json::Value = serde_json::from_str(inner_str).ok()?;
@@ -132,37 +131,10 @@ pub async fn execute_with_conductor_and_learning(
 
     update_progress("Setting up tools", 25);
 
-    // 4. Build ToolRegistry with essential built-in tools + MCP bridge tools
+    // 4. Build ToolRegistry with MCP bridge tools + optional built-in tools
     let mut tool_registry = ToolRegistry::empty();
 
-    // Register core built-in tools for code analysis agents
-    tool_registry.register(
-        "filesystem_tools",
-        Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
-    );
-    tool_registry.register(
-        "git_status",
-        Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
-    );
-    tool_registry.register(
-        "git_diff",
-        Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
-    );
-    tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
-    tool_registry.register(
-        "test_run",
-        Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
-    );
-    tool_registry.register(
-        "shell_exec",
-        Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
-    );
-    tool_registry.register(
-        "code_review",
-        Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
-    );
-
-    // Project additional MCP tools from external servers
+    // Project MCP tools from external servers
     let mcp_tools = mcp_registry
         .list_all_tools()
         .await
@@ -176,11 +148,40 @@ pub async fn execute_with_conductor_and_learning(
             serde_json::to_string(&tool.input_schema).unwrap_or_default()
         );
     }
+    let has_mcp_tools = !mcp_tools.is_empty();
     for tool in mcp_tools {
-        // Create bridge tool that delegates to MCP registry
         let tool_name = tool.name.clone();
         let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
         tool_registry.register(&tool_name, Box::new(bridge));
+    }
+
+    // Only register built-in code tools when no MCP servers are configured
+    if !has_mcp_tools {
+        tool_registry.register(
+            "filesystem_tools",
+            Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
+        );
+        tool_registry.register(
+            "git_status",
+            Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
+        );
+        tool_registry.register(
+            "git_diff",
+            Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
+        );
+        tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
+        tool_registry.register(
+            "test_run",
+            Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
+        );
+        tool_registry.register(
+            "shell_exec",
+            Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
+        );
+        tool_registry.register(
+            "code_review",
+            Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
+        );
     }
 
     // Register A2A mesh tools (list_agents, agent_query, send_task, get_task_status)
@@ -328,237 +329,36 @@ pub async fn execute_with_conductor_and_learning(
         images,
     });
 
-    let response = router
-        .route_with_tools_hinted(&task_content, messages, Some(&registry_arc), model_hint)
-        .await
-        .map_err(|e| format!("Router failed: {e}"))?;
+    // Transition task from Pending → Running so the dashboard shows "working"
+    let _ = conductor.start_task(hrm_task.id).await;
 
-    // Capture decision trace for attribution in learning events
-    let decision_trace = router.last_decision_trace();
-    let decision_trace_id = decision_trace.as_ref().map(|t| t.trace_id);
-    let decision_model_name = router.last_routed_model();
+    // 6. Agentic tool loop: LLM calls tools → results fed back → LLM continues
+    update_progress("Generating LLM response", 50);
 
-    info!("LLM response received, {} chars", response.content.len());
-
-    update_progress("Processing response", 60);
-
-    // Debug: show full LLM response for tool call debugging
-    if std::env::var("ARKAVO_DEBUG").is_ok() {
-        eprintln!("[LLM Response] {} chars:", response.content.len());
-        eprintln!(
-            "{}",
-            &response.content[..std::cmp::min(1000, response.content.len())]
-        );
-    }
-
-    debug!(
-        "LLM response content: {}",
-        if response.content.len() > 500 {
-            format!("{}...", &response.content[..500])
-        } else {
-            response.content.clone()
-        }
-    );
-    debug!(
-        "LLM returned {} tool calls: {:?}",
-        response.tool_calls.len(),
-        response
-            .tool_calls
-            .iter()
-            .map(|tc| format!("{}({})", tc.tool_name, tc.arguments))
-            .collect::<Vec<_>>()
-    );
-
-    // 6. Handle any tool calls returned by the LLM
-    let mut final_result = response.content.clone();
-
-    if !response.tool_calls.is_empty() {
-        let tool_count = response.tool_calls.len();
-        update_progress(&format!("Executing {tool_count} tool calls"), 70);
-        info!("Executing {tool_count} tool calls");
-
-        let mut tool_results = Vec::new();
-        let mut reward_signals: Vec<f64> = Vec::new();
-        for (step_idx, tool_call) in response.tool_calls.iter().enumerate() {
-            let args = tool_call.arguments.clone();
-            debug!(
-                "Tool call: {} with args: {}",
-                tool_call.tool_name,
-                serde_json::to_string(&args).unwrap_or_default()
-            );
-
-            let start_time = std::time::Instant::now();
-
-            // Try ToolRegistry first (includes RLM context tools), then fall back to MCP registry
-            let tool_result = if let Some(tool) = registry_arc.get(&tool_call.tool_name) {
-                tool.execute(args.clone()).await.map_err(|e| e.to_string())
-            } else {
-                // Fall back to MCP registry for external tools
-                mcp_registry
-                    .call_tool(&tool_call.tool_name, args.clone(), "hrm")
-                    .await
-                    .map_err(|e| e.to_string())
-            };
-
-            match tool_result {
-                Ok(result) => {
-                    let latency_ms = start_time.elapsed().as_millis() as u64;
-                    let result_str = serde_json::to_string(&result).unwrap_or_default();
-
-                    // Extract reward signal from game/sim results.
-                    // Negative reward means the action hurt (e.g. colonists starving)
-                    // even though the MCP call itself succeeded.
-                    let reward = extract_reward_from_result(&result_str);
-                    let tool_success = reward.is_none_or(|r| r >= 0.0);
-
-                    if let Some(r) = reward {
-                        reward_signals.push(r);
-                        if r < 0.0 {
-                            info!(
-                                "Tool {} returned negative reward {:.3} — marking as failure for learning",
-                                tool_call.tool_name, r
-                            );
-                        }
-                    } else {
-                        info!("Tool {} succeeded", tool_call.tool_name);
-                    }
-                    debug!("Tool {} result: {}", tool_call.tool_name, result_str);
-
-                    // Record in short-term tool memory
-                    if let Some(mem) = tool_memory {
-                        mem.write()
-                            .await
-                            .add(tool_call.tool_name.clone(), &args, &result_str);
-                    }
-
-                    // Emit learning event — success reflects game reward, not just MCP status
-                    if let Some(bus) = learning_bus {
-                        let event = LearningEvent::ToolCall {
-                            tool_name: tool_call.tool_name.clone(),
-                            args: args.clone(),
-                            result: result_str.clone(),
-                            success: tool_success,
-                            latency_ms,
-                            decision_trace_id,
-                            step_index: step_idx as u16,
-                            model_name: decision_model_name.clone(),
-                        };
-                        let _ = bus.sender().send(event).await;
-                    }
-
-                    tool_results.push(format!(
-                        "## Tool: {}\n{}",
-                        tool_call.tool_name,
-                        serde_json::to_string_pretty(&result).unwrap_or_default()
-                    ));
-                }
-                Err(err_str) => {
-                    let latency_ms = start_time.elapsed().as_millis() as u64;
-                    warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
-
-                    // Record failure in short-term tool memory
-                    if let Some(mem) = tool_memory {
-                        mem.write().await.add(
-                            tool_call.tool_name.clone(),
-                            &args,
-                            &format!("Error: {err_str}"),
-                        );
-                    }
-
-                    // Emit learning event for failed tool call
-                    if let Some(bus) = learning_bus {
-                        let event = LearningEvent::ToolCall {
-                            tool_name: tool_call.tool_name.clone(),
-                            args: args.clone(),
-                            result: format!("Error: {err_str}"),
-                            success: false,
-                            latency_ms,
-                            decision_trace_id,
-                            step_index: step_idx as u16,
-                            model_name: decision_model_name.clone(),
-                        };
-                        let _ = bus.sender().send(event).await;
-                    }
-
-                    // Learn tool error correction for future prompts
-                    if let Some(model_name) = router.last_routed_model() {
-                        let model_family = arkavo_router::Router::detect_model_family(&model_name);
-                        router.advisor().observe_tool_error(
-                            &model_family,
-                            &tool_call.tool_name,
-                            &err_str,
-                            &args,
-                        );
-
-                        // Record anti-pattern so routing penalizes this model+category
-                        if let Some(bus) = learning_bus {
-                            use super::anti_pattern::AntiPatternStore;
-                            let signature =
-                                AntiPatternStore::classify_failure(&tool_call.tool_name, &err_str);
-                            bus.record_human_correction(
-                                &signature,
-                                decision_trace_id,
-                                Some(&model_name),
-                            )
-                            .await;
-                        }
-                    }
-
-                    tool_results.push(format!(
-                        "## Tool: {} (Error)\n{}",
-                        tool_call.tool_name, err_str
-                    ));
-                }
-            }
-        }
-
-        if !tool_results.is_empty() {
-            final_result.push_str("\n\n## Tool Execution Results\n");
-            final_result.push_str(&tool_results.join("\n\n"));
-        }
-
-        // Corrective Thompson Sampling feedback based on actual game reward.
-        // The quality gate already recorded success + quality ~1.0 based on text format.
-        // This second signal injects the ground-truth reward so Thompson Sampling
-        // eventually demotes models that produce plausible-looking but harmful actions.
-        if !reward_signals.is_empty()
-            && let Some(model_name) = router.last_routed_model()
-        {
-            let avg_reward = reward_signals.iter().sum::<f64>() / reward_signals.len() as f64;
-            // Map reward [-1, 1] → quality [0, 1]
-            let quality = f64::midpoint(avg_reward, 1.0).clamp(0.0, 1.0);
-            let feedback = if avg_reward >= 0.0 {
-                BurstFeedback::success(uuid::Uuid::new_v4(), "reward_correction".to_string(), 0)
-                    .with_quality(quality)
-            } else {
-                BurstFeedback::failure(uuid::Uuid::new_v4(), "reward_correction".to_string(), 0)
-                    .with_quality(quality)
-            };
-            info!(
-                model = %model_name,
-                avg_reward = format!("{avg_reward:.3}").as_str(),
-                quality = format!("{quality:.3}").as_str(),
-                "Reward correction applied to Thompson Sampling"
-            );
-            router
-                .model_learning()
-                .immediate_update(&model_name, &feedback)
-                .await;
-        }
+    // Prepend agent purpose to task_content so the classifier sees domain
+    // keywords (e.g. "code quality" → CodeReview) instead of generic tick prompts.
+    let classification_content = if let Some(purpose) = system_prompt {
+        let hint = purpose.lines().next().unwrap_or(purpose);
+        format!("[Context: {hint}] {task_content}")
     } else {
-        // No tool calls = wasted tick. Penalize this model via Thompson Sampling
-        // so routing favors models that actually use the available tools.
-        warn!("LLM did not request any tool calls — penalizing model");
-        if let Some(model_name) = router.last_routed_model() {
-            let feedback =
-                BurstFeedback::failure(uuid::Uuid::new_v4(), "no_tool_call".to_string(), 0)
-                    .with_quality(0.1);
-            router
-                .model_learning()
-                .immediate_update(&model_name, &feedback)
-                .await;
-        }
-    }
+        task_content.clone()
+    };
+
+    let loop_result = super::conductor_tool_loop::run_tool_loop(
+        router,
+        &registry_arc,
+        mcp_registry,
+        &classification_content,
+        messages,
+        model_hint,
+        learning_bus,
+        tool_memory,
+    )
+    .await?;
+
+    let final_result = loop_result.final_text;
+    let decision_model_name = loop_result.decision_model_name;
+    let total_latency_ms = loop_result.total_latency_ms;
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;
@@ -598,11 +398,59 @@ pub async fn execute_with_conductor_and_learning(
             FinalTaskReport::success(hrm_task.id, contributions).with_reward(response_quality);
 
         router.model_learning().retrospective_update(&report).await;
+
+        // Feed latency into Thompson Sampling via BurstFeedback
+        let latency_feedback = arkavo_router::BurstFeedback::success(
+            hrm_task.id,
+            "general".to_string(),
+            total_latency_ms,
+        )
+        .with_quality(response_quality);
+        router
+            .model_learning()
+            .immediate_update(model_name, &latency_feedback)
+            .await;
+
+        // Wire quality into policy cache for trend tracking + guidance
+        if let Some(bus) = learning_bus {
+            bus.record_quality(model_name, "general", response_quality)
+                .await;
+
+            // Feed low-quality results into AutoLearner pain aggregation
+            if response_quality < 0.5 {
+                let desc = format!(
+                    "Task quality {:.0}% for model {model_name}",
+                    response_quality * 100.0
+                );
+                bus.report_autolearn_pain(1.0 - response_quality, model_name, &desc);
+            }
+        }
+
+        // Bypass episode buffer for critically low quality — learn immediately
+        if response_quality < 0.1
+            && let Some(bus) = learning_bus
+        {
+            use arkavo_router::learning::{Lesson, LessonPattern};
+            let warning = "Action produced 0% quality. The last approach failed completely. \
+                 Try a fundamentally different strategy next time."
+                .to_string();
+            let lesson = Lesson::new(
+                model_name.clone(),
+                "default".to_string(),
+                "general".to_string(),
+                LessonPattern::new(
+                    format!("quality dropped to {:.0}%", response_quality * 100.0),
+                    warning,
+                    "agent tries different approach".to_string(),
+                ),
+                0.9,
+                1,
+            );
+            bus.add_lesson_to_cache(lesson).await;
+        }
     }
 
     update_progress("Finalizing", 95);
-
-    info!("Task {} completed via Conductor", hrm_task.id);
 
     Ok(final_result)
 }

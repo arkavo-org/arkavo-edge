@@ -13,6 +13,7 @@ pub enum AdvisorIssue {
     WrongExpert,
     Timeout,
     ToolError,
+    NoToolCalls,
 }
 
 impl std::fmt::Display for AdvisorIssue {
@@ -23,6 +24,7 @@ impl std::fmt::Display for AdvisorIssue {
             Self::WrongExpert => write!(f, "WrongExpert"),
             Self::Timeout => write!(f, "Timeout"),
             Self::ToolError => write!(f, "ToolError"),
+            Self::NoToolCalls => write!(f, "NoToolCalls"),
         }
     }
 }
@@ -37,6 +39,7 @@ impl std::str::FromStr for AdvisorIssue {
             "WrongExpert" => Ok(Self::WrongExpert),
             "Timeout" => Ok(Self::Timeout),
             "ToolError" => Ok(Self::ToolError),
+            "NoToolCalls" => Ok(Self::NoToolCalls),
             other => Err(format!("unknown AdvisorIssue: {other}")),
         }
     }
@@ -163,9 +166,10 @@ impl PromptAdvisor {
                     // Only include code-fence and wrong-expert for simple queries
                     AdvisorIssue::UnwantedCodeFence | AdvisorIssue::WrongExpert => is_simple_query,
                     // Always include output-loop, timeout, and tool-error corrections
-                    AdvisorIssue::OutputLoop | AdvisorIssue::Timeout | AdvisorIssue::ToolError => {
-                        true
-                    }
+                    AdvisorIssue::OutputLoop
+                    | AdvisorIssue::Timeout
+                    | AdvisorIssue::ToolError
+                    | AdvisorIssue::NoToolCalls => true,
                 }
             })
             .filter(|a| {
@@ -316,6 +320,20 @@ impl PromptAdvisor {
                 model_family,
                 AdvisorIssue::WrongExpert,
                 advice_text_for(&AdvisorIssue::WrongExpert).to_string(),
+            );
+        }
+    }
+
+    /// Observe that a model produced text but made no tool calls.
+    ///
+    /// Creates a `NoToolCalls` adjustment so future prompts include an
+    /// explicit instruction to use tools.
+    pub fn observe_no_tool_calls(&self, model_family: &str, response: &str) {
+        if !response.is_empty() && !self.has_static(model_family, &AdvisorIssue::NoToolCalls) {
+            self.learn(
+                model_family,
+                AdvisorIssue::NoToolCalls,
+                advice_text_for(&AdvisorIssue::NoToolCalls).to_string(),
             );
         }
     }
@@ -495,6 +513,9 @@ fn advice_text_for(issue: &AdvisorIssue) -> &'static str {
         AdvisorIssue::Timeout => "Keep your response brief and direct.",
         AdvisorIssue::ToolError => {
             "Check tool parameter names carefully. Use exact values from previous error messages."
+        }
+        AdvisorIssue::NoToolCalls => {
+            "You MUST use tools to complete tasks. Do not just describe what you would do — call a tool NOW. Start with list_agents or filesystem_tools."
         }
     }
 }
@@ -995,6 +1016,7 @@ mod tests {
             AdvisorIssue::WrongExpert,
             AdvisorIssue::Timeout,
             AdvisorIssue::ToolError,
+            AdvisorIssue::NoToolCalls,
         ] {
             let s = issue.to_string();
             let parsed: AdvisorIssue = s.parse().unwrap();

@@ -56,6 +56,8 @@ chrono = { workspace = true }
 sha2 = { workspace = true }
 notify = { workspace = true }
 rand = { workspace = true }
+torg-core = { workspace = true }
+tokio-util = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 lru = { workspace = true }
@@ -90,6 +92,8 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh" }
 arkavo-gossip = { path = "../arkavo-gossip" }
+arkavo-autolearn = { path = "../arkavo-autolearn" }
+arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 
 # Demo dependencies

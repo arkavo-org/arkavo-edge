@@ -6,7 +6,7 @@
 //! # Four-Step Learning Cycle
 //!
 //! 1. **Pain Signal**: Anomalies from runtime monitoring or proactive boundary probing
-//! 2. **Synthesis**: Ministral-3B generates TØRG graph within Adaptive Layer constraints
+//! 2. **Synthesis**: LLM generates TØRG graph within Adaptive Layer constraints
 //! 3. **Immune Response**: Agent verifies via InvariantLayer (distrusts its own LLM)
 //! 4. **Swarm Propagation**: Verified patches broadcast via gossip; receivers verify independently
 //!
@@ -16,7 +16,7 @@
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │                       AutoLearner                                │
 //! │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
-//! │  │ PainAggregator│→│MinistralSynth │→│   ImmuneVerifier       │ │
+//! │  │ PainAggregator│→│ PolicySynth   │→│   ImmuneVerifier       │ │
 //! │  │  (signals)    │  │  (LLM)       │  │ (InvariantLayer+SAT) │ │
 //! │  └─────────────┘  └──────────────┘  └────────────────────────┘ │
 //! │                                              ↓                  │
@@ -30,7 +30,7 @@
 //! # Requirements Implemented
 //!
 //! - AUTO-001: AutoLearner orchestrator struct
-//! - AUTO-002: Ministral-3B integration for patchlet synthesis
+//! - AUTO-002: LLM integration for patchlet synthesis
 //! - AUTO-003: Anomaly → synthesis → verification → propagation loop
 //! - AUTO-004: Gossip protocol for swarm-wide patchlet distribution
 //! - AUTO-005: Zero-trust verification for remote patches
@@ -61,6 +61,7 @@ mod learner;
 mod network;
 mod patchlet;
 mod signals;
+pub mod store;
 mod synthesizer;
 mod verifier;
 
@@ -72,7 +73,8 @@ pub use network::{
 };
 pub use patchlet::{PainTrigger, Patchlet, VerificationSummary};
 pub use signals::{DEFAULT_MAX_SIGNALS, PainAggregator, PainSignal, PainSource};
-pub use synthesizer::{MinistralSynthesizer, SynthesizerConfig};
+pub use store::{AutoLearnStore, PatchRecord, PatchRecordStatus};
+pub use synthesizer::{PolicySynthesizer, SynthesizerConfig};
 pub use verifier::{
     DEFAULT_VERIFICATION_TIMEOUT_MS, ImmuneVerifier, InvariantViolation, StressStats,
     VerificationResult, VerifierConfig,
@@ -205,7 +207,7 @@ mod tests {
         let cost = ConstantCost::new(1.0);
         let ensemble = PolicyEnsemble::new(production, invariant_layer.clone(), cost);
 
-        let synthesizer = Arc::new(MinistralSynthesizer::new().unwrap());
+        let synthesizer = Arc::new(PolicySynthesizer::new().unwrap());
         let keypair = AgentKeypair::generate();
         let network = Arc::new(GossipNetworkBridge::new(
             "test-agent".to_string(),

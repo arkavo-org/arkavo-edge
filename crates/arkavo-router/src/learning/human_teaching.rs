@@ -69,9 +69,9 @@ pub fn create_instruction_lesson(
     };
 
     let pattern = LessonPattern::new(
-        instruction.to_string(),
         "human_instruction".to_string(),
-        "follow human guidance".to_string(),
+        instruction.to_string(),
+        "human".to_string(),
     );
 
     let mut lesson = Lesson::new(
@@ -502,7 +502,8 @@ ALWAYS run clippy before pushing
         assert_eq!(lesson.scope, LessonScope::Global);
         assert_eq!(lesson.tier, MemoryTier::Canonical);
         assert_eq!(lesson.confidence, 1.0);
-        assert_eq!(lesson.pattern.action, "human_instruction");
+        assert_eq!(lesson.pattern.condition, "human_instruction");
+        assert_eq!(lesson.pattern.action, "always prioritize food");
     }
 
     #[test]

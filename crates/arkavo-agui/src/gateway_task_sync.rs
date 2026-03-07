@@ -309,6 +309,11 @@ async fn poll_agent_tasks(
                         None
                     };
 
+                    let first_working_at = if ui_status == "working" || ui_status == "completed" {
+                        Some(chrono::Utc::now().to_rfc3339())
+                    } else {
+                        None
+                    };
                     let tracked = super::gateway::TrackedTask {
                         id: composite_key.clone(),
                         description: objective.to_string(),
@@ -319,7 +324,7 @@ async fn poll_agent_tasks(
                         created_at: created_at.to_string(),
                         completed_at: None,
                         task_category: None,
-                        first_working_at: None,
+                        first_working_at,
                         source: "agent".to_string(),
                         summary: summary.clone(),
                     };
@@ -341,14 +346,19 @@ async fn poll_agent_tasks(
                     // If the task already has quality data or non-zero progress,
                     // emit TaskStatusChanged so the UI gets metrics on first sync.
                     if quality_score.is_some() || progress > 0.0 {
-                        let metrics = quality_score.map(|q| crate::types::TaskMetrics {
-                            tokens_generated: 0,
-                            tokens_per_sec: 0.0,
-                            ttft_ms: 0,
-                            inference_duration_ms: 0,
-                            energy_wh: 0.0,
-                            quality_score: Some(q),
-                        });
+                        let first_working = task_store
+                            .read()
+                            .await
+                            .get(&composite_key)
+                            .and_then(|t| t.first_working_at.clone());
+                        let mut metrics = crate::gateway_routing::compute_task_metrics(
+                            created_at,
+                            &first_working,
+                            result_text.as_deref(),
+                        );
+                        if let Some(ref mut m) = metrics {
+                            m.quality_score = quality_score;
+                        }
                         let changed = AgUiEvent::TaskStatusChanged {
                             task_id: composite_key.clone(),
                             status: ui_status.clone(),
@@ -397,20 +407,41 @@ async fn poll_agent_tasks(
                             if let Some(tracked) = store.get_mut(&composite_key) {
                                 tracked.status = ui_status.clone();
                                 tracked.progress = Some(progress as f32);
+                                if ui_status == "working" && tracked.first_working_at.is_none() {
+                                    tracked.first_working_at =
+                                        Some(chrono::Utc::now().to_rfc3339());
+                                }
                                 if ui_status == "completed" || ui_status == "failed" {
                                     tracked.completed_at = Some(chrono::Utc::now().to_rfc3339());
                                 }
                             }
                         }
 
-                        let metrics = quality_score.map(|q| crate::types::TaskMetrics {
-                            tokens_generated: 0,
-                            tokens_per_sec: 0.0,
-                            ttft_ms: 0,
-                            inference_duration_ms: 0,
-                            energy_wh: 0.0,
-                            quality_score: Some(q),
-                        });
+                        let first_working = task_store
+                            .read()
+                            .await
+                            .get(&composite_key)
+                            .and_then(|t| t.first_working_at.clone());
+                        let metrics = if ui_status == "completed" || ui_status == "failed" {
+                            let mut m = crate::gateway_routing::compute_task_metrics(
+                                created_at,
+                                &first_working,
+                                result_text.as_deref(),
+                            );
+                            if let Some(ref mut met) = m {
+                                met.quality_score = quality_score;
+                            }
+                            m
+                        } else {
+                            quality_score.map(|q| crate::types::TaskMetrics {
+                                tokens_generated: 0,
+                                tokens_per_sec: 0.0,
+                                ttft_ms: 0,
+                                inference_duration_ms: 0,
+                                energy_wh: 0.0,
+                                quality_score: Some(q),
+                            })
+                        };
 
                         let changed = AgUiEvent::TaskStatusChanged {
                             task_id: composite_key.clone(),

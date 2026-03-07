@@ -61,7 +61,7 @@ async fn test_multi_round_guidance_accumulation() {
         "Round 2 should inject Round 1 failure lesson"
     );
     assert!(
-        guidance.contains("Learned behavior guidance:"),
+        guidance.contains("RULES (follow these strictly):"),
         "Should have guidance header"
     );
     assert_eq!(bus.behavior_lesson_count().await, 1);

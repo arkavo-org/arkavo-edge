@@ -1,6 +1,8 @@
 mod a2a_server;
 mod anti_pattern;
+mod autolearn_bridge;
 mod conductor;
+mod conductor_tool_loop;
 mod config_helpers;
 mod episode_buffer;
 mod event_loop;
@@ -20,6 +22,8 @@ mod tool_pattern_observer;
 mod well_known;
 
 pub use a2a_server::A2aServer;
+pub use arkavo_autolearn::PainSignal;
+pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
 pub use config_helpers::AgentMetadata;
 pub use episode_buffer::{EpisodeBuffer, ToolObservation};
@@ -28,7 +32,10 @@ pub use gossip_transport::{
     start_advisor_broadcast_loop, start_anti_entropy_loop, start_cleanup_loop,
     start_gossip_transport, start_lesson_propagation_loop,
 };
-pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
+pub use learning_bus::{
+    BehaviorAdvice, LearningBus, LearningBusStats, LearningConfig, LearningEvent,
+    LearningPipelineReporter,
+};
 pub use mcp_bridge::McpBridgeTool;
 pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};

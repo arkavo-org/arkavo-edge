@@ -12,8 +12,9 @@ pub mod server;
 
 // Re-export commonly used types
 pub use server::{
-    A2aServer, AgentGoal, AgentMetadata, AgentPlan, BehaviorAdvice, EpisodeBuffer, GoalStatus,
-    LearningBus, LearningConfig, LearningEvent, McpBridgeTool, PolicyCache, RlmBridge, ToolMemory,
+    A2aServer, AgentGoal, AgentMetadata, AgentPlan, AutoLearnBridge, BehaviorAdvice, EpisodeBuffer,
+    GoalStatus, LearningBus, LearningBusStats, LearningConfig, LearningEvent,
+    LearningPipelineReporter, McpBridgeTool, PainSignal, PolicyCache, RlmBridge, ToolMemory,
     ToolMemoryEntry, ToolObservation, ToolPatternCache, ToolPatternObserver, WellKnownState,
     estimate_tokens, execute_with_conductor, execute_with_conductor_and_learning,
     model_context_size, run_startup_planning_phase, start_advisor_broadcast_loop,

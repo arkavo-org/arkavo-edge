@@ -53,7 +53,7 @@ impl HealthMonitor {
                 check_interval.tick().await;
 
                 if let Err(e) = self.run_health_check(&event_tx).await {
-                    eprintln!("Health check error: {e}");
+                    tracing::warn!("Health check error: {e}");
                 }
             }
         });
@@ -96,7 +96,7 @@ impl HealthMonitor {
         match self.llm_based_analysis(health_data).await {
             Ok(analysis) => Ok(analysis),
             Err(e) => {
-                eprintln!("LLM analysis failed: {e}, falling back to rule-based");
+                tracing::debug!("LLM analysis unavailable: {e}, using rule-based");
                 Ok(Self::rule_based_analysis_impl(health_data))
             }
         }
@@ -278,27 +278,22 @@ JSON:"#,
     async fn execute_auto_action(&self, action: &str) -> Result<()> {
         match action {
             "retry_api_connection" => {
-                // Trigger reconnection logic
-                println!("Auto-action: Retrying API connection");
+                tracing::info!(
+                    action = "retry_api_connection",
+                    "Health auto-action: retrying API"
+                );
+                if let Some(tool) = self.tool_registry.get("get_system_health") {
+                    let _ = tool.execute(serde_json::json!({})).await;
+                }
             }
-            "switch_to_local_model" => {
-                // Signal router to prefer local models temporarily
-                println!("Auto-action: Switching to local model");
+            "switch_to_local_model"
+            | "reconnect_websocket"
+            | "clear_queue"
+            | "throttle_requests" => {
+                tracing::info!(action, "Health auto-action: handled by existing subsystems");
             }
-            "reconnect_websocket" => {
-                // Trigger WebSocket reconnection
-                println!("Auto-action: Reconnecting WebSocket");
-            }
-            "clear_queue" => {
-                // Clear stale items from queues
-                println!("Auto-action: Clearing stale queue items");
-            }
-            "throttle_requests" => {
-                // Apply rate limiting
-                println!("Auto-action: Throttling requests");
-            }
-            _ => {
-                println!("Auto-action not implemented: {action}");
+            other => {
+                tracing::debug!(action = other, "Health auto-action: unrecognized");
             }
         }
         Ok(())

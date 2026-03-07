@@ -55,6 +55,8 @@ pub struct GossipNetworkBridge {
     protocol: GossipProtocol,
     /// Our keypair for signing
     keypair: AgentKeypair,
+    /// Agent identity for announcements
+    agent_id: String,
     /// Channel sender for outgoing messages
     outbox_tx: mpsc::Sender<GossipMessage>,
     /// Channel receiver for outgoing messages (for transport to consume)
@@ -71,7 +73,7 @@ impl GossipNetworkBridge {
         let mut key_registry = KeyRegistry::new();
         key_registry.register(agent_id.clone(), keypair.public_key().clone());
 
-        let protocol = GossipProtocol::new(agent_id, config.gossip.clone(), key_registry);
+        let protocol = GossipProtocol::new(agent_id.clone(), config.gossip.clone(), key_registry);
 
         let (outbox_tx, outbox_rx) = mpsc::channel(config.outbox_buffer);
         let (patch_tx, patch_rx) = mpsc::channel(config.inbox_buffer);
@@ -79,6 +81,7 @@ impl GossipNetworkBridge {
         Self {
             protocol,
             keypair,
+            agent_id,
             outbox_tx,
             outbox_rx: Some(outbox_rx),
             patch_tx,
@@ -228,10 +231,7 @@ impl GossipNetworkBridge {
 
     /// Get agent ID
     fn agent_id(&self) -> &str {
-        // The protocol stores the agent_id but doesn't expose it,
-        // so we derive it from the keypair public key hash
-        // In practice, this would be stored separately
-        "local-agent"
+        &self.agent_id
     }
 }
 
@@ -383,6 +383,42 @@ mod tests {
         // Verify peer was added
         bridge.add_peer("peer-1".to_string()).await;
         assert_eq!(bridge.peer_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_agent_id_from_constructor() {
+        let keypair = AgentKeypair::generate();
+        let bridge = GossipNetworkBridge::new(
+            "my-custom-agent".to_string(),
+            keypair,
+            NetworkConfig::default(),
+        );
+
+        assert_eq!(bridge.agent_id(), "my-custom-agent");
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_patch_originator() {
+        let keypair = AgentKeypair::generate();
+        let mut bridge = GossipNetworkBridge::new(
+            "originator-agent".to_string(),
+            keypair,
+            NetworkConfig::default(),
+        );
+
+        let mut outbox = bridge.take_outbox().unwrap();
+        let patchlet = create_test_patchlet();
+        bridge.broadcast_patch(&patchlet).await.unwrap();
+
+        let msg = outbox.recv().await.unwrap();
+        if let GossipMessage::PatchAnnounce(announcement) = msg {
+            assert_eq!(
+                announcement.originator, "originator-agent",
+                "Announcement originator should match agent_id passed to constructor"
+            );
+        } else {
+            panic!("Expected PatchAnnounce message");
+        }
     }
 
     #[tokio::test]
