@@ -291,6 +291,25 @@ impl ToolRegistry {
         self.tools.insert(name.to_string(), tool);
     }
 
+    /// Register a `search_tools` meta-tool that lets the model discover tools by keyword.
+    ///
+    /// Call this after all other tools are registered so the search tool has a complete
+    /// snapshot of the tool catalog.
+    pub fn register_search_tool(&mut self) {
+        let catalog: Vec<(String, String)> = self
+            .tools
+            .values()
+            .map(|t| {
+                let s = t.schema();
+                (s.name.clone(), s.description.clone())
+            })
+            .collect();
+        self.tools.insert(
+            "search_tools".to_string(),
+            Box::new(SearchToolsTool { catalog }),
+        );
+    }
+
     /// Check if a binary is available in PATH
     fn is_binary_available(name: &str) -> bool {
         std::process::Command::new(name)
@@ -620,6 +639,77 @@ impl ToolRegistry {
 // Note: Default cannot be implemented for ToolRegistry since it requires async storage initialization.
 // Use ToolRegistry::new(storage) or ToolRegistry::empty() instead.
 
+/// Meta-tool that lets the model search for available tools by keyword.
+///
+/// Stores a snapshot of tool names and descriptions taken at registration time.
+/// The model can call this tool mid-conversation to discover tools it needs.
+struct SearchToolsTool {
+    catalog: Vec<(String, String)>,
+}
+
+#[async_trait::async_trait]
+impl Tool for SearchToolsTool {
+    async fn execute(&self, params: serde_json::Value) -> crate::Result<serde_json::Value> {
+        let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
+
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut matches: Vec<&(String, String)> = if query_words.is_empty() {
+            self.catalog.iter().collect()
+        } else {
+            self.catalog
+                .iter()
+                .filter(|(name, desc)| {
+                    let name_l = name.to_lowercase();
+                    let desc_l = desc.to_lowercase();
+                    query_words
+                        .iter()
+                        .any(|w| name_l.contains(w) || desc_l.contains(w))
+                })
+                .collect()
+        };
+
+        // Limit results to avoid overwhelming the model
+        matches.truncate(10);
+
+        let results: Vec<serde_json::Value> = matches
+            .iter()
+            .map(|(name, desc)| serde_json::json!({"name": name, "description": desc}))
+            .collect();
+
+        Ok(serde_json::json!({
+            "tools": results,
+            "total_available": self.catalog.len(),
+        }))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| {
+            ToolSchema {
+            name: "search_tools".to_string(),
+            aliases: Some(vec![
+                "find_tools".to_string(),
+                "list_tools".to_string(),
+                "discover_tools".to_string(),
+            ]),
+            description: "Search for available tools by keyword. Returns matching tool names and descriptions.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keyword to search for (e.g., 'file', 'github', 'security')"
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+        });
+        &SCHEMA
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
@@ -828,5 +918,42 @@ mod tests {
         let json = serde_json::to_string(&level).unwrap();
         let deserialized: DetailLevel = serde_json::from_str(&json).unwrap();
         assert_eq!(level, deserialized);
+    }
+
+    #[tokio::test]
+    async fn test_search_tools_tool() {
+        let mut registry = create_test_registry().await;
+        registry.register_search_tool();
+
+        let tool = registry
+            .get("search_tools")
+            .expect("search_tools registered");
+        let result = tool
+            .execute(serde_json::json!({"query": "time"}))
+            .await
+            .unwrap();
+
+        let tools = result.get("tools").unwrap().as_array().unwrap();
+        assert!(!tools.is_empty());
+        assert!(
+            tools
+                .iter()
+                .any(|t| t.get("name").unwrap().as_str().unwrap().contains("time"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_tools_tool_empty_query() {
+        let mut registry = create_test_registry().await;
+        registry.register_search_tool();
+
+        let tool = registry.get("search_tools").unwrap();
+        let result = tool
+            .execute(serde_json::json!({"query": ""}))
+            .await
+            .unwrap();
+
+        let total = result.get("total_available").unwrap().as_u64().unwrap();
+        assert!(total > 0);
     }
 }

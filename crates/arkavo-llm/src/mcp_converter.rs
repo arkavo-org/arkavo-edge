@@ -400,41 +400,73 @@ impl McpConverter {
         }
         prompt.push('\n');
 
-        // Add concrete examples for each tool
+        // Add concrete, schema-derived examples for each tool
         prompt.push_str("Examples:\n");
         for tool in tools.iter().take(3) {
-            let _ = writeln!(prompt, "```{}", tool.name);
-            if let Some(props) = tool.schema.get("properties").and_then(|p| p.as_object()) {
-                let required: Vec<&str> = tool
-                    .schema
-                    .get("required")
-                    .and_then(|r| r.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                    .unwrap_or_default();
-
-                // Show required params with realistic example values
-                for (name, _prop) in props.iter() {
-                    if required.contains(&name.as_str()) {
-                        let example = match name.as_str() {
-                            "location" => "Tokyo",
-                            "path" | "file_path" => "/tmp/file.txt",
-                            "query" => "search term",
-                            "url" => "https://example.com",
-                            "command" => "ls -la",
-                            "message" | "text" | "content" => "Hello world",
-                            "x" | "y" | "z" => "100",
-                            _ => "value",
-                        };
-                        let _ = writeln!(prompt, "{name}: {example}");
-                    }
-                }
-            }
-            prompt.push_str("```\n");
+            let example = crate::example_generator::generate_fence_example(tool);
+            prompt.push_str(&example);
+            prompt.push('\n');
         }
 
         prompt.push_str("\nRespond with ONLY the code fence when using a tool.\n");
 
         prompt
+    }
+
+    /// Convert MCP ToolInfo to fence prompt with detail level for model size adaptation.
+    ///
+    /// - `NameOnly`: Minimal prompt for sub-1B models (names + 1 generic example)
+    /// - `NameAndDescription`: Names, descriptions, required param names (no types/JSON)
+    /// - `FullSchema`: Full prompt with schemas and per-tool examples
+    pub fn to_fence_prompt_distilled(
+        tools: &[ToolInfo],
+        detail: arkavo_mcp_tools::DetailLevel,
+    ) -> String {
+        use arkavo_mcp_tools::DetailLevel;
+
+        if tools.is_empty() {
+            return String::new();
+        }
+
+        match detail {
+            DetailLevel::FullSchema => Self::to_fence_prompt(tools),
+            DetailLevel::NameAndDescription => {
+                let mut prompt =
+                    String::from("\n\nYou have tools. Call them using code fences.\n\nTools:\n");
+                for tool in tools {
+                    let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
+                }
+                prompt.push_str("\nRequired parameters:\n");
+                for tool in tools {
+                    let required: Vec<&str> = tool
+                        .schema
+                        .get("required")
+                        .and_then(|r| r.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                        .unwrap_or_default();
+                    if !required.is_empty() {
+                        let _ = writeln!(prompt, "- {}: {}", tool.name, required.join(", "));
+                    }
+                }
+                // Single example from first tool
+                if let Some(tool) = tools.first() {
+                    prompt.push_str("\nExample:\n");
+                    let example = crate::example_generator::generate_fence_example(tool);
+                    prompt.push_str(&example);
+                    prompt.push('\n');
+                }
+                prompt.push_str("\nRespond with ONLY the code fence when using a tool.\n");
+                prompt
+            }
+            DetailLevel::NameOnly => {
+                let mut prompt =
+                    String::from("\n\nYou have tools. Call them using code fences.\n\nTools: ");
+                let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+                prompt.push_str(&names.join(", "));
+                prompt.push_str("\n\nFormat:\n```<tool>\n<param>: <value>\n```\n\nRespond with ONLY the code fence when using a tool.\n");
+                prompt
+            }
+        }
     }
 
     /// Convert MCP ToolInfo to prompt format based on specified format

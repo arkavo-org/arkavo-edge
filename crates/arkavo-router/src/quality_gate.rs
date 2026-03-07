@@ -257,13 +257,13 @@ impl super::Router {
                         .await;
 
                     if attempt + 1 < MAX_RETRIES {
-                        // RL FEEDBACK: Inject validation error back into conversation
-                        // so the model can learn the correct format and retry
+                        // RL FEEDBACK: Inject specific validation error with actionable fix
+                        let available_tool_names: Vec<&str> =
+                            tool_infos.iter().map(|t| t.name.as_str()).collect();
+                        let fix = validation_error.fix_suggestion(&available_tool_names);
                         let feedback_msg = Message {
                             role: Role::User,
-                            content: format!(
-                                "ERROR: {validation_error}\n\nYou MUST include ALL required parameters inside the fence. Example:\n```tool_name\nparam1: value1\nparam2: value2\n```\nTry again with the correct parameters.",
-                            ),
+                            content: format!("ERROR: {validation_error}\n\nFix: {fix}"),
                             images: None,
                         };
                         feedback_messages.push(feedback_msg);

@@ -14,4 +14,6 @@ pub mod terminal;
 pub mod terminal_ui;
 #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
 pub mod test;
+#[cfg(feature = "llama-cpp")]
+pub mod tool_bench;
 pub mod ui;

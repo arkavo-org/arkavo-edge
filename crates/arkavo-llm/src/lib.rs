@@ -6,6 +6,7 @@ pub mod config;
 pub mod context_pool;
 pub mod conversation_context;
 pub mod error;
+pub mod example_generator;
 pub mod image;
 pub mod mcp_converter;
 pub mod message;
@@ -20,6 +21,7 @@ pub mod stream;
 pub mod stream_adapter;
 pub mod stream_model;
 pub mod tool_executor;
+pub mod tool_grammar;
 pub mod tool_parser;
 
 pub use chat::ChatRequest;
@@ -55,7 +57,7 @@ mod gemini_adapter;
 pub use gemini_adapter::GeminiProvider;
 
 #[cfg(feature = "llama-cpp")]
-mod llamacpp_provider;
+pub mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
 #[cfg(all(feature = "llama-cpp", target_env = "musl"))]

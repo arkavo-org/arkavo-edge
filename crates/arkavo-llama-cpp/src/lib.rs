@@ -1164,6 +1164,73 @@ impl LlamaSampler {
         }
     }
 
+    /// Add a GBNF grammar sampler to constrain token generation to valid syntax.
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_grammar(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+        let grammar_sampler = unsafe {
+            ffi::llama_sampler_init_grammar(vocab, grammar_cstr.as_ptr(), root_cstr.as_ptr())
+        };
+        if !grammar_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
+    /// Add a lazy grammar sampler that only activates when a trigger pattern is detected.
+    ///
+    /// This allows the model to output free text until it starts a tool call (e.g., "```"),
+    /// at which point the grammar constrains output to valid syntax.
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_grammar_lazy(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+        trigger_patterns: &[&str],
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+        let pattern_cstrings: Vec<CString> = trigger_patterns
+            .iter()
+            .filter_map(|p| CString::new(*p).ok())
+            .collect();
+        let mut pattern_ptrs: Vec<*const std::os::raw::c_char> =
+            pattern_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+
+        let grammar_sampler = unsafe {
+            ffi::llama_sampler_init_grammar_lazy_patterns(
+                vocab,
+                grammar_cstr.as_ptr(),
+                root_cstr.as_ptr(),
+                pattern_ptrs.as_mut_ptr(),
+                pattern_ptrs.len(),
+                std::ptr::null(),
+                0,
+            )
+        };
+        if !grammar_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
         unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }

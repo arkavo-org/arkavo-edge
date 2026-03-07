@@ -28,6 +28,10 @@ pub struct SamplingConfig {
     pub debug: bool,
     /// Tool call format for local models (default: Fence for best small model reliability)
     pub tool_format: LocalToolFormat,
+    /// Optional GBNF grammar for constrained tool call decoding
+    pub grammar: Option<String>,
+    /// Trigger patterns for lazy grammar activation (e.g., "```")
+    pub grammar_triggers: Option<Vec<String>>,
 }
 
 impl Default for SamplingConfig {
@@ -40,6 +44,8 @@ impl Default for SamplingConfig {
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
+            grammar: None,
+            grammar_triggers: None,
         }
     }
 }
@@ -371,6 +377,8 @@ impl LlamaCppProvider {
             seed: self.config.seed,
             use_dry_sampling,
             model_format: format,
+            grammar: self.config.grammar.clone(),
+            grammar_triggers: self.config.grammar_triggers.clone(),
         };
 
         tokio::spawn(async move {
@@ -405,6 +413,8 @@ impl LlamaCppProvider {
             seed: self.config.seed,
             use_dry_sampling,
             model_format: format,
+            grammar: None,
+            grammar_triggers: None,
         };
 
         tokio::spawn(async move {
@@ -518,6 +528,8 @@ impl Provider for LlamaCppProvider {
         let format = detect_model_format(&self.name);
         let is_glm = matches!(format, ModelFormat::GLM4);
 
+        let mut tool_grammar: Option<(String, Vec<String>)> = None;
+
         let system_prompt = if let Some(tools_value) = tools.as_ref() {
             let tools_array = tools_value
                 .as_array()
@@ -534,6 +546,22 @@ impl Provider for LlamaCppProvider {
                     })
                 })
                 .collect();
+
+            // Generate GBNF grammar for fence-format tool calls when explicitly enabled.
+            // Grammar enforcement is opt-in via SamplingConfig because lazy grammar
+            // triggers can cause crashes on some model/quant combinations.
+            if self.config.grammar.is_some()
+                && matches!(self.config.tool_format, LocalToolFormat::Fence)
+                && !tool_infos.is_empty()
+            {
+                let (grammar, _root) =
+                    crate::tool_grammar::fence_grammar_after_trigger(&tool_infos);
+                let triggers: Vec<String> = crate::tool_grammar::fence_trigger_patterns()
+                    .into_iter()
+                    .map(String::from)
+                    .collect();
+                tool_grammar = Some((grammar, triggers));
+            }
 
             // Use GLM-specific prompt that emphasizes tools are optional
             if is_glm {
@@ -569,10 +597,34 @@ impl Provider for LlamaCppProvider {
             }
         }
 
-        // For GLM with tools, use lower temperature (0.15) for more reliable tool calling
-        let raw_content = if is_glm && tools.is_some() {
+        // Model-specific temperature tuning for tool calling reliability
+        let tool_temperature = if tools.is_some() {
+            let name_lower = self.name.to_lowercase();
+            if is_glm {
+                Some(0.15)
+            } else if name_lower.contains("0.6b")
+                || name_lower.contains("0.8b")
+                || name_lower.contains("270m")
+            {
+                Some(0.1) // Near-greedy for tiny models
+            } else if name_lower.contains("3b") || name_lower.contains("4b") {
+                Some(0.2)
+            } else {
+                None // Keep default for 8B+
+            }
+        } else {
+            None
+        };
+
+        let raw_content = if tool_temperature.is_some() || tool_grammar.is_some() {
             let mut config = self.config.clone();
-            config.temperature = 0.15;
+            if let Some(temp) = tool_temperature {
+                config.temperature = temp;
+            }
+            if let Some((grammar, triggers)) = tool_grammar {
+                config.grammar = Some(grammar);
+                config.grammar_triggers = Some(triggers);
+            }
             let custom_provider = Self {
                 model: self.model.clone(),
                 registry: self.registry.clone(),

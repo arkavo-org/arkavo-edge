@@ -127,6 +127,10 @@ pub(crate) struct StreamingConfig {
     pub use_dry_sampling: bool,
     /// Model format for stop-sequence detection (prevents self-prompting)
     pub model_format: ModelFormat,
+    /// Optional GBNF grammar for constrained decoding (tool calling)
+    pub grammar: Option<String>,
+    /// Trigger patterns for lazy grammar activation (e.g., "```")
+    pub grammar_triggers: Option<Vec<String>>,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -216,6 +220,23 @@ pub(crate) async fn generate_tokens_with_context(
             create_sampler_chain(config.temperature, config.top_p, config.top_k, config.seed)
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
+
+        // Add grammar sampler for constrained decoding of tool calls
+        if let Some(ref grammar_str) = config.grammar {
+            let vocab = model.get_vocab();
+            if let Some(ref triggers) = config.grammar_triggers {
+                let trigger_refs: Vec<&str> = triggers.iter().map(|s| s.as_str()).collect();
+                unsafe {
+                    sampler.add_grammar_lazy(vocab, grammar_str, "root", &trigger_refs);
+                }
+                tracing::debug!("Grammar sampler added (lazy, triggers: {triggers:?})");
+            } else {
+                unsafe {
+                    sampler.add_grammar(vocab, grammar_str, "root");
+                }
+                tracing::debug!("Grammar sampler added (strict)");
+            }
+        }
 
         let eos_token = model.get_eos_token();
         if is_debug() {
