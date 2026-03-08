@@ -49,6 +49,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -72,6 +73,7 @@ pub async fn execute_with_conductor_and_learning(
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     model_hint: Option<&arkavo_router::ModelChoice>,
     images: Option<Vec<String>>,
+    compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -376,7 +378,7 @@ pub async fn execute_with_conductor_and_learning(
         model_hint,
         learning_bus,
         tool_memory,
-        None, // compute_budget: enforced at orchestrator tick level
+        compute_budget,
     )
     .await?;
 
@@ -406,7 +408,7 @@ pub async fn execute_with_conductor_and_learning(
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;
-    let quality_category = if loop_result.tool_call_count > 0 && task_content.contains("sim_step") {
+    let quality_category = if loop_result.tool_call_count > 0 && task_content.contains("game-rl") {
         "game_simulation"
     } else {
         "general"

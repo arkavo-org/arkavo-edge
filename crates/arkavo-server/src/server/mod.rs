@@ -265,6 +265,14 @@ pub trait A2aRpc {
     /// Health check (proxied from GET /health)
     #[method(name = "health")]
     async fn health(&self) -> RpcResult<serde_json::Value>;
+
+    /// Get compute budget status for telemetry monitoring
+    #[method(name = "budget.compute_status")]
+    async fn budget_compute_status(&self) -> RpcResult<serde_json::Value>;
+
+    /// Get process-level system metrics (RSS, CPU) for per-agent observability
+    #[method(name = "system.metrics")]
+    async fn system_metrics(&self) -> RpcResult<serde_json::Value>;
 }
 
 pub struct A2aRpcImpl {
@@ -295,6 +303,8 @@ pub struct A2aRpcImpl {
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
+    /// Per-agent compute budget (specialists check before each tick)
+    pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -446,6 +456,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.learning_bus.as_ref(),
             self.budget_manager.as_ref(),
             self.model_hint.clone(),
+            &self.compute_budget,
             request,
         )
         .await
@@ -955,5 +966,58 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn health(&self) -> RpcResult<serde_json::Value> {
         Ok(serde_json::json!({"status": "ok"}))
+    }
+
+    async fn budget_compute_status(&self) -> RpcResult<serde_json::Value> {
+        let budget = self.compute_budget.read().await;
+        let snapshot = budget.snapshot();
+        let agent_meta = self.agent_metadata.read().await;
+        let agent_id = agent_meta.name.clone();
+        drop(agent_meta);
+        drop(budget);
+
+        serde_json::to_value(serde_json::json!({
+            "agent_id": agent_id,
+            "compute_budget": snapshot,
+        }))
+        .map_err(|e| {
+            ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
+        })
+    }
+
+    async fn system_metrics(&self) -> RpcResult<serde_json::Value> {
+        use sysinfo::{Pid, System};
+        let pid = std::process::id();
+        let mut sys = System::new();
+        sys.refresh_memory();
+        sys.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            sysinfo::ProcessRefreshKind::nothing()
+                .with_memory()
+                .with_cpu(),
+        );
+        let (rss_mb, cpu_percent) = if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+            (
+                proc.memory() as f64 / (1024.0 * 1024.0),
+                proc.cpu_usage() as f64,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let total_ram_mb = sys.total_memory() as f64 / (1024.0 * 1024.0);
+        let available_ram_mb = sys.available_memory() as f64 / (1024.0 * 1024.0);
+        let agent_meta = self.agent_metadata.read().await;
+        let agent_id = agent_meta.name.clone();
+        drop(agent_meta);
+
+        Ok(serde_json::json!({
+            "agent_id": agent_id,
+            "rss_mb": rss_mb,
+            "cpu_percent": cpu_percent,
+            "pid": pid,
+            "total_ram_mb": total_ram_mb,
+            "available_ram_mb": available_ram_mb,
+        }))
     }
 }

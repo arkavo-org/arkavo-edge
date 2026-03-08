@@ -254,6 +254,7 @@ async fn execute_subtask(
         model_hint,
         learning_bus,
         tool_memory,
+        None, // compute_budget: planner doesn't enforce per-iteration budget
     )
     .await
     {

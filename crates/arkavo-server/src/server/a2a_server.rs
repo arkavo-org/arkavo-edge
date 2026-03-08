@@ -921,6 +921,7 @@ impl A2aServer {
                             None,
                             model_hint.as_ref(),
                             None,
+                            None,
                         )
                         .await
                         {
@@ -1274,6 +1275,7 @@ impl A2aServer {
             .unwrap_or(false);
         let loop_metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
         let total_ram_bytes = self.total_ram_bytes;
+        let self_agent_id = self.agent_metadata.read().await.name.clone();
         let commander_model = self.agent_metadata.read().await.model.clone();
 
         info!("Starting orchestrator loop (observe → plan → act)");
@@ -1408,6 +1410,13 @@ impl A2aServer {
                 info!("Orchestrator tick {tick}: executing cycle");
                 let start = std::time::Instant::now();
 
+                // Commander (has MCP tools) never gates on compute budget —
+                // it allocates budgets to others. Specialists gate via messaging handler.
+                let tool_loop_budget = if has_mcp_tools {
+                    None
+                } else {
+                    Some(&compute_budget)
+                };
                 match super::conductor::execute_with_conductor_and_learning(
                     &conductor,
                     &router,
@@ -1421,6 +1430,7 @@ impl A2aServer {
                     Some(&mesh_state),
                     model_hint.as_ref(),
                     None,
+                    tool_loop_budget,
                 )
                 .await
                 {
@@ -1455,6 +1465,7 @@ impl A2aServer {
                                 .map(|v| v.to_string())
                                 .unwrap_or_default();
                             let cmd_model = commander_model.clone();
+                            let own_id = self_agent_id.clone();
                             tokio::spawn(async move {
                                 // Re-discover peers in case new specialists joined
                                 mesh.discover_peers().await;
@@ -1465,9 +1476,16 @@ impl A2aServer {
                                     peer_count,
                                 );
                                 if !data.is_empty() {
-                                    broadcast_state_to_peers(&mesh, &data, per_agent_bytes).await;
+                                    broadcast_state_to_peers(
+                                        &mesh,
+                                        &data,
+                                        per_agent_bytes,
+                                        &own_id,
+                                    )
+                                    .await;
                                 } else {
-                                    refresh_specialist_budgets(&mesh, per_agent_bytes).await;
+                                    refresh_specialist_budgets(&mesh, per_agent_bytes, &own_id)
+                                        .await;
                                 }
                             });
                             last_broadcast_tick = tick;
@@ -1654,12 +1672,14 @@ fn compute_per_agent_bytes_static(total_ram: u64, commander_model: &str, count: 
 async fn refresh_specialist_budgets(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
     per_agent_bytes: u64,
+    self_agent_id: &str,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
         .read()
         .await
         .keys()
+        .filter(|id| id.as_str() != self_agent_id)
         .cloned()
         .collect();
 
@@ -1701,12 +1721,14 @@ async fn broadcast_state_to_peers(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
     observation: &str,
     per_agent_bytes: u64,
+    self_agent_id: &str,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
         .read()
         .await
         .keys()
+        .filter(|id| id.as_str() != self_agent_id)
         .cloned()
         .collect();
 
@@ -1869,7 +1891,7 @@ mod broadcast_tests {
     #[tokio::test]
     async fn test_broadcast_skips_when_no_peers() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0).await;
+        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0, "self").await;
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
@@ -1885,7 +1907,7 @@ mod broadcast_tests {
             .await
             .insert("peer-b".to_string(), "http://127.0.0.1:19998".to_string());
 
-        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0).await;
+        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0, "self").await;
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 

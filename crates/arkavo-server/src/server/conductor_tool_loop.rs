@@ -68,10 +68,10 @@ pub(super) async fn run_tool_loop(
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
         let timeout_secs = if context_tokens <= 2000 {
-            30u64
+            45u64
         } else {
             let extra = ((context_tokens - 2000) / 500) as u64;
-            (30 + extra).min(60)
+            (45 + extra).min(90)
         };
 
         let response = match tokio::time::timeout(

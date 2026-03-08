@@ -29,6 +29,7 @@ pub async fn handle_message_send(
     learning_bus: Option<&Arc<LearningBus>>,
     budget_manager: Option<&Arc<arkavo_budget::BudgetManager>>,
     model_hint: Option<arkavo_router::ModelChoice>,
+    compute_budget: &arkavo_budget::SharedComputeBudget,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -125,6 +126,23 @@ pub async fn handle_message_send(
         }
     }
 
+    // Extract budget allocation from task metadata and refresh compute budget
+    if let Some(metadata) = &request.message.metadata
+        && let Some(alloc_value) = metadata.get("budget_allocation")
+        && let Ok(allocation) =
+            serde_json::from_value::<arkavo_budget::BudgetAllocation>(alloc_value.clone())
+    {
+        let mut budget = compute_budget.write().await;
+        budget.refresh(&allocation);
+        metrics.record_compute_budget_refresh();
+        let snapshot = budget.snapshot();
+        metrics.record_compute_budget_state(
+            &snapshot.status,
+            snapshot.remaining_inferences,
+            snapshot.remaining_tokens,
+        );
+    }
+
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {
             if let Some(router) = router {
@@ -135,6 +153,7 @@ pub async fn handle_message_send(
                 let task_store = task_store.clone();
                 let task_id_clone = task_id;
                 let learning_bus = learning_bus.cloned();
+                let compute_budget = compute_budget.clone();
 
                 tokio::spawn(async move {
                     if let Err(e) = task_executor
@@ -160,6 +179,7 @@ pub async fn handle_message_send(
                         None,
                         model_hint.as_ref(),
                         images,
+                        Some(&compute_budget),
                     )
                     .await
                     {

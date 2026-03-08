@@ -58,6 +58,9 @@ pub struct PendingDelegation {
 pub struct CompletedDelegation {
     pub agent_id: String,
     pub response: String,
+    pub response_latency_ms: u64,
+    /// Budget snapshot from the specialist (if available)
+    pub budget_snapshot: Option<arkavo_budget::ComputeBudgetSnapshot>,
 }
 
 /// Shared state for mesh tools
@@ -105,14 +108,30 @@ impl MeshToolsState {
 
             match fetch_task_result(&delegation).await {
                 Ok(Some(response)) => {
-                    tracing::info!(
-                        agent_id = %delegation.agent_id,
-                        response_len = response.len(),
-                        "Specialist response pre-fetched"
-                    );
+                    let latency_ms = delegation.sent_at.elapsed().as_millis() as u64;
+                    // Fetch budget snapshot from specialist for feedback to commander
+                    let budget_snapshot =
+                        fetch_budget_snapshot(&delegation.address, &delegation.agent_id).await;
+                    if let Some(ref snap) = budget_snapshot {
+                        tracing::info!(
+                            agent_id = %delegation.agent_id,
+                            response_len = response.len(),
+                            remaining_inferences = snap.remaining_inferences,
+                            status = %snap.status,
+                            "Specialist response pre-fetched with budget feedback"
+                        );
+                    } else {
+                        tracing::info!(
+                            agent_id = %delegation.agent_id,
+                            response_len = response.len(),
+                            "Specialist response pre-fetched (no budget data)"
+                        );
+                    }
                     completed.push(CompletedDelegation {
                         agent_id: delegation.agent_id,
                         response,
+                        response_latency_ms: latency_ms,
+                        budget_snapshot,
                     });
                 }
                 Ok(None) => {
@@ -132,6 +151,24 @@ impl MeshToolsState {
 
         *pending = still_pending;
         completed
+    }
+}
+
+impl MeshToolsState {
+    /// Trigger mDNS discovery to populate agent_addresses.
+    ///
+    /// Called by the orchestrator loop so broadcast/budget-refresh
+    /// can reach specialists without waiting for the LLM to call send_task.
+    pub async fn discover_peers(&self) {
+        match discover_and_register_agents(self).await {
+            Ok(()) => {
+                let count = self.agent_addresses.read().await.len();
+                tracing::info!(count, "Peer discovery complete");
+            }
+            Err(e) => {
+                tracing::debug!("Peer discovery failed: {e}");
+            }
+        }
     }
 }
 
@@ -457,17 +494,24 @@ impl Tool for SendTaskTool {
             .await
             .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
 
-        // Build message
+        // Build message with budget allocation for specialist compute control
+        let default_budget = arkavo_budget::BudgetAllocation::default();
+        let mut final_metadata = metadata.unwrap_or_else(|| {
+            json!({
+                "source": "orchestrator",
+                "task_type": "delegated"
+            })
+        });
+        if final_metadata.get("budget_allocation").is_none() {
+            final_metadata["budget_allocation"] =
+                serde_json::to_value(&default_budget).unwrap_or_default();
+        }
+
         let message = Message {
             parts: vec![MessagePart::Text {
                 content: task.to_string(),
             }],
-            metadata: metadata.or_else(|| {
-                Some(json!({
-                    "source": "orchestrator",
-                    "task_type": "delegated"
-                }))
-            }),
+            metadata: Some(final_metadata),
         };
 
         let send_request = MessageSendRequest {
@@ -751,6 +795,39 @@ async fn fetch_task_result(
             }
         }
         A2aResponse::Error { error, .. } => Err(format!("{}: {}", error.code, error.message)),
+    }
+}
+
+/// Fetch compute budget snapshot from a specialist agent via JSON-RPC.
+async fn fetch_budget_snapshot(
+    address: &str,
+    agent_id: &str,
+) -> Option<arkavo_budget::ComputeBudgetSnapshot> {
+    let transport_config = TransportConfig {
+        timeout_ms: 3000,
+        max_retries: 0,
+        tls_config: TlsConfig {
+            require_tls: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let transport = Arc::new(HttpTransport::new(transport_config).ok()?);
+    let endpoint = A2aEndpoint {
+        url: address.to_string(),
+        agent_id: agent_id.to_string(),
+        public_key: None,
+    };
+
+    transport.connect(&endpoint).await.ok()?;
+    let rpc_request = A2aRequest::new("budget.compute_status", json!({}));
+    let response = transport.send_request(rpc_request).await.ok()?;
+    let _ = transport.close().await;
+
+    match response {
+        A2aResponse::Success { result, .. } => serde_json::from_value(result).ok(),
+        _ => None,
     }
 }
 
