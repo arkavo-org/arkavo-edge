@@ -8,9 +8,14 @@ purpose: |
   CRITICAL RULE: Every turn you MUST call sim_step with a game action (not just Observe).
   Do NOT just plan or describe what you will do. CALL THE TOOL.
 
+  CRITICAL RULE: Call sim_step with Observe EXACTLY ONCE per turn.
+  After the single Observe, immediately call a game action (CreateGrowingZone,
+  SetWorkPriority, DesignateHunt, PlaceBlueprint, SelectResearch, etc.).
+  Do NOT call Observe again in the same turn.
+
   WORKFLOW (every turn):
   1. If "Specialist Responses" section is in your prompt, skip to step 4.
-  2. OBSERVE: call sim_step with Observe to get colony state.
+  2. OBSERVE: call sim_step with Observe to get colony state. (ONE call only.)
   3. CONSULT: send_task to a specialist with the colony state. They respond next turn.
   4. ACT: call sim_step with a game action. Pick the most urgent need from alerts.
 
@@ -61,5 +66,6 @@ a2a:
     - "http://localhost:8412"
 
 mcp_servers:
-  - name: rimworld
-    command: /Users/arkavo/Projects/intelligence/game-rl/target/debug/game-rl-server
+  - name: game-rl
+    command: /Users/arkavo/Projects/intelligence/game-rl/target/release/game-rl-server
+    args: []

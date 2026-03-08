@@ -11,6 +11,14 @@ pub(super) struct ToolLoopResult {
     pub final_text: String,
     pub decision_model_name: Option<String>,
     pub total_latency_ms: u64,
+    /// Peak context token count during the loop
+    pub context_tokens: u32,
+    /// Context window utilization (0-100%)
+    pub context_utilization_pct: f64,
+    /// LLM inference timing from the first iteration (populated by llama.cpp)
+    pub inference_timing: Option<arkavo_llm::provider::InferenceTiming>,
+    /// Total number of tool calls executed across all iterations
+    pub tool_call_count: usize,
 }
 
 /// Run the agentic tool loop: LLM calls tools → results fed back → LLM continues.
@@ -25,6 +33,7 @@ pub(super) async fn run_tool_loop(
     model_hint: Option<&arkavo_router::ModelChoice>,
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
+    compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
 ) -> Result<ToolLoopResult, String> {
     const MAX_TOOL_ITERATIONS: u8 = 4;
     let mut final_result = String::new();
@@ -32,6 +41,7 @@ pub(super) async fn run_tool_loop(
     let mut decision_trace_id = None;
     let mut decision_model_name = None;
     let mut total_step_idx: usize = 0;
+    let mut first_inference_timing = None;
     let loop_start = std::time::Instant::now();
 
     // Context budget: estimate model window in chars (tokens × 4)
@@ -42,6 +52,18 @@ pub(super) async fn run_tool_loop(
     let char_budget = model_ctx * 4;
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
+        // Budget gate: stop early if compute budget is exhausted
+        if let Some(budget) = compute_budget {
+            let b = budget.read().await;
+            if !b.has_remaining() {
+                info!(
+                    "Compute budget exhausted — stopping tool loop at iteration {}",
+                    iteration
+                );
+                break;
+            }
+        }
+
         // Context-aware timeout: scale with accumulated context size
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
@@ -100,6 +122,7 @@ pub(super) async fn run_tool_loop(
             let trace = router.last_decision_trace();
             decision_trace_id = trace.as_ref().map(|t| t.trace_id);
             decision_model_name = router.last_routed_model();
+            first_inference_timing.clone_from(&response.inference_timing);
         }
 
         info!(
@@ -216,12 +239,42 @@ pub(super) async fn run_tool_loop(
         });
     }
 
+    // Synthesize a minimal summary when the LLM's last turn was a tool call
+    // (not a text response). Without this, compute_response_quality("", ...) returns
+    // 0.0, keeping Thompson Sampling avg_quality stuck at 0%.
+    if final_result.is_empty() && total_step_idx > 0 {
+        final_result = format!(
+            "Completed {} tool call(s). Last result: {}",
+            total_step_idx,
+            messages
+                .last()
+                .map(|m| &m.content[..m.content.len().min(200)])
+                .unwrap_or("ok")
+        );
+    }
+
     apply_reward_correction(router, &reward_signals).await;
+
+    // Compute context utilization
+    let peak_context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+    let peak_context_tokens = (peak_context_chars / 4) as u32;
+    let context_utilization_pct = (peak_context_tokens as f64 / model_ctx as f64) * 100.0;
+
+    let total_latency_ms = loop_start.elapsed().as_millis() as u64;
+
+    // Record conductor orchestration latency to global subsystem timing
+    arkavo_observability::subsystem_timing::global_timing()
+        .conductor_orchestration
+        .record(total_latency_ms);
 
     Ok(ToolLoopResult {
         final_text: final_result,
         decision_model_name,
-        total_latency_ms: loop_start.elapsed().as_millis() as u64,
+        total_latency_ms,
+        context_tokens: peak_context_tokens,
+        context_utilization_pct,
+        inference_timing: first_inference_timing,
+        tool_call_count: total_step_idx,
     })
 }
 
@@ -262,6 +315,9 @@ async fn execute_tool_calls(
         match tool_result {
             Ok(result) => {
                 let latency_ms = start_time.elapsed().as_millis() as u64;
+                arkavo_observability::subsystem_timing::global_timing()
+                    .mcp_tools
+                    .record(latency_ms);
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
 
                 let reward = super::conductor::extract_reward_from_result(&result_str);
@@ -308,6 +364,9 @@ async fn execute_tool_calls(
             }
             Err(err_str) => {
                 let latency_ms = start_time.elapsed().as_millis() as u64;
+                arkavo_observability::subsystem_timing::global_timing()
+                    .mcp_tools
+                    .record(latency_ms);
                 warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
 
                 if let Some(mem) = tool_memory {
@@ -480,7 +539,7 @@ fn summarize_tool_results(parts: &[String], max_chars_per_tool: usize) -> String
 }
 
 /// Find the index of the closing brace that matches the first `{` in `s`.
-fn find_matching_brace(s: &str) -> Option<usize> {
+pub(super) fn find_matching_brace(s: &str) -> Option<usize> {
     let start = s.find('{')?;
     let mut depth = 0;
     for (i, ch) in s[start..].char_indices() {

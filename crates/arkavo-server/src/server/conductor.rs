@@ -376,16 +376,42 @@ pub async fn execute_with_conductor_and_learning(
         model_hint,
         learning_bus,
         tool_memory,
+        None, // compute_budget: enforced at orchestrator tick level
     )
     .await?;
 
     let final_result = loop_result.final_text;
     let decision_model_name = loop_result.decision_model_name;
     let total_latency_ms = loop_result.total_latency_ms;
+    let context_utilization_pct = loop_result.context_utilization_pct;
+
+    if let Some(ref timing) = loop_result.inference_timing {
+        info!(
+            prompt_eval_ms = format!("{:.1}", timing.prompt_eval_ms).as_str(),
+            generation_ms = format!("{:.1}", timing.generation_ms).as_str(),
+            n_prompt_eval = timing.n_prompt_eval,
+            n_eval = timing.n_eval,
+            "LLM inference timing"
+        );
+        let total_inference_ms = (timing.prompt_eval_ms + timing.generation_ms) as u64;
+        arkavo_observability::subsystem_timing::global_timing()
+            .inference
+            .record(total_inference_ms);
+    }
+    info!(
+        context_tokens = loop_result.context_tokens,
+        context_utilization_pct = format!("{context_utilization_pct:.1}").as_str(),
+        "Context window utilization"
+    );
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;
-    let response_quality = compute_response_quality(&final_result, 0, "general");
+    let quality_category = if loop_result.tool_call_count > 0 && task_content.contains("sim_step") {
+        "game_simulation"
+    } else {
+        "general"
+    };
+    let response_quality = compute_response_quality(&final_result, 0, quality_category);
 
     let burst_result =
         BurstResult::success(contract.id, serde_json::json!({ "content": final_result }));

@@ -64,6 +64,10 @@ pub struct A2aServer {
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
     /// Orchestrator tick counter shared with the RPC impl for learning/status
     orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
+    /// Per-agent compute budget (specialists check before each tick)
+    compute_budget: arkavo_budget::SharedComputeBudget,
+    /// Total system RAM detected at startup (bytes)
+    total_ram_bytes: u64,
 }
 
 impl A2aServer {
@@ -101,6 +105,12 @@ impl A2aServer {
             )),
             federated_memory: Arc::new(tokio::sync::RwLock::new(None)),
             orchestrator_tick: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            compute_budget: arkavo_budget::new_shared_compute_budget(),
+            total_ram_bytes: {
+                let mut sys = sysinfo::System::new();
+                sys.refresh_memory();
+                sys.total_memory()
+            },
         }
     }
 
@@ -356,6 +366,17 @@ impl A2aServer {
         Ok(())
     }
 
+    /// Resolve model hint from AGENTS.md.
+    ///
+    /// Returns the model specified in the agent's configuration. The router's
+    /// ModelSelector memory budget (set from hint size) prevents Thompson
+    /// Sampling from exploring models far beyond this hint.
+    async fn resolve_model_hint(&self) -> Option<arkavo_router::ModelChoice> {
+        let metadata = self.agent_metadata.read().await;
+        let choice = arkavo_router::ModelChoice::from_name(&metadata.model)?;
+        Some(choice)
+    }
+
     async fn recreate_llm_adapter(&self) {
         let metadata = self.agent_metadata.read().await;
         let model = metadata.model.clone();
@@ -520,6 +541,28 @@ impl A2aServer {
                 };
 
                 let router = Arc::new(router);
+
+                // Set per-agent memory budget from the model hint so Thompson
+                // Sampling only considers models at or below the configured size.
+                // Cap = hint size exactly. This prevents loading oversized models
+                // (e.g. qwen3.5-27b at 23 GB when hint is glm-4.7-flash at 20 GB).
+                {
+                    let metadata = self.agent_metadata.read().await;
+                    if let Some(hint) = arkavo_router::ModelChoice::from_name(&metadata.model) {
+                        let hint_bytes = hint.size_bytes();
+                        if hint_bytes > 0 {
+                            let cap = hint_bytes;
+                            router.set_memory_budget(cap);
+                            info!(
+                                model = hint.name(),
+                                hint_mb = hint_bytes / (1024 * 1024),
+                                budget_mb = cap / (1024 * 1024),
+                                "Router model budget set from AGENTS.md hint"
+                            );
+                        }
+                    }
+                }
+
                 *self.router.write().await = Some(router.clone());
                 info!(
                     "✓ Successfully initialized router (offline={})",
@@ -784,10 +827,7 @@ impl A2aServer {
         let agent_plan = self.agent_plan.clone();
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
-        let model_hint = {
-            let metadata = self.agent_metadata.read().await;
-            arkavo_router::ModelChoice::from_name(&metadata.model)
-        };
+        let model_hint = self.resolve_model_hint().await;
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
@@ -1170,10 +1210,8 @@ impl A2aServer {
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
-            model_hint: {
-                let metadata = self.agent_metadata.read().await;
-                arkavo_router::ModelChoice::from_name(&metadata.model)
-            },
+            compute_budget: self.compute_budget.clone(),
+            model_hint: self.resolve_model_hint().await,
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
@@ -1226,16 +1264,24 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let orchestrator_tick = self.orchestrator_tick.clone();
         let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        let model_hint = {
-            let metadata = self.agent_metadata.read().await;
-            arkavo_router::ModelChoice::from_name(&metadata.model)
-        };
+        let model_hint = self.resolve_model_hint().await;
+        let compute_budget = self.compute_budget.clone();
+        let has_mcp_tools = self
+            .mcp_registry
+            .list_all_tools()
+            .await
+            .map(|tools| !tools.is_empty())
+            .unwrap_or(false);
+        let loop_metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
+        let total_ram_bytes = self.total_ram_bytes;
+        let commander_model = self.agent_metadata.read().await.model.clone();
 
         info!("Starting orchestrator loop (observe → plan → act)");
 
         tokio::spawn(async move {
-            // Wait for MCP server to be ready
+            // Wait for MCP server to be ready, then discover peers
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            mesh_state.discover_peers().await;
 
             let mut tick: u64 = 0;
             let mut consecutive_no_action_ticks: u32 = 0;
@@ -1252,6 +1298,24 @@ impl A2aServer {
                     continue;
                 }
 
+                // Specialists (no MCP tools) check compute budget before each tick.
+                // Commander (has MCP tools) always runs — it allocates budgets.
+                if !has_mcp_tools {
+                    let budget = compute_budget.read().await;
+                    let snapshot = budget.snapshot();
+                    loop_metrics.record_compute_budget_state(
+                        &snapshot.status,
+                        snapshot.remaining_inferences,
+                        snapshot.remaining_tokens,
+                    );
+                    if !snapshot.has_remaining {
+                        drop(budget);
+                        loop_metrics.record_compute_budget_passive();
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        continue;
+                    }
+                }
+
                 // Read short-term memory (recent tool calls from previous ticks)
                 let memory_guard = agent_memory.read().await;
                 let recent_actions = memory_guard.format_for_prompt();
@@ -1262,6 +1326,22 @@ impl A2aServer {
                 // can act on advice immediately without wasting iterations on
                 // get_task_status polling.
                 let completed = mesh_state.collect_completed().await;
+
+                // Use budget feedback from specialists to detect overload
+                for c in &completed {
+                    if let Some(ref snap) = c.budget_snapshot
+                        && (snap.status == "exhausted" || snap.status == "passive")
+                    {
+                        info!(
+                            agent_id = %c.agent_id,
+                            status = %snap.status,
+                            remaining_inferences = snap.remaining_inferences,
+                            "Specialist budget {} — skipping broadcast this cycle",
+                            snap.status
+                        );
+                    }
+                }
+
                 let specialist_context = if completed.is_empty() {
                     String::new()
                 } else {
@@ -1271,8 +1351,8 @@ impl A2aServer {
                     for c in &completed {
                         let _ = write!(
                             ctx,
-                            "### From {} specialist:\n{}\n\n",
-                            c.agent_id, c.response
+                            "### From {} specialist ({}ms):\n{}\n\n",
+                            c.agent_id, c.response_latency_ms, c.response
                         );
                     }
                     ctx.push_str(
@@ -1346,18 +1426,49 @@ impl A2aServer {
                 {
                     Ok(result) => {
                         let elapsed = start.elapsed();
+
+                        // Consume compute budget for specialists after inference
+                        if !has_mcp_tools {
+                            let tokens_est = result.len() as u64;
+                            let mut budget = compute_budget.write().await;
+                            budget.consume_inference(tokens_est, 0.0);
+                            loop_metrics.record_compute_budget_consumption(tokens_est);
+                            let snapshot = budget.snapshot();
+                            loop_metrics.record_compute_budget_state(
+                                &snapshot.status,
+                                snapshot.remaining_inferences,
+                                snapshot.remaining_tokens,
+                            );
+                        }
+
                         // Check if this tick produced a meaningful action
                         let memory_guard = agent_memory.read().await;
                         let had_action = memory_guard.had_meaningful_action();
 
-                        // Broadcast state to specialists (rate-limited, non-blocking)
-                        if tick - last_broadcast_tick >= 3
-                            && let Some(observe_data) = memory_guard.last_observe_full()
-                        {
+                        // Broadcast state + budget to specialists (rate-limited, non-blocking).
+                        // Always refresh budgets every 3 ticks even without observation
+                        // so specialists don't stay passive indefinitely.
+                        if tick - last_broadcast_tick >= 3 {
                             let mesh = mesh_state.clone();
-                            let data = observe_data.to_string();
+                            let data = memory_guard
+                                .last_observe_full()
+                                .map(|v| v.to_string())
+                                .unwrap_or_default();
+                            let cmd_model = commander_model.clone();
                             tokio::spawn(async move {
-                                broadcast_state_to_peers(&mesh, &data).await;
+                                // Re-discover peers in case new specialists joined
+                                mesh.discover_peers().await;
+                                let peer_count = mesh.agent_addresses.read().await.len();
+                                let per_agent_bytes = compute_per_agent_bytes_static(
+                                    total_ram_bytes,
+                                    &cmd_model,
+                                    peer_count,
+                                );
+                                if !data.is_empty() {
+                                    broadcast_state_to_peers(&mesh, &data, per_agent_bytes).await;
+                                } else {
+                                    refresh_specialist_budgets(&mesh, per_agent_bytes).await;
+                                }
                             });
                             last_broadcast_tick = tick;
                         }
@@ -1452,15 +1563,97 @@ fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget:
     config
 }
 
+// --- Urgency detection ---
+
+/// Detect urgency level from game state observation text.
+///
+/// Tries structured JSON first (looks for an `alerts` array), then falls back
+/// to keyword frequency scanning for threat-related terms.
+fn detect_urgency(observe_data: &str) -> arkavo_budget::UrgencyLevel {
+    use arkavo_budget::UrgencyLevel;
+
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(observe_data)
+        && let Some(alerts) = v.pointer("/alerts").and_then(|a| a.as_array())
+    {
+        return match alerts.len() {
+            0..=1 => UrgencyLevel::Low,
+            2..=4 => UrgencyLevel::Medium,
+            5..=9 => UrgencyLevel::High,
+            _ => UrgencyLevel::Critical,
+        };
+    }
+
+    let lower = observe_data.to_lowercase();
+    let count: usize = [
+        "raid", "attack", "threat", "alert", "fire", "bleed", "danger",
+    ]
+    .iter()
+    .map(|kw| lower.matches(kw).count())
+    .sum();
+    match count {
+        0..=1 => UrgencyLevel::Low,
+        2..=4 => UrgencyLevel::Medium,
+        5..=9 => UrgencyLevel::High,
+        _ => UrgencyLevel::Critical,
+    }
+}
+
+/// Compact a large observation for broadcast to peers.
+///
+/// Generic strategy: if the JSON has a "Delta" key (changes since last state),
+/// extract only that. Otherwise truncate to `max_chars`. Domain-specific
+/// filtering is the specialist's job via its own system prompt.
+fn compact_observation(obs: &str, max_chars: usize) -> String {
+    if obs.len() <= max_chars {
+        return obs.to_string();
+    }
+    // Prefer the Delta section — it contains only what changed
+    if let Some(delta_start) = obs.find("\"Delta\":{") {
+        let subset = &obs[delta_start..];
+        if let Some(end) = super::conductor_tool_loop::find_matching_brace(subset) {
+            let delta = &subset[..=end];
+            if delta.len() <= max_chars {
+                return format!("{{{delta}}}");
+            }
+        }
+    }
+    // Fallback: truncate with a note
+    let cut = max_chars.saturating_sub(30);
+    format!(
+        "{}...(truncated {} bytes)",
+        &obs[..cut.min(obs.len())],
+        obs.len()
+    )
+}
+
 // --- Peer state broadcast ---
 
-/// Broadcast observation state to all discovered peer agents for proactive analysis.
+/// Compute per-agent memory budget from total system RAM.
 ///
-/// Called after the orchestrator's tool loop completes. Sends the full observation
-/// to every known peer agent. Each peer's own prompt/purpose handles domain filtering.
-async fn broadcast_state_to_peers(
+/// Reserves 8GB for the OS and subtracts the commander's model weight,
+/// then divides evenly among specialists. Returns at least 512MB.
+fn compute_per_agent_bytes_static(total_ram: u64, commander_model: &str, count: usize) -> u64 {
+    const OS_RESERVE: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
+    const FLOOR: u64 = 512 * 1024 * 1024; // 512 MB min
+    let commander_bytes = arkavo_router::ModelChoice::from_name(commander_model)
+        .map(|m| m.size_bytes())
+        .unwrap_or(0);
+    let available = total_ram
+        .saturating_sub(OS_RESERVE)
+        .saturating_sub(commander_bytes);
+    if count == 0 {
+        return available.max(FLOOR);
+    }
+    (available / count as u64).max(FLOOR)
+}
+
+/// Refresh specialist budgets without sending observation data.
+///
+/// Called when the commander hasn't produced a game observation yet but specialists
+/// need their budgets refreshed to avoid staying passive indefinitely.
+async fn refresh_specialist_budgets(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
-    observation: &str,
+    per_agent_bytes: u64,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
@@ -1474,18 +1667,93 @@ async fn broadcast_state_to_peers(
         return;
     }
 
+    for agent_id in &peer_ids {
+        let pending = mesh_state
+            .pending_delegations
+            .read()
+            .await
+            .iter()
+            .filter(|d| d.agent_id == *agent_id)
+            .count() as u32;
+        let allocation = arkavo_budget::BudgetPolicy::allocate(
+            arkavo_budget::UrgencyLevel::Low,
+            pending,
+            per_agent_bytes,
+        );
+        // Only propagate budget allocation — no LLM work needed when no game state exists
+        match send_advisory_task(mesh_state, agent_id, "", Some(&allocation)).await {
+            Ok(_) => info!(
+                max_inferences = allocation.max_inferences,
+                max_memory_mb = allocation.max_memory_bytes / (1024 * 1024),
+                per_agent_bytes,
+                "Budget refreshed for {agent_id}"
+            ),
+            Err(e) => warn!("Could not reach {agent_id}: {e}"),
+        }
+    }
+}
+
+/// Broadcast observation state to all discovered peer agents for proactive analysis.
+///
+/// Computes per-specialist budget allocations dynamically based on game urgency
+/// and each specialist's pending task backlog.
+async fn broadcast_state_to_peers(
+    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
+    observation: &str,
+    per_agent_bytes: u64,
+) {
+    let peer_ids: Vec<String> = mesh_state
+        .agent_addresses
+        .read()
+        .await
+        .keys()
+        .cloned()
+        .collect();
+
+    if peer_ids.is_empty() {
+        return;
+    }
+
+    let urgency = detect_urgency(observation);
+    let compacted = compact_observation(observation, 2000);
+
     let task = format!(
         "PROACTIVE ANALYSIS — Review this state update and respond \
          with urgent action recommendations ONLY if you see problems \
          in your domain of expertise.\n\
          If everything looks fine, respond with 'No issues detected.'\n\n\
-         {observation}"
+         {compacted}"
     );
 
     for agent_id in &peer_ids {
-        match send_advisory_task(mesh_state, agent_id, &task).await {
-            Ok(_) => info!("State broadcast to {agent_id}"),
-            Err(e) => debug!("Could not reach {agent_id}: {e}"),
+        let pending = mesh_state
+            .pending_delegations
+            .read()
+            .await
+            .iter()
+            .filter(|d| d.agent_id == *agent_id)
+            .count() as u32;
+
+        // Back off if specialist already has pending work — don't pile on tasks
+        if pending >= 2 {
+            info!(
+                agent_id = %agent_id,
+                pending,
+                "Skipping broadcast to {agent_id} — already has {pending} pending tasks"
+            );
+            continue;
+        }
+
+        let allocation = arkavo_budget::BudgetPolicy::allocate(urgency, pending, per_agent_bytes);
+        match send_advisory_task(mesh_state, agent_id, &task, Some(&allocation)).await {
+            Ok(_) => info!(
+                ?urgency,
+                pending,
+                max_inferences = allocation.max_inferences,
+                ttl_secs = allocation.ttl_secs,
+                "Budget allocated to {agent_id}"
+            ),
+            Err(e) => warn!("Could not reach {agent_id}: {e}"),
         }
     }
 }
@@ -1498,12 +1766,20 @@ async fn send_advisory_task(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
     agent_id: &str,
     task: &str,
+    budget_allocation: Option<&arkavo_budget::BudgetAllocation>,
 ) -> std::result::Result<(), String> {
     use arkavo_protocol::transport::TlsConfig;
     use arkavo_protocol::types::{Message, MessagePart, MessageSendRequest, MessageSendResponse};
     use arkavo_protocol::{
         A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
     };
+
+    // Empty task = budget-only refresh. Skip the RPC call that would trigger
+    // idle LLM inference on the specialist side.
+    if task.is_empty() {
+        debug!(agent_id, "Budget-only refresh — no task content to send");
+        return Ok(());
+    }
 
     let address = {
         let addrs = mesh_state.agent_addresses.read().await;
@@ -1537,14 +1813,19 @@ async fn send_advisory_task(
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut meta = serde_json::json!({
+        "source": "state_broadcast",
+        "task_type": "advisory"
+    });
+    if let Some(alloc) = budget_allocation {
+        meta["budget_allocation"] = serde_json::to_value(alloc).unwrap_or_default();
+    }
+
     let message = Message {
         parts: vec![MessagePart::Text {
             content: task.to_string(),
         }],
-        metadata: Some(serde_json::json!({
-            "source": "state_broadcast",
-            "task_type": "advisory"
-        })),
+        metadata: Some(meta),
     };
 
     let send_request = MessageSendRequest {
@@ -1588,16 +1869,13 @@ mod broadcast_tests {
     #[tokio::test]
     async fn test_broadcast_skips_when_no_peers() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        // No peers discovered — should return without error
-        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#).await;
-        // No pending delegations created
+        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0).await;
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
     #[tokio::test]
     async fn test_broadcast_creates_task_per_peer() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        // Register fake peers (send will fail since no server, but we test the attempt)
         mesh.agent_addresses
             .write()
             .await
@@ -1607,9 +1885,85 @@ mod broadcast_tests {
             .await
             .insert("peer-b".to_string(), "http://127.0.0.1:19998".to_string());
 
-        // Broadcast — will fail to connect but should not panic
-        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#).await;
-        // Peers unreachable, so no pending delegations
+        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0).await;
         assert!(mesh.pending_delegations.read().await.is_empty());
+    }
+
+    #[test]
+    fn test_dynamic_memory_128gb_3_specialists() {
+        let total_ram = 128 * 1024 * 1024 * 1024_u64; // 128 GB
+        let commander_size = arkavo_router::ModelChoice::from_name("glm-4.7-flash")
+            .unwrap()
+            .size_bytes(); // ~20 billion bytes
+        let per_agent = compute_per_agent_bytes_static(total_ram, "glm-4.7-flash", 3);
+        let os_reserve = 8 * 1024 * 1024 * 1024_u64;
+        let expected = (total_ram - os_reserve - commander_size) / 3;
+        assert_eq!(per_agent, expected);
+        // Must be well above the 512MB floor (~37 GB)
+        assert!(per_agent > 30 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_dynamic_memory_floor_enforced() {
+        // Tiny system: 4 GB total, large commander model, many specialists
+        let total_ram = 4 * 1024 * 1024 * 1024_u64;
+        let per_agent = compute_per_agent_bytes_static(total_ram, "glm-4.7-flash", 10);
+        // Should hit the 512MB floor
+        assert_eq!(per_agent, 512 * 1024 * 1024);
+    }
+}
+
+#[cfg(test)]
+mod urgency_tests {
+    use super::*;
+    use arkavo_budget::UrgencyLevel;
+
+    #[test]
+    fn test_detect_urgency_json_alerts_low() {
+        let data = r#"{"alerts":[],"colonists":[{"name":"Jess"}]}"#;
+        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
+    }
+
+    #[test]
+    fn test_detect_urgency_json_alerts_medium() {
+        let data = r#"{"alerts":["cold snap","food shortage","crop blight"]}"#;
+        assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
+    }
+
+    #[test]
+    fn test_detect_urgency_json_alerts_high() {
+        let data = r#"{"alerts":["a","b","c","d","e","f","g"]}"#;
+        assert_eq!(detect_urgency(data), UrgencyLevel::High);
+    }
+
+    #[test]
+    fn test_detect_urgency_json_alerts_critical() {
+        let alerts: Vec<String> = (0..12).map(|i| format!("alert_{i}")).collect();
+        let data = serde_json::json!({"alerts": alerts}).to_string();
+        assert_eq!(detect_urgency(&data), UrgencyLevel::Critical);
+    }
+
+    #[test]
+    fn test_detect_urgency_keyword_fallback() {
+        let data = "Colony is under raid! Attack from the north. Fire in storage.";
+        assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
+    }
+
+    #[test]
+    fn test_detect_urgency_no_threats() {
+        let data = "All colonists are happy. Resources are plentiful.";
+        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
+    }
+
+    #[test]
+    fn test_detect_urgency_keyword_critical() {
+        let data = "raid attack threat alert fire bleed danger raid attack threat alert";
+        assert_eq!(detect_urgency(data), UrgencyLevel::Critical);
+    }
+
+    #[test]
+    fn test_detect_urgency_json_without_alerts_key() {
+        let data = r#"{"colonists":3,"resources":{"wood":50}}"#;
+        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
     }
 }
