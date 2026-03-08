@@ -373,6 +373,15 @@ impl super::Router {
                 .await;
 
             let elapsed = inference_start.elapsed();
+            let latency_ms = elapsed.as_millis() as u64;
+            self.metrics.write().await.record_router_latency(latency_ms);
+            arkavo_observability::subsystem_timing::global_timing()
+                .router_decisions
+                .record(latency_ms);
+            arkavo_observability::subsystem_timing::global_timing()
+                .inference
+                .record(latency_ms);
+
             let quality = selector_quality::compute_response_quality(
                 &response.content,
                 elapsed.as_millis() as u64,
@@ -427,6 +436,7 @@ impl super::Router {
             reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: None,
+            inference_timing: None,
         })
     }
 }

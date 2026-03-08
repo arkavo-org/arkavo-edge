@@ -62,21 +62,33 @@ pub fn load_api_keys_from_config() {
 /// * `Ok(PathBuf)` - Path to the model file
 /// * `Err(String)` - Error with user-friendly message including download instructions
 pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
-    use hf_hub::api::tokio::Api;
-
     tracing::debug!(
         "find_gguf_model: looking for repo={} filename={}",
         repo_id,
         filename
     );
 
+    // 1. Check local cache first (no network, instant)
+    if let Some(cache) = get_hf_cache_dir() {
+        let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
+        let snapshots_dir = cache.join(&repo_cache_name).join("snapshots");
+        if let Some(path) = find_file_in_dir(&snapshots_dir, filename) {
+            tracing::debug!("find_gguf_model: found in local cache at {:?}", path);
+            return Ok(path);
+        }
+    }
+
+    // 2. Not cached — try downloading via hf_hub API
+    use hf_hub::api::tokio::Api;
     let api = Api::new().map_err(|e| format!("Failed to initialize HuggingFace API: {e}"))?;
 
-    // 1. Try preferred model first (download if needed, or use cached)
     let repo = api.repo(hf_hub::Repo::model(repo_id.to_string()));
     match repo.get(filename).await {
         Ok(path) => {
-            tracing::debug!("find_gguf_model: found via hf_hub API at {:?}", path);
+            tracing::debug!(
+                "find_gguf_model: downloaded/found via hf_hub API at {:?}",
+                path
+            );
             return Ok(path);
         }
         Err(e) => {
@@ -84,13 +96,13 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         }
     }
 
-    // 2. Scan cache for any GGUF in the preferred repo
+    // 3. Scan cache for any GGUF in the preferred repo
     if let Some(path) = scan_cache_for_gguf(&api, repo_id).await {
         tracing::debug!("find_gguf_model: found via cache scan at {:?}", path);
         return Ok(path);
     }
 
-    // 3. Fallback: use ANY available .gguf file from cache
+    // 4. Fallback: use ANY available .gguf file from cache
     if let Some(path) = find_any_gguf().await {
         tracing::info!(
             "Using fallback model: {}",
@@ -101,7 +113,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         return Ok(path);
     }
 
-    // 4. Nothing found - provide helpful error
+    // 5. Nothing found - provide helpful error
     Err(format!(
         "No GGUF models found in HuggingFace cache. Download with: hf download {repo_id} {filename}"
     ))
@@ -284,13 +296,14 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
 
-    // Priority order: prefer larger models first for better quality
+    // Priority order: prefer smallest models first — classifier/judge need speed, not quality.
+    // Loading large models here wastes memory (bypasses per-agent memory budget).
     use crate::decision::ModelChoice;
     let preferred_repos: Vec<String> = [
+        ModelChoice::LocalQwen3,
+        ModelChoice::LocalMinistral3B,
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_27B,
-        ModelChoice::LocalMinistral3B,
-        ModelChoice::LocalQwen3,
     ]
     .iter()
     .filter_map(ModelChoice::cache_dir_name)

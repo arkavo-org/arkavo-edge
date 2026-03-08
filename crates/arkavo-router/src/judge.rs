@@ -689,6 +689,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = judge
@@ -718,6 +719,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = judge
@@ -743,6 +745,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = judge
@@ -768,6 +771,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         // Tool execution failed
@@ -805,6 +809,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         // Tool execution failed
@@ -849,6 +854,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         // Tool execution failed

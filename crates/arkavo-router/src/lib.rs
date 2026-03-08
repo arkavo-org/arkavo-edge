@@ -69,14 +69,19 @@ pub use tdf_audit::{MessageEncryptor, TdfAuditConfig};
 // Re-export response processing types
 pub use response::{sanitize_response, strip_think_blocks, strip_tool_blocks};
 
+/// Extract search keywords from a user message (for tool search telemetry).
+pub fn tool_search_keywords(text: &str) -> String {
+    tool_extraction::extract_keywords(text)
+}
+
 pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::Message;
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
+use arkavo_llm::{Message, Role};
 use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
@@ -309,6 +314,15 @@ impl Router {
     /// Get a reference to the model learning module (Thompson Sampling state)
     pub fn model_learning(&self) -> &LearningModule {
         &self.model_learning
+    }
+
+    /// Set per-agent memory budget on the model selector.
+    ///
+    /// Models whose weight files exceed this limit are excluded from the
+    /// feasible set, preventing Thompson Sampling from loading oversized
+    /// models into the registry.
+    pub fn set_memory_budget(&self, bytes: u64) {
+        self.selector.set_memory_budget(bytes);
     }
 
     /// Get the model name last selected by `route_with_tools()`.
@@ -661,8 +675,20 @@ impl Router {
     /// Chat inference never blocks task/orchestrator work. Uses the smallest
     /// available model (0.8B/3B) which avoids <think> tag issues from larger
     /// reasoning models. Strips think blocks from the response.
-    pub async fn route_chat(&self, messages: Vec<Message>) -> Result<arkavo_llm::ProviderResponse> {
-        let model = self.selector.fastest_local_model();
+    ///
+    /// When a tool registry is provided, tools are passed to the LLM so it can
+    /// produce structured tool calls (e.g. `get_time`) instead of hallucinating.
+    ///
+    /// `model_override` forces a specific model (for testing/benchmarking).
+    pub async fn route_chat(
+        &self,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model_override: Option<&ModelChoice>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        let model = model_override
+            .cloned()
+            .unwrap_or_else(|| self.selector.fastest_local_model());
         tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
 
         let provider = self.instantiate_provider(&model).await?;
@@ -673,20 +699,54 @@ impl Router {
             .await
             .map_err(|_| Error::ModelExecution("Chat semaphore closed".to_string()))?;
 
-        let content = provider
-            .complete(messages)
+        // Build tool JSON from registry (same pattern as quality_gate.rs)
+        let tools_json = match tool_registry {
+            Some(registry) => {
+                let detail_level = tool_extraction::detail_level_for_model(&model);
+                let last_user_msg = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::User)
+                    .map(|m| m.content.as_str())
+                    .unwrap_or("");
+                let keywords = tool_extraction::extract_keywords(last_user_msg);
+                let tool_infos =
+                    tool_extraction::search_tools_hybrid(registry, &keywords, detail_level, None)
+                        .await;
+                if tool_infos.is_empty() {
+                    None
+                } else {
+                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
+                        &tool_infos,
+                    ))
+                }
+            }
+            None => None,
+        };
+
+        let mut response = provider
+            .complete_with_tools(messages, tools_json, None)
             .await
             .map_err(|e| Error::ModelExecution(format!("chat: {e}")))?;
 
         // Strip <think> blocks that small models may still emit
-        let content = crate::response::strip_think_blocks(&content);
+        response.content = crate::response::strip_think_blocks(&response.content);
 
-        Ok(arkavo_llm::ProviderResponse {
-            content,
-            reasoning_content: None,
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".to_string()),
-        })
+        // Filter tool calls (remove language-fence false positives)
+        if !response.tool_calls.is_empty() {
+            response.tool_calls =
+                tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
+        }
+
+        // Fall back to text extraction if provider didn't parse tool calls
+        if response.tool_calls.is_empty() && tool_registry.is_some() {
+            let text_calls = tool_extraction::extract_tool_calls_from_text(&response.content);
+            if !text_calls.is_empty() {
+                response.tool_calls = text_calls;
+            }
+        }
+
+        Ok(response)
     }
 
     /// Get the fastest available local model choice (for callers that need to know)

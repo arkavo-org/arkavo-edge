@@ -344,6 +344,7 @@ impl super::Router {
             reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: None,
+            inference_timing: None,
         })
     }
 
@@ -399,6 +400,7 @@ impl super::Router {
                     reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: Some("stop".to_string()),
+                    inference_timing: None,
                 };
 
                 let validator = validator::ResponseValidator::new(&tools);

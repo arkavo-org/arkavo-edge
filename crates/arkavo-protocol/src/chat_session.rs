@@ -58,6 +58,8 @@ pub struct ChatSessionManager {
     teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
     /// Agent purpose/system prompt from AGENTS.md, prepended to every chat context
     system_prompt: Option<String>,
+    /// Override the default model selection (for testing/benchmarking)
+    model_override: Option<arkavo_router::ModelChoice>,
 }
 
 struct ChatSessionState {
@@ -159,6 +161,7 @@ impl ChatSessionManager {
             learning_context: None,
             teaching_tx: None,
             system_prompt: None,
+            model_override: None,
         }
     }
 
@@ -179,6 +182,11 @@ impl ChatSessionManager {
         if !prompt.is_empty() {
             self.system_prompt = Some(prompt);
         }
+    }
+
+    /// Override the default model selection for chat inference.
+    pub fn set_model_override(&mut self, model: arkavo_router::ModelChoice) {
+        self.model_override = Some(model);
     }
 
     /// Create a new chat session with optional authentication
@@ -263,6 +271,7 @@ impl ChatSessionManager {
             let learning_context = self.learning_context.clone();
             let teaching_tx = self.teaching_tx.clone();
             let system_prompt = self.system_prompt.clone();
+            let model_override = self.model_override.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -278,6 +287,7 @@ impl ChatSessionManager {
                         learning_context,
                         teaching_tx,
                         system_prompt,
+                        model_override,
                     )
                     .await;
                 });
@@ -808,7 +818,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -822,6 +832,7 @@ impl ChatSessionManager {
         learning_context: Option<Arc<RwLock<String>>>,
         teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
         system_prompt: Option<String>,
+        model_override: Option<arkavo_router::ModelChoice>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -880,27 +891,29 @@ impl ChatSessionManager {
                         });
                     }
 
-                    // Inject available tool names so LLM is aware of its capabilities
+                    // Emit tool search telemetry before routing
                     if let Some(ref registry) = tool_registry {
-                        let tools = registry.list_tools();
-                        if !tools.is_empty() {
-                            let tool_list: String = tools
-                                .iter()
-                                .map(|t| format!("- {}: {}", t.name, t.description))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            let tool_msg = format!(
-                                "You have access to these tools:\n{tool_list}\n\n\
-                                 When asked to perform actions, use the appropriate tool."
-                            );
-                            let insert_pos =
-                                usize::from(system_prompt.is_some());
-                            windowed_context.insert(insert_pos, Message {
-                                role: Role::System,
-                                content: tool_msg,
-                                images: None,
-                            });
-                        }
+                        let keywords = arkavo_router::tool_search_keywords(&user_message.content);
+                        let tool_names: Vec<String> = registry
+                            .search_tools(&keywords, arkavo_mcp_tools::DetailLevel::NameOnly)
+                            .iter()
+                            .map(|t| t.name.clone())
+                            .collect();
+                        let tool_search_delta = MessageDelta {
+                            session_id: session_id.clone(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Metadata {
+                                key: "tool_search".to_string(),
+                                value: serde_json::json!({
+                                    "keywords": keywords,
+                                    "tools_found": tool_names.len(),
+                                    "tool_names": tool_names,
+                                }),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = delta_tx.send(tool_search_delta);
                     }
 
                     // Classify human teaching intent before routing
@@ -973,7 +986,14 @@ impl ChatSessionManager {
                         );
                     }
 
-                    let model = router.fastest_local_model();
+                    let model = model_override
+                        .clone()
+                        .unwrap_or_else(|| router.fastest_local_model());
+                    let reasoning = if model_override.is_some() {
+                        format!("--model override: {}", model.name())
+                    } else {
+                        "Chat path: fastest local model, separate semaphore".to_string()
+                    };
                     let metadata_delta = MessageDelta {
                         session_id: session_id.clone(),
                         message_id: message_id.clone(),
@@ -983,7 +1003,7 @@ impl ChatSessionManager {
                             value: serde_json::json!({
                                 "model": model.name(),
                                 "category": "chat",
-                                "reasoning": "Chat path: fastest local model, separate semaphore",
+                                "reasoning": reasoning,
                             }),
                         },
                         timestamp: chrono::Utc::now(),
@@ -991,17 +1011,18 @@ impl ChatSessionManager {
                     let _ = delta_tx.send(metadata_delta);
 
                     let inference_start = std::time::Instant::now();
+                    let chat_timeout_secs = 60;
                     let route_result = match tokio::time::timeout(
-                        std::time::Duration::from_secs(30),
-                        router.route_chat(windowed_context),
+                        std::time::Duration::from_secs(chat_timeout_secs),
+                        router.route_chat(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
                     )
                     .await
                     {
                         Ok(inner) => inner,
                         Err(_elapsed) => {
-                            error!(session.id = %session_id, "Chat inference timed out after 30s");
+                            error!(session.id = %session_id, "Chat inference timed out after {chat_timeout_secs}s");
                             Err(arkavo_router::Error::ModelExecution(
-                                "Chat inference timed out after 30s".to_string(),
+                                format!("Chat inference timed out after {chat_timeout_secs}s"),
                             ))
                         }
                     };
@@ -1011,18 +1032,39 @@ impl ChatSessionManager {
                             final_response = response.content.clone();
                             let elapsed = inference_start.elapsed();
 
-                            // Emit quality_feedback metadata delta
+                            // Emit quality_feedback metadata delta with inference timing
+                            let mut quality_value = serde_json::json!({
+                                "latency_ms": elapsed.as_millis() as u64,
+                                "response_len": response.content.len(),
+                                "has_tool_calls": !response.tool_calls.is_empty(),
+                                "tool_call_count": response.tool_calls.len(),
+                            });
+                            // Include tool call names for diagnostics
+                            if !response.tool_calls.is_empty() {
+                                let tool_names: Vec<&str> = response.tool_calls
+                                    .iter()
+                                    .map(|tc| tc.tool_name.as_str())
+                                    .collect();
+                                quality_value["tool_names"] = serde_json::json!(tool_names);
+                            }
+                            // Include inference timing from provider (local models)
+                            if let Some(ref timing) = response.inference_timing {
+                                quality_value["prompt_eval_ms"] = serde_json::json!(timing.prompt_eval_ms);
+                                quality_value["generation_ms"] = serde_json::json!(timing.generation_ms);
+                                quality_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
+                                quality_value["generated_tokens"] = serde_json::json!(timing.n_eval);
+                                if timing.n_eval > 0 && timing.generation_ms > 0.0 {
+                                    let tok_per_sec = timing.n_eval as f64 / (timing.generation_ms / 1000.0);
+                                    quality_value["tokens_per_sec"] = serde_json::json!(format!("{tok_per_sec:.1}"));
+                                }
+                            }
                             let quality_delta = MessageDelta {
                                 session_id: session_id.clone(),
                                 message_id: message_id.clone(),
                                 sequence: 1,
                                 delta: MessageDeltaContent::Metadata {
                                     key: "quality_feedback".to_string(),
-                                    value: serde_json::json!({
-                                        "latency_ms": elapsed.as_millis() as u64,
-                                        "response_len": response.content.len(),
-                                        "has_tool_calls": !response.tool_calls.is_empty(),
-                                    }),
+                                    value: quality_value,
                                 },
                                 timestamp: chrono::Utc::now(),
                             };
@@ -1095,16 +1137,10 @@ impl ChatSessionManager {
                                         let _ = delta_tx.send(result_delta);
                                     }
 
-                                    // Route again to get final response with tool results
-                                    #[allow(deprecated)]
+                                    // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
                                         std::time::Duration::from_secs(120),
-                                        router.route_with_quality_gate(
-                                            &user_message.content,
-                                            conversation_context.clone(),
-                                            tool_registry.as_deref(),
-                                            3,
-                                        ),
+                                        router.route_chat(conversation_context.clone(), None, model_override.as_ref()),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
@@ -1115,15 +1151,40 @@ impl ChatSessionManager {
                                     };
                                     match retry_result {
                                         Ok(final_resp) => {
-                                            final_response = final_resp.content.clone();
+                                            // Strip think blocks from final response (second inference
+                                            // may use a larger model that produces <think> tags)
+                                            let clean_content = arkavo_router::strip_think_blocks(&final_resp.content);
+                                            final_response = clean_content.clone();
+
+                                            // Emit telemetry for second inference
+                                            let mut tool_loop_value = serde_json::json!({
+                                                "phase": "tool_result_synthesis",
+                                                "latency_ms": inference_start.elapsed().as_millis() as u64,
+                                                "response_len": clean_content.len(),
+                                            });
+                                            if let Some(ref timing) = final_resp.inference_timing {
+                                                tool_loop_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
+                                                tool_loop_value["generated_tokens"] = serde_json::json!(timing.n_eval);
+                                            }
+                                            let tool_loop_delta = MessageDelta {
+                                                session_id: session_id.clone(),
+                                                message_id: message_id.clone(),
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 3) as u64,
+                                                delta: MessageDeltaContent::Metadata {
+                                                    key: "quality_feedback".to_string(),
+                                                    value: tool_loop_value,
+                                                },
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            let _ = delta_tx.send(tool_loop_delta);
 
                                             // Send final text delta
                                             let final_delta = MessageDelta {
                                                 session_id: session_id.clone(),
                                                 message_id: message_id.clone(),
-                                                sequence: (response.tool_calls.len() + tool_results.len() + 3) as u64,
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 4) as u64,
                                                 delta: MessageDeltaContent::Text {
-                                                    text: final_resp.content.clone(),
+                                                    text: clean_content.clone(),
                                                 },
                                                 timestamp: chrono::Utc::now(),
                                             };
@@ -1132,7 +1193,7 @@ impl ChatSessionManager {
                                             // Add final assistant response to context
                                             conversation_context.push(Message {
                                                 role: Role::Assistant,
-                                                content: final_resp.content,
+                                                content: clean_content,
                                                 images: None,
                                             });
                                         }

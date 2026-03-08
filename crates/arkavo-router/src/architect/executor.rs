@@ -170,6 +170,7 @@ impl ArchitectExecutor {
                         reasoning_content: None,
                         tool_calls: Vec::new(),
                         finish_reason: Some("stop".to_string()),
+                        inference_timing: None,
                     })
             };
 

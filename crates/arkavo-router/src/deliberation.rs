@@ -104,6 +104,7 @@ impl Deliberator {
                 reasoning_content: None,
                 tool_calls: vec![],
                 finish_reason: None,
+                inference_timing: None,
             }
         };
 
@@ -185,9 +186,10 @@ impl Deliberator {
         // TODO: When streaming or using reasoning models, extract reasoning_content
         Ok(ProviderResponse {
             content,
-            reasoning_content: None, // Will be populated by reasoning-capable providers
+            reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 
@@ -301,6 +303,7 @@ Otherwise, list the specific issues found."#,
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 
@@ -363,6 +366,7 @@ Otherwise, list the specific issues found."#,
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 }

@@ -2,30 +2,28 @@
 
 Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-param, multi-param, no-param, enum, file path, command execution, should-not-call, and multi-type params. Five test tools registered (get_weather, read_file, search, get_time, run_command).
 
-## Results
+## Results (2026-03-08)
 
 | Model | Size | Parse | Tool Name | Params | Avg Latency |
 |-------|------|-------|-----------|--------|-------------|
-| gemma-3-270m-it | 270M | N/A | N/A | N/A | N/A (MLX only, no GGUF) |
-| Qwen3-0.6B | 0.6B | 8/8 | 7/8 | 8/8 | 164ms |
-| Qwen3.5-0.8B | 0.8B | 2/8 | 2/8 | 2/8 | 230ms |
-| Ministral-3-3B | 3B | 8/8 | 8/8 | 8/8 | 386ms |
-| GLM-4.7-Flash | 4.7B | 8/8 | 8/8 | 8/8 | 815ms |
-| Ministral-3-8B | 8B | 8/8 | 8/8 | 8/8 | 804ms |
-| Qwen3.5-9B | 9B | 8/8 | 8/8 | 8/8 | 1030ms |
-| Qwen3.5-27B | 27B | 8/8 | 8/8 | 8/8 | 6102ms |
+| Qwen3-0.6B | 0.6B | 8/8 | 7/8 | 8/8 | 171ms |
+| Qwen3.5-0.8B | 0.8B | 1/8 | 1/8 | 1/8 | 22444ms |
+| **Ministral-3-3B** | **3B** | **8/8** | **8/8** | **8/8** | **422ms** |
+| GLM-4.7-Flash | 4.7B | 8/8 | 8/8 | 8/8 | 782ms |
+| Ministral-3-8B | 8B | 8/8 | 8/8 | 8/8 | 783ms |
+| Qwen3.5-27B | 27B | 8/8 | 8/8 | 8/8 | 5868ms |
 
 ## Key Findings
 
-**Qwen3.5-0.8B is an outlier.** Despite being larger than Qwen3-0.6B, it scores 2/8 vs 7/8. The 0.8B model frequently generates malformed fence blocks or omits tool names. Qwen3-0.6B is the better choice for ultra-lightweight deployments.
+**Qwen3.5-0.8B is critically broken for tool calling.** 1/8 accuracy at 22.4s latency — both the slowest and least accurate model. Qwen3-0.6B (7/8 at 171ms) is vastly superior for ultra-lightweight deployments. Qwen3.5-0.8B was removed as the default chat model in favor of Ministral-3B.
 
-**All 3B+ models achieve perfect 8/8.** Ministral-3-3B, GLM-4.7-Flash, Ministral-3-8B, Qwen3.5-9B, and Qwen3.5-27B all produce valid fence-format tool calls with correct tool names and parameters on every scenario.
+**All 3B+ models achieve perfect 8/8.** Ministral-3-3B, GLM-4.7-Flash, Ministral-3-8B, and Qwen3.5-27B all produce valid fence-format tool calls with correct tool names and parameters on every scenario.
 
-**Ministral-3-3B is the best value.** Perfect scores at 386ms average latency — fast enough for interactive use on edge hardware.
+**Ministral-3-3B is the default chat model.** Perfect 8/8 scores at 422ms average — the best latency/accuracy tradeoff. Selected by `fastest_local_model()` for all chat path tool calling.
 
-**GLM-4.7-Flash is faster than Ministral-8B at similar quality.** 815ms vs 804ms is comparable, but GLM-4.7 loads and infers with lower memory pressure.
+**GLM-4.7-Flash and Ministral-8B are nearly identical.** 782ms vs 783ms, both 8/8 perfect. GLM-4.7 requires 32GB RAM (MoE architecture).
 
-**27B models are slow on Apple Silicon.** Qwen3.5-27B takes 6.1s average per tool call, making it impractical for real-time agentic loops unless offloaded to GPU.
+**27B models are slow on Apple Silicon.** Qwen3.5-27B takes 5.9s average per tool call. Suitable for batch/offline tasks, not real-time agentic loops.
 
 ## Improvements Implemented
 
@@ -74,6 +72,28 @@ Tested with a 4-agent learning mesh (orchestrator + code-analyzer + test-generat
 - **Path resolution**: Models sometimes use relative paths (`/crates/...`) instead of absolute paths, causing `filesystem_tools` failures. This is a prompt engineering issue, not a parsing issue.
 - **Inference timeouts on complex tasks**: 8B models can timeout (30s limit) on tasks with large tool result context, triggering quality cooldown.
 - **Quality score 0.0 on tool-only responses**: When the model responds with only a tool call and no text, the quality scorer assigns 0.0. The tool call itself may succeed — this is a scoring gap, not a tool calling failure.
+
+## Chat Path Tool Calling
+
+The `--prompt` chat path now supports full tool calling via `route_chat()` → `provider.complete_with_tools()`. Previously, tools were listed in a text system message but never wired to the provider, causing hallucinated responses.
+
+### Model Override
+
+```bash
+# Test specific model
+arkavo chat --model ministral-3b --prompt "What time is it?"
+arkavo chat --model glm-4.7-flash --prompt "What time is it?"
+```
+
+### Debug Telemetry
+
+With `ARKAVO_DEBUG=1`, metadata deltas render inline diagnostics:
+
+```
+[Model] ministral-3b (Chat path: fastest local model, separate semaphore)
+[Tools] keywords="time" found=5 tools=[get_time, get_weather, ...]
+[Perf] 422ms | 47 chars | 1 tool calls | prompt_eval: 89ms gen: 333ms | 142.3 tok/s
+```
 
 ## Running Benchmarks
 

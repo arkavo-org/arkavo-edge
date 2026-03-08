@@ -228,7 +228,7 @@ impl ModelChoice {
     pub fn size_bytes(&self) -> u64 {
         match self {
             Self::LocalQwen3 => 550_000_000,
-            Self::LocalMinistral3B => 2_500_000_000,
+            Self::LocalMinistral3B => 6_000_000_000,
             Self::LocalMinistral8B => 5_500_000_000,
             Self::LocalQwen35_27B => 23_000_000_000,
             Self::LocalGlm47Flash => 20_000_000_000,
@@ -252,6 +252,36 @@ impl ModelChoice {
                 | Self::LocalGemma12B
                 | Self::LocalMinistral8B
         )
+    }
+
+    /// If this model exceeds `max_bytes`, return the largest local model that fits.
+    /// Cloud models are not constrained (size_bytes returns 0).
+    pub fn downgrade_for_budget(&self, max_bytes: u64) -> Self {
+        if max_bytes == 0 || self.size_bytes() <= max_bytes {
+            return self.clone();
+        }
+
+        // Local models sorted by size descending — pick the largest that fits
+        let candidates = [
+            Self::LocalGlm47Flash,
+            Self::LocalQwen35_27B,
+            Self::LocalDeepSeekCoder,
+            Self::LocalGemma12B,
+            Self::LocalMinistral8B,
+            Self::LocalMinistral3B,
+            Self::LocalGemma4B,
+            Self::LocalQwen3,
+            Self::LocalGemma270M,
+        ];
+
+        for candidate in &candidates {
+            if candidate.size_bytes() <= max_bytes {
+                return candidate.clone();
+            }
+        }
+
+        // Nothing fits — fall back to smallest
+        Self::LocalGemma270M
     }
 
     /// Human-readable display name
@@ -594,5 +624,45 @@ mod tests {
         );
         assert_eq!(ModelChoice::GeminiFlash.capability(), PlannerTier::Large);
         assert_eq!(ModelChoice::ClaudeSonnet.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_downgrade_model_fits_budget() {
+        // Model fits — no downgrade
+        let model = ModelChoice::LocalQwen3; // 550MB
+        let result = model.downgrade_for_budget(2 * 1024 * 1024 * 1024); // 2GB budget
+        assert_eq!(result, ModelChoice::LocalQwen3);
+    }
+
+    #[test]
+    fn test_downgrade_model_exceeds_budget() {
+        // ministral-3b (2.5GB) exceeds 1GB budget → should downgrade to qwen3.5-0.8b (550MB)
+        let model = ModelChoice::LocalMinistral3B;
+        let result = model.downgrade_for_budget(1024 * 1024 * 1024); // 1GB budget
+        assert_eq!(result, ModelChoice::LocalQwen3); // 550MB fits
+    }
+
+    #[test]
+    fn test_downgrade_picks_largest_that_fits() {
+        // 6GB budget should allow ministral-8b (5.5GB)
+        let model = ModelChoice::LocalQwen35_27B; // 23GB
+        let result = model.downgrade_for_budget(6 * 1024 * 1024 * 1024);
+        assert_eq!(result, ModelChoice::LocalMinistral8B);
+    }
+
+    #[test]
+    fn test_downgrade_cloud_model_not_constrained() {
+        // Cloud models have size_bytes() == 0, never downgraded
+        let model = ModelChoice::GeminiFlash;
+        let result = model.downgrade_for_budget(512 * 1024 * 1024);
+        assert_eq!(result, ModelChoice::GeminiFlash);
+    }
+
+    #[test]
+    fn test_downgrade_zero_budget_no_constraint() {
+        // max_bytes=0 means no constraint
+        let model = ModelChoice::LocalMinistral3B;
+        let result = model.downgrade_for_budget(0);
+        assert_eq!(result, ModelChoice::LocalMinistral3B);
     }
 }
