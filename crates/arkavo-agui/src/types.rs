@@ -338,6 +338,45 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Compute budget telemetry events (per-agent, polled from agents)
+    ComputeBudgetUpdate {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "computeBudget")]
+        compute_budget: serde_json::Value,
+        timestamp: String,
+    },
+
+    // Per-agent process metrics (self-reported by each agent binary)
+    AgentSystemMetrics {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        /// Resident set size in MB
+        #[serde(rename = "rssMb")]
+        rss_mb: f64,
+        /// CPU usage percentage (0-100+, multi-core can exceed 100)
+        #[serde(rename = "cpuPercent")]
+        cpu_percent: f64,
+        /// OS process ID
+        pid: u32,
+        /// Total system RAM in MB
+        #[serde(rename = "totalRamMb", skip_serializing_if = "Option::is_none")]
+        total_ram_mb: Option<f64>,
+        /// Available (free) system RAM in MB
+        #[serde(rename = "availableRamMb", skip_serializing_if = "Option::is_none")]
+        available_ram_mb: Option<f64>,
+    },
+
+    // Per-agent task counts
+    AgentTaskCounts {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        pending: u32,
+        active: u32,
+        completed: u32,
+        failed: u32,
+    },
+
     // Security / TDF audit events
     GetSecurityStatus,
     SecurityStatusUpdate {
@@ -488,6 +527,21 @@ pub struct TaskMetrics {
     pub energy_wh: f64,
     #[serde(rename = "qualityScore", skip_serializing_if = "Option::is_none")]
     pub quality_score: Option<f64>,
+    /// Context window utilization (0-100%)
+    #[serde(
+        rename = "contextUtilizationPct",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_utilization_pct: Option<f64>,
+    /// Prompt evaluation / prefill time (ms) — from llama.cpp timings
+    #[serde(rename = "promptEvalMs", skip_serializing_if = "Option::is_none")]
+    pub prompt_eval_ms: Option<u64>,
+    /// Token generation time (ms) — from llama.cpp timings
+    #[serde(rename = "generationMs", skip_serializing_if = "Option::is_none")]
+    pub generation_ms: Option<u64>,
+    /// KV cache hit rate (0-100%) — tokens served from cache
+    #[serde(rename = "cacheHitPct", skip_serializing_if = "Option::is_none")]
+    pub cache_hit_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

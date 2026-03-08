@@ -67,7 +67,7 @@ async fn llm_judge(router: &arkavo_router::Router, objective: &str, response: &s
         &response[..response.len().min(2000)]
     );
     let messages = vec![arkavo_llm::Message::user(prompt)];
-    match router.route_chat(messages).await {
+    match router.route_chat(messages, None, None).await {
         Ok(resp) => resp
             .content
             .trim()
@@ -88,7 +88,7 @@ async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Opti
          Only output the summary, nothing else.\n\n{truncated}"
     );
     let messages = vec![arkavo_llm::Message::user(prompt)];
-    match router.route_chat(messages).await {
+    match router.route_chat(messages, None, None).await {
         Ok(resp) if !resp.content.is_empty() => {
             let summary = resp.content.trim().to_string();
             if summary.is_empty() {
@@ -440,6 +440,10 @@ async fn poll_agent_tasks(
                                 inference_duration_ms: 0,
                                 energy_wh: 0.0,
                                 quality_score: Some(q),
+                                context_utilization_pct: None,
+                                prompt_eval_ms: None,
+                                generation_ms: None,
+                                cache_hit_pct: None,
                             })
                         };
 

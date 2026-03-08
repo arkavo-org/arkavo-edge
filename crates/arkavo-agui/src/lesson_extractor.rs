@@ -115,6 +115,17 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
             ),
             "Only call registered tools".to_string(),
         ),
+        FailureMode::PolicyViolation { count } => (
+            format!(
+                "Agent {} attempted {} blocked operations on {} tasks{}",
+                ctx.agent_id, count, ctx.task_category, task_hint
+            ),
+            format!(
+                "Agent {} must not call shell_exec or destructive commands; use only declared MCP tools",
+                ctx.agent_id
+            ),
+            "Only call tools explicitly listed in agent skills".to_string(),
+        ),
         FailureMode::OutputLoop => (
             format!(
                 "Agent {} enters output loops on {} tasks{}",
@@ -246,6 +257,20 @@ mod tests {
             .and_then(|v| v.as_f64())
             .expect("quality_score should be a number");
         assert!((score - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_lesson_from_policy_violation() {
+        let judgment = TaskJudgment {
+            quality_score: 0.1,
+            issues: vec!["2 tool calls blocked by security policy".into()],
+            failure_modes: vec![FailureMode::PolicyViolation { count: 2 }],
+        };
+        let lesson = extract_lesson(&judgment, &ctx("commander", "game_action")).unwrap();
+        assert!(lesson.pattern.condition.contains("blocked operations"));
+        assert!(lesson.pattern.action.contains("shell_exec"));
+        assert!(lesson.pattern.expected_outcome.contains("agent skills"));
+        assert!((lesson.confidence - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]

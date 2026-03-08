@@ -815,6 +815,32 @@ impl AgentConnection {
         // No local LLM streams to abort - all handled by agent's protocol server
     }
 
+    /// Get compute budget status via JSON-RPC telemetry
+    pub async fn get_compute_budget(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let result: serde_json::Value = client
+            .request("budget.compute_status", rpc_params![])
+            .await?;
+
+        Ok(result)
+    }
+
+    /// Get per-agent process metrics (RSS, CPU) via JSON-RPC
+    pub async fn get_system_metrics(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let result: serde_json::Value = client.request("system.metrics", rpc_params![]).await?;
+
+        Ok(result)
+    }
+
     /// Get agent configuration
     pub async fn get_config(
         &self,

@@ -248,6 +248,10 @@ pub(crate) fn compute_task_metrics(
         inference_duration_ms,
         energy_wh,
         quality_score: None,
+        context_utilization_pct: None,
+        prompt_eval_ms: None,
+        generation_ms: None,
+        cache_hit_pct: None,
     })
 }
 

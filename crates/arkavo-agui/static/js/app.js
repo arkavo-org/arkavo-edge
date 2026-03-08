@@ -50,6 +50,12 @@ function routeEvent(event) {
         case 'costMetricsUpdate':
             handleCostMetricsUpdate(event);
             break;
+        case 'computeBudgetUpdate':
+            handleComputeBudgetUpdate(event);
+            break;
+        case 'agentSystemMetrics':
+            handleAgentSystemMetrics(event);
+            break;
         case 'securityStatusUpdate':
             handleSecurityStatusUpdate(event);
             break;

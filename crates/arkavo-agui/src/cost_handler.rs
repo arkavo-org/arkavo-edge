@@ -126,20 +126,57 @@ impl CostHandler {
             )
         };
 
-        let (session_limit, session_spent) = if let Some(ref manager) = self.budget_manager {
-            let config = manager.get_config().await;
-            let tracker = manager.tracker();
-            let status = tracker.get_status().await;
-            (config.limits.session_limit, status.session_spent)
-        } else {
-            (None, arkavo_budget::TokenCost::ZERO)
-        };
+        let (session_limit, session_spent, agent_allocations) =
+            if let Some(ref manager) = self.budget_manager {
+                let config = manager.get_config().await;
+                let tracker = manager.tracker();
+                let status = tracker.get_status().await;
 
-        let dashboard = ROICalculator::calculate_dashboard(
+                let mut allocations = Vec::new();
+                for (agent_id, agent_budget) in &config.agent_budgets {
+                    let agent_status = tracker.get_agent_status(agent_id).await;
+                    let spent = agent_status
+                        .as_ref()
+                        .map(|s| s.session_spent.as_dollars())
+                        .unwrap_or(0.0);
+                    let allocated = agent_budget
+                        .session_limit
+                        .map(|l| l.as_dollars())
+                        .unwrap_or(0.0);
+
+                    allocations.push(arkavo_budget::AgentAllocationSummary {
+                        agent_id: agent_id.clone(),
+                        allocated_usd: allocated,
+                        spent_usd: spent,
+                        remaining_usd: (allocated - spent).max(0.0),
+                        allocated_tokens: 0,
+                        tokens_used: 0,
+                        model_type: "local".to_string(),
+                        status: if spent >= allocated {
+                            "exhausted".to_string()
+                        } else if allocated > 0.0 {
+                            "active".to_string()
+                        } else {
+                            "passive".to_string()
+                        },
+                    });
+                }
+
+                (
+                    config.limits.session_limit,
+                    status.session_spent,
+                    allocations,
+                )
+            } else {
+                (None, arkavo_budget::TokenCost::ZERO, vec![])
+            };
+
+        let dashboard = ROICalculator::calculate_dashboard_with_allocations(
             &routing_metrics,
             &orch_metrics,
             session_limit,
             session_spent,
+            agent_allocations,
         );
 
         Ok(dashboard)

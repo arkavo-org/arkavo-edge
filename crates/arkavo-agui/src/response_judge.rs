@@ -18,6 +18,10 @@ pub enum FailureMode {
     HallucinatedTool {
         count: usize,
     },
+    /// Agent called a tool that was blocked by security policy (policy_denied / auto_blocked)
+    PolicyViolation {
+        count: usize,
+    },
     OutputLoop,
 }
 
@@ -94,6 +98,20 @@ pub fn judge(task_description: &str, result: &str) -> TaskJudgment {
         score -= error_ratio * 0.6;
     }
 
+    // Policy violation detection (agent called blocked/denied tools)
+    let policy_violations = count_policy_violations(trimmed);
+    if policy_violations > 0 {
+        issues.push(format!(
+            "{} tool calls blocked by security policy (policy_denied/auto_blocked)",
+            policy_violations
+        ));
+        failure_modes.push(FailureMode::PolicyViolation {
+            count: policy_violations,
+        });
+        // Harsh penalty: agent should never attempt blocked operations
+        score -= (policy_violations as f64 * 0.3).min(0.8);
+    }
+
     // Tool hallucination detection (Rust stdlib methods as tool names)
     let hallucination_count = count_hallucinated_tools(trimmed);
     if hallucination_count > 0 {
@@ -145,6 +163,7 @@ fn is_generic_response(lower: &str) -> bool {
 /// Detects two formats:
 /// - Conductor: `## Tool: name` (success), `## Tool: name (Error)` (failure)
 /// - Agent HRM: `1. tool_name {...} → result` (success), `→ Error:` (failure)
+/// - Policy denials: `"approval":"policy_denied"` or `"approval":"auto_blocked"`
 fn count_tool_results(text: &str) -> (usize, usize) {
     // Conductor format
     let conductor_errors = text.matches("(Error)").count();
@@ -154,9 +173,28 @@ fn count_tool_results(text: &str) -> (usize, usize) {
     let arrow_errors = text.matches("→ Error:").count();
     let arrow_total = text.matches("→ ").count();
 
-    let errors = conductor_errors + arrow_errors;
-    let total = (conductor_total + arrow_total).max(errors);
+    // Policy denial / security block results look like successful tool calls
+    // but represent agent misbehavior that should be penalized
+    let policy_denied = text.matches("\"approval\":\"policy_denied\"").count()
+        + text.matches("approval\":\"policy_denied").count();
+    let auto_blocked = text.matches("\"approval\":\"auto_blocked\"").count()
+        + text.matches("approval\":\"auto_blocked").count();
+    let policy_errors = policy_denied + auto_blocked;
+
+    let errors = conductor_errors + arrow_errors + policy_errors;
+    let total = (conductor_total + arrow_total + policy_errors).max(errors);
     (errors, total)
+}
+
+/// Count policy violations (tool calls blocked by security policy)
+///
+/// Detects `"approval":"policy_denied"` and `"approval":"auto_blocked"` in
+/// tool result text. These indicate the agent attempted operations that
+/// were blocked by the security layer.
+fn count_policy_violations(text: &str) -> usize {
+    let policy_denied = text.matches("policy_denied").count();
+    let auto_blocked = text.matches("auto_blocked").count();
+    policy_denied + auto_blocked
 }
 
 /// Count hallucinated tool calls (non-existent tools called)
@@ -423,5 +461,66 @@ mod tests {
         assert!(has_repetition("a\na\na\na\na"));
         assert!(!has_repetition("line 1\nline 2\nline 3"));
         assert!(!has_repetition("short"));
+    }
+
+    #[test]
+    fn test_policy_denied_detected_as_failure() {
+        let result = r#"1. shell_exec: OK
+   → {"approval":"policy_denied","duration_ms":0,"exit_code":-1,"reason":"RequiresReview commands need explicit policy approval via TaskPolicyManager","stderr":""}"#;
+        let j = judge("Review colony state", result);
+        assert!(
+            j.quality_score < 0.5,
+            "Policy denied should score low: {}",
+            j.quality_score
+        );
+        assert!(j.issues.iter().any(|i| i.contains("security policy")));
+        assert!(
+            j.failure_modes
+                .iter()
+                .any(|f| matches!(f, FailureMode::PolicyViolation { .. }))
+        );
+    }
+
+    #[test]
+    fn test_auto_blocked_detected_as_failure() {
+        let result = r#"1. shell_exec: OK
+   → {"approval":"auto_blocked","block_reason":"Recursive delete blocked","duration_ms":0,"exit_code":-1}"#;
+        let j = judge("Manage colony resources", result);
+        assert!(
+            j.quality_score < 0.5,
+            "Auto-blocked should score low: {}",
+            j.quality_score
+        );
+        assert!(
+            j.failure_modes
+                .iter()
+                .any(|f| matches!(f, FailureMode::PolicyViolation { .. }))
+        );
+    }
+
+    #[test]
+    fn test_multiple_policy_violations_harsh_penalty() {
+        let result = r#"1. shell_exec → {"approval":"policy_denied","reason":"blocked"}
+2. shell_exec → {"approval":"auto_blocked","block_reason":"Recursive delete blocked"}
+3. shell_exec → {"approval":"policy_denied","reason":"blocked"}"#;
+        let j = judge("Do something", result);
+        assert!(
+            j.quality_score < 0.3,
+            "Multiple policy violations: {}",
+            j.quality_score
+        );
+    }
+
+    #[test]
+    fn test_count_policy_violations() {
+        assert_eq!(count_policy_violations("normal text"), 0);
+        assert_eq!(count_policy_violations(r#""approval":"policy_denied""#), 1);
+        assert_eq!(count_policy_violations(r#""approval":"auto_blocked""#), 1);
+        assert_eq!(
+            count_policy_violations(
+                r#"policy_denied here and auto_blocked there and policy_denied again"#
+            ),
+            3
+        );
     }
 }

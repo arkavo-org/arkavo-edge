@@ -139,10 +139,9 @@ async fn send_status_update(
 
 pub async fn handle_request_mesh_status(
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
+    agent_connections: &Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received RequestMeshStatus");
-
     let agents_list = agents.read().await;
     let mesh_agents: Vec<MeshAgentInfo> = agents_list
         .iter()
@@ -170,17 +169,40 @@ pub async fn handle_request_mesh_status(
             status: "connected".to_string(),
         })
         .collect();
+    drop(agents_list);
 
     let mesh_status = AgUiEvent::MeshStatus {
         agents: mesh_agents,
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
-
-    if let Ok(json) = serde_json::to_string(&mesh_status) {
-        println!("AG-UI: MeshStatus JSON: {}", &json[..json.len().min(500)]);
-    }
     tx.send(mesh_status).await?;
-    println!("AG-UI: Sent MeshStatus with {} agents", agents_list.len());
+
+    // Poll compute budget and system metrics from each connected agent via JSON-RPC
+    let conns = agent_connections.read().await;
+    for (agent_id, conn) in conns.iter() {
+        if let Ok(budget_data) = conn.get_compute_budget().await {
+            let event = AgUiEvent::ComputeBudgetUpdate {
+                agent_id: agent_id.clone(),
+                compute_budget: budget_data,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            let _ = tx.send(event).await;
+        }
+
+        // Poll per-agent process metrics (RSS, CPU)
+        if let Ok(metrics_data) = conn.get_system_metrics().await {
+            let event = AgUiEvent::AgentSystemMetrics {
+                agent_id: agent_id.clone(),
+                rss_mb: metrics_data["rss_mb"].as_f64().unwrap_or(0.0),
+                cpu_percent: metrics_data["cpu_percent"].as_f64().unwrap_or(0.0),
+                pid: metrics_data["pid"].as_u64().unwrap_or(0) as u32,
+                total_ram_mb: metrics_data["total_ram_mb"].as_f64(),
+                available_ram_mb: metrics_data["available_ram_mb"].as_f64(),
+            };
+            let _ = tx.send(event).await;
+        }
+    }
+
     Ok(())
 }
 

@@ -10,6 +10,8 @@ pub struct ROIDashboard {
     pub model_distribution: ModelDistribution,
     pub budget_health: BudgetHealth,
     pub recommendations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_allocations: Vec<arkavo_budget::AgentAllocationSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +88,22 @@ impl ROICalculator {
         session_limit: Option<TokenCost>,
         session_spent: TokenCost,
     ) -> ROIDashboard {
+        Self::calculate_dashboard_with_allocations(
+            routing_metrics,
+            orchestrator_metrics,
+            session_limit,
+            session_spent,
+            vec![],
+        )
+    }
+
+    pub fn calculate_dashboard_with_allocations(
+        routing_metrics: &RoutingMetrics,
+        orchestrator_metrics: &OrchestratorMetrics,
+        session_limit: Option<TokenCost>,
+        session_spent: TokenCost,
+        agent_allocations: Vec<arkavo_budget::AgentAllocationSummary>,
+    ) -> ROIDashboard {
         let session_stats = Self::calculate_session_stats(routing_metrics, orchestrator_metrics);
 
         let cost_breakdown = Self::calculate_cost_breakdown(routing_metrics);
@@ -104,6 +122,7 @@ impl ROICalculator {
             model_distribution,
             budget_health,
             recommendations,
+            agent_allocations,
         }
     }
 

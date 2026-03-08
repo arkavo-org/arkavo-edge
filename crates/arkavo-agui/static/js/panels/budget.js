@@ -31,10 +31,28 @@ function handleCostMetricsUpdate(event) {
     renderBudget();
 }
 
+function handleComputeBudgetUpdate(event) {
+    if (!AppState.computeBudgets) AppState.computeBudgets = {};
+    AppState.computeBudgets[event.agentId] = event.computeBudget;
+    renderBudget();
+}
+
+function handleAgentSystemMetrics(event) {
+    AppState.agentSystemMetrics[event.agentId] = {
+        rssMb: event.rssMb,
+        cpuPercent: event.cpuPercent,
+        pid: event.pid,
+        totalRamMb: event.totalRamMb,
+        availableRamMb: event.availableRamMb
+    };
+    renderBudget();
+}
+
 function requestBudgetData() {
     wsSend({ type: 'getROIDashboard' });
     wsSend({ type: 'getCostMetrics', timeRange: '24h' });
     wsSend({ type: 'getBudgetStatus', agentId: null });
+    wsSend({ type: 'requestMeshStatus' });
 }
 
 function updateCostBadge() {
@@ -80,6 +98,60 @@ function renderBudget() {
     html += renderStatCard('Burn Rate', formatCost(ss ? ss.burn_rate_per_hour : 0) + '/hr', '');
     html += '</div>';
 
+    // System Memory Overview (from agentSystemMetrics)
+    var sysMetrics = AppState.agentSystemMetrics;
+    var sysKeys = Object.keys(sysMetrics);
+    if (sysKeys.length > 0) {
+        var firstMetrics = sysMetrics[sysKeys[0]];
+        var totalRam = firstMetrics.totalRamMb;
+        var availRam = firstMetrics.availableRamMb;
+        if (totalRam) {
+            var usedRam = totalRam - (availRam || 0);
+            var ramPct = (usedRam / totalRam) * 100;
+            html += '<div class="section-title">System Memory</div>';
+            html += '<div class="stats-grid">';
+            html += renderStatCard('Total RAM', formatBytes(totalRam * 1024 * 1024), '');
+            html += renderStatCard('Available', formatBytes((availRam || 0) * 1024 * 1024), '');
+            html += renderStatCard('Used', formatBytes(usedRam * 1024 * 1024), ramPct.toFixed(0) + '%');
+            html += '</div>';
+            html += '<div style="margin:0.5em 0 1em">' + renderMemoryBar(ramPct, sysKeys, sysMetrics) + '</div>';
+        }
+    }
+
+    // Compute Budget Telemetry (from agents via JSON-RPC)
+    var budgets = AppState.computeBudgets;
+    if (budgets && Object.keys(budgets).length > 0) {
+        html += '<div class="section-title">Compute Budget Telemetry</div>';
+        html += '<table class="cost-table"><thead><tr>' +
+            '<th>Agent</th><th>Status</th><th>Inferences</th><th>Tokens</th><th>Memory</th><th>RSS</th><th>TTL</th>' +
+            '</tr></thead><tbody>';
+        Object.keys(budgets).forEach(function(agentId) {
+            var data = budgets[agentId];
+            var cb = data.compute_budget || data;
+            var status = cb.status || 'unknown';
+            var statusColor = status === 'active' ? '#4ade80' :
+                              status === 'exhausted' ? '#f87171' : '#94a3b8';
+            var ttl = cb.ttl_remaining_secs != null ? cb.ttl_remaining_secs.toFixed(0) + 's' : '-';
+            var memMax = cb.max_memory_bytes || 0;
+            var memUsed = cb.used_memory_bytes || 0;
+            var memLabel = memMax > 0
+                ? formatBytes(memUsed) + ' / ' + formatBytes(memMax)
+                : '-';
+            var agentMet = sysMetrics[data.agent_id || agentId];
+            var rssLabel = agentMet ? formatBytes(agentMet.rssMb * 1024 * 1024) : '-';
+            html += '<tr>';
+            html += '<td>' + escapeHtml(data.agent_id || agentId) + '</td>';
+            html += '<td><span style="color:' + statusColor + ';font-weight:bold">' + escapeHtml(status) + '</span></td>';
+            html += '<td class="mono">' + (cb.remaining_inferences || 0) + '</td>';
+            html += '<td class="mono">' + (cb.remaining_tokens || 0) + '</td>';
+            html += '<td class="mono">' + memLabel + '</td>';
+            html += '<td class="mono">' + rssLabel + '</td>';
+            html += '<td class="mono">' + ttl + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    }
+
     // Cost breakdown by model
     var cb = db.cost_breakdown;
     if (cb && cb.by_model) {
@@ -117,6 +189,27 @@ function renderBudget() {
         html += '</div>';
     }
 
+    // Per-Agent Budget Allocations
+    if (db.agent_allocations && db.agent_allocations.length > 0) {
+        html += '<div class="section-title">Agent Budget Allocation</div>';
+        html += '<table class="cost-table"><thead><tr><th>Agent</th><th>Allocated</th><th>Spent</th><th>Remaining</th><th>Usage</th><th>Status</th></tr></thead><tbody>';
+        db.agent_allocations.forEach(function(agent) {
+            var usagePct = agent.allocated_usd > 0 ? (agent.spent_usd / agent.allocated_usd) * 100 : 0;
+            var statusColor = agent.status === 'active' ? '#4ade80' :
+                              agent.status === 'exhausted' ? '#f87171' :
+                              agent.status === 'passive' ? '#94a3b8' : '#fbbf24';
+            html += '<tr>';
+            html += '<td>' + escapeHtml(agent.agent_id) + '</td>';
+            html += '<td class="mono">' + formatCost(agent.allocated_usd) + '</td>';
+            html += '<td class="mono">' + formatCost(agent.spent_usd) + '</td>';
+            html += '<td class="mono">' + formatCost(agent.remaining_usd) + '</td>';
+            html += '<td>' + renderMiniGauge(usagePct) + '</td>';
+            html += '<td><span style="color:' + statusColor + '">' + escapeHtml(agent.status) + '</span></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+    }
+
     // Recommendations
     if (db.recommendations && db.recommendations.length > 0) {
         html += '<div class="section-title">Recommendations</div>';
@@ -128,6 +221,14 @@ function renderBudget() {
     }
 
     container.innerHTML = html;
+}
+
+function renderMiniGauge(pct) {
+    pct = Math.min(100, Math.max(0, pct));
+    var color = pct < 50 ? '#4ade80' : pct < 80 ? '#fbbf24' : '#f87171';
+    return '<div style="display:inline-block;width:60px;height:8px;background:#334155;border-radius:4px;overflow:hidden">' +
+        '<div style="width:' + pct.toFixed(0) + '%;height:100%;background:' + color + '"></div>' +
+        '</div> <span class="mono" style="font-size:0.75em">' + pct.toFixed(0) + '%</span>';
 }
 
 function renderBudgetGauge(pct, statusClass) {
@@ -150,4 +251,30 @@ function renderStatCard(label, value, sub) {
         '<div class="stat-card-value">' + escapeHtml(String(value)) + '</div>' +
         (sub ? '<div class="stat-card-sub">' + escapeHtml(sub) + '</div>' : '') +
         '</div>';
+}
+
+function formatBytes(bytes) {
+    if (bytes == null || bytes === 0) return '0 B';
+    var gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return gb.toFixed(1) + ' GB';
+    var mb = bytes / (1024 * 1024);
+    if (mb >= 1) return mb.toFixed(0) + ' MB';
+    return (bytes / 1024).toFixed(0) + ' KB';
+}
+
+function renderMemoryBar(usedPct, agentIds, metrics) {
+    var barColor = usedPct < 60 ? '#4ade80' : usedPct < 85 ? '#fbbf24' : '#f87171';
+    var bar = '<div style="height:18px;background:#334155;border-radius:4px;overflow:hidden;position:relative">' +
+        '<div style="width:' + Math.min(100, usedPct).toFixed(1) + '%;height:100%;background:' + barColor +
+        ';transition:width 0.3s"></div></div>';
+    var legend = '<div style="display:flex;gap:1em;flex-wrap:wrap;margin-top:0.25em;font-size:0.75em;color:#94a3b8">';
+    for (var i = 0; i < agentIds.length; i++) {
+        var m = metrics[agentIds[i]];
+        if (m && m.rssMb) {
+            legend += '<span>' + escapeHtml(agentIds[i]) + ': ' + formatBytes(m.rssMb * 1024 * 1024) +
+                (m.cpuPercent != null ? ' · ' + m.cpuPercent.toFixed(0) + '% CPU' : '') + '</span>';
+        }
+    }
+    legend += '</div>';
+    return bar + legend;
 }
