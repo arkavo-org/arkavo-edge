@@ -118,6 +118,12 @@ impl Div<u64> for TokenCost {
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Tokens read from the prompt cache (billed at discounted rate)
+    #[serde(default)]
+    pub cached_input_tokens: u32,
+    /// Tokens written into the prompt cache (billed at write surcharge rate)
+    #[serde(default)]
+    pub cache_write_tokens: u32,
 }
 
 impl TokenUsage {
@@ -125,11 +131,27 @@ impl TokenUsage {
         Self {
             input_tokens,
             output_tokens,
+            cached_input_tokens: 0,
+            cache_write_tokens: 0,
+        }
+    }
+
+    pub fn with_cache(
+        input_tokens: u32,
+        output_tokens: u32,
+        cached_input_tokens: u32,
+        cache_write_tokens: u32,
+    ) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            cached_input_tokens,
+            cache_write_tokens,
         }
     }
 
     pub fn total_tokens(&self) -> u32 {
-        self.input_tokens + self.output_tokens
+        self.input_tokens + self.output_tokens + self.cached_input_tokens + self.cache_write_tokens
     }
 
     pub fn calculate_cost(
@@ -192,5 +214,21 @@ mod tests {
 
         let total_cost = usage.calculate_cost(input_cost, output_cost);
         assert_eq!(total_cost.as_cents(), 60); // 30 + 30 = 60 cents
+    }
+
+    #[test]
+    fn test_token_usage_with_cache() {
+        let usage = TokenUsage::with_cache(500, 200, 800, 100);
+        assert_eq!(usage.input_tokens, 500);
+        assert_eq!(usage.cached_input_tokens, 800);
+        assert_eq!(usage.cache_write_tokens, 100);
+        assert_eq!(usage.total_tokens(), 1600);
+    }
+
+    #[test]
+    fn test_token_usage_new_has_zero_cache() {
+        let usage = TokenUsage::new(1000, 500);
+        assert_eq!(usage.cached_input_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
     }
 }

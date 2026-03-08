@@ -162,6 +162,60 @@ impl BudgetTracker {
         Ok(true)
     }
 
+    /// Shared write path: update global + agent status, append to history, fire event.
+    async fn apply_spending(
+        &self,
+        agent_id: &str,
+        cost: TokenCost,
+        record: &SpendingRecord,
+        config: &BudgetConfig,
+    ) -> Result<()> {
+        {
+            let mut status = self.status.write().await;
+            status.session_spent += cost;
+            status.hourly_spent += cost;
+            status.daily_spent += cost;
+            status.monthly_spent += cost;
+            status.total_spent += cost;
+            status.last_updated = Utc::now();
+
+            self.check_thresholds(config, &status, None).await?;
+        }
+
+        {
+            let mut agent_statuses = self.agent_status.write().await;
+            let agent_status = agent_statuses
+                .entry(agent_id.to_string())
+                .or_insert_with(BudgetStatus::default);
+
+            agent_status.session_spent += cost;
+            agent_status.hourly_spent += cost;
+            agent_status.daily_spent += cost;
+            agent_status.monthly_spent += cost;
+            agent_status.total_spent += cost;
+            agent_status.last_updated = Utc::now();
+
+            if let Some(agent_budget) = config.agent_budgets.get(agent_id) {
+                self.check_agent_thresholds(&config.thresholds, agent_budget, agent_status)
+                    .await?;
+            }
+        }
+
+        {
+            let mut history = self.spending_history.write().await;
+            history.push(record.clone());
+            if history.len() > 10000 {
+                history.drain(0..1000);
+            }
+        }
+
+        let _ = self
+            .event_sender
+            .send(BudgetEvent::SpendingRecorded(record.clone()));
+
+        Ok(())
+    }
+
     pub async fn record_spending(
         &self,
         agent_id: String,
@@ -183,50 +237,8 @@ impl BudgetTracker {
 
         let mut config = self.config.write().await;
         config.time_windows.update();
-
-        {
-            let mut status = self.status.write().await;
-            status.session_spent += cost;
-            status.hourly_spent += cost;
-            status.daily_spent += cost;
-            status.monthly_spent += cost;
-            status.total_spent += cost;
-            status.last_updated = Utc::now();
-
-            self.check_thresholds(&config, &status, None).await?;
-        }
-
-        {
-            let mut agent_statuses = self.agent_status.write().await;
-            let agent_status = agent_statuses
-                .entry(agent_id.clone())
-                .or_insert_with(BudgetStatus::default);
-
-            agent_status.session_spent += cost;
-            agent_status.hourly_spent += cost;
-            agent_status.daily_spent += cost;
-            agent_status.monthly_spent += cost;
-            agent_status.total_spent += cost;
-            agent_status.last_updated = Utc::now();
-
-            if let Some(agent_budget) = config.agent_budgets.get(&agent_id) {
-                self.check_agent_thresholds(&config.thresholds, agent_budget, agent_status)
-                    .await?;
-            }
-        }
-
-        {
-            let mut history = self.spending_history.write().await;
-            history.push(record.clone());
-
-            if history.len() > 10000 {
-                history.drain(0..1000);
-            }
-        }
-
-        let _ = self
-            .event_sender
-            .send(BudgetEvent::SpendingRecorded(record.clone()));
+        self.apply_spending(&agent_id, cost, &record, &config)
+            .await?;
 
         Ok(record)
     }
@@ -303,50 +315,8 @@ impl BudgetTracker {
             metadata: None,
         };
 
-        // Update global status
-        {
-            let mut status = self.status.write().await;
-            status.session_spent += cost;
-            status.hourly_spent += cost;
-            status.daily_spent += cost;
-            status.monthly_spent += cost;
-            status.total_spent += cost;
-            status.last_updated = Utc::now();
-            self.check_thresholds(&config, &status, None).await?;
-        }
-
-        // Update agent status
-        {
-            let mut agent_statuses = self.agent_status.write().await;
-            let agent_status = agent_statuses
-                .entry(agent_id.clone())
-                .or_insert_with(BudgetStatus::default);
-
-            agent_status.session_spent += cost;
-            agent_status.hourly_spent += cost;
-            agent_status.daily_spent += cost;
-            agent_status.monthly_spent += cost;
-            agent_status.total_spent += cost;
-            agent_status.last_updated = Utc::now();
-
-            if let Some(agent_budget) = config.agent_budgets.get(&agent_id) {
-                self.check_agent_thresholds(&config.thresholds, agent_budget, agent_status)
-                    .await?;
-            }
-        }
-
-        // Record in history
-        {
-            let mut history = self.spending_history.write().await;
-            history.push(record.clone());
-            if history.len() > 10000 {
-                history.drain(0..1000);
-            }
-        }
-
-        let _ = self
-            .event_sender
-            .send(BudgetEvent::SpendingRecorded(record.clone()));
+        self.apply_spending(&agent_id, cost, &record, &config)
+            .await?;
 
         Ok(record)
     }
@@ -564,50 +534,8 @@ impl BudgetTracker {
 
         let mut config = self.config.write().await;
         config.time_windows.update();
-
-        {
-            let mut status = self.status.write().await;
-            status.session_spent += cost;
-            status.hourly_spent += cost;
-            status.daily_spent += cost;
-            status.monthly_spent += cost;
-            status.total_spent += cost;
-            status.last_updated = Utc::now();
-
-            self.check_thresholds(&config, &status, None).await?;
-        }
-
-        {
-            let mut agent_statuses = self.agent_status.write().await;
-            let agent_status = agent_statuses
-                .entry(agent_id.clone())
-                .or_insert_with(BudgetStatus::default);
-
-            agent_status.session_spent += cost;
-            agent_status.hourly_spent += cost;
-            agent_status.daily_spent += cost;
-            agent_status.monthly_spent += cost;
-            agent_status.total_spent += cost;
-            agent_status.last_updated = Utc::now();
-
-            if let Some(agent_budget) = config.agent_budgets.get(&agent_id) {
-                self.check_agent_thresholds(&config.thresholds, agent_budget, agent_status)
-                    .await?;
-            }
-        }
-
-        {
-            let mut history = self.spending_history.write().await;
-            history.push(record.clone());
-
-            if history.len() > 10000 {
-                history.drain(0..1000);
-            }
-        }
-
-        let _ = self
-            .event_sender
-            .send(BudgetEvent::SpendingRecorded(record.clone()));
+        self.apply_spending(&agent_id, cost, &record, &config)
+            .await?;
 
         Ok(record)
     }

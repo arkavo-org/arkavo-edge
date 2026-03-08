@@ -266,15 +266,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_cost_estimation() {
-        use crate::provider_costs::ProviderPricing;
-        let pricing = ProviderPricing::new();
+        use crate::provider_costs::{PricingEntry, ProviderPricing};
+        let mut pricing = ProviderPricing::new();
+
+        // Runtime-loaded pricing (no hardcoded defaults)
+        pricing.load_from_entries(&[
+            PricingEntry {
+                model_id: "gpt-3.5-turbo".into(),
+                provider: "openai".into(),
+                input_cents_per_1k: 50,
+                output_cents_per_1k: 150,
+                cached_input_cents_per_1k: None,
+                cache_write_cents_per_1k: None,
+                context_window: Some(16385),
+                max_output_tokens: Some(4096),
+            },
+            PricingEntry {
+                model_id: "llama3.2:latest".into(),
+                provider: "ollama".into(),
+                input_cents_per_1k: 0,
+                output_cents_per_1k: 0,
+                cached_input_cents_per_1k: None,
+                cache_write_cents_per_1k: None,
+                context_window: Some(8192),
+                max_output_tokens: Some(4096),
+            },
+        ]);
 
         // Test OpenAI GPT-3.5-turbo pricing
         let cost = pricing
             .estimate_cost("openai", "gpt-3.5-turbo", 1000, 500)
             .expect("Should have pricing for GPT-3.5-turbo");
 
-        // 1000 tokens input @ $0.50/1k + 500 tokens output @ $1.50/1k = $0.50 + $0.75 = $1.25
+        // 1000 * 50/1000 + 500 * 150/1000 = 50 + 75 = 125
         assert_eq!(cost.as_cents(), 125);
 
         // Test free models
