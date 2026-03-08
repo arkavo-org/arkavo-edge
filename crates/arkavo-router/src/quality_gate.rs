@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::judge;
 use crate::learning::BurstFeedback;
 use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
-use arkavo_llm::{Message, ProviderResponse, Role};
+use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
 
 impl super::Router {
@@ -79,9 +79,13 @@ impl super::Router {
                     )
                     .await;
 
-                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
-                        &tool_infos,
-                    ))
+                    let json = match current_decision.recommended_model {
+                        crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                            arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                        }
+                        _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                    };
+                    Some(json)
                 }
                 None => None,
             };
@@ -257,16 +261,16 @@ impl super::Router {
                         .await;
 
                     if attempt + 1 < MAX_RETRIES {
-                        // RL FEEDBACK: Inject specific validation error with actionable fix
+                        // RL FEEDBACK: Inject specific validation error with actionable fix.
+                        // Insert assistant→user pair to maintain role alternation
+                        // required by Jinja chat templates (Qwen3.5, Ministral).
                         let available_tool_names: Vec<&str> =
                             tool_infos.iter().map(|t| t.name.as_str()).collect();
                         let fix = validation_error.fix_suggestion(&available_tool_names);
-                        let feedback_msg = Message {
-                            role: Role::User,
-                            content: format!("ERROR: {validation_error}\n\nFix: {fix}"),
-                            images: None,
-                        };
-                        feedback_messages.push(feedback_msg);
+                        feedback_messages.push(Message::assistant(response.content.clone()));
+                        feedback_messages.push(Message::user(format!(
+                            "ERROR: {validation_error}\n\nFix: {fix}",
+                        )));
                         tracing::info!(
                             "RL feedback: injecting validation error for retry (attempt {})",
                             attempt + 1
@@ -324,27 +328,24 @@ impl super::Router {
                                 if judgment.issue_type == IssueType::MissingToolUse
                                     && !judgment.suggested_keywords.is_empty()
                                 {
-                                    tracing::warn!(
-                                        "Judge suggested tools {:?} but available tools may differ — continuing with response",
-                                        judgment.suggested_keywords
-                                    );
+                                    return Err(Error::MissingToolUse {
+                                        keywords: judgment.suggested_keywords.clone(),
+                                    });
                                 }
 
                                 if attempt + 1 < MAX_RETRIES {
                                     // RL FEEDBACK: Inject judge rejection reason back into
-                                    // conversation so the model can learn from the feedback
+                                    // conversation. Insert assistant→user pair for Jinja
+                                    // role alternation compliance.
                                     let reason = judgment
                                         .reason
                                         .as_deref()
                                         .unwrap_or("Quality check failed");
-                                    let feedback_msg = Message {
-                                        role: Role::User,
-                                        content: format!(
-                                            "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
-                                        ),
-                                        images: None,
-                                    };
-                                    feedback_messages.push(feedback_msg);
+                                    feedback_messages
+                                        .push(Message::assistant(response.content.clone()));
+                                    feedback_messages.push(Message::user(format!(
+                                        "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
+                                    )));
                                     tracing::info!(
                                         "RL feedback: injecting judge rejection for retry (attempt {})",
                                         attempt + 1

@@ -6,7 +6,7 @@ use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
-use arkavo_llm::{Message as LlmMessage, Provider, Role};
+use arkavo_llm::{Message as LlmMessage, Provider};
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
 use chrono::Utc;
@@ -77,11 +77,7 @@ impl Planner {
             )));
         };
 
-        let messages = vec![LlmMessage {
-            role: Role::User,
-            content: planning_prompt.clone(),
-            images: None,
-        }];
+        let messages = vec![LlmMessage::user(planning_prompt.clone())];
 
         // Use structured output with JSON schema if provider supports it
         let schema = if planning_provider.supports_structured_output() {
@@ -374,11 +370,7 @@ impl Planner {
             )));
         };
 
-        let messages = vec![LlmMessage {
-            role: Role::User,
-            content: adjustment_prompt.clone(),
-            images: None,
-        }];
+        let messages = vec![LlmMessage::user(adjustment_prompt.clone())];
 
         let response = provider
             .complete(messages)

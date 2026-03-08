@@ -288,18 +288,16 @@ pub async fn download_model(model: &RecommendedModel) -> Result<PathBuf, String>
 
 /// Run a simple test query to verify the model works
 pub async fn run_test_query() -> Result<String, String> {
-    use arkavo_llm::{LlmClient, Message, Role};
+    use arkavo_llm::{LlmClient, Message};
 
     println!("\nTesting model...");
 
     let client = LlmClient::from_env().map_err(|e| format!("Failed to create LLM client: {e}"))?;
 
     let response = client
-        .complete(vec![Message {
-            role: Role::User,
-            content: "Say exactly: Hello! Arkavo Edge is ready.".to_string(),
-            images: None,
-        }])
+        .complete(vec![Message::user(
+            "Say exactly: Hello! Arkavo Edge is ready.",
+        )])
         .await
         .map_err(|e| format!("Test query failed: {e}"))?;
 

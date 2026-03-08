@@ -233,17 +233,9 @@ async fn execute_subtask(
 ) -> String {
     let mut messages = Vec::new();
     if let Some(sys) = system_prompt {
-        messages.push(arkavo_llm::Message {
-            role: arkavo_llm::Role::System,
-            content: sys.to_string(),
-            images: None,
-        });
+        messages.push(arkavo_llm::Message::system(sys));
     }
-    messages.push(arkavo_llm::Message {
-        role: arkavo_llm::Role::User,
-        content: task_content.to_string(),
-        images: None,
-    });
+    messages.push(arkavo_llm::Message::user(task_content));
 
     match super::conductor_tool_loop::run_tool_loop(
         router,

@@ -203,7 +203,7 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
 /// Check if a specific model exists in the HuggingFace cache (no download, no fallback)
 ///
 /// Returns true if the model file is already cached, false otherwise.
-/// Used by upgrade_model to only upgrade to models that are available.
+/// Used by `is_model_available` to check if a model is cached locally.
 pub fn is_model_cached(repo_id: &str, filename: &str) -> bool {
     let Some(cache) = get_hf_cache_dir() else {
         return false;

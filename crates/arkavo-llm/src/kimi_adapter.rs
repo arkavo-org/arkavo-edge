@@ -87,7 +87,7 @@ fn convert_messages_to_kimi(messages: Vec<Message>) -> Vec<arkavo_kimi::Message>
             role: match msg.role {
                 Role::System => arkavo_kimi::Role::System,
                 Role::User => arkavo_kimi::Role::User,
-                Role::Assistant => arkavo_kimi::Role::Assistant,
+                Role::Assistant | Role::Tool => arkavo_kimi::Role::Assistant,
             },
             content: msg.content,
             images: msg.images,

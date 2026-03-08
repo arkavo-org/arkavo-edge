@@ -185,11 +185,7 @@ pub(super) async fn run_tool_loop(
         let tool_count = response.tool_calls.len();
         info!("Executing {tool_count} tool calls (step {})", iteration + 1);
 
-        messages.push(arkavo_llm::Message {
-            role: arkavo_llm::Role::Assistant,
-            content: response.content.clone(),
-            images: None,
-        });
+        messages.push(arkavo_llm::Message::assistant(response.content.clone()));
 
         let tool_result_parts = execute_tool_calls(
             &response.tool_calls,
@@ -230,13 +226,9 @@ pub(super) async fn run_tool_loop(
             tool_results_text
         };
 
-        messages.push(arkavo_llm::Message {
-            role: arkavo_llm::Role::User,
-            content: format!(
-                "Tool results:\n{result_to_append}\n\nContinue your workflow. What is the next step?"
-            ),
-            images: None,
-        });
+        messages.push(arkavo_llm::Message::user(format!(
+            "Tool results:\n{result_to_append}\n\nContinue your workflow. What is the next step?"
+        )));
     }
 
     // Synthesize a minimal summary when the LLM's last turn was a tool call
@@ -441,19 +433,12 @@ pub(super) async fn distill_with_small_model(
     let truncated: String = raw_results.chars().take(3000).collect();
 
     let messages = vec![
-        arkavo_llm::Message {
-            role: arkavo_llm::Role::System,
-            content: "You are a concise status analyst. Given tool output, list ONLY \
-                      noteworthy or changed items. Omit routine/unchanged data. \
-                      Keep your response under 300 words."
-                .to_string(),
-            images: None,
-        },
-        arkavo_llm::Message {
-            role: arkavo_llm::Role::User,
-            content: truncated,
-            images: None,
-        },
+        arkavo_llm::Message::system(
+            "You are a concise status analyst. Given tool output, list ONLY \
+             noteworthy or changed items. Omit routine/unchanged data. \
+             Keep your response under 300 words.",
+        ),
+        arkavo_llm::Message::user(truncated),
     ];
 
     match tokio::time::timeout(

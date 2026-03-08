@@ -1,4 +1,4 @@
-use arkavo_llm::{Message, Provider, ProviderResponse, Role, tool_executor::ToolExecutionResult};
+use arkavo_llm::{Message, Provider, ProviderResponse, tool_executor::ToolExecutionResult};
 use arkavo_mcp_tools::ToolInfo;
 use std::sync::Arc;
 
@@ -176,11 +176,7 @@ impl ResponseJudge {
 
         let judgment_text = self
             .judge_provider
-            .complete(vec![Message {
-                role: Role::User,
-                content: judge_prompt,
-                images: None,
-            }])
+            .complete(vec![Message::user(judge_prompt)])
             .await
             .map_err(|e| {
                 tracing::warn!("Judge LLM failed, falling back to heuristics: {}", e);

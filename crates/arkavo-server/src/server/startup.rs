@@ -263,11 +263,7 @@ async fn generate_param_aliases(
     );
 
     // Use the router to call the LLM
-    let messages = vec![arkavo_llm::Message {
-        role: arkavo_llm::Role::User,
-        content: alias_prompt,
-        images: None,
-    }];
+    let messages = vec![arkavo_llm::Message::user(alias_prompt)];
 
     let response = match router.route_with_tools(&"", messages, None).await {
         Ok(resp) => resp.content,

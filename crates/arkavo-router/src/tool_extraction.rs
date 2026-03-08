@@ -208,8 +208,43 @@ pub(crate) fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall>
     if let Some(calls) = extract_python_function_calls(content) {
         return calls;
     }
+    if let Some(calls) = extract_curly_brace_tool_calls(content) {
+        return calls;
+    }
 
     Vec::new()
+}
+
+/// Extract `tool_name{json}` or `tool_name{}` format (Ministral/Mistral models)
+fn extract_curly_brace_tool_calls(content: &str) -> Option<Vec<ParsedToolCall>> {
+    let re = regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9_-]*)\{([^}]*)\}").ok()?;
+    let mut calls = Vec::new();
+
+    for cap in re.captures_iter(content) {
+        let name = cap.get(1)?.as_str();
+        let body = cap.get(2)?.as_str().trim();
+
+        // Skip common non-tool patterns
+        if name.len() <= 2 || ["if", "for", "while", "match", "fn", "let", "var"].contains(&name) {
+            continue;
+        }
+
+        let args = if body.is_empty() {
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            // Try parsing as JSON object content: tool_name{"key": "val"}
+            serde_json::from_str(&format!("{{{body}}}"))
+                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+        };
+
+        calls.push(ParsedToolCall {
+            tool_name: name.to_string(),
+            arguments: args,
+            call_id: None,
+        });
+    }
+
+    if calls.is_empty() { None } else { Some(calls) }
 }
 
 /// Extract Python-style function calls from text
@@ -576,5 +611,27 @@ echo "hello"
 "#;
         let extracted = extract_code_block_content(content);
         assert!(extracted.contains("result = context_search"));
+    }
+
+    #[test]
+    fn test_curly_brace_tool_call_no_args() {
+        let calls = extract_curly_brace_tool_calls("get_agent_time{}").unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_agent_time");
+        assert_eq!(calls[0].arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_curly_brace_tool_call_with_args() {
+        let calls = extract_curly_brace_tool_calls(r#"get_time{"timezone": "UTC"}"#).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_time");
+        assert_eq!(calls[0].arguments, serde_json::json!({"timezone": "UTC"}));
+    }
+
+    #[test]
+    fn test_curly_brace_skips_keywords() {
+        assert!(extract_curly_brace_tool_calls("if{}").is_none());
+        assert!(extract_curly_brace_tool_calls("fn{}").is_none());
     }
 }

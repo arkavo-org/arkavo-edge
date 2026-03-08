@@ -4,8 +4,8 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResp
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
-    ChatInputs, LlamaModel, ModelFormat, apply_chat_template_with_format, detect_model_format, ffi,
-    init_llama_logging, test_minimal_init,
+    ChatInputs, ChatMessageMeta, LlamaModel, ModelFormat, apply_chat_template_with_format,
+    detect_model_format, ffi, init_llama_logging, test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -329,6 +329,15 @@ impl LlamaCppProvider {
 
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
 
+        // Build per-message metadata for tool-role messages
+        let meta: Vec<ChatMessageMeta> = messages
+            .iter()
+            .map(|m| ChatMessageMeta {
+                tool_call_id: m.tool_call_id.clone(),
+                tool_name: m.tool_name.clone(),
+            })
+            .collect();
+
         // Detect model format from model name
         let format = detect_model_format(&self.name);
         let model = self.get_model()?;
@@ -352,7 +361,7 @@ impl LlamaCppProvider {
                     enable_thinking,
                     add_generation_prompt: true,
                 };
-                match tmpls.apply(&llama_messages, &inputs) {
+                match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
                     Ok(result) => {
                         if crate::llamacpp_streaming::is_debug() {
                             if let Ok(s) = std::str::from_utf8(&result.prompt) {
@@ -537,6 +546,7 @@ impl LlamaCppProvider {
                 Role::System => "system",
                 Role::User => "user",
                 Role::Assistant => "assistant",
+                Role::Tool => "tool",
             };
 
             let role_cstring = CString::new(role_str)
@@ -680,21 +690,10 @@ impl Provider for LlamaCppProvider {
                 if first.role == Role::System {
                     first.content = format!("{}\n\n{}", system_prompt, first.content);
                 } else {
-                    modified_messages.insert(
-                        0,
-                        Message {
-                            role: Role::System,
-                            content: system_prompt,
-                            images: None,
-                        },
-                    );
+                    modified_messages.insert(0, Message::system(system_prompt));
                 }
             } else {
-                modified_messages.push(Message {
-                    role: Role::System,
-                    content: system_prompt,
-                    images: None,
-                });
+                modified_messages.push(Message::system(system_prompt));
             }
         }
 

@@ -2,7 +2,7 @@ use crate::{Error, Result};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llm::{Message, Provider, Role};
+use arkavo_llm::{Message, Provider};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -42,11 +42,7 @@ impl ContextSummarizer {
 
         let prompt = self.create_summary_prompt(content);
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let summary = self
             .provider

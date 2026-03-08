@@ -1,8 +1,7 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
-use arkavo_llm::{LlmClient, Message, StreamResponse};
+use arkavo_llm::{LlmClient, Message};
 use arkavo_memory::storage::MemoryStorage;
-use futures::TryStreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Runtime;
@@ -31,15 +30,6 @@ fn get_or_create_runtime() -> &'static Runtime {
     })
 }
 
-// Type alias for boxed error stream
-type BoxedErrorStream = Box<
-    dyn tokio_stream::Stream<
-            Item = Result<StreamResponse, Box<dyn std::error::Error + Send + Sync>>,
-        > + Send
-        + Unpin,
->;
-
-// Helper function to convert any error to Box<dyn Error + Send + Sync>
 fn box_error<E: std::error::Error + Send + Sync + 'static>(
     e: E,
 ) -> Box<dyn std::error::Error + Send + Sync> {
@@ -233,103 +223,110 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let user_message = Message::user(user_input.clone());
             messages_clone.push(user_message);
 
-            // Try router-based streaming with quality gate first (Unix + mcp-tools)
-            // Router provides: cost optimization, quality validation, model escalation
+            // Try router-based routing with Thompson Sampling (Unix + mcp-tools)
+            // Router provides: cost optimization, quality validation, TS learning
             #[cfg(all(unix, feature = "mcp-tools"))]
-            let stream_result: Result<
-                (BoxedErrorStream, bool),
+            let route_result: std::result::Result<
+                Option<String>,
                 Box<dyn std::error::Error + Send + Sync>,
             > = match (router.as_ref(), &client_clone) {
                 (Some(router), _) => {
                     let task_desc = user_input.clone();
-                    #[allow(deprecated)]
                     match router
-                        .route_with_quality_gate_stream(
+                        .route_with_tools(
                             &task_desc,
                             messages_clone.clone(),
                             tool_registry.as_ref(),
-                            3,
                         )
                         .await
                     {
-                        Ok(s) => {
-                            let boxed_stream: BoxedErrorStream = Box::new(s.map_err(box_error));
-                            Ok((boxed_stream, true))
-                        }
+                        Ok(response) => Ok(Some(response.content)),
                         Err(e) => Err(box_error(e)),
                     }
                 }
-                (None, client) => match client.stream(messages_clone.clone()).await {
-                    Ok(s) => {
-                        let boxed_stream: BoxedErrorStream = Box::new(s.map_err(box_error));
-                        Ok((boxed_stream, false))
-                    }
-                    Err(e) => Err(box_error(e)),
-                },
+                (None, _) => Ok(None),
             };
 
-            // Fallback to direct LLM streaming (other platforms)
+            // Determine if we got a router response or need to fall back to streaming
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            let use_streaming_fallback = match &route_result {
+                Ok(Some(_)) => false,
+                Ok(None) => true,
+                Err(_) => true,
+            };
+
             #[cfg(not(all(unix, feature = "mcp-tools")))]
-            let stream_result = client_clone
-                .stream(messages_clone.clone())
-                .await
-                .map(|s| (s, false))
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+            let route_result: std::result::Result<
+                Option<String>,
+                Box<dyn std::error::Error + Send + Sync>,
+            > = Ok(None);
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            let use_streaming_fallback = true;
 
-            match stream_result {
-                Ok((mut stream, used_router)) => {
+            if !use_streaming_fallback {
+                // Router returned a complete response — send as single chunk
+                if let Ok(Some(content)) = route_result {
                     if SHOW_DEBUG.load(Ordering::Relaxed) {
-                        eprintln!(
-                            "[LLM Task] Streaming via {}",
-                            if used_router {
-                                "Router Quality Gate"
-                            } else {
-                                "Direct LLM"
-                            }
-                        );
+                        eprintln!("[LLM Task] Response via Router (Thompson Sampling)");
                     }
-                    let mut full_response = String::new();
-
-                    // Send start streaming signal
                     let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
-
-                    // Stream the response
-                    while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
-                        match chunk {
-                            Ok(response) => {
-                                full_response.push_str(&response.content);
-                                if let Err(e) = llm_tx.send(response.content).await {
-                                    eprintln!("[LLM Task] Failed to send chunk: {e}");
-                                    break;
-                                }
-                                if response.done {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[LLM Task] Stream error: {e}");
-                                let _ = llm_tx.send(format!("Error: {e}")).await;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Send end streaming signal
+                    let _ = llm_tx.send(content.clone()).await;
                     let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                     // Add assistant response to messages
-                    messages_clone.push(Message::assistant(full_response));
-
-                    if SHOW_DEBUG.load(Ordering::Relaxed) {
-                        eprintln!(
-                            "[LLM Task] Response complete, total messages: {}",
-                            messages_clone.len()
-                        );
-                    }
+                    messages_clone.push(Message::assistant(&content));
                 }
-                Err(e) => {
-                    eprintln!("[LLM Task] Error: {e}");
-                    let _ = llm_tx.send(format!("Error: {e}")).await;
+            } else {
+                // Fallback to direct LLM streaming
+                let stream_result = client_clone
+                    .stream(messages_clone.clone())
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+
+                match stream_result {
+                    Ok(mut stream) => {
+                        if SHOW_DEBUG.load(Ordering::Relaxed) {
+                            eprintln!("[LLM Task] Streaming via Direct LLM");
+                        }
+                        let mut full_response = String::new();
+
+                        let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
+
+                        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+                            match chunk {
+                                Ok(response) => {
+                                    full_response.push_str(&response.content);
+                                    if let Err(e) = llm_tx.send(response.content).await {
+                                        eprintln!("[LLM Task] Failed to send chunk: {e}");
+                                        break;
+                                    }
+                                    if response.done {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[LLM Task] Stream error: {e}");
+                                    let _ = llm_tx.send(format!("Error: {e}")).await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
+
+                        messages_clone.push(Message::assistant(full_response));
+
+                        if SHOW_DEBUG.load(Ordering::Relaxed) {
+                            eprintln!(
+                                "[LLM Task] Response complete, total messages: {}",
+                                messages_clone.len()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[LLM Task] Error: {e}");
+                        let _ = llm_tx.send(format!("Error: {e}")).await;
+                    }
                 }
             }
             if SHOW_DEBUG.load(Ordering::Relaxed) {

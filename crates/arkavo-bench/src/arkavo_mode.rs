@@ -18,7 +18,6 @@ impl ArkavoMode {
     pub async fn new(router: Arc<Router>) -> Result<Self> {
         let config = SolverConfig {
             max_context_tokens: 8000,
-            max_quality_retries: 3,
             include_dependencies: true,
             include_tests: true,
             search_depth: 5,

@@ -53,16 +53,8 @@ Rules:
 - Order subtasks logically"#;
 
         let messages = vec![
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::System,
-                content: system_prompt.to_string(),
-                images: None,
-            },
-            arkavo_llm::Message {
-                role: arkavo_llm::Role::User,
-                content: intent.to_string(),
-                images: None,
-            },
+            arkavo_llm::Message::system(system_prompt),
+            arkavo_llm::Message::user(intent),
         ];
 
         let response = tokio::time::timeout(

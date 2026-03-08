@@ -1,7 +1,7 @@
 use super::{ArchitectPlan, ArchitectResult, Subtask};
 use crate::decision::ModelChoice;
 use crate::{Error, Result, Router};
-use arkavo_llm::{Message, Provider, ProviderResponse, Role};
+use arkavo_llm::{Message, Provider, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -59,14 +59,10 @@ impl ArchitectExecutor {
 
         // Build context with original task
         let mut accumulated_context = context;
-        accumulated_context.push(Message {
-            role: Role::User,
-            content: format!(
-                "We are executing a multi-step plan for: {}\n\nI will give you one subtask at a time.",
-                plan.original_task
-            ),
-            images: None,
-        });
+        accumulated_context.push(Message::user(format!(
+            "We are executing a multi-step plan for: {}\n\nI will give you one subtask at a time.",
+            plan.original_task
+        )));
 
         // Execute subtasks in order (respecting dependencies)
         for subtask in &plan.subtasks {
@@ -90,14 +86,10 @@ impl ArchitectExecutor {
 
             // Add successful result to context for subsequent subtasks
             if result.success {
-                accumulated_context.push(Message {
-                    role: Role::Assistant,
-                    content: format!(
-                        "Completed subtask {}: {}\n\nResult:\n{}",
-                        subtask.index, subtask.description, result.response
-                    ),
-                    images: None,
-                });
+                accumulated_context.push(Message::assistant(format!(
+                    "Completed subtask {}: {}\n\nResult:\n{}",
+                    subtask.index, subtask.description, result.response
+                )));
             }
 
             total_cost += result.actual_cost_usd;
@@ -136,14 +128,10 @@ impl ArchitectExecutor {
 
             // Build subtask prompt
             let mut messages = context.to_vec();
-            messages.push(Message {
-                role: Role::User,
-                content: format!(
-                    "Execute this subtask:\n\n{}\n\nProvide a complete implementation.",
-                    subtask.description
-                ),
-                images: None,
-            });
+            messages.push(Message::user(format!(
+                "Execute this subtask:\n\n{}\n\nProvide a complete implementation.",
+                subtask.description
+            )));
 
             // Execute with or without tools
             let response = if tool_registry.is_some() && provider.supports_tools() {

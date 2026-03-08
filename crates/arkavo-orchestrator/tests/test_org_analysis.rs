@@ -46,7 +46,7 @@ mod org_analysis_tests {
         // 6. Generates intelligent summary
 
         match router
-            .route_with_quality_gate(task, vec![], Some(&tool_registry), 3)
+            .route_with_tools(task, vec![], Some(&tool_registry))
             .await
         {
             Ok(response) => {
@@ -104,7 +104,7 @@ mod org_analysis_tests {
         println!("Task: {}", task);
 
         match router
-            .route_with_quality_gate(task, vec![], Some(&tool_registry), 3)
+            .route_with_tools(task, vec![], Some(&tool_registry))
             .await
         {
             Ok(response) => {

@@ -51,39 +51,6 @@ impl super::Router {
         }
     }
 
-    pub(crate) fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
-        let candidate = match current {
-            ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
-            ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_9B,
-            ModelChoice::LocalQwen35_9B => ModelChoice::LocalQwen35_27B,
-            ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
-            ModelChoice::LocalGlm47Flash => ModelChoice::LocalGlm47Flash,
-            ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
-            ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
-            ModelChoice::LocalGemma12B => ModelChoice::LocalGemma12B,
-            ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
-            ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
-            ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
-            ModelChoice::GeminiFlash => ModelChoice::ClaudeSonnet,
-            ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
-            ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
-            ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
-            ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
-        };
-
-        if self.is_model_available(&candidate) {
-            candidate
-        } else {
-            tracing::debug!(
-                "Upgrade target {:?} not available, staying with {:?}",
-                candidate,
-                current
-            );
-            current.clone()
-        }
-    }
-
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),

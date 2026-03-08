@@ -1,6 +1,6 @@
 use crate::types::AgUiEvent;
 use anyhow::Result;
-use arkavo_llm::{Message, Role};
+use arkavo_llm::Message;
 use arkavo_mcp_tools::registry::ToolRegistry;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
@@ -114,11 +114,7 @@ impl HealthMonitor {
         // Get the appropriate provider from router
         let provider = self.router.get_local_provider();
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let response = provider.complete_with_options(messages, Some(250)).await?;
         self.parse_analysis(&response)

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_llm::{Message, Role};
+use arkavo_llm::Message;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -189,11 +189,7 @@ impl TimeoutAnalyzer {
 
         let prompt = self.build_timeout_prompt(cmd);
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let response = provider.complete_with_options(messages, Some(150)).await?;
 

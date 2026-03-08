@@ -11,7 +11,7 @@ fn contains_word(text: &str, word: &str) -> bool {
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llm::{Provider, Role};
+use arkavo_llm::Provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -557,11 +557,7 @@ impl TaskClassifier {
     async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
         let prompt = self.build_classification_prompt(task);
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let provider = self.provider.lock().await;
         let response = provider

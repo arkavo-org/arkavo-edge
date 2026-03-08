@@ -798,6 +798,14 @@ pub struct ChatInputs {
     pub add_generation_prompt: bool,
 }
 
+/// Per-message metadata for Jinja template rendering (tool results)
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Default)]
+pub struct ChatMessageMeta {
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+}
+
 /// Safe wrapper around llama.cpp's common_chat_templates (Jinja template engine)
 #[cfg(not(target_env = "musl"))]
 pub struct ChatTemplates {
@@ -840,14 +848,48 @@ impl ChatTemplates {
         messages: &[ffi::llama_chat_message],
         inputs: &ChatInputs,
     ) -> Result<ChatResult, String> {
-        // Convert llama_chat_message to arkavo_chat_msg
+        self.apply_with_meta(messages, &[], inputs)
+    }
+
+    /// Apply chat template with messages, tool metadata, and configuration.
+    /// `meta` carries tool_call_id/tool_name for tool-role messages (indexed
+    /// parallel to `messages`; shorter slices are padded with None).
+    pub fn apply_with_meta(
+        &self,
+        messages: &[ffi::llama_chat_message],
+        meta: &[ChatMessageMeta],
+        inputs: &ChatInputs,
+    ) -> Result<ChatResult, String> {
+        // Keep CStrings alive for the duration of the FFI call
+        let meta_cstrings: Vec<(Option<CString>, Option<CString>)> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let m = meta.get(i);
+                let tc_id = m
+                    .and_then(|m| m.tool_call_id.as_deref())
+                    .and_then(|s| CString::new(s).ok());
+                let t_name = m
+                    .and_then(|m| m.tool_name.as_deref())
+                    .and_then(|s| CString::new(s).ok());
+                (tc_id, t_name)
+            })
+            .collect();
+
         let c_msgs: Vec<ffi::arkavo_chat_msg> = messages
             .iter()
-            .map(|m| ffi::arkavo_chat_msg {
+            .enumerate()
+            .map(|(i, m)| ffi::arkavo_chat_msg {
                 role: m.role,
                 content: m.content,
-                tool_call_id: std::ptr::null(),
-                tool_name: std::ptr::null(),
+                tool_call_id: meta_cstrings[i]
+                    .0
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                tool_name: meta_cstrings[i]
+                    .1
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
             })
             .collect();
 

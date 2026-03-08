@@ -51,25 +51,26 @@ pub fn strip_think_blocks(content: &str) -> String {
     result
 }
 
-/// Strip `<tool>...</tool>` blocks from content
+/// Strip `<tool>...</tool>` and `<tool_call>...</tool_call>` blocks from content
 ///
 /// These blocks represent tool executions that have already been processed.
 /// Handles both closed and unclosed tool blocks.
 pub fn strip_tool_blocks(content: &str) -> String {
     let mut result = content.to_string();
 
-    while let Some(start) = result.find("<tool>") {
-        if let Some(end) = result.find("</tool>") {
-            let end_pos = end + "</tool>".len();
-            result = format!("{}{}", &result[..start], &result[end_pos..]);
-        } else {
-            // Unclosed tool block - remove from <tool> to end
-            result = result[..start].to_string();
-            break;
+    for (open_tag, close_tag) in [("<tool_call>", "</tool_call>"), ("<tool>", "</tool>")] {
+        while let Some(start) = result.find(open_tag) {
+            if let Some(end) = result[start..].find(close_tag) {
+                let end_pos = start + end + close_tag.len();
+                result = format!("{}{}", &result[..start], &result[end_pos..]);
+            } else {
+                result = result[..start].to_string();
+                break;
+            }
         }
     }
 
-    result
+    result.trim().to_string()
 }
 
 /// Strip conversation prefixes from content

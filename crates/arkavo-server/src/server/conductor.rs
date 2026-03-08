@@ -335,24 +335,19 @@ pub async fn execute_with_conductor_and_learning(
     // Build messages: System (AGENTS.md purpose) → System (RLM, if active) → User (task)
     let mut messages = Vec::new();
     if let Some(sys) = system_prompt {
-        messages.push(arkavo_llm::Message {
-            role: arkavo_llm::Role::System,
-            content: sys.to_string(),
-            images: None,
-        });
+        messages.push(arkavo_llm::Message::system(sys));
     }
     if let Some(ref rlm_prompt) = rlm_system_prompt {
-        messages.push(arkavo_llm::Message {
-            role: arkavo_llm::Role::System,
-            content: rlm_prompt.clone(),
-            images: None,
-        });
+        messages.push(arkavo_llm::Message::system(rlm_prompt.clone()));
     }
-    messages.push(arkavo_llm::Message {
-        role: arkavo_llm::Role::User,
-        content: augmented_content,
-        images,
-    });
+    if let Some(imgs) = images {
+        messages.push(arkavo_llm::Message::user_with_images(
+            augmented_content,
+            imgs,
+        ));
+    } else {
+        messages.push(arkavo_llm::Message::user(augmented_content));
+    }
 
     // Transition task from Pending → Running so the dashboard shows "working"
     let _ = conductor.start_task(hrm_task.id).await;

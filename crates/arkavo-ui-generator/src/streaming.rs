@@ -210,11 +210,8 @@ impl StreamingGenerator {
                                         && let Some(router_instance) = &router
                                     {
                                         let classifier = router_instance.get_local_provider();
-                                        let messages = vec![arkavo_llm::Message {
-                                            role: arkavo_llm::Role::User,
-                                            content: prompt.clone(),
-                                            images: None,
-                                        }];
+                                        let messages =
+                                            vec![arkavo_llm::Message::user(prompt.clone())];
 
                                         if let Ok(response) = classifier.complete(messages).await {
                                             json_buffer = response;
@@ -307,11 +304,7 @@ impl StreamingGenerator {
                         // Fall back to local model
                         if let Some(router_instance) = &router {
                             let classifier = router_instance.get_local_provider();
-                            let messages = vec![arkavo_llm::Message {
-                                role: arkavo_llm::Role::User,
-                                content: prompt.clone(),
-                                images: None,
-                            }];
+                            let messages = vec![arkavo_llm::Message::user(prompt.clone())];
 
                             match classifier.complete(messages).await {
                                 Ok(response) => {
@@ -395,11 +388,7 @@ impl StreamingGenerator {
                 // Use local model via Router
 
                 let classifier = router_instance.get_local_provider();
-                let messages = vec![arkavo_llm::Message {
-                    role: arkavo_llm::Role::User,
-                    content: prompt.clone(),
-                    images: None,
-                }];
+                let messages = vec![arkavo_llm::Message::user(prompt.clone())];
 
                 match classifier.complete(messages).await {
                     Ok(response) => {

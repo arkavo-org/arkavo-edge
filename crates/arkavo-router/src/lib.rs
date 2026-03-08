@@ -21,7 +21,6 @@ pub mod provider_info;
 pub(crate) mod quality_gate;
 pub mod response;
 pub mod rlm;
-pub(crate) mod routing_deprecated;
 pub mod selector;
 pub mod selector_quality;
 pub mod stream;
@@ -134,6 +133,10 @@ pub struct Router {
     /// Separate semaphore for chat inference so chat never blocks game ticks.
     /// Uses the fastest local model (0.8B/3B) which has its own context pool.
     chat_semaphore: Arc<Semaphore>,
+    /// Separate semaphore for synthesis/internal tasks (route_fast).
+    /// Prevents synthesis from blocking production inference since they
+    /// use different models (fastest_local_model vs Thompson-selected).
+    synthesis_semaphore: Arc<Semaphore>,
     /// Tracks which model was last selected by route_with_tools().
     /// The conductor reads this after tool execution to attribute
     /// reward-based corrective feedback to the right Thompson Sampling prior.
@@ -176,6 +179,7 @@ impl Router {
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
+            synthesis_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
             recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
@@ -213,6 +217,7 @@ impl Router {
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
+            synthesis_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
             recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
@@ -564,7 +569,6 @@ impl Router {
     /// // Await full response
     /// let response = router.route(task, messages, None).await?.complete().await?;
     /// ```
-    #[allow(deprecated)] // Uses deprecated route_architect and route_with_quality_gate internally
     pub async fn route(
         &self,
         task_description: &str,
@@ -590,40 +594,45 @@ impl Router {
         let complexity = scorer.analyze(task_description);
 
         if complexity.architect_recommended {
-            // Use architect mode for complex tasks
             tracing::info!(
                 "Architect mode activated: {} estimated subtasks",
                 complexity.estimated_subtasks
             );
 
-            let result = self
-                .route_architect(task_description, messages, tool_registry)
-                .await?;
+            let planner = ArchitectPlanner::new();
+            let plan = planner.create_plan(task_description, complexity).await?;
+
+            let executor =
+                ArchitectExecutor::new(std::sync::Arc::new(self.clone_for_executor().await?));
+            let arch_result = executor.execute(&plan, messages, tool_registry).await?;
 
             let response = RouteResponse {
-                content: result.final_response,
+                content: arch_result.final_response,
                 tool_calls: Vec::new(),
                 model: ModelChoice::ClaudeOpus,
-                cost_usd: result.actual_cost_usd,
+                cost_usd: arch_result.actual_cost_usd,
                 used_architect_mode: true,
-                architect_savings: Some(result.actual_savings_usd),
+                architect_savings: Some(arch_result.actual_savings_usd),
             };
 
             return Ok(RouteStream::from_response(response));
         }
 
-        // Simple task - use quality-gated routing
+        // Simple task - use Thompson Sampling routing
         let provider_response = self
-            .route_with_quality_gate(task_description, messages, tool_registry, 3)
+            .route_with_tools(task_description, messages, tool_registry)
             .await?;
 
-        let decision = self.classify(task_description).await?;
+        let model = self
+            .last_routed_model()
+            .and_then(|name| ModelChoice::from_name(&name))
+            .unwrap_or_else(|| self.selector.fastest_local_model());
 
         let response = RouteResponse {
             content: provider_response.content,
             tool_calls: provider_response.tool_calls,
-            model: decision.recommended_model,
-            cost_usd: decision.estimated_cost_usd,
+            model,
+            cost_usd: 0.0,
             used_architect_mode: false,
             architect_savings: None,
         };
@@ -648,10 +657,10 @@ impl Router {
         let provider = self.instantiate_provider(&model).await?;
 
         let _permit = self
-            .inference_semaphore
+            .synthesis_semaphore
             .acquire()
             .await
-            .map_err(|_| Error::ModelExecution("Inference semaphore closed".to_string()))?;
+            .map_err(|_| Error::ModelExecution("Synthesis semaphore closed".to_string()))?;
 
         let content = provider
             .complete(messages)
@@ -804,6 +813,41 @@ impl Router {
                 }
             });
         }
+    }
+
+    /// Create a clone of Router for use in executor
+    pub(crate) async fn clone_for_executor(&self) -> Result<Self> {
+        Ok(Self {
+            classifier: self.classifier.clone(),
+            selector: self.selector.clone(),
+            model_learning: self.model_learning.clone(),
+            #[cfg(feature = "llama-cpp")]
+            model_registry: self.model_registry.clone(),
+            model_cooldowns: self.model_cooldowns.clone(),
+            metrics: self.metrics.clone(),
+            connectivity: self.connectivity.clone(),
+            offline_mode: self.offline_mode,
+            preflight: self.preflight.clone(),
+            advisor: self.advisor.clone(),
+            #[cfg(feature = "critic")]
+            critic: self.critic.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_store: self.advisor_store.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_encryptor: self.tdf_encryptor.clone(),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_audit_store: self.tdf_audit_store.clone(),
+            inference_semaphore: self.inference_semaphore.clone(),
+            chat_semaphore: self.chat_semaphore.clone(),
+            synthesis_semaphore: self.synthesis_semaphore.clone(),
+            last_routed_model: self.last_routed_model.clone(),
+            last_decision_trace: self.last_decision_trace.clone(),
+            recent_traces: self.recent_traces.clone(),
+        })
     }
 
     pub async fn get_metrics(&self) -> RoutingMetrics {

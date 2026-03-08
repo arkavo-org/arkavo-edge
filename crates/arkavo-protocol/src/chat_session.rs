@@ -5,7 +5,7 @@ use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
 use arkavo_llm::{
-    DeltaType, LlmClientAdapter, Message, Role, StreamLlmModel, ToolExecutionResult, ToolExecutor,
+    DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutionResult, ToolExecutor,
 };
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_observability::{
@@ -850,11 +850,7 @@ impl ChatSessionManager {
                     metrics_collector.record_message_received();
 
                     // Add to conversation context
-                    conversation_context.push(Message {
-                        role: Role::User,
-                        content: user_message.content.clone(),
-                        images: None,
-                    });
+                    conversation_context.push(Message::user(user_message.content.clone()));
 
                     let message_id = Uuid::new_v4().to_string();
                     session_observability::log_stream_start(&session_id, None);
@@ -874,21 +870,13 @@ impl ChatSessionManager {
                     if let Some(ref lc) = learning_context {
                         let ctx = lc.read().await;
                         if !ctx.is_empty() {
-                            windowed_context.insert(0, Message {
-                                role: Role::System,
-                                content: ctx.clone(),
-                                images: None,
-                            });
+                            windowed_context.insert(0, Message::system(ctx.clone()));
                         }
                     }
 
                     // Prepend agent purpose/system prompt from AGENTS.md (always first)
                     if let Some(ref prompt) = system_prompt {
-                        windowed_context.insert(0, Message {
-                            role: Role::System,
-                            content: prompt.clone(),
-                            images: None,
-                        });
+                        windowed_context.insert(0, Message::system(prompt.clone()));
                     }
 
                     // Emit tool search telemetry before routing
@@ -1070,20 +1058,28 @@ impl ChatSessionManager {
                             };
                             let _ = delta_tx.send(quality_delta);
 
-                            // Send text delta (sequence 2+, after metadata deltas)
-                            let text_delta = MessageDelta {
-                                session_id: session_id.clone(),
-                                message_id: message_id.clone(),
-                                sequence: 2,
-                                delta: MessageDeltaContent::Text {
-                                    text: response.content.clone(),
-                                },
-                                timestamp: chrono::Utc::now(),
-                            };
-                            let _ = delta_tx.send(text_delta);
-
                             // Check for tool calls and execute them
                             if !response.tool_calls.is_empty() {
+                                // Strip tool call markup from content before sending text delta.
+                                // Handles XML (<tool_call>) and text-extracted calls (tool_name{}).
+                                let mut clean = arkavo_router::strip_tool_blocks(&response.content);
+                                // If content is just the raw tool call text, suppress it
+                                for tc in &response.tool_calls {
+                                    clean = clean.replace(&tc.tool_name, "");
+                                }
+                                let clean = clean.trim().trim_matches(|c: char| c == '{' || c == '}' || c == '(' || c == ')').trim().to_string();
+                                if !clean.is_empty() {
+                                    let text_delta = MessageDelta {
+                                        session_id: session_id.clone(),
+                                        message_id: message_id.clone(),
+                                        sequence: 2,
+                                        delta: MessageDeltaContent::Text {
+                                            text: clean,
+                                        },
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    let _ = delta_tx.send(text_delta);
+                                }
                                 // Send tool call deltas
                                 for (idx, tool_call) in response.tool_calls.iter().enumerate() {
                                     let tool_delta = MessageDelta {
@@ -1107,19 +1103,11 @@ impl ChatSessionManager {
                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
                                     // Add assistant message with tool calls to context
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content.clone(),
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::assistant(response.content.clone()));
 
                                     // Format and add tool results to context as user message
                                     let results_message = format_tool_results(&tool_results);
-                                    conversation_context.push(Message {
-                                        role: Role::User,
-                                        content: results_message,
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::user(results_message));
 
                                     // Send tool result deltas
                                     for (idx, result) in tool_results.iter().enumerate() {
@@ -1191,11 +1179,7 @@ impl ChatSessionManager {
                                             let _ = delta_tx.send(final_delta);
 
                                             // Add final assistant response to context
-                                            conversation_context.push(Message {
-                                                role: Role::Assistant,
-                                                content: clean_content,
-                                                images: None,
-                                            });
+                                            conversation_context.push(Message::assistant(clean_content));
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
@@ -1205,43 +1189,32 @@ impl ChatSessionManager {
                                 } else {
                                     warn!("Tool calls received but no tool registry available");
                                     // Add assistant message to context without tool execution
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content,
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::assistant(response.content));
                                 }
                             } else {
-                                // No tool calls - add assistant message to context
-                                conversation_context.push(Message {
-                                    role: Role::Assistant,
-                                    content: response.content,
-                                    images: None,
-                                });
+                                // No tool calls - send text delta and add to context
+                                let text_delta = MessageDelta {
+                                    session_id: session_id.clone(),
+                                    message_id: message_id.clone(),
+                                    sequence: 2,
+                                    delta: MessageDeltaContent::Text {
+                                        text: response.content.clone(),
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = delta_tx.send(text_delta);
+                                conversation_context.push(Message::assistant(response.content));
                             }
                         }
                         Err(e) => {
-                            let error_msg = e.to_string();
-
                             // Check if Judge detected missing tool usage
-                            if error_msg.contains("MISSING_TOOL_USE:") {
+                            if let arkavo_router::Error::MissingToolUse { ref keywords } = e {
                                 if let Some(ref registry) = tool_registry {
-                                    // Extract keywords from error message
-                                    let keywords_str = error_msg
-                                        .strip_prefix("Model execution failed: MISSING_TOOL_USE:")
-                                        .unwrap_or("");
-                                    let keywords: Vec<String> = keywords_str
-                                        .trim_matches(|c| c == '[' || c == ']' || c == '"')
-                                        .split(',')
-                                        .map(|s| s.trim().trim_matches('"').to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect();
-
                                     info!("Judge detected missing tool usage, searching for: {:?}", keywords);
 
                                     // Search for tools matching the judge's suggested keywords
                                     let mut tools_found = Vec::new();
-                                    for keyword in &keywords {
+                                    for keyword in keywords {
                                         let found = registry.search_tools(
                                             keyword,
                                             arkavo_mcp_tools::DetailLevel::FullSchema,
@@ -1261,21 +1234,15 @@ impl ChatSessionManager {
                                         );
 
                                         // Add tool hints to conversation
-                                        conversation_context.push(Message {
-                                            role: Role::User,
-                                            content: tool_msg,
-                                            images: None,
-                                        });
+                                        conversation_context.push(Message::user(tool_msg));
 
                                         // Retry with tool hints
-                                        #[allow(deprecated)]
                                         let hint_result = tokio::time::timeout(
                                             std::time::Duration::from_secs(120),
-                                            router.route_with_quality_gate(
+                                            router.route_with_tools(
                                                 &user_message.content,
                                                 conversation_context.clone(),
                                                 tool_registry.as_deref(),
-                                                3,
                                             ),
                                         )
                                         .await;
@@ -1324,11 +1291,7 @@ impl ChatSessionManager {
                                                 }
 
                                                 // Add response to context
-                                                conversation_context.push(Message {
-                                                    role: Role::Assistant,
-                                                    content: response.content,
-                                                    images: None,
-                                                });
+                                                conversation_context.push(Message::assistant(response.content));
                                             }
                                             Err(retry_err) => {
                                                 final_response = String::new();
