@@ -1,5 +1,6 @@
 #![allow(clippy::redundant_pub_crate)]
 
+use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::ModelFormat;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -11,8 +12,8 @@ use arkavo_llama_cpp::multimodal::{
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, batch_init_with_tokens_seq,
-    create_sampler_chain, create_sampler_chain_with_dry, decode_batch, token_to_bytes,
-    tokenize_with_model,
+    create_sampler_chain, create_sampler_chain_with_dry, decode_batch, perf_context,
+    token_to_bytes, tokenize_with_model,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -283,6 +284,7 @@ pub(crate) async fn generate_tokens_with_context(
                         content: piece,
                         reasoning_content: None,
                         done: false,
+                        inference_timing: None,
                     }));
                 }
                 break;
@@ -305,6 +307,7 @@ pub(crate) async fn generate_tokens_with_context(
                     content: special_text,
                     reasoning_content: None,
                     done: false,
+                    inference_timing: None,
                 }));
             }
 
@@ -324,6 +327,7 @@ pub(crate) async fn generate_tokens_with_context(
                             content: piece,
                             reasoning_content: None,
                             done: false,
+                            inference_timing: None,
                         }));
                     }
                 }
@@ -352,6 +356,7 @@ pub(crate) async fn generate_tokens_with_context(
                     content: piece,
                     reasoning_content: None,
                     done: false,
+                    inference_timing: None,
                 };
 
                 if tx.send(Ok(response)).is_err() {
@@ -385,28 +390,33 @@ pub(crate) async fn generate_tokens_with_context(
                         content: piece,
                         reasoning_content: None,
                         done: false,
+                        inference_timing: None,
                     }));
                 }
-                let _ = tx.send(Ok(StreamResponse {
-                    content: String::new(),
-                    reasoning_content: None,
-                    done: true,
-                }));
                 break;
             }
         }
 
-        Ok::<(u32, Option<Instant>), Error>((tokens_generated, first_token_time))
+        let perf = perf_context(&ctx);
+        let timing = InferenceTiming {
+            prompt_eval_ms: perf.t_p_eval_ms,
+            generation_ms: perf.t_eval_ms,
+            n_prompt_eval: perf.n_p_eval.max(0) as u32,
+            n_eval: perf.n_eval.max(0) as u32,
+        };
+
+        Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
     }
     .await;
 
     match result {
-        Ok((tokens_generated, first_token_time)) => {
+        Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
                 content: String::new(),
                 reasoning_content: None,
                 done: true,
+                inference_timing: Some(timing),
             }));
         }
         Err(e) => {

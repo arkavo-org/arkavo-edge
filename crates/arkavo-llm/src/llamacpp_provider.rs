@@ -424,6 +424,48 @@ impl LlamaCppProvider {
         Ok(UnboundedReceiverStream::new(rx))
     }
 
+    async fn complete_with_timing(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<(String, Option<crate::provider::InferenceTiming>)> {
+        let custom_provider;
+        let provider = if let Some(max) = max_tokens {
+            let mut config = self.config.clone();
+            config.max_tokens = max as u32;
+            custom_provider = Self {
+                model: self.model.clone(),
+                registry: self.registry.clone(),
+                name: self.name.clone(),
+                config,
+                mtmd_ctx: self.mtmd_ctx.clone(),
+                conversation_id: self.conversation_id.clone(),
+            };
+            &custom_provider
+        } else {
+            self
+        };
+
+        let mut stream = provider.generate_streaming(messages)?;
+        let mut full_response = String::new();
+        let mut timing = None;
+
+        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+            match chunk {
+                Ok(response) => {
+                    full_response.push_str(&response.content);
+                    if response.done {
+                        timing = response.inference_timing;
+                        break;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok((full_response, timing))
+    }
+
     fn messages_to_llama_chat_static(
         messages: &[Message],
     ) -> Result<(Vec<ffi::llama_chat_message>, Vec<CString>)> {
@@ -616,30 +658,31 @@ impl Provider for LlamaCppProvider {
             None
         };
 
-        let raw_content = if tool_temperature.is_some() || tool_grammar.is_some() {
-            let mut config = self.config.clone();
-            if let Some(temp) = tool_temperature {
-                config.temperature = temp;
-            }
-            if let Some((grammar, triggers)) = tool_grammar {
-                config.grammar = Some(grammar);
-                config.grammar_triggers = Some(triggers);
-            }
-            let custom_provider = Self {
-                model: self.model.clone(),
-                registry: self.registry.clone(),
-                name: self.name.clone(),
-                config,
-                mtmd_ctx: self.mtmd_ctx.clone(),
-                conversation_id: self.conversation_id.clone(),
+        let (raw_content, inference_timing) =
+            if tool_temperature.is_some() || tool_grammar.is_some() {
+                let mut config = self.config.clone();
+                if let Some(temp) = tool_temperature {
+                    config.temperature = temp;
+                }
+                if let Some((grammar, triggers)) = tool_grammar {
+                    config.grammar = Some(grammar);
+                    config.grammar_triggers = Some(triggers);
+                }
+                let custom_provider = Self {
+                    model: self.model.clone(),
+                    registry: self.registry.clone(),
+                    name: self.name.clone(),
+                    config,
+                    mtmd_ctx: self.mtmd_ctx.clone(),
+                    conversation_id: self.conversation_id.clone(),
+                };
+                custom_provider
+                    .complete_with_timing(modified_messages, max_tokens)
+                    .await?
+            } else {
+                self.complete_with_timing(modified_messages, max_tokens)
+                    .await?
             };
-            custom_provider
-                .complete_with_options(modified_messages, max_tokens)
-                .await?
-        } else {
-            self.complete_with_options(modified_messages, max_tokens)
-                .await?
-        };
 
         // Extract thinking blocks for GLM models
         let (content, reasoning_content) = if is_glm {
@@ -696,6 +739,7 @@ impl Provider for LlamaCppProvider {
             reasoning_content,
             tool_calls,
             finish_reason: None,
+            inference_timing,
         })
     }
 }

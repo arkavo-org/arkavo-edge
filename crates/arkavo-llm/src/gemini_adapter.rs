@@ -131,6 +131,7 @@ impl Provider for GeminiProvider {
                     content: response.text.unwrap_or_default(),
                     reasoning_content: None,
                     done: response.done,
+                    inference_timing: None,
                 })
                 .map_err(|e| Error::Stream(format!("Stream error: {e}")))
         });
@@ -251,6 +252,7 @@ impl Provider for GeminiProvider {
             reasoning_content: None,
             tool_calls: parsed_tool_calls,
             finish_reason: None,
+            inference_timing: None,
         })
     }
 }

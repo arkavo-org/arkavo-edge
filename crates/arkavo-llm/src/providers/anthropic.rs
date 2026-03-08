@@ -576,6 +576,7 @@ impl Provider for AnthropicProvider {
                                                 content: text,
                                                 reasoning_content: None,
                                                 done: false,
+                                                inference_timing: None,
                                             }))
                                             .await
                                             .is_err()
@@ -595,6 +596,7 @@ impl Provider for AnthropicProvider {
                                                 content: String::new(),
                                                 reasoning_content: None,
                                                 done: true,
+                                                inference_timing: None,
                                             }))
                                             .await
                                             .is_err()
@@ -723,6 +725,7 @@ impl Provider for AnthropicProvider {
             },
             tool_calls,
             finish_reason: message.stop_reason,
+            inference_timing: None,
         })
     }
 }

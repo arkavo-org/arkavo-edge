@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use sysinfo::{Pid, System};
 
 /// Lightweight metrics snapshot for WebSocket streaming to AG-UI
 /// Target: ≤ 1KB JSON serialized size
@@ -28,6 +29,9 @@ pub struct MetricsSnapshot {
     pub session_states: SessionStateBreakdown,
     /// Top error types (limited to 5 most common)
     pub top_errors: Vec<ErrorCount>,
+    /// Subsystem timing breakdown (omitted when all zeros to stay ≤1KB)
+    #[serde(rename = "subsystemTiming", skip_serializing_if = "Option::is_none")]
+    pub subsystem_timing: Option<crate::subsystem_timing::SubsystemTiming>,
 }
 
 /// Breakdown of sessions by state
@@ -58,6 +62,7 @@ impl MetricsSnapshot {
             cpu_usage_percent: 0.0,
             session_states: SessionStateBreakdown { active: 0 },
             top_errors: Vec::new(),
+            subsystem_timing: None,
         }
     }
 
@@ -114,6 +119,7 @@ pub struct MetricsSampler {
     last_error_count: u64,
     last_snapshot_time: DateTime<Utc>,
     error_counts: HashMap<String, u64>,
+    system: System,
 }
 
 impl MetricsSampler {
@@ -126,6 +132,7 @@ impl MetricsSampler {
             last_error_count: 0,
             last_snapshot_time: Utc::now(),
             error_counts: HashMap::new(),
+            system: System::new(),
         }
     }
 
@@ -183,6 +190,14 @@ impl MetricsSampler {
             (0.0, 0.0)
         };
 
+        // Subsystem timing from global registry
+        let timing = crate::subsystem_timing::global_timing().snapshot();
+        let subsystem_timing = if timing.is_empty() {
+            None
+        } else {
+            Some(timing)
+        };
+
         let snapshot = MetricsSnapshot {
             timestamp: now,
             active_sessions: session_states.active,
@@ -195,6 +210,7 @@ impl MetricsSampler {
             cpu_usage_percent,
             session_states,
             top_errors,
+            subsystem_timing,
         };
 
         // Update state for next sample
@@ -222,11 +238,23 @@ impl MetricsSampler {
         errors
     }
 
-    /// Get system metrics (simplified implementation)
-    fn get_system_metrics(&self) -> (f64, f64) {
-        // In a real implementation, this would use system APIs
-        // For now, return placeholder values
-        (0.0, 0.0)
+    /// Get system metrics (RSS in MB, CPU %) for the current process.
+    fn get_system_metrics(&mut self) -> (f64, f64) {
+        let pid = Pid::from_u32(std::process::id());
+        self.system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[pid]),
+            true,
+            sysinfo::ProcessRefreshKind::nothing()
+                .with_memory()
+                .with_cpu(),
+        );
+        if let Some(proc) = self.system.process(pid) {
+            let memory_mb = proc.memory() as f64 / (1024.0 * 1024.0);
+            let cpu_percent = proc.cpu_usage() as f64;
+            (memory_mb, cpu_percent)
+        } else {
+            (0.0, 0.0)
+        }
     }
 
     /// Record an error for tracking

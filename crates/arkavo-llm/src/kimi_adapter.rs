@@ -101,6 +101,7 @@ fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse 
         content: resp.content,
         reasoning_content: resp.reasoning_content,
         done: resp.done,
+        inference_timing: None,
     }
 }
 

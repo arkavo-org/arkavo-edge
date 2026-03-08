@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::Stream;
 
@@ -13,6 +14,22 @@ pub struct ProviderResponse {
     pub reasoning_content: Option<String>,
     pub tool_calls: Vec<ParsedToolCall>,
     pub finish_reason: Option<String>,
+    /// LLM inference timing from provider (prompt_eval_ms, generation_ms, n_p_eval, n_eval)
+    pub inference_timing: Option<InferenceTiming>,
+}
+
+/// Timing data from the LLM inference engine.
+/// Populated by llama.cpp provider; None for cloud providers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceTiming {
+    /// Prompt evaluation / prefill time in ms
+    pub prompt_eval_ms: f64,
+    /// Token generation time in ms
+    pub generation_ms: f64,
+    /// Number of prompt tokens evaluated (not served from KV cache)
+    pub n_prompt_eval: u32,
+    /// Number of tokens generated
+    pub n_eval: u32,
 }
 
 #[async_trait]
@@ -53,6 +70,7 @@ pub trait Provider: Send + Sync {
             reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: None,
+            inference_timing: None,
         })
     }
 

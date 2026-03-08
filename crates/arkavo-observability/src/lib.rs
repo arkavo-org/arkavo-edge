@@ -8,6 +8,7 @@ pub mod health_reporter;
 pub mod metrics;
 pub mod metrics_snapshot;
 pub mod session;
+pub mod subsystem_timing;
 pub mod task_tracker;
 
 /// Configuration for observability setup

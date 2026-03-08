@@ -146,6 +146,7 @@ fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamRespo
         content: resp.content.unwrap_or_default(),
         reasoning_content: resp.reasoning_content,
         done: resp.done,
+        inference_timing: None,
     }
 }
 
@@ -309,6 +310,7 @@ impl Provider for DeepSeekProvider {
             reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
             finish_reason,
+            inference_timing: None,
         })
     }
 }

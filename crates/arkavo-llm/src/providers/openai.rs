@@ -385,6 +385,7 @@ impl Provider for OpenAIProvider {
                                             content: String::new(),
                                             reasoning_content: None,
                                             done: true,
+                                            inference_timing: None,
                                         }))
                                         .await
                                         .is_err()
@@ -399,6 +400,7 @@ impl Provider for OpenAIProvider {
                                             content: content.clone(),
                                             reasoning_content: None,
                                             done: choice.finish_reason.is_some(),
+                                            inference_timing: None,
                                         }))
                                         .await
                                         .is_err()
