@@ -4,9 +4,9 @@ use tracing::{debug, error, info, warn};
 
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
+use arkavo_llm::LlmClientAdapter;
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
-use arkavo_llm::{LlmClient, LlmClientAdapter, LlmConfig};
 use jsonrpsee::server::middleware::http::ProxyGetRequestLayer;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
@@ -204,17 +204,13 @@ impl A2aServer {
         self.initialize_router().await;
         self.build_tool_registry().await;
 
-        // Also create LLM adapter if model is specified
-        if !model.is_empty() {
-            self.recreate_llm_adapter().await;
-        }
+        // LLM inference is handled by the Router's embedded llama.cpp via
+        // route_with_tools_hinted(). No separate LLM adapter needed.
     }
 
     pub async fn set_api_keys(&self, api_keys: std::collections::HashMap<String, String>) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.api_keys = api_keys;
-        drop(metadata);
-        self.recreate_llm_adapter().await;
     }
 
     #[allow(dead_code)]
@@ -375,94 +371,6 @@ impl A2aServer {
         let metadata = self.agent_metadata.read().await;
         let choice = arkavo_router::ModelChoice::from_name(&metadata.model)?;
         Some(choice)
-    }
-
-    async fn recreate_llm_adapter(&self) {
-        let metadata = self.agent_metadata.read().await;
-        let model = metadata.model.clone();
-        let api_keys = metadata.api_keys.clone();
-        drop(metadata);
-
-        info!("Attempting to create LLM adapter for model: {}", model);
-        match self.create_llm_adapter(&model, &api_keys) {
-            Ok(adapter) => {
-                *self.llm_adapter.write().await = Some(adapter);
-                info!("✓ Successfully created LLM adapter with model: {}", model);
-            }
-            Err(e) => {
-                error!(model = model, error = %e, "✗ Failed to create LLM adapter");
-            }
-        }
-    }
-
-    pub(super) fn create_llm_adapter(
-        &self,
-        model_url: &str,
-        api_keys: &std::collections::HashMap<String, String>,
-    ) -> Result<Arc<LlmClientAdapter>> {
-        if let Some((provider, rest)) = model_url.split_once("://") {
-            match provider {
-                "ollama" => {
-                    if let Some((host_port, model_name)) = rest.rsplit_once('/') {
-                        let config =
-                            LlmConfig::ollama_with(format!("http://{host_port}"), model_name);
-                        let client = LlmClient::from_config(&config).map_err(|e| {
-                            A2aError::InvalidRequest(format!("Failed to create LLM client: {e}"))
-                        })?;
-                        Ok(Arc::new(LlmClientAdapter::new(client)))
-                    } else {
-                        Err(A2aError::InvalidRequest(format!(
-                            "Invalid Ollama URL format: {model_url}"
-                        )))
-                    }
-                }
-                "kimi" => {
-                    let api_key = api_keys
-                        .get("MOONSHOT_API_KEY")
-                        .cloned()
-                        .or_else(|| std::env::var("MOONSHOT_API_KEY").ok());
-
-                    let mut config = if let Some(key) = api_key {
-                        LlmConfig::kimi(key)
-                    } else {
-                        return Err(A2aError::InvalidRequest(
-                            "MOONSHOT_API_KEY not provided in config or environment".to_string(),
-                        ));
-                    };
-
-                    if !rest.is_empty() {
-                        config.model = Some(rest.to_string());
-                    }
-
-                    let client = LlmClient::from_config(&config).map_err(|e| {
-                        A2aError::InvalidRequest(format!("Failed to create KIMI client: {e}"))
-                    })?;
-                    Ok(Arc::new(LlmClientAdapter::new(client)))
-                }
-                _ => Err(A2aError::InvalidRequest(format!(
-                    "Unsupported LLM provider: {provider}"
-                ))),
-            }
-        } else {
-            info!(
-                "Model '{}' has no provider prefix, attempting to create from environment variables",
-                model_url
-            );
-
-            let config = LlmConfig::from_env();
-            let client = LlmClient::from_config(&config).map_err(|e| {
-                A2aError::InvalidRequest(format!(
-                    "Failed to create LLM client for model '{model_url}' from environment: {e}. \
-                     Either use format 'provider://host:port/model' or set LLM_PROVIDER env var"
-                ))
-            })?;
-
-            info!(
-                "Successfully created LLM client from environment for model: {}",
-                model_url
-            );
-            Ok(Arc::new(LlmClientAdapter::new(client)))
-        }
     }
 
     async fn initialize_router(&self) {
@@ -735,7 +643,6 @@ impl A2aServer {
         info!("File watcher started for {:?}", config_path);
 
         let agent_metadata = self.agent_metadata.clone();
-        let llm_adapter = self.llm_adapter.clone();
         let mcp_registry = self.mcp_registry.clone();
 
         let handle = tokio::task::spawn_blocking(move || {
@@ -753,7 +660,6 @@ impl A2aServer {
                             info!("AGENTS.md modified, triggering hot-reload");
 
                             let agent_metadata_clone = agent_metadata.clone();
-                            let llm_adapter_clone = llm_adapter.clone();
                             let mcp_registry_clone = mcp_registry.clone();
 
                             #[allow(clippy::disallowed_methods)]
@@ -769,7 +675,6 @@ impl A2aServer {
                                         match reload_configuration_for_watcher(
                                             &content,
                                             agent_metadata_clone,
-                                            llm_adapter_clone,
                                             mcp_registry_clone,
                                         ).await {
                                             Ok(_) => info!("Configuration hot-reload completed successfully"),

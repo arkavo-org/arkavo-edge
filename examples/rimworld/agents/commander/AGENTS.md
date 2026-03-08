@@ -24,7 +24,7 @@ purpose: |
   Use send_task to consult specialists (survival, industry, defense).
   Use colonist names and IDs from the MOST RECENT observation only.
 
-model: glm-4.7-flash
+model: qwen3.5-9b
 action_interval: 15
 listen: 0.0.0.0:8401
 mdns: true

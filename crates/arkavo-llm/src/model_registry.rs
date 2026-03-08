@@ -76,19 +76,27 @@ impl ModelRegistry {
     /// Returns an error if the model fails to load from the given path
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn load(&self, name: &str, path: &str) -> Result<()> {
+        // Double-check under read lock to avoid concurrent duplicate loads
+        if self.is_loaded(name) {
+            return Ok(());
+        }
+
         let model = LlamaModel::from_file(path)
             .map_err(|e| Error::Config(format!("Failed to load model from {path}: {e}")))?;
 
         let model_arc = Arc::new(model);
-
-        // Register with context pool for concurrent context management
-        self.context_pool.register_model(name, model_arc.clone())?;
 
         {
             let mut models = self
                 .models
                 .write()
                 .map_err(|_| Error::Internal("Lock poisoned".to_string()))?;
+            // Final check under write lock — another thread may have loaded it
+            if models.contains_key(name) {
+                return Ok(());
+            }
+            // Register with context pool for concurrent context management
+            self.context_pool.register_model(name, model_arc.clone())?;
             models.insert(name.to_string(), model_arc);
         }
 

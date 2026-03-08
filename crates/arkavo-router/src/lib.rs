@@ -651,7 +651,22 @@ impl Router {
     ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
 
-        let model = self.selector.fastest_local_model();
+        let preferred = self.selector.fastest_local_model();
+        // Prefer a model already loaded in the registry to avoid ~1s reload.
+        // Synthesis tasks don't need a specific model — any loaded one will do.
+        #[cfg(feature = "llama-cpp")]
+        let model = if self.model_registry.is_loaded(preferred.name()) {
+            preferred
+        } else {
+            // Use any already-loaded model, sorted by preference (smallest first)
+            crate::ModelChoice::ALL_LOCAL
+                .iter()
+                .find(|m| self.model_registry.is_loaded(m.name()))
+                .cloned()
+                .unwrap_or(preferred)
+        };
+        #[cfg(not(feature = "llama-cpp"))]
+        let model = preferred;
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
 
         let provider = self.instantiate_provider(&model).await?;

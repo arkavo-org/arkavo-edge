@@ -50,9 +50,45 @@ pub fn example_value_for_param(name: &str, schema: &Value) -> String {
                 "[\"item1\", \"item2\"]".to_string()
             }
         }
-        "object" => "{\"key\": \"value\"}".to_string(),
+        "object" => example_object_from_schema(name, schema),
         // Default: string — use name-based heuristics
         _ => example_string_for_name(name),
+    }
+}
+
+/// Generate an example JSON object using actual property names from the schema.
+/// Falls back to `{"key": "value"}` when no properties are defined.
+fn example_object_from_schema(_name: &str, schema: &Value) -> String {
+    let props = match schema.get("properties").and_then(|p| p.as_object()) {
+        Some(p) if !p.is_empty() => p,
+        _ => return "{\"key\": \"value\"}".to_string(),
+    };
+
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // Show required props first, then up to 1 optional
+    let mut pairs = Vec::new();
+    for req in &required {
+        if let Some(prop_schema) = props.get(*req) {
+            let val = example_value_for_param(req, prop_schema);
+            pairs.push(format!("\"{req}\": \"{val}\""));
+        }
+    }
+    for (key, prop_schema) in props {
+        if !required.contains(&key.as_str()) && pairs.len() < required.len() + 1 {
+            let val = example_value_for_param(key, prop_schema);
+            pairs.push(format!("\"{key}\": \"{val}\""));
+        }
+    }
+
+    if pairs.is_empty() {
+        "{\"key\": \"value\"}".to_string()
+    } else {
+        format!("{{{}}}", pairs.join(", "))
     }
 }
 
@@ -187,6 +223,59 @@ mod tests {
         assert!(example.starts_with("```search\n"));
         assert!(example.contains("query: search term"));
         assert!(example.ends_with("```"));
+    }
+
+    #[test]
+    fn test_example_value_object_with_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "Type": {"type": "string", "description": "Action type"},
+                "ColonistId": {"type": "string"}
+            },
+            "required": ["Type"]
+        });
+        let val = example_value_for_param("Action", &schema);
+        assert!(val.contains("\"Type\""), "Should contain Type key: {val}");
+        assert!(
+            !val.contains("\"key\""),
+            "Should not contain generic key: {val}"
+        );
+    }
+
+    #[test]
+    fn test_example_value_object_without_properties() {
+        let schema = json!({"type": "object"});
+        let val = example_value_for_param("data", &schema);
+        assert_eq!(val, "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn test_generate_fence_example_nested_object() {
+        let tool = ToolInfo {
+            name: "step".to_string(),
+            category: "game".to_string(),
+            description: "Execute action".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "AgentId": {"type": "string"},
+                    "Action": {
+                        "type": "object",
+                        "properties": {
+                            "Type": {"type": "string"}
+                        },
+                        "required": ["Type"]
+                    }
+                },
+                "required": ["AgentId", "Action"],
+            }),
+        };
+        let example = generate_fence_example(&tool);
+        assert!(
+            example.contains("Action: {\"Type\""),
+            "Should show nested Type: {example}"
+        );
     }
 
     #[test]

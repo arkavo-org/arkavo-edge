@@ -1,4 +1,3 @@
-use arkavo_llm::LlmClientAdapter;
 use arkavo_protocol::agent_config::parse_agents_config;
 use arkavo_protocol::error::{A2aError, Result};
 use arkavo_protocol::mcp_registry::McpRegistry;
@@ -87,7 +86,6 @@ fn parse_simple_agents_config(
 pub(super) async fn reload_configuration_for_watcher(
     content: &str,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
-    _llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
     mcp_registry: Arc<McpRegistry>,
 ) -> Result<()> {
     // Validate configuration before applying

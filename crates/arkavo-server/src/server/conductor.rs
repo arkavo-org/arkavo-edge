@@ -332,13 +332,17 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    // Build messages: System (AGENTS.md purpose) → System (RLM, if active) → User (task)
+    // Build messages: single System (merged) → User (task)
+    // Qwen3.5 and other models require exactly one system message at the start.
     let mut messages = Vec::new();
-    if let Some(sys) = system_prompt {
+    let merged_system = match (system_prompt, &rlm_system_prompt) {
+        (Some(sys), Some(rlm)) => Some(format!("{sys}\n\n{rlm}")),
+        (Some(sys), None) => Some(sys.to_string()),
+        (None, Some(rlm)) => Some(rlm.clone()),
+        (None, None) => None,
+    };
+    if let Some(sys) = merged_system {
         messages.push(arkavo_llm::Message::system(sys));
-    }
-    if let Some(ref rlm_prompt) = rlm_system_prompt {
-        messages.push(arkavo_llm::Message::system(rlm_prompt.clone()));
     }
     if let Some(imgs) = images {
         messages.push(arkavo_llm::Message::user_with_images(

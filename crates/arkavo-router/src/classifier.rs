@@ -540,7 +540,7 @@ impl TaskClassifier {
         {
             (
                 TaskCategory::GameSimulation,
-                0.80,
+                0.90,
                 "Keywords match game/simulation tasks".to_string(),
             )
         } else {
@@ -784,7 +784,7 @@ impl TaskClassifier {
         {
             (
                 TaskCategory::GameSimulation,
-                0.80,
+                0.90,
                 "Keywords match game/simulation tasks".to_string(),
             )
         } else {

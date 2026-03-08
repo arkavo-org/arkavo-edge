@@ -127,6 +127,20 @@ impl ModelChoice {
         !self.is_local()
     }
 
+    /// All local model variants, ordered smallest-first for fast-path preference.
+    pub const ALL_LOCAL: &[Self] = &[
+        Self::LocalGemma270M,
+        Self::LocalQwen3,
+        Self::LocalMinistral3B,
+        Self::LocalGemma4B,
+        Self::LocalMinistral8B,
+        Self::LocalQwen35_9B,
+        Self::LocalGemma12B,
+        Self::LocalDeepSeekCoder,
+        Self::LocalQwen35_27B,
+        Self::LocalGlm47Flash,
+    ];
+
     pub fn is_anthropic(&self) -> bool {
         matches!(self, Self::ClaudeSonnet | Self::ClaudeOpus)
     }
