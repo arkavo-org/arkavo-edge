@@ -95,6 +95,40 @@ With `ARKAVO_DEBUG=1`, metadata deltas render inline diagnostics:
 [Perf] 422ms | 47 chars | 1 tool calls | prompt_eval: 89ms gen: 333ms | 142.3 tok/s
 ```
 
+## Raw Inference Performance
+
+Baseline throughput via `llama-bench` (pp512 prompt processing, tg128 text generation). Apple Silicon unified memory. These numbers represent the theoretical ceiling before tool-calling overhead (prompt construction, parsing, validation).
+
+| Model | Size | Quant | PP (t/s) | TG (t/s) |
+|-------|------|-------|----------|----------|
+| Qwen3-0.6B | 0.6B | Q8_0 | 9,872 | 293 |
+| Qwen3.5-0.8B | 0.8B | Q4_K_M | 5,861 | 170 |
+| Ministral-3-3B | 3B | Q4_K_M | 1,900 | 136 |
+| GLM-4.7-Flash | 4.7B (MoE 30B) | Q4_K_M | 1,153 | 75 |
+| Ministral-3-8B | 8B | Q5_K_M | 765 | 55 |
+| Qwen3.5-9B | 9B | Q4_K_M | 767 | 50 |
+| Qwen3.5-27B | 27B | Q6_K_XL | 226 | 14 |
+
+## llama-server Tool Calling (Native)
+
+Baseline tool-calling accuracy via `llama-server` with `tool_bench.py` (temp=0, n=8). Tests native llama-server tool calling without Arkavo's fence-format layer.
+
+| Model | hello_world | weather | Avg Latency |
+|-------|-------------|---------|-------------|
+| Qwen3-0.6B | 8/8 | 8/8 | 622ms |
+| Qwen3.5-0.8B | 8/8 | 0/8* | 500ms |
+| **Ministral-3-3B** | **8/8** | **8/8** | **192ms** |
+| GLM-4.7-Flash | 8/8 | 8/8 | 1,090ms |
+| Ministral-3-8B | 8/8 | 8/8 | 456ms |
+| Qwen3.5-9B | 8/8 | 8/8 | 1,032ms |
+| Qwen3.5-27B | 8/8 | 8/8 | 6,411ms |
+
+*Qwen3.5-0.8B weather failure: refuses to call the tool, responds with text instead.
+
+**Ministral-3B dominates at 192ms** — 3x faster than the next-best (Ministral-8B at 456ms) with perfect accuracy on both scenarios. This confirms the choice as default chat model.
+
+**Qwen3.5-0.8B passes hello_world but fails weather.** The model can produce tool call syntax for trivial cases but refuses parameterized calls, generating text responses instead.
+
 ## Running Benchmarks
 
 ```bash
