@@ -454,7 +454,10 @@ async fn run_live_bench(
 
                         let ptool = calls.first().map(|c| c.tool_name.clone());
                         let pargs = calls.first().map(|c| c.arguments.clone());
-                        (parsed, correct_tool, pp, ptc, resp.content, ptool, pargs)
+                        // Strip think blocks for cleaner output reporting
+                        let clean_content =
+                            arkavo_router::response::strip_think_blocks(&resp.content);
+                        (parsed, correct_tool, pp, ptc, clean_content, ptool, pargs)
                     }
                     Err(e) => (
                         false,

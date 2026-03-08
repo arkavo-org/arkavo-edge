@@ -26,6 +26,8 @@ pub enum ModelChoice {
     LocalMinistral3B,
     /// Ministral-8B - TØRG-compatible, high quality
     LocalMinistral8B,
+    /// Qwen3.5-9B - 9B dense model, good balance of quality and speed
+    LocalQwen35_9B,
     /// Qwen3.5-27B - 27B dense model, requires 48GB+ RAM
     LocalQwen35_27B,
     /// GLM-4.7-Flash - 30B MoE reasoning model, requires 32GB+ RAM
@@ -55,6 +57,7 @@ impl ModelChoice {
             Self::LocalQwen3 => "qwen3.5-0.8b",
             Self::LocalMinistral3B => "ministral-3b",
             Self::LocalMinistral8B => "ministral-8b",
+            Self::LocalQwen35_9B => "qwen3.5-9b",
             Self::LocalQwen35_27B => "qwen3.5-27b",
             Self::LocalGlm47Flash => "glm-4.7-flash",
             Self::LocalGemma270M => "gemma-3-270m-it",
@@ -69,7 +72,7 @@ impl ModelChoice {
     /// Model family identifier for prompt advisor lookups
     pub fn family(&self) -> &str {
         match self {
-            Self::LocalQwen3 | Self::LocalQwen35_27B => "qwen",
+            Self::LocalQwen3 | Self::LocalQwen35_9B | Self::LocalQwen35_27B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
             Self::LocalGlm47Flash => "glm",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "gemma",
@@ -87,6 +90,7 @@ impl ModelChoice {
             "qwen3.5-0.8b" | "qwen3-0.6b" => Some(Self::LocalQwen3),
             "ministral-3b" => Some(Self::LocalMinistral3B),
             "ministral-8b" => Some(Self::LocalMinistral8B),
+            "qwen3.5-9b" => Some(Self::LocalQwen35_9B),
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
             "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
             "gemma-3-270m-it" => Some(Self::LocalGemma270M),
@@ -109,6 +113,7 @@ impl ModelChoice {
             Self::LocalQwen3
                 | Self::LocalMinistral3B
                 | Self::LocalMinistral8B
+                | Self::LocalQwen35_9B
                 | Self::LocalQwen35_27B
                 | Self::LocalGlm47Flash
                 | Self::LocalGemma270M
@@ -145,7 +150,7 @@ impl ModelChoice {
         match self {
             Self::GeminiFlash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
-            Self::LocalQwen3 | Self::LocalQwen35_27B => "local-qwen",
+            Self::LocalQwen3 | Self::LocalQwen35_9B | Self::LocalQwen35_27B => "local-qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
             Self::LocalGlm47Flash => "local-glm",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
@@ -164,6 +169,7 @@ impl ModelChoice {
             Self::LocalMinistral3B | Self::LocalGemma4B => PlannerTier::Medium,
             // Large: > 7B parameters or cloud models
             Self::LocalMinistral8B
+            | Self::LocalQwen35_9B
             | Self::LocalQwen35_27B
             | Self::LocalGlm47Flash
             | Self::LocalGemma12B
@@ -184,6 +190,7 @@ impl ModelChoice {
             Self::LocalQwen3 => Some("unsloth/Qwen3.5-0.8B-GGUF"),
             Self::LocalMinistral3B => Some("mistralai/Ministral-3-3B-Instruct-2512-GGUF"),
             Self::LocalMinistral8B => Some("mistralai/Ministral-3-8B-Instruct-2512-GGUF"),
+            Self::LocalQwen35_9B => Some("unsloth/Qwen3.5-9B-GGUF"),
             Self::LocalQwen35_27B => Some("unsloth/Qwen3.5-27B-GGUF"),
             Self::LocalGlm47Flash => Some("unsloth/GLM-4.7-Flash-GGUF"),
             Self::LocalGemma270M => Some("unsloth/gemma-3-270m-it-GGUF"),
@@ -200,6 +207,7 @@ impl ModelChoice {
             Self::LocalQwen3 => Some("Qwen3.5-0.8B-Q4_K_M.gguf"),
             Self::LocalMinistral3B => Some("Ministral-3-3B-Instruct-2512-Q5_K_M.gguf"),
             Self::LocalMinistral8B => Some("Ministral-3-8B-Instruct-2512-Q5_K_M.gguf"),
+            Self::LocalQwen35_9B => Some("Qwen3.5-9B-Q4_K_M.gguf"),
             Self::LocalQwen35_27B => Some("Qwen3.5-27B-UD-Q6_K_XL.gguf"),
             Self::LocalGlm47Flash => Some("GLM-4.7-Flash-Q4_K_M.gguf"),
             Self::LocalGemma270M => Some("gemma-3-270m-it-Q4_0.gguf"),
@@ -230,6 +238,7 @@ impl ModelChoice {
             Self::LocalQwen3 => 550_000_000,
             Self::LocalMinistral3B => 6_000_000_000,
             Self::LocalMinistral8B => 5_500_000_000,
+            Self::LocalQwen35_9B => 6_000_000_000,
             Self::LocalQwen35_27B => 23_000_000_000,
             Self::LocalGlm47Flash => 20_000_000_000,
             Self::LocalGemma270M => 200_000_000,
@@ -247,7 +256,8 @@ impl ModelChoice {
     pub fn supports_vision(&self) -> bool {
         matches!(
             self,
-            Self::LocalQwen35_27B
+            Self::LocalQwen35_9B
+                | Self::LocalQwen35_27B
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
                 | Self::LocalMinistral8B
@@ -267,6 +277,7 @@ impl ModelChoice {
             Self::LocalQwen35_27B,
             Self::LocalDeepSeekCoder,
             Self::LocalGemma12B,
+            Self::LocalQwen35_9B,
             Self::LocalMinistral8B,
             Self::LocalMinistral3B,
             Self::LocalGemma4B,
@@ -290,6 +301,7 @@ impl ModelChoice {
             Self::LocalQwen3 => "Qwen3.5 0.8B",
             Self::LocalMinistral3B => "Ministral 3B",
             Self::LocalMinistral8B => "Ministral 8B",
+            Self::LocalQwen35_9B => "Qwen3.5 9B",
             Self::LocalQwen35_27B => "Qwen3.5 27B",
             Self::LocalGlm47Flash => "GLM-4.7-Flash",
             Self::LocalGemma270M => "Gemma 270M",
@@ -409,6 +421,9 @@ impl RoutingDecision {
             }
             (ModelChoice::LocalMinistral3B, _) => vec![ModelChoice::LocalMinistral8B],
             (ModelChoice::LocalMinistral8B, _) => {
+                vec![ModelChoice::LocalQwen35_9B, ModelChoice::LocalQwen35_27B]
+            }
+            (ModelChoice::LocalQwen35_9B, _) => {
                 vec![ModelChoice::LocalQwen35_27B, ModelChoice::LocalGlm47Flash]
             }
             (ModelChoice::LocalQwen35_27B, _) => {
@@ -480,6 +495,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalQwen35_9B
             | ModelChoice::LocalQwen35_27B
             | ModelChoice::LocalGlm47Flash
             | ModelChoice::LocalGemma270M
@@ -498,6 +514,7 @@ impl RoutingDecision {
             ModelChoice::LocalQwen3 => Duration::from_millis(500),
             ModelChoice::LocalMinistral3B => Duration::from_secs(2),
             ModelChoice::LocalMinistral8B => Duration::from_secs(4),
+            ModelChoice::LocalQwen35_9B => Duration::from_secs(4),
             ModelChoice::LocalQwen35_27B => Duration::from_secs(10),
             ModelChoice::LocalGlm47Flash => Duration::from_secs(8),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
@@ -644,10 +661,10 @@ mod tests {
 
     #[test]
     fn test_downgrade_picks_largest_that_fits() {
-        // 6GB budget should allow ministral-8b (5.5GB)
+        // 6GB budget should allow qwen3.5-9b (6GB)
         let model = ModelChoice::LocalQwen35_27B; // 23GB
         let result = model.downgrade_for_budget(6 * 1024 * 1024 * 1024);
-        assert_eq!(result, ModelChoice::LocalMinistral8B);
+        assert_eq!(result, ModelChoice::LocalQwen35_9B);
     }
 
     #[test]

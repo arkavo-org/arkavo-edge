@@ -132,6 +132,8 @@ pub(crate) struct StreamingConfig {
     pub grammar: Option<String>,
     /// Trigger patterns for lazy grammar activation (e.g., "```")
     pub grammar_triggers: Option<Vec<String>>,
+    /// Additional stop sequences from template engine (e.g., to prevent <think> blocks)
+    pub additional_stops: Vec<String>,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -192,6 +194,13 @@ pub(crate) async fn generate_tokens_with_context(
             .map_err(|e| Error::Config(format!("Failed to tokenize: {e}")))?;
 
         tracing::info!("Input tokenized to {} tokens", input_tokens.len());
+        if is_debug() {
+            let tail_start = prompt_bytes.len().saturating_sub(300);
+            if let Ok(tail) = std::str::from_utf8(&prompt_bytes[tail_start..]) {
+                eprintln!("Prompt tail ({} bytes):\n«{tail}»", prompt_bytes.len());
+            }
+            eprintln!("Stops: {:?}, Grammar: {}", config.additional_stops, config.grammar.is_some());
+        }
         if is_debug() {
             eprintln!(
                 "🔍 First 10 tokens: {:?}",
@@ -309,6 +318,31 @@ pub(crate) async fn generate_tokens_with_context(
                     done: false,
                     inference_timing: None,
                 }));
+            }
+
+            // Check for additional stop sequences (e.g., <think> when thinking is disabled)
+            let additional_stop = config.additional_stops.iter().find_map(|stop| {
+                detection_buffer.find(stop.as_str()).map(|pos| (pos, stop.clone()))
+            });
+            if let Some((stop_pos, stop_seq)) = additional_stop {
+                if is_debug() {
+                    eprintln!(
+                        "⛔ Additional stop detected: '{stop_seq}' at byte {stop_pos}"
+                    );
+                }
+                tracing::info!("Generation stopped: additional stop sequence '{stop_seq}'");
+                if !utf8_buffer.is_empty() {
+                    let piece = extract_valid_utf8(&mut utf8_buffer);
+                    if !piece.is_empty() {
+                        let _ = tx.send(Ok(StreamResponse {
+                            content: piece,
+                            reasoning_content: None,
+                            done: false,
+                            inference_timing: None,
+                        }));
+                    }
+                }
+                break;
             }
 
             // Check for self-prompting using the detection buffer (with special tokens)

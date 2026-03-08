@@ -62,6 +62,7 @@ impl ModelSelector {
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
+            ModelChoice::LocalQwen35_9B => "9B dense reasoning (4s), zero cost, good quality",
             ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",

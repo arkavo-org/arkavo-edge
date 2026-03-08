@@ -1126,6 +1126,7 @@ name = "arkavo-llama-cpp-sys"
 version = "0.64.0"
 dependencies = [
  "bindgen",
+ "cc",
  "cmake",
  "which 6.0.3",
 ]

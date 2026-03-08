@@ -21,7 +21,7 @@ Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-para
 
 **Ministral-3-3B is the default chat model.** Perfect 8/8 scores at 422ms average — the best latency/accuracy tradeoff. Selected by `fastest_local_model()` for all chat path tool calling.
 
-**GLM-4.7-Flash and Ministral-8B are nearly identical.** 782ms vs 783ms, both 8/8 perfect. GLM-4.7 requires 32GB RAM (MoE architecture).
+**GLM-4.7-Flash and Ministral-8B are nearly identical in Arkavo Edge** (782ms vs 783ms), but GLM-4.7 is 2.4x slower in raw llama-server (1,090ms vs 456ms). The 30B total parameter count negates MoE efficiency on memory-bandwidth-bound Apple Silicon. GLM-4.7 requires 32GB RAM.
 
 **27B models are slow on Apple Silicon.** Qwen3.5-27B takes 5.9s average per tool call. Suitable for batch/offline tasks, not real-time agentic loops.
 
@@ -128,6 +128,31 @@ Baseline tool-calling accuracy via `llama-server` with `tool_bench.py` (temp=0, 
 **Ministral-3B dominates at 192ms** — 3x faster than the next-best (Ministral-8B at 456ms) with perfect accuracy on both scenarios. This confirms the choice as default chat model.
 
 **Qwen3.5-0.8B passes hello_world but fails weather.** The model can produce tool call syntax for trivial cases but refuses parameterized calls, generating text responses instead.
+
+## Cross-Benchmark Analysis
+
+Comparing native llama-server (`tool_bench.py`, 2 scenarios) against Arkavo Edge (`tool-bench`, 8 scenarios) reveals the overhead of the full tool-calling pipeline.
+
+| Model | llama-server | Arkavo Edge | Ratio | Where Time Goes |
+|-------|-------------|-------------|-------|-----------------|
+| Ministral-3-3B | 192ms | 422ms | 2.2x | Pipeline overhead dominates (prompt construction, schema injection, fence parsing, validation, semaphore) |
+| Ministral-3-8B | 456ms | 783ms | 1.7x | Similar pipeline overhead, slightly amortized by slower inference |
+| GLM-4.7-Flash | 1,090ms | 782ms | 0.72x | Arkavo appears faster due to different test mix (8 scenarios include fast no-ops) |
+| Qwen3.5-27B | 6,411ms | 5,868ms | 0.91x | Inference dominates — pipeline overhead is noise at this scale |
+
+**For small models (3B-8B), Arkavo Edge adds 1.7-2.2x overhead** vs direct llama-server. This is the cost of: tool schema distillation, few-shot example generation, semaphore acquisition, fence-format parsing, response validation, and think-block stripping. The pipeline overhead is roughly constant (~200-300ms), so it dominates on fast models and vanishes on slow ones.
+
+**For large models (27B), overhead is negligible.** Model inference at 14 t/s TG makes everything else a rounding error.
+
+**GLM-4.7-Flash is slower than expected** given MoE efficiency claims. Despite activating only ~4.7B parameters per token, the 30B total parameter count means the full model must be loaded into memory. On Apple Silicon unified memory, bandwidth becomes the bottleneck — loading 30B of weights per forward pass limits throughput to 75 TG t/s vs Ministral-3B's 136 TG t/s, despite Ministral having more active parameters per token.
+
+**Qwen3.5-0.8B fails at both levels.** Native llama-server shows 0/8 on parameterized weather calls (refuses, responds with text). Arkavo Edge sees 1/8 parse rate. The tool-calling failure is in the model weights, not the pipeline. Combined with 22s latency (vs 500ms native — a 45x blowup likely caused by excessive think-block generation), this model should be excluded from any tool-calling path.
+
+### Optimization Opportunities
+
+- **Prompt caching**: The ~200ms pipeline overhead includes re-building tool schemas per request. Caching the tool prompt prefix across requests for the same model would eliminate ~50-80ms.
+- **Speculative parsing**: Start fence-format parsing while tokens are still streaming instead of waiting for completion.
+- **Grammar-constrained decoding**: GBNF grammars (currently opt-in) eliminate invalid tool calls at generation time, removing the need for post-hoc validation retries. Blocked by Ministral-3B Q4_K_M crash.
 
 ## Running Benchmarks
 

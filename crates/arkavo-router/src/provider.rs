@@ -55,7 +55,8 @@ impl super::Router {
         let candidate = match current {
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_27B,
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_9B,
+            ModelChoice::LocalQwen35_9B => ModelChoice::LocalQwen35_27B,
             ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGlm47Flash => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,

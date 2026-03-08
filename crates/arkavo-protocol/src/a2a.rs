@@ -70,7 +70,7 @@ impl A2aClient {
                 session_manager.set_model_override(model);
             } else {
                 eprintln!(
-                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-27b, glm-4.7-flash"
+                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash"
                 );
             }
         }

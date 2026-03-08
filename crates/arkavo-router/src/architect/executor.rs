@@ -277,7 +277,8 @@ impl ArchitectExecutor {
             // Qwen3/Ministral escalation path
             ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
             ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_27B,
+            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_9B,
+            ModelChoice::LocalQwen35_9B => ModelChoice::LocalQwen35_27B,
             ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGlm47Flash => ModelChoice::GeminiFlash,
             // Legacy Gemma escalation path

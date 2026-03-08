@@ -28,7 +28,7 @@ pub fn strip_think_blocks(content: &str) -> String {
 
     // Extract and optionally display think blocks
     while let Some(start) = result.find("<think>") {
-        if let Some(end) = result.find("</think>") {
+        if let Some(end) = result[start..].find("</think>").map(|e| start + e) {
             let think_content = &result[start + 7..end];
             if debug && !think_content.trim().is_empty() {
                 eprintln!("[thinking] {}", think_content.trim());

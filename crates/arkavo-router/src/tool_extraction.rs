@@ -34,6 +34,7 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::LocalGemma12B
         | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
         ModelChoice::LocalMinistral8B
+        | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalGlm47Flash
         | ModelChoice::GeminiFlash
