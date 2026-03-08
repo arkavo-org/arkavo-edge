@@ -318,6 +318,7 @@ pub async fn process_with_tools(
                 reasoning_content: None,
                 tool_calls: result.tool_calls,
                 finish_reason: None,
+                inference_timing: None,
             }
         } else {
             // Subsequent iterations - use quality gate directly
@@ -895,6 +896,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result =
@@ -910,6 +912,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

@@ -809,18 +809,17 @@ impl HttpMcpClient {
         match self.send_request_once(method, params.clone()) {
             Ok(result) => {
                 // Check for JSON-RPC session errors
-                if let Some(ref error) = result.error {
-                    if error.message.contains("Session")
+                if let Some(ref error) = result.error
+                    && (error.message.contains("Session")
                         || error.message.contains("session")
-                        || error.message.contains("initialize")
-                    {
-                        log_mcp(&format!(
-                            "HTTP MCP: session error '{}', re-initializing",
-                            error.message
-                        ));
-                        if self.reinitialize().is_ok() {
-                            return self.send_request_once(method, params);
-                        }
+                        || error.message.contains("initialize"))
+                {
+                    log_mcp(&format!(
+                        "HTTP MCP: session error '{}', re-initializing",
+                        error.message
+                    ));
+                    if self.reinitialize().is_ok() {
+                        return self.send_request_once(method, params);
                     }
                 }
                 Ok(result)
@@ -836,8 +835,7 @@ impl HttpMcpClient {
                     || msg.contains("HTTP MCP send")
                 {
                     log_mcp(&format!(
-                        "HTTP MCP: connection error '{}', re-initializing",
-                        msg
+                        "HTTP MCP: connection error '{msg}', re-initializing",
                     ));
                     if self.reinitialize().is_ok() {
                         return self.send_request_once(method, params);
