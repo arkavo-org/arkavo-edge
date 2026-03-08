@@ -131,6 +131,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -153,6 +154,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new("Test".to_string(), response, tools);
@@ -177,6 +179,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -196,6 +199,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new("Test".to_string(), response, vec![]);

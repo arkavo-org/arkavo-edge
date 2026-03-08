@@ -78,6 +78,7 @@ impl Provider for MockProvider {
                 content: response,
                 reasoning_content: None,
                 done: true,
+                inference_timing: None,
             }));
         });
 

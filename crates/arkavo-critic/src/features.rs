@@ -105,6 +105,7 @@ mod tests {
             reasoning_content: None,
             tool_calls,
             finish_reason: None,
+            inference_timing: None,
         }
     }
 
