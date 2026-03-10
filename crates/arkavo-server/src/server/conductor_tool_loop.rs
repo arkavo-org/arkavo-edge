@@ -52,15 +52,28 @@ pub(super) async fn run_tool_loop(
     let char_budget = model_ctx * 4;
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
-        // Budget gate: stop early if compute budget is exhausted
+        // Budget gate: auto-refresh if expired, stop if truly exhausted
         if let Some(budget) = compute_budget {
-            let b = budget.read().await;
+            let mut b = budget.write().await;
             if !b.has_remaining() {
-                info!(
-                    "Compute budget exhausted — stopping tool loop at iteration {}",
-                    iteration
-                );
-                break;
+                // Auto-refresh for autonomous agents whose TTL expired.
+                // Specialists get refreshed by commander broadcasts;
+                // autonomous agents (orchestrators, task-generators) need self-refresh.
+                if b.remaining_inferences == 0 {
+                    b.refresh(&arkavo_budget::BudgetAllocation {
+                        max_inferences: 32,
+                        max_tokens: 100_000,
+                        ttl_secs: 600,
+                        ..arkavo_budget::BudgetAllocation::default()
+                    });
+                    info!("Compute budget auto-refreshed at iteration {}", iteration);
+                } else {
+                    info!(
+                        "Compute budget exhausted — stopping tool loop at iteration {}",
+                        iteration
+                    );
+                    break;
+                }
             }
         }
 
@@ -70,8 +83,8 @@ pub(super) async fn run_tool_loop(
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
         let (base_timeout, max_timeout) = match model_hint {
-            Some(h) if h.size_bytes() >= 5_000_000_000 => (90u64, 150u64), // 8B+ (~50 t/s)
-            _ => (45u64, 90u64),
+            Some(h) if h.size_bytes() >= 5_000_000_000 => (180u64, 300u64), // 8B+ (~50 t/s), allow GPU sharing
+            _ => (90u64, 180u64),
         };
         let timeout_secs = if context_tokens <= 2000 {
             base_timeout

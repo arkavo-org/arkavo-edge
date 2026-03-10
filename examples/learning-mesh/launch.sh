@@ -89,6 +89,7 @@ start_mesh() {
     start_agent "code-analyzer" "$SCRIPT_DIR/code-analyzer" 8412
     start_agent "test-generator" "$SCRIPT_DIR/test-generator" 8414
     start_agent "security-auditor" "$SCRIPT_DIR/security-auditor" 8416
+    start_agent "task-generator" "$SCRIPT_DIR/task-generator" 8418
 
     print_status "INFO" "Waiting for agents to initialize and discover peers..."
     sleep 3
@@ -99,7 +100,7 @@ show_status() {
     echo "Learning Mesh Status:"
     echo "====================="
 
-    local agents=("orchestrator:8410" "code-analyzer:8412" "test-generator:8414" "security-auditor:8416")
+    local agents=("orchestrator:8410" "code-analyzer:8412" "test-generator:8414" "security-auditor:8416" "task-generator:8418")
 
     for agent in "${agents[@]}"; do
         local name="${agent%:*}"

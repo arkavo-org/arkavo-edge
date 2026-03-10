@@ -194,7 +194,15 @@ pub type SharedComputeBudget = Arc<RwLock<AgentComputeBudget>>;
 
 pub fn new_shared_compute_budget() -> SharedComputeBudget {
     let mut budget = AgentComputeBudget::new_passive();
-    budget.refresh(&BudgetPolicy::allocate(UrgencyLevel::Medium, 0, 0));
+    // Generous initial budget for autonomous agents that may not receive
+    // external budget refreshes. Allows multiple tool-loop iterations
+    // before needing a commander broadcast or message/send refresh.
+    budget.refresh(&BudgetAllocation {
+        max_inferences: 32,
+        max_tokens: 100_000,
+        ttl_secs: 600,
+        ..BudgetAllocation::default()
+    });
     Arc::new(RwLock::new(budget))
 }
 
