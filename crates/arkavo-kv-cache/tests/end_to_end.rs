@@ -16,8 +16,8 @@
 
 use arkavo_kv_cache::ContextManager;
 use arkavo_llama_cpp::{
-    batch_free, batch_init_with_tokens_seq, create_sampler_chain, decode_batch, init_llama_logging,
-    set_debug_logging, token_to_bytes, tokenize_with_model, LlamaContext, LlamaModel,
+    LlamaContext, LlamaModel, batch_free, batch_init_with_tokens_seq, create_sampler_chain,
+    decode_batch, init_llama_logging, set_debug_logging, token_to_bytes, tokenize_with_model,
 };
 
 const LEARNING_SEQ: i32 = 0;

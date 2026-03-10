@@ -163,10 +163,9 @@ pub async fn start_event_processing_loop(
                                     // Persist episode to SQLite
                                     if let Some(ref store) =
                                         *learning_bus.learning_store.read().await
+                                        && let Err(e) = store.store_episode(&episode).await
                                     {
-                                        if let Err(e) = store.store_episode(&episode).await {
-                                            tracing::warn!("Failed to persist episode: {e}");
-                                        }
+                                        tracing::warn!("Failed to persist episode: {e}");
                                     }
 
                                     // Index in case retrieval for similarity search
@@ -235,14 +234,12 @@ pub async fn start_event_processing_loop(
                                                 // Persist to SQLite
                                                 if let Some(ref store) =
                                                     *learning_bus.learning_store.read().await
-                                                {
-                                                    if let Err(e) =
+                                                    && let Err(e) =
                                                         store.store_lesson(&lesson).await
-                                                    {
-                                                        tracing::warn!(
-                                                            "Failed to persist synthesized lesson: {e}"
-                                                        );
-                                                    }
+                                                {
+                                                    tracing::warn!(
+                                                        "Failed to persist synthesized lesson: {e}"
+                                                    );
                                                 }
 
                                                 // Create announcement and gossip
