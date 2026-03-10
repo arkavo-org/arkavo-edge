@@ -39,8 +39,45 @@ pub struct SubTaskSpec {
     #[serde(default)]
     pub required_capabilities: Vec<String>,
     /// Index-based references into the subtask_specs array (0-based).
-    #[serde(default)]
+    /// Tolerates LLM outputs that use string names instead of indices.
+    #[serde(default, deserialize_with = "deserialize_depends_on")]
     pub depends_on: Vec<usize>,
+}
+
+/// Deserialize `depends_on` tolerantly: accepts `[0, 1]` (indices) or
+/// `["analyze", "generate"]` (string names that LLMs sometimes produce).
+/// String values are silently dropped since we can't resolve names to indices here.
+fn deserialize_depends_on<'de, D>(deserializer: D) -> Result<Vec<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct DependsOnVisitor;
+
+    impl<'de> de::Visitor<'de> for DependsOnVisitor {
+        type Value = Vec<usize>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("an array of integers or strings")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut indices = Vec::new();
+            while let Some(val) = seq.next_element::<serde_json::Value>()? {
+                if let Some(n) = val.as_u64() {
+                    indices.push(n as usize);
+                }
+                // String values silently ignored — LLMs output names like "analyze"
+            }
+            Ok(indices)
+        }
+    }
+
+    deserializer.deserialize_seq(DependsOnVisitor)
 }
 
 /// Rule-based intent analyzer using keyword matching.
@@ -195,6 +232,32 @@ mod tests {
         let spec: SubTaskSpec = serde_json::from_str(json).unwrap();
         assert!(spec.required_capabilities.is_empty());
         assert!(spec.depends_on.is_empty());
+    }
+
+    #[test]
+    fn depends_on_tolerates_string_values_from_llm() {
+        let json = r#"{
+            "keywords": ["colonist beds"],
+            "entities": [],
+            "subtask_specs": [
+                {
+                    "task_type": "analyze",
+                    "description": "Analyze state",
+                    "required_capabilities": [],
+                    "depends_on": []
+                },
+                {
+                    "task_type": "execute",
+                    "description": "Execute action",
+                    "required_capabilities": [],
+                    "depends_on": ["analyze"]
+                }
+            ]
+        }"#;
+        let analysis: IntentAnalysis = serde_json::from_str(json).unwrap();
+        assert_eq!(analysis.subtask_specs.len(), 2);
+        // String deps are silently dropped (can't resolve names to indices)
+        assert!(analysis.subtask_specs[1].depends_on.is_empty());
     }
 
     #[tokio::test]
