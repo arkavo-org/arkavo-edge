@@ -131,17 +131,12 @@ mod tests {
             preferences: UiPreferences::default(),
         };
 
-        let decision = RoutingDecision {
-            recommended_model: ModelChoice::LocalQwen3,
-            reasoning: "test".to_string(),
-            estimated_cost_usd: 0.0,
-            should_compress: false,
-            task_category: TaskCategory::FrontendUI,
-            confidence: 0.9,
-            fallback_chain: vec![],
-            estimated_time: std::time::Duration::from_secs(1),
-            compression_target: None,
-        };
+        let decision = RoutingDecision::new(
+            ModelChoice::LocalQwen3,
+            TaskCategory::FrontendUI,
+            0.9,
+            "test".to_string(),
+        );
 
         let prompt = builder.build(&request, &decision);
         assert!(prompt.is_ok());

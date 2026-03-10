@@ -190,6 +190,8 @@ async fn test_mock_provider() {
         role: Role::User,
         content: "Test message".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let response1 = mock.complete(messages.clone()).await.unwrap();

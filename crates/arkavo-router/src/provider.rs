@@ -117,7 +117,8 @@ impl super::Router {
 
         // Enable vision only for models that declare support (e.g., 27B, not 0.8B).
         // The MtmdContext is cached in the registry so the CLIP model is loaded once,
-        // not on every inference call.
+        // not on every inference call. Vision is unavailable on musl targets.
+        #[cfg(not(target_env = "musl"))]
         let provider = if model.supports_vision() {
             if let Some(cached_ctx) = self.model_registry.get_vision_ctx(registry_name) {
                 tracing::debug!(model = registry_name, "Using cached vision context");
