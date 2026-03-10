@@ -160,6 +160,15 @@ pub async fn start_event_processing_loop(
                                         episode.outcome.success
                                     );
 
+                                    // Persist episode to SQLite
+                                    if let Some(ref store) =
+                                        *learning_bus.learning_store.read().await
+                                    {
+                                        if let Err(e) = store.store_episode(&episode).await {
+                                            tracing::warn!("Failed to persist episode: {e}");
+                                        }
+                                    }
+
                                     // Index in case retrieval for similarity search
                                     let summary = format!(
                                         "{}: {}",
@@ -222,6 +231,19 @@ pub async fn start_event_processing_loop(
                                                     lesson.pattern.condition,
                                                     lesson.confidence
                                                 );
+
+                                                // Persist to SQLite
+                                                if let Some(ref store) =
+                                                    *learning_bus.learning_store.read().await
+                                                {
+                                                    if let Err(e) =
+                                                        store.store_lesson(&lesson).await
+                                                    {
+                                                        tracing::warn!(
+                                                            "Failed to persist synthesized lesson: {e}"
+                                                        );
+                                                    }
+                                                }
 
                                                 // Create announcement and gossip
                                                 let announcement = LessonAnnouncement::new(

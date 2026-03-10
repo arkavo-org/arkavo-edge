@@ -33,21 +33,25 @@ impl super::Router {
         let mut current_decision = self.classify(task_description).await?;
 
         if let Some(hint) = model_hint {
-            if self.is_model_available(hint) {
-                let excluded = self.get_excluded_models().await;
-                if excluded.iter().any(|e| e == hint.name()) {
-                    tracing::info!(
-                        hint = hint.name(),
-                        "Model hint on cooldown, falling back to Thompson Sampling"
-                    );
-                } else {
-                    tracing::info!(
-                        hint = hint.name(),
-                        original = current_decision.recommended_model.name(),
-                        "Applying model hint from AGENTS.md"
-                    );
-                    current_decision.recommended_model = hint.clone();
-                }
+            let consecutive = self.get_cooldown_consecutive(hint.name()).await;
+            // Hinted models get 3 chances to learn from feedback before
+            // Thompson Sampling takes over. A quick cooldown means a
+            // systemic issue, not a model issue.
+            const HINT_OVERRIDE_THRESHOLD: u32 = 3;
+            if consecutive >= HINT_OVERRIDE_THRESHOLD {
+                tracing::info!(
+                    hint = hint.name(),
+                    consecutive,
+                    selected = current_decision.recommended_model.name(),
+                    "Model hint failed {consecutive}x, letting Thompson Sampling select"
+                );
+            } else if self.is_model_available(hint) {
+                tracing::info!(
+                    hint = hint.name(),
+                    original = current_decision.recommended_model.name(),
+                    "Applying model hint from AGENTS.md"
+                );
+                current_decision.recommended_model = hint.clone();
             } else {
                 tracing::debug!(
                     hint = hint.name(),

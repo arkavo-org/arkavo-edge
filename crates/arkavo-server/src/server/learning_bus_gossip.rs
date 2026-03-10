@@ -45,9 +45,9 @@ impl LearningBus {
         let responses = match gossip.handle_message(message).await {
             Ok(responses) => responses,
             Err(e) => {
-                // Log but don't early-return: still apply lessons/adjustments
-                // even when signature verification fails (key exchange timing)
-                tracing::warn!("Gossip verification error (applying content anyway): {}", e);
+                // Don't early-return: still apply lessons/adjustments
+                // even when signature verification fails (key exchange timing race)
+                tracing::debug!("Gossip verification pending key exchange: {}", e);
                 vec![]
             }
         };

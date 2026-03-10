@@ -115,10 +115,17 @@ pub async fn execute_with_conductor_and_learning(
         update_ui_progress(msg, pct);
     };
 
-    // 2a. Check if task is complex enough to decompose into multiple subtasks
+    // 2a. Check if task is complex enough to decompose into multiple subtasks.
+    // Only decompose when the agent has MCP tools (external servers) — agents
+    // with only mesh/built-in tools are advisors where decomposition loses context.
+    let has_mcp_tools = mcp_registry
+        .list_all_tools()
+        .await
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
     let (is_complex, _) =
         arkavo_router::classifier::Classification::detect_complexity(&task_content);
-    if is_complex {
+    if is_complex && has_mcp_tools {
         match super::conductor_planner::execute_with_plan(
             conductor,
             router,
@@ -180,8 +187,10 @@ pub async fn execute_with_conductor_and_learning(
         tool_registry.register(&tool_name, Box::new(bridge));
     }
 
-    // Only register built-in code tools when no MCP servers are configured
-    if !has_mcp_tools {
+    // Only register built-in code tools for standalone agents (no MCP servers
+    // and no mesh peers). Mesh-only agents (specialists) get only mesh tools —
+    // code tools are irrelevant for domain-specific advisory roles.
+    if !has_mcp_tools && mesh_state.is_none() {
         tool_registry.register(
             "filesystem_tools",
             Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
@@ -407,8 +416,8 @@ pub async fn execute_with_conductor_and_learning(
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;
-    let quality_category = if loop_result.tool_call_count > 0 && task_content.contains("game-rl") {
-        "game_simulation"
+    let quality_category = if loop_result.tool_call_count > 0 {
+        "tool_use"
     } else {
         "general"
     };

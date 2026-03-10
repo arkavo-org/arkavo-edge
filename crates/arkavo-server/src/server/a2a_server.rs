@@ -68,6 +68,8 @@ pub struct A2aServer {
     compute_budget: arkavo_budget::SharedComputeBudget,
     /// Total system RAM detected at startup (bytes)
     total_ram_bytes: u64,
+    /// Mesh state for A2A peer delegation (shared between orchestrator and RPC)
+    mesh_state: Arc<arkavo_mcp_mesh::MeshToolsState>,
 }
 
 impl A2aServer {
@@ -111,6 +113,7 @@ impl A2aServer {
                 sys.refresh_memory();
                 sys.total_memory()
             },
+            mesh_state: Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
         }
     }
 
@@ -1117,6 +1120,8 @@ impl A2aServer {
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
             compute_budget: self.compute_budget.clone(),
+            mesh_state: Some(self.mesh_state.clone()),
+            agent_memory: self.agent_memory.clone(),
             model_hint: self.resolve_model_hint().await,
             #[cfg(feature = "kas")]
             kas_handler: {
@@ -1169,7 +1174,7 @@ impl A2aServer {
         let learning_bus = self.learning_bus.read().await.clone();
         let agent_memory = self.agent_memory.clone();
         let orchestrator_tick = self.orchestrator_tick.clone();
-        let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        let mesh_state = self.mesh_state.clone();
         let model_hint = self.resolve_model_hint().await;
         let compute_budget = self.compute_budget.clone();
         let has_mcp_tools = self
@@ -1193,6 +1198,7 @@ impl A2aServer {
             let mut tick: u64 = 0;
             let mut consecutive_no_action_ticks: u32 = 0;
             let mut last_broadcast_tick: u64 = 0;
+            let mut consecutive_timeouts: u32 = 0;
             loop {
                 tick += 1;
                 orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
@@ -1218,7 +1224,9 @@ impl A2aServer {
                     if !snapshot.has_remaining {
                         drop(budget);
                         loop_metrics.record_compute_budget_passive();
-                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        // Short sleep so specialists pick up budget refreshes quickly
+                        // from commander broadcasts (every 3 ticks ≈ 15-45s).
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
                     }
                 }
@@ -1342,12 +1350,11 @@ impl A2aServer {
                     Ok(result) => {
                         let elapsed = start.elapsed();
 
-                        // Consume compute budget for specialists after inference
-                        if !has_mcp_tools {
-                            let tokens_est = result.len() as u64;
-                            let mut budget = compute_budget.write().await;
-                            budget.consume_inference(tokens_est, 0.0);
-                            loop_metrics.record_compute_budget_consumption(tokens_est);
+                        // Report budget state after inference.
+                        // Consumption happens per-iteration inside the tool loop
+                        // via consume_inference() so multi-step loops are counted.
+                        {
+                            let budget = compute_budget.read().await;
                             let snapshot = budget.snapshot();
                             loop_metrics.record_compute_budget_state(
                                 &snapshot.status,
@@ -1375,6 +1382,12 @@ impl A2aServer {
                                 // Re-discover peers in case new specialists joined
                                 mesh.discover_peers().await;
                                 let peer_count = mesh.agent_addresses.read().await.len();
+                                info!(
+                                    peer_count,
+                                    data_len = data.len(),
+                                    "Broadcast check: peers={peer_count}, data_len={}",
+                                    data.len()
+                                );
                                 let per_agent_bytes = compute_per_agent_bytes_static(
                                     total_ram_bytes,
                                     &cmd_model,
@@ -1389,6 +1402,7 @@ impl A2aServer {
                                     )
                                     .await;
                                 } else {
+                                    info!("No observation data — refreshing budgets only");
                                     refresh_specialist_budgets(&mesh, per_agent_bytes, &own_id)
                                         .await;
                                 }
@@ -1408,20 +1422,41 @@ impl A2aServer {
                                 );
                             }
                         }
+
+                        // Adaptive tick interval: scale based on inference duration.
+                        // Fast ticks when GPU is responsive, back off when contended.
+                        let elapsed_secs = elapsed.as_secs();
+                        if elapsed_secs >= 60 {
+                            consecutive_timeouts += 1;
+                        } else if elapsed_secs >= 30 {
+                            consecutive_timeouts = consecutive_timeouts.saturating_sub(1);
+                        } else {
+                            consecutive_timeouts = 0;
+                        }
+
                         info!(
                             "Orchestrator tick {tick} completed in {:.1}s: {} chars",
                             elapsed.as_secs_f64(),
-                            result.len()
+                            result.len(),
                         );
                     }
                     Err(e) => {
                         consecutive_no_action_ticks += 1;
+                        consecutive_timeouts += 1;
                         warn!("Orchestrator tick {tick} failed: {e}");
                     }
                 }
 
-                // Wait between ticks — gives the environment time to advance
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // Adaptive wait: fast (5s) when GPU is responsive, backs off
+                // on consecutive slow ticks to avoid piling up blocked inferences.
+                let tick_interval = match consecutive_timeouts {
+                    0 => 5,
+                    1 => 15,
+                    2 => 30,
+                    _ => 60,
+                };
+                info!(consecutive_timeouts, tick_interval, "Next tick interval");
+                tokio::time::sleep(std::time::Duration::from_secs(tick_interval)).await;
             }
         });
     }
@@ -1638,8 +1673,22 @@ async fn broadcast_state_to_peers(
         .collect();
 
     if peer_ids.is_empty() {
+        let all_ids: Vec<String> = mesh_state
+            .agent_addresses
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        warn!(
+            self_id = %self_agent_id,
+            all_agents = ?all_ids,
+            "No peers to broadcast to (all filtered as self)"
+        );
         return;
     }
+
+    info!(peer_count = peer_ids.len(), peers = ?peer_ids, "Broadcasting state to specialists");
 
     let urgency = detect_urgency(observation);
     let compacted = compact_observation(observation, 2000);

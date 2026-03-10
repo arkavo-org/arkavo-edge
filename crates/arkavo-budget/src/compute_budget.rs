@@ -178,7 +178,7 @@ impl Default for BudgetAllocation {
         Self {
             max_tokens: 10_000,
             max_cost_usd: 0.50,
-            max_inferences: 3,
+            max_inferences: 8,
             max_memory_bytes: 2 * 1024 * 1024 * 1024, // 2GB
             max_disk_bytes: 10 * 1024 * 1024 * 1024,  // 10GB
             max_network_bytes: 100 * 1024 * 1024,     // 100MB
@@ -226,10 +226,10 @@ impl BudgetPolicy {
         per_agent_bytes: u64,
     ) -> BudgetAllocation {
         let (max_inferences, ttl_secs, max_memory_mb): (u32, u64, u64) = match urgency {
-            UrgencyLevel::Low => (2, 180, 1024),
-            UrgencyLevel::Medium => (3, 120, 2048),
-            UrgencyLevel::High => (5, 60, 2048),
-            UrgencyLevel::Critical => (8, 45, 2048),
+            UrgencyLevel::Low => (6, 120, 1024),
+            UrgencyLevel::Medium => (8, 90, 2048),
+            UrgencyLevel::High => (12, 60, 2048),
+            UrgencyLevel::Critical => (16, 45, 2048),
         };
         let max_inferences = if pending_tasks >= 2 {
             max_inferences.saturating_sub(1).max(1)
@@ -313,35 +313,35 @@ mod tests {
     #[test]
     fn test_budget_policy_low_urgency() {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::Low, 0, 0);
-        assert_eq!(alloc.max_inferences, 2);
-        assert_eq!(alloc.ttl_secs, 180);
+        assert_eq!(alloc.max_inferences, 6);
+        assert_eq!(alloc.ttl_secs, 120);
     }
 
     #[test]
     fn test_budget_policy_critical_urgency() {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::Critical, 0, 0);
-        assert_eq!(alloc.max_inferences, 8);
+        assert_eq!(alloc.max_inferences, 16);
         assert_eq!(alloc.ttl_secs, 45);
     }
 
     #[test]
     fn test_budget_policy_backs_off_with_pending() {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::High, 3, 0);
-        assert_eq!(alloc.max_inferences, 4); // 5 - 1
+        assert_eq!(alloc.max_inferences, 11); // 12 - 1
         assert_eq!(alloc.ttl_secs, 60);
     }
 
     #[test]
     fn test_budget_policy_pending_never_below_one() {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::Low, 10, 0);
-        assert_eq!(alloc.max_inferences, 1); // 2 - 1, clamped to 1
+        assert_eq!(alloc.max_inferences, 5); // 6 - 1
     }
 
     #[test]
     fn test_budget_policy_medium_default_values() {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::Medium, 0, 0);
-        assert_eq!(alloc.max_inferences, 3);
-        assert_eq!(alloc.ttl_secs, 120);
+        assert_eq!(alloc.max_inferences, 8);
+        assert_eq!(alloc.ttl_secs, 90);
         assert_eq!(alloc.max_tokens, BudgetAllocation::default().max_tokens);
     }
 
@@ -361,8 +361,8 @@ mod tests {
         let alloc = BudgetPolicy::allocate(UrgencyLevel::Low, 0, per_agent);
         assert_eq!(alloc.max_memory_bytes, per_agent);
         // Urgency still controls inferences/TTL, not memory
-        assert_eq!(alloc.max_inferences, 2);
-        assert_eq!(alloc.ttl_secs, 180);
+        assert_eq!(alloc.max_inferences, 6);
+        assert_eq!(alloc.ttl_secs, 120);
     }
 
     #[test]

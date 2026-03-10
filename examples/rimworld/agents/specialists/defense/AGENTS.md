@@ -42,7 +42,7 @@ purpose: |
   - Manhunters: High — stay indoors or fight
   - Mechanoids: Very dangerous — need good weapons and cover
 
-model: qwen3.5-0.8b
+model: qwen3.5-9b
 listen: 0.0.0.0:8412
 mdns: true
 

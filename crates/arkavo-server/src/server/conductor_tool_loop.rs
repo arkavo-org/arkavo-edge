@@ -64,16 +64,36 @@ pub(super) async fn run_tool_loop(
             }
         }
 
-        // Context-aware timeout: scale with accumulated context size
+        // Context-aware timeout scaled by model generation speed.
+        // Benchmarked TG speeds: 0.8B=170t/s, 3B=136t/s, 9B=50t/s, 27B=14t/s.
+        // Formula: base covers ~500 token response + prompt eval overhead.
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
+        let (base_timeout, max_timeout) = match model_hint {
+            Some(h) if h.size_bytes() >= 5_000_000_000 => (90u64, 150u64), // 8B+ (~50 t/s)
+            _ => (45u64, 90u64),
+        };
         let timeout_secs = if context_tokens <= 2000 {
-            45u64
+            base_timeout
         } else {
             let extra = ((context_tokens - 2000) / 500) as u64;
-            (45 + extra).min(90)
+            (base_timeout + extra).min(max_timeout)
         };
 
+        let msg_count = messages.len();
+        let largest_msg = messages.iter().map(|m| m.content.len()).max().unwrap_or(0);
+        info!(
+            iteration = iteration + 1,
+            msg_count,
+            context_chars,
+            context_tokens,
+            largest_msg_chars = largest_msg,
+            timeout_secs,
+            model = model_hint.map(|h| h.name()).unwrap_or("auto"),
+            "Tool loop: starting inference"
+        );
+
+        let inference_start = std::time::Instant::now();
         let response = match tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             router.route_with_tools_hinted(
@@ -85,7 +105,20 @@ pub(super) async fn run_tool_loop(
         )
         .await
         {
-            Ok(inner) => inner.map_err(|e| format!("Router failed: {e}"))?,
+            Ok(inner) => {
+                let inference_ms = inference_start.elapsed().as_millis();
+                info!(
+                    iteration = iteration + 1,
+                    inference_ms, context_tokens, timeout_secs, "Tool loop: inference completed"
+                );
+                // Consume one inference from compute budget so specialists
+                // respect their per-window allocation and don't saturate the GPU.
+                if let Some(budget) = compute_budget {
+                    let mut b = budget.write().await;
+                    b.consume_inference(context_tokens as u64, 0.0);
+                }
+                inner.map_err(|e| format!("Router failed: {e}"))?
+            }
             Err(_elapsed) => {
                 warn!(
                     iteration = iteration + 1,
@@ -161,23 +194,31 @@ pub(super) async fn run_tool_loop(
         }
 
         if response.tool_calls.is_empty() {
-            if iteration == 0 {
+            // Agents without MCP tools (specialists/advisors) produce text-only
+            // output by design — don't penalize them for not calling tools.
+            let has_mcp_tools = mcp_registry
+                .list_all_tools()
+                .await
+                .map(|t| !t.is_empty())
+                .unwrap_or(false);
+            if iteration == 0
+                && has_mcp_tools
+                && let Some(model_name) = router.last_routed_model()
+            {
                 warn!("LLM did not request any tool calls — penalizing model");
-                if let Some(model_name) = router.last_routed_model() {
-                    let feedback =
-                        BurstFeedback::failure(uuid::Uuid::new_v4(), "no_tool_call".to_string(), 0)
-                            .with_quality(0.0);
-                    router
-                        .model_learning()
-                        .immediate_update(&model_name, &feedback)
-                        .await;
-                    router.record_quality_cooldown(&model_name).await;
-                    let family = arkavo_router::Router::detect_model_family(&model_name);
-                    router
-                        .advisor()
-                        .observe_no_tool_calls(&family, &response.content);
-                    info!(model = %model_name, "No tool calls: recorded negative feedback and cooldown");
-                }
+                let feedback =
+                    BurstFeedback::failure(uuid::Uuid::new_v4(), "no_tool_call".to_string(), 0)
+                        .with_quality(0.0);
+                router
+                    .model_learning()
+                    .immediate_update(&model_name, &feedback)
+                    .await;
+                router.record_quality_cooldown(&model_name).await;
+                let family = arkavo_router::Router::detect_model_family(&model_name);
+                router
+                    .advisor()
+                    .observe_no_tool_calls(&family, &response.content);
+                info!(model = %model_name, "No tool calls: recorded negative feedback and cooldown");
             }
             break;
         }
@@ -202,24 +243,40 @@ pub(super) async fn run_tool_loop(
         .await;
 
         let tool_results_text = tool_result_parts.join("\n\n");
+        let raw_result_chars = tool_results_text.len();
 
         // Large tool results (status dumps, state queries) get distilled by a
         // small fast model so the main model receives only noteworthy items.
         let result_to_append = if tool_results_text.len() > SMALL_MODEL_SUMMARIZE_THRESHOLD {
             match distill_with_small_model(router, &tool_results_text).await {
-                Some(summary) => summary,
+                Some(summary) => {
+                    info!(
+                        raw_chars = raw_result_chars,
+                        distilled_chars = summary.len(),
+                        "Tool results distilled by small model"
+                    );
+                    summary
+                }
                 None => {
                     // Fallback to structural summarization
                     let current_context_chars: usize =
                         messages.iter().map(|m| m.content.len()).sum();
                     let projected = current_context_chars + tool_results_text.len();
-                    if projected > char_budget * 80 / 100 {
+                    let summarized = if projected > char_budget * 80 / 100 {
                         summarize_tool_results(&tool_result_parts, 500)
                     } else if projected > char_budget * 60 / 100 {
                         summarize_tool_results(&tool_result_parts, 1500)
                     } else {
                         tool_results_text
-                    }
+                    };
+                    info!(
+                        raw_chars = raw_result_chars,
+                        summarized_chars = summarized.len(),
+                        projected_context = projected,
+                        char_budget,
+                        "Tool results: distillation failed, structural fallback"
+                    );
+                    summarized
                 }
             }
         } else {
@@ -313,7 +370,8 @@ async fn execute_tool_calls(
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
 
                 let reward = super::conductor::extract_reward_from_result(&result_str);
-                let tool_success = reward.is_none_or(|r| r >= 0.0);
+                let semantic_failure = detect_semantic_failure(&result_str);
+                let tool_success = reward.is_none_or(|r| r >= 0.0) && semantic_failure.is_none();
 
                 if let Some(r) = reward {
                     reward_signals.push(r);
@@ -322,6 +380,29 @@ async fn execute_tool_calls(
                             "Tool {} returned negative reward {:.3}",
                             tool_call.tool_name, r
                         );
+                    }
+                } else if let Some(ref err_msg) = semantic_failure {
+                    warn!("Tool {} action failed: {}", tool_call.tool_name, err_msg);
+                    // Record anti-pattern for repeated semantic failures
+                    if let Some(model_name) = router.last_routed_model() {
+                        let model_family = arkavo_router::Router::detect_model_family(&model_name);
+                        router.advisor().observe_tool_error(
+                            &model_family,
+                            &tool_call.tool_name,
+                            err_msg,
+                            &args,
+                        );
+                        if let Some(bus) = learning_bus {
+                            use super::anti_pattern::AntiPatternStore;
+                            let signature =
+                                AntiPatternStore::classify_failure(&tool_call.tool_name, err_msg);
+                            bus.record_human_correction(
+                                &signature,
+                                decision_trace_id,
+                                Some(&model_name),
+                            )
+                            .await;
+                        }
                     }
                 } else {
                     info!("Tool {} succeeded", tool_call.tool_name);
@@ -571,6 +652,61 @@ async fn apply_reward_correction(router: &Arc<arkavo_router::Router>, reward_sig
         .await;
 }
 
+/// Detect semantic failures in tool results that arrive as successful RPC
+/// responses but indicate the action failed at the application level.
+///
+/// Searches the result JSON tree for any object containing `"Success": false`
+/// (case-insensitive key) paired with a `"Message"` field. Works with
+/// double-wrapped JSON (`{"result": "..."}`) and arbitrarily nested structures.
+fn detect_semantic_failure(result_json: &str) -> Option<String> {
+    let outer: serde_json::Value = serde_json::from_str(result_json).ok()?;
+
+    // Unwrap the MCP double-wrapping: {"result": "{...}"}
+    let inner = if let Some(inner_str) = outer.get("result").and_then(|v| v.as_str()) {
+        serde_json::from_str(inner_str).unwrap_or(outer)
+    } else {
+        outer
+    };
+
+    find_failure_in_value(&inner)
+}
+
+/// Recursively search a JSON value for `"Success": false` with a sibling `"Message"`.
+fn find_failure_in_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            // Check if this object has Success:false
+            let has_failure = map.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("success") && v == &serde_json::Value::Bool(false)
+            });
+            if has_failure {
+                let msg = map
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("message"))
+                    .and_then(|(_, v)| v.as_str())
+                    .unwrap_or("Action failed");
+                return Some(msg.to_string());
+            }
+            // Recurse into child values
+            for v in map.values() {
+                if let Some(msg) = find_failure_in_value(v) {
+                    return Some(msg);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                if let Some(msg) = find_failure_in_value(v) {
+                    return Some(msg);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,5 +787,42 @@ mod tests {
         assert!(result.contains("truncated"));
         assert!(result.contains("100000 total chars"));
         assert!(result.len() <= 4000);
+    }
+
+    #[test]
+    fn test_detect_semantic_failure_nested() {
+        // Any nested object with Success:false should be detected
+        let result = r#"{"result":"{\"Data\":{\"Action\":{\"Type\":\"Create\",\"ErrorCode\":\"InternalError\",\"Message\":\"Missing required field.\",\"Success\":false}}}"}"#;
+        let failure = detect_semantic_failure(result);
+        assert!(failure.is_some());
+        assert!(failure.unwrap().contains("Missing required field"));
+    }
+
+    #[test]
+    fn test_detect_semantic_failure_success_true() {
+        let result = r#"{"result":"{\"Data\":{\"Action\":{\"Success\":true,\"Message\":\"\"}}}"}"#;
+        assert!(detect_semantic_failure(result).is_none());
+    }
+
+    #[test]
+    fn test_detect_semantic_failure_no_success_field() {
+        let result = r#"{"result":"{\"Tick\":100}"}"#;
+        assert!(detect_semantic_failure(result).is_none());
+    }
+
+    #[test]
+    fn test_detect_semantic_failure_top_level() {
+        let result = r#"{"result":"{\"Success\":false,\"Message\":\"Invalid agent ID\"}"}"#;
+        let failure = detect_semantic_failure(result);
+        assert!(failure.is_some());
+        assert!(failure.unwrap().contains("Invalid agent ID"));
+    }
+
+    #[test]
+    fn test_detect_semantic_failure_case_insensitive() {
+        let result = r#"{"result":"{\"success\":false,\"message\":\"bad request\"}"}"#;
+        let failure = detect_semantic_failure(result);
+        assert!(failure.is_some());
+        assert!(failure.unwrap().contains("bad request"));
     }
 }

@@ -131,7 +131,8 @@ fn is_reinforcement(text: &str) -> bool {
 
 fn is_instruction(text: &str) -> bool {
     // Constraint-style instructions
-    let has_constraint_marker = text.contains("must ") || text.contains("never ");
+    let has_constraint_marker =
+        text.contains("must ") || text.contains("never ") || text.contains("always ");
 
     // Imperative instructions with "always" or preference markers
     let has_directive = text.starts_with("always ")

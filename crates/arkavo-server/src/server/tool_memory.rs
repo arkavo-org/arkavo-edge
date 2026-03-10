@@ -23,6 +23,7 @@ pub struct ToolMemoryEntry {
     pub result_summary: String,
     pub is_error: bool,
     pub is_duplicate: bool,
+    pub is_observe: bool,
     pub timestamp: std::time::Instant,
 }
 
@@ -45,7 +46,12 @@ impl ToolMemory {
             .unwrap_or("")
             .to_string();
 
-        if action_type == "Observe" {
+        // Store the full result of any read-only observation tool for state broadcast.
+        // Convention: tools named "*:observe" or "*:state" are observation endpoints.
+        let is_observe = tool_name.ends_with(":observe")
+            || tool_name.ends_with(":state")
+            || tool_name.ends_with(":status");
+        if is_observe {
             self.last_observe_full = Some(result.to_string());
         } else if !action_type.is_empty() {
             // Track consecutive same-type actions across ticks
@@ -82,6 +88,7 @@ impl ToolMemory {
             result_summary,
             is_error,
             is_duplicate,
+            is_observe,
             timestamp: std::time::Instant::now(),
         });
     }
@@ -121,19 +128,19 @@ impl ToolMemory {
         self.last_observe_full.as_deref()
     }
 
-    /// Check if any recent entry was a meaningful action (has Action.Type, not Observe)
+    /// Check if any recent entry was a meaningful action (has Action.Type, not observation)
     pub fn had_meaningful_action(&self) -> bool {
         self.entries
             .iter()
-            .any(|e| !e.action_type.is_empty() && e.action_type != "Observe")
+            .any(|e| !e.action_type.is_empty() && !e.is_observe)
     }
 
-    /// Returns distinct action types used in recent entries (excluding Observe)
+    /// Returns distinct action types used in recent entries (excluding observations)
     pub fn recent_action_types(&self) -> Vec<String> {
         let mut seen = Vec::new();
         for entry in self.entries.iter().rev() {
             if !entry.action_type.is_empty()
-                && entry.action_type != "Observe"
+                && !entry.is_observe
                 && !seen.contains(&entry.action_type)
             {
                 seen.push(entry.action_type.clone());
@@ -165,7 +172,7 @@ impl ToolMemory {
             None => return String::new(),
         };
         let action_type = action.get("Type").and_then(|t| t.as_str()).unwrap_or("");
-        if action_type.is_empty() || action_type == "Observe" {
+        if action_type.is_empty() {
             return String::new();
         }
 
@@ -221,9 +228,10 @@ mod tests {
     }
 
     #[test]
-    fn test_action_key_observe_is_empty() {
+    fn test_action_key_type_only_no_params() {
+        // Action types without extra params produce a plain key (no parens)
         let args = json!({"Action": {"Type": "Observe"}});
-        assert_eq!(ToolMemory::extract_action_key(&args), "");
+        assert_eq!(ToolMemory::extract_action_key(&args), "Observe");
     }
 
     #[test]
@@ -281,9 +289,9 @@ mod tests {
         // No entries
         assert!(!mem.had_meaningful_action());
 
-        // Observe doesn't count
-        let observe = json!({"Action": {"Type": "Observe"}});
-        mem.add("any_tool".into(), &observe, r#"{"ok":true}"#);
+        // Observation tool (name ends in :observe) doesn't count
+        let observe_args = json!({"Include": ["resources"]});
+        mem.add("env:observe".into(), &observe_args, r#"{"ok":true}"#);
         assert!(!mem.had_meaningful_action());
 
         // Action counts (any tool name)
@@ -291,8 +299,8 @@ mod tests {
         mem.add("any_tool".into(), &action, r#"{"ok":true}"#);
         assert!(mem.had_meaningful_action());
 
-        // Action followed by Observe still returns true
-        mem.add("any_tool".into(), &observe, r#"{"ok":true}"#);
+        // Action followed by observe still returns true
+        mem.add("env:observe".into(), &observe_args, r#"{"ok":true}"#);
         assert!(mem.had_meaningful_action());
 
         // Delegation (no Action.Type) after action: action still in window
@@ -305,9 +313,9 @@ mod tests {
         mem2.add("send_task".into(), &task, r#"{"ok":true}"#);
         assert!(!mem2.had_meaningful_action());
 
-        // Fresh memory with only Observe: no meaningful action
+        // Fresh memory with only observation: no meaningful action
         let mut mem3 = ToolMemory::new(10);
-        mem3.add("any_tool".into(), &observe, r#"{"ok":true}"#);
+        mem3.add("env:observe".into(), &observe_args, r#"{"ok":true}"#);
         assert!(!mem3.had_meaningful_action());
     }
 
@@ -331,20 +339,21 @@ mod tests {
     #[test]
     fn test_action_variety_ignores_observe() {
         let mut mem = ToolMemory::new(10);
-        let observe = json!({"Action": {"Type": "Observe"}});
 
+        // Observation tool calls (matching :observe convention) should not
+        // reset or affect the consecutive action type tracker.
         mem.add(
             "tool_a".into(),
             &json!({"Action": {"Type": "Build", "Id": "1"}}),
             "ok",
         );
-        mem.add("tool_a".into(), &observe, "ok");
+        mem.add("env:observe".into(), &json!({}), "state");
         mem.add(
             "tool_a".into(),
             &json!({"Action": {"Type": "Build", "Id": "2"}}),
             "ok",
         );
-        mem.add("tool_a".into(), &observe, "ok");
+        mem.add("env:observe".into(), &json!({}), "state");
         mem.add(
             "tool_a".into(),
             &json!({"Action": {"Type": "Build", "Id": "3"}}),
@@ -381,8 +390,8 @@ mod tests {
     #[test]
     fn test_recent_action_types() {
         let mut mem = ToolMemory::new(10);
-        let observe = json!({"Action": {"Type": "Observe"}});
-        mem.add("tool_a".into(), &observe, "ok");
+        // Observation tool calls are excluded from action types
+        mem.add("env:observe".into(), &json!({}), "ok");
         assert!(mem.recent_action_types().is_empty());
 
         mem.add(
@@ -406,9 +415,10 @@ mod tests {
         let mut mem = ToolMemory::new(10);
         assert!(mem.last_observe_full().is_none());
 
-        let observe = json!({"Action": {"Type": "Observe"}});
+        // Tools ending in :observe store full results for state broadcast
+        let args = json!({"Include": ["colonists", "resources", "alerts"]});
         let full_result = r#"{"state":{"tick":100,"resources":{"wood":50}}}"#;
-        mem.add("tool_a".into(), &observe, full_result);
+        mem.add("game-rl:observe".into(), &args, full_result);
         assert_eq!(mem.last_observe_full(), Some(full_result));
 
         // Non-observe action doesn't overwrite
@@ -418,8 +428,22 @@ mod tests {
 
         // New observe overwrites
         let new_result = r#"{"state":{"tick":101,"resources":{"wood":45}}}"#;
-        mem.add("tool_a".into(), &observe, new_result);
+        mem.add("env:observe".into(), &json!({}), new_result);
         assert_eq!(mem.last_observe_full(), Some(new_result));
+    }
+
+    #[test]
+    fn test_last_observe_full_state_and_status_tools() {
+        let mut mem = ToolMemory::new(10);
+
+        // Tools ending in :state or :status also count as observations
+        let result = r#"{"status":"running","health":0.95}"#;
+        mem.add("system:state".into(), &json!({}), result);
+        assert_eq!(mem.last_observe_full(), Some(result));
+
+        let result2 = r#"{"active":true}"#;
+        mem.add("agent:status".into(), &json!({}), result2);
+        assert_eq!(mem.last_observe_full(), Some(result2));
     }
 
     #[test]

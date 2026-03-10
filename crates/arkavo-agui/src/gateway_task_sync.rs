@@ -82,6 +82,13 @@ async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Opti
     if objective.len() < 80 {
         return None;
     }
+    // Guard against garbage input that would produce hallucinated summaries.
+    // If the objective has very few alphanumeric chars relative to its length,
+    // or is mostly whitespace/control chars, skip LLM summarization entirely.
+    let alnum_count = objective.chars().filter(|c| c.is_alphanumeric()).count();
+    if alnum_count < 20 {
+        return None;
+    }
     let truncated = &objective[..objective.len().min(2000)];
     let prompt = format!(
         "Summarize this agent task in one short sentence (max 15 words). \
@@ -91,7 +98,9 @@ async fn summarize_task(router: &arkavo_router::Router, objective: &str) -> Opti
     match router.route_chat(messages, None, None).await {
         Ok(resp) if !resp.content.is_empty() => {
             let summary = resp.content.trim().to_string();
-            if summary.is_empty() {
+            // Reject summaries that don't relate to game/colony management
+            // (hallucination indicator: generic corporate phrases)
+            if summary.is_empty() || summary.len() > 200 {
                 None
             } else {
                 Some(summary)

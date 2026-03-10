@@ -2,30 +2,42 @@
 
 Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-param, multi-param, no-param, enum, file path, command execution, should-not-call, and multi-type params. Five test tools registered (get_weather, read_file, search, get_time, run_command).
 
-## Results (2026-03-08)
+## Results (2026-03-09)
 
 | Model | Size | Parse | Tool Name | Params | Avg Latency |
 |-------|------|-------|-----------|--------|-------------|
-| Qwen3-0.6B | 0.6B | 8/8 | 7/8 | 8/8 | 171ms |
-| Qwen3.5-0.8B | 0.8B | 1/8 | 1/8 | 1/8 | 22444ms |
-| **Ministral-3-3B** | **3B** | **8/8** | **8/8** | **8/8** | **422ms** |
-| GLM-4.7-Flash | 4.7B | 8/8 | 8/8 | 8/8 | 782ms |
-| Ministral-3-8B | 8B | 8/8 | 8/8 | 8/8 | 783ms |
-| Qwen3.5-27B | 27B | 8/8 | 8/8 | 8/8 | 5868ms |
+| **Qwen3.5-0.8B** | **0.8B** | **8/8** | **8/8** | **8/8** | **525ms** |
+| **Ministral-3-3B** | **3B** | **8/8** | **8/8** | **8/8** | **690ms** |
+| Ministral-3-8B | 8B | 8/8 | 8/8 | 8/8 | 1,409ms |
+| Qwen3.5-9B | 9B | 8/8 | 8/8 | 8/8 | 1,905ms |
+| GLM-4.7-Flash | 4.7B | 8/8 | 8/8 | 8/8 | 2,698ms |
+| Qwen3.5-27B | 27B | 7/8 | 7/8 | 7/8 | 41,634ms |
 
 ## Key Findings
 
-**Qwen3.5-0.8B is critically broken for tool calling.** 1/8 accuracy at 22.4s latency — both the slowest and least accurate model. Qwen3-0.6B (7/8 at 171ms) is vastly superior for ultra-lightweight deployments. Qwen3.5-0.8B was removed as the default chat model in favor of Ministral-3B.
+**Qwen3.5-0.8B fixed: 1/8 → 8/8.** Previously broken due to missing parser support for Qwen's native `<parameter=key>value</parameter>` format. With the named-parameter parser and production text-extraction fallbacks now wired into the bench, all 8 scenarios pass at 525ms average.
 
-**All 3B+ models achieve perfect 8/8.** Ministral-3-3B, GLM-4.7-Flash, Ministral-3-8B, and Qwen3.5-27B all produce valid fence-format tool calls with correct tool names and parameters on every scenario.
+**All models up to 9B achieve perfect 8/8.** Qwen3.5-0.8B, Ministral-3B, Ministral-8B, Qwen3.5-9B, and GLM-4.7-Flash all produce correct tool calls with correct parameters on every scenario.
 
-**Ministral-3-3B is the default chat model.** Perfect 8/8 scores at 422ms average — the best latency/accuracy tradeoff. Selected by `fastest_local_model()` for all chat path tool calling.
+**Ministral-3-3B remains the recommended default.** Perfect 8/8 at 690ms — the best latency/accuracy tradeoff for 3B+ models. Qwen3.5-0.8B is faster (525ms) but uses the native `<tool_call>` format requiring text-extraction fallback rather than direct fence parsing.
 
-**GLM-4.7-Flash and Ministral-8B are nearly identical in Arkavo Edge** (782ms vs 783ms), but GLM-4.7 is 2.4x slower in raw llama-server (1,090ms vs 456ms). The 30B total parameter count negates MoE efficiency on memory-bandwidth-bound Apple Silicon. GLM-4.7 requires 32GB RAM.
+**GLM-4.7-Flash is slower than Ministral-8B** (2,698ms vs 1,409ms) despite MoE architecture. The 30B total parameter count negates MoE efficiency on memory-bandwidth-bound Apple Silicon. Requires 32GB RAM.
 
-**27B models are slow on Apple Silicon.** Qwen3.5-27B takes 5.9s average per tool call. Suitable for batch/offline tasks, not real-time agentic loops.
+**Qwen3.5-27B degrades under load.** 7/8 accuracy with one scenario (command_execution) taking 269s — likely hitting generation length limits or think-block runaway. Suitable for batch/offline tasks only.
+
+### Bench Uses Production Code Path
+
+The bench now wires through the same post-processing as the production router:
+1. `LlamaCppProvider::complete_with_tools()` — inference with Jinja template + tool-calling temperature
+2. `filter_and_extract_tool_calls()` — language fence filtering
+3. `extract_tool_calls_from_text()` — fallback chain: fence → JSON → XML → Python-style → curly-brace
+4. Model discovery via `ModelChoice` registry + `is_model_cached()`
 
 ## Improvements Implemented
+
+### Qwen Named-Parameter Parser
+
+`parse_function_eq_format()` now handles Qwen3.5's `<parameter=key>value</parameter>` format via `extract_named_parameters()`. Previously only `<parameter>JSON</parameter>` (single tag with JSON body) was supported. Values are type-inferred: `true`/`false` → boolean, digits → number, everything else → string. This fixed Qwen3.5-0.8B from 1/8 → 8/8 and Qwen3.5-9B from 6/8 → 8/8.
 
 ### Refined Retry Feedback
 `ValidationError::fix_suggestion()` generates specific, actionable error messages when tool calls fail validation. Instead of generic "include ALL required parameters", the model receives:
@@ -135,18 +147,18 @@ Comparing native llama-server (`tool_bench.py`, 2 scenarios) against Arkavo Edge
 
 | Model | llama-server | Arkavo Edge | Ratio | Where Time Goes |
 |-------|-------------|-------------|-------|-----------------|
-| Ministral-3-3B | 192ms | 422ms | 2.2x | Pipeline overhead dominates (prompt construction, schema injection, fence parsing, validation, semaphore) |
-| Ministral-3-8B | 456ms | 783ms | 1.7x | Similar pipeline overhead, slightly amortized by slower inference |
-| GLM-4.7-Flash | 1,090ms | 782ms | 0.72x | Arkavo appears faster due to different test mix (8 scenarios include fast no-ops) |
-| Qwen3.5-27B | 6,411ms | 5,868ms | 0.91x | Inference dominates — pipeline overhead is noise at this scale |
+| Qwen3.5-0.8B | 500ms | 525ms | 1.05x | Minimal overhead — native `<tool_call>` format parsed via text-extraction fallback |
+| Ministral-3-3B | 192ms | 690ms | 3.6x | Pipeline overhead dominates (Jinja template, prompt construction, fence parsing, validation) |
+| Ministral-3-8B | 456ms | 1,409ms | 3.1x | Similar pipeline overhead, slightly amortized by slower inference |
+| Qwen3.5-9B | 1,032ms | 1,905ms | 1.8x | Native `<parameter=key>` format, think-block overhead |
+| GLM-4.7-Flash | 1,090ms | 2,698ms | 2.5x | MoE overhead on Apple Silicon unified memory |
+| Qwen3.5-27B | 6,411ms | 41,634ms | 6.5x | Think-block runaway on some scenarios (command_execution: 269s) |
 
-**For small models (3B-8B), Arkavo Edge adds 1.7-2.2x overhead** vs direct llama-server. This is the cost of: tool schema distillation, few-shot example generation, semaphore acquisition, fence-format parsing, response validation, and think-block stripping. The pipeline overhead is roughly constant (~200-300ms), so it dominates on fast models and vanishes on slow ones.
+**Qwen models use native tool-call format**, not fence format. The Jinja template engine renders Qwen's `<tool_call><function=name><parameter=key>value</parameter></function></tool_call>` syntax. The parser handles this via `extract_tool_calls_from_text()` → `parse_xml()` → `parse_function_eq_format()` → `extract_named_parameters()`. This adds near-zero overhead for Qwen3.5-0.8B (1.05x) since no format conversion is needed.
 
-**For large models (27B), overhead is negligible.** Model inference at 14 t/s TG makes everything else a rounding error.
+**Ministral models use native function-call format** (`tool_name{json_args}`), caught by the `extract_curly_brace_tool_calls()` fallback. Pipeline overhead (~500ms) includes Jinja template rendering, tool schema injection, and response post-processing.
 
-**GLM-4.7-Flash is slower than expected** given MoE efficiency claims. Despite activating only ~4.7B parameters per token, the 30B total parameter count means the full model must be loaded into memory. On Apple Silicon unified memory, bandwidth becomes the bottleneck — loading 30B of weights per forward pass limits throughput to 75 TG t/s vs Ministral-3B's 136 TG t/s, despite Ministral having more active parameters per token.
-
-**Qwen3.5-0.8B fails at both levels.** Native llama-server shows 0/8 on parameterized weather calls (refuses, responds with text). Arkavo Edge sees 1/8 parse rate. The tool-calling failure is in the model weights, not the pipeline. Combined with 22s latency (vs 500ms native — a 45x blowup likely caused by excessive think-block generation), this model should be excluded from any tool-calling path.
+**For large models (27B), think-block generation dominates.** Qwen3.5-27B generates extensive `<think>` blocks before tool calls, inflating latency far beyond raw inference speed.
 
 ### Optimization Opportunities
 

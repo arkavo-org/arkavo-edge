@@ -305,6 +305,10 @@ pub struct A2aRpcImpl {
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
     /// Per-agent compute budget (specialists check before each tick)
     pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
+    /// Mesh state for A2A delegation (send_task, list_agents, etc.)
+    pub(crate) mesh_state: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    /// Shared tool memory for tracking recent actions across message/send calls
+    pub(crate) agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -457,6 +461,9 @@ impl A2aRpcServer for A2aRpcImpl {
             self.budget_manager.as_ref(),
             self.model_hint.clone(),
             &self.compute_budget,
+            self.mesh_state.as_ref(),
+            &self.agent_metadata,
+            &self.agent_memory,
             request,
         )
         .await

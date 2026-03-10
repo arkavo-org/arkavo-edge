@@ -26,8 +26,7 @@ pub mod selector_quality;
 pub mod stream;
 #[cfg(feature = "tdf-encrypt")]
 pub mod tdf_audit;
-#[allow(clippy::redundant_pub_crate)]
-pub(crate) mod tool_extraction;
+pub mod tool_extraction;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
@@ -476,6 +475,15 @@ impl Router {
         MODEL_COOLDOWN_BASE_SECS
             .saturating_mul(multiplier)
             .min(MODEL_COOLDOWN_MAX_SECS)
+    }
+
+    /// Get the consecutive failure count for a model (0 if not on cooldown).
+    pub async fn get_cooldown_consecutive(&self, model_name: &str) -> u32 {
+        let cooldowns = self.model_cooldowns.read().await;
+        cooldowns
+            .get(model_name)
+            .map(|(_, count)| *count)
+            .unwrap_or(0)
     }
 
     /// Get model names currently on cooldown (expired entries are pruned)

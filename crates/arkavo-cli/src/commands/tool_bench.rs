@@ -317,8 +317,17 @@ pub async fn run(command: &ToolBenchCommand) -> Result<(), Box<dyn std::error::E
         "Totals: Parse {total_parsed}/{total} | Tool {total_tool_ok}/{total} | Params {total_params_ok}/{total}"
     );
 
-    // If a model is specified, run live inference
-    if let Some(ref model_name) = command.model {
+    // Determine which models to bench
+    let models: Vec<String> = if command.all {
+        discover_cached_models()
+    } else if let Some(ref model_name) = command.model {
+        vec![model_name.clone()]
+    } else {
+        vec![]
+    };
+
+    let mut all_reports = Vec::new();
+    for model_name in &models {
         println!("\n═══════════════════════════════════════════════════════════════");
         println!("Live inference with model: {model_name}");
         println!("═══════════════════════════════════════════════════════════════");
@@ -335,17 +344,46 @@ pub async fn run(command: &ToolBenchCommand) -> Result<(), Box<dyn std::error::E
                     report.scenarios_total,
                     report.avg_latency_ms,
                 );
-
-                if let Some(ref path) = command.output {
-                    let json = serde_json::to_string_pretty(&report)?;
-                    std::fs::write(path, json)?;
-                    println!("Results saved to {path}");
-                }
+                all_reports.push(report);
             }
             Err(e) => {
-                eprintln!("Live bench failed: {e}");
+                eprintln!("Live bench failed for {model_name}: {e}");
             }
         }
+    }
+
+    if models.len() > 1 {
+        println!("\n═══════════════════════════════════════════════════════════════");
+        println!("Summary");
+        println!("═══════════════════════════════════════════════════════════════");
+        println!(
+            "{:<25} {:<10} {:<10} {:<10} {:<10}",
+            "Model", "Parse", "Tool", "Params", "Avg ms"
+        );
+        println!("{}", "─".repeat(65));
+        for r in &all_reports {
+            println!(
+                "{:<25} {}/{:<7} {}/{:<7} {}/{:<7} {:.0}",
+                r.model,
+                r.parse_success,
+                r.scenarios_total,
+                r.tool_name_correct,
+                r.scenarios_total,
+                r.params_present,
+                r.scenarios_total,
+                r.avg_latency_ms,
+            );
+        }
+    }
+
+    if let Some(ref path) = command.output {
+        let json = if all_reports.len() == 1 {
+            serde_json::to_string_pretty(&all_reports[0])?
+        } else {
+            serde_json::to_string_pretty(&all_reports)?
+        };
+        std::fs::write(path, json)?;
+        println!("Results saved to {path}");
     }
 
     Ok(())
@@ -412,8 +450,21 @@ async fn run_live_bench(
             let (parsed, correct_tool, params_present, params_type_correct, raw, ptool, pargs) =
                 match response {
                     Ok(resp) => {
-                        let calls: Vec<_> = resp
-                            .tool_calls
+                        // Apply the same post-processing as the production router:
+                        // 1. Filter language fences (e.g., ```python\ntool(...)```)
+                        let mut calls =
+                            arkavo_router::tool_extraction::filter_and_extract_tool_calls(
+                                resp.tool_calls,
+                            );
+                        // 2. If no tool calls parsed, try text extraction fallbacks
+                        //    (curly-brace format, Python-style, XML, JSON)
+                        if calls.is_empty() && !resp.content.is_empty() {
+                            calls = arkavo_router::tool_extraction::extract_tool_calls_from_text(
+                                &resp.content,
+                            );
+                        }
+                        // 3. Filter to registered tool names only
+                        let calls: Vec<_> = calls
                             .into_iter()
                             .filter(|c| registered.contains(c.tool_name.as_str()))
                             .collect();
@@ -513,45 +564,70 @@ async fn run_live_bench(
     })
 }
 
+/// Resolve a model name to a GGUF file path using the production ModelChoice registry.
 fn find_model_path(model_name: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // Check HuggingFace cache
+    use arkavo_router::decision::ModelChoice;
+
+    let choice = ModelChoice::from_name(model_name)
+        .ok_or_else(|| format!("Unknown model: '{model_name}'"))?;
+
+    let repo = choice
+        .repo_id()
+        .ok_or_else(|| format!("No repo for model '{model_name}'"))?;
+    let file = choice
+        .gguf_filename()
+        .ok_or_else(|| format!("No GGUF filename for model '{model_name}'"))?;
+
+    if !arkavo_router::model_discovery::is_model_cached(repo, file) {
+        return Err(format!(
+            "Model '{model_name}' not cached. Download with: huggingface-cli download {repo} {file}"
+        )
+        .into());
+    }
+
+    // Use the same cache path resolution as production
     let hf_cache = dirs::home_dir()
         .ok_or("No home directory")?
         .join(".cache/huggingface/hub");
+    let repo_cache = format!("models--{}", repo.replace('/', "--"));
+    let snapshots = hf_cache.join(&repo_cache).join("snapshots");
 
-    if !hf_cache.exists() {
-        return Err(format!("HuggingFace cache not found at {}", hf_cache.display()).into());
-    }
-
-    let name_lower = model_name.to_lowercase();
-
-    // Search for matching GGUF files
-    for entry in std::fs::read_dir(&hf_cache)? {
-        let entry = entry?;
-        let dir_name = entry.file_name().to_string_lossy().to_lowercase();
-        if !dir_name.contains(&name_lower) && !name_lower.split('-').all(|p| dir_name.contains(p)) {
-            continue;
-        }
-
-        let snapshots = entry.path().join("snapshots");
-        if !snapshots.exists() {
-            continue;
-        }
-
-        // Find the latest snapshot with a GGUF file
-        for snap in std::fs::read_dir(&snapshots)? {
-            let snap = snap?;
-            for file in std::fs::read_dir(snap.path())? {
-                let file = file?;
-                let fname = file.file_name().to_string_lossy().to_lowercase();
-                if fname.ends_with(".gguf") {
-                    return Ok(file.path().to_string_lossy().to_string());
-                }
-            }
+    for snap in std::fs::read_dir(&snapshots)? {
+        let snap = snap?;
+        let candidate = snap.path().join(file);
+        if candidate.exists() {
+            return Ok(candidate.to_string_lossy().to_string());
         }
     }
 
-    Err(format!("No GGUF model found for '{model_name}' in HuggingFace cache").into())
+    Err(format!("GGUF file not found in cache for '{model_name}'").into())
+}
+
+/// Discover cached local models using the production ModelChoice registry.
+fn discover_cached_models() -> Vec<String> {
+    use arkavo_router::decision::ModelChoice;
+    use arkavo_router::model_discovery::is_model_cached;
+
+    // All local models in the production registry, ordered smallest → largest
+    let candidates = [
+        ModelChoice::LocalQwen3,
+        ModelChoice::LocalMinistral3B,
+        ModelChoice::LocalGlm47Flash,
+        ModelChoice::LocalMinistral8B,
+        ModelChoice::LocalQwen35_9B,
+        ModelChoice::LocalQwen35_27B,
+    ];
+
+    candidates
+        .iter()
+        .filter(|m| {
+            matches!(
+                (m.repo_id(), m.gguf_filename()),
+                (Some(repo), Some(file)) if is_model_cached(repo, file)
+            )
+        })
+        .map(|m| m.name().to_string())
+        .collect()
 }
 
 /// Synthetic fence-format outputs for offline parser testing.

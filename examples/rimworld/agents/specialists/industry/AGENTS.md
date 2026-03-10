@@ -35,7 +35,7 @@ purpose: |
   - SimpleResearchBench needs no power. HiTechResearchBench needs power.
   - Place blueprints away from other buildings (leave 1-2 tile gaps).
 
-model: qwen3.5-0.8b
+model: qwen3.5-9b
 listen: 0.0.0.0:8411
 mdns: true
 
