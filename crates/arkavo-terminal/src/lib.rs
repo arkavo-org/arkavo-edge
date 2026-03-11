@@ -922,10 +922,8 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
     // These methods would be added to App in a full implementation
     // app.set_title(&format!("Task: {} (Session: {})", task_id, session_id));
     // app.set_read_only(false); // Allow interaction in task view
-    println!(
-        "Running task view for task: {task_id} in session: {}...",
-        &session_id[..8.min(session_id.len())]
-    );
+    let session_tag = String::from(&session_id[..8.min(session_id.len())]);
+    println!("Running task view for task: {task_id} in session: {session_tag}...");
 
     // Handle task-specific events
     tokio::spawn(async move {

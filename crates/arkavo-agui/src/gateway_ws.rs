@@ -52,6 +52,7 @@ async fn handle_websocket(
     use futures::stream::StreamExt;
 
     let session_id = uuid::Uuid::new_v4().to_string();
+    let session_tag = String::from(&session_id[..8]);
     let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
     let (mut ws_write, mut ws_read) = ws.split();
 
@@ -65,7 +66,7 @@ async fn handle_websocket(
         }
     });
 
-    println!("AG-UI: New WebSocket connection: {}...", &session_id[..8]);
+    println!("AG-UI: New WebSocket connection: {session_tag}...");
 
     {
         let conn_info = super::gateway::ConnectionInfo {
@@ -161,10 +162,7 @@ async fn handle_websocket(
         }
     }
     forward_task.abort();
-    println!(
-        "AG-UI: WebSocket connection closed: {}...",
-        &session_id[..8]
-    );
+    println!("AG-UI: WebSocket connection closed: {session_tag}...");
 }
 
 #[allow(clippy::too_many_arguments)]
