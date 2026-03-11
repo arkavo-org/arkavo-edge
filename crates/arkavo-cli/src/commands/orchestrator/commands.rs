@@ -193,8 +193,8 @@ fn show_config() -> Result<()> {
 
     println!("Orchestrator Configuration:");
     println!("  GitHub App ID: {}", config.github_app_id);
-    println!("  Webhook Secret: {}", config.get_masked_secret());
-    println!("  Private Key: {}", config.get_masked_private_key());
+    println!("  Webhook Secret: [set]");
+    println!("  Private Key: [set]");
     println!("  Webhook Port: {}", config.webhook_port);
     println!("  Metrics Port: {}", config.metrics_port);
     println!(

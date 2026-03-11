@@ -6,6 +6,7 @@
  */
 
 const readline = require('readline');
+const crypto = require('crypto');
 
 // Try to load Claude Agent SDK from multiple locations
 let ClaudeCodeSession;
@@ -130,7 +131,7 @@ const rpcHandlers = {
     
     async openSession(params) {
         const { context } = params;
-        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const sessionId = `session_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
         
         try {
             // Create session configuration

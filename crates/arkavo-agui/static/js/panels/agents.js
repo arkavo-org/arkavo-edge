@@ -60,8 +60,9 @@ function renderAgents() {
 
     container.innerHTML = agents.map(function(agent) {
         var agentId = escapeHtml(agent.id || agent.name);
-        var safeId = agentId.replace(/'/g, "\\'");
+        var safeId = agentId.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         var status = escapeHtml(agent.status || 'connected');
+        var statusClass = status.replace(/[^a-zA-Z0-9-]/g, '');
         var chat = getAgentChat(agentId);
         var chatActive = chat.isOpen ? ' active' : '';
 
@@ -69,7 +70,7 @@ function renderAgents() {
             '<div class="agent-header">' +
             '<span class="agent-id">' + (agentId || 'Unknown') + '</span>' +
             '<div class="agent-header-actions">' +
-            '<span class="agent-status ' + status + '">' + status + '</span>' +
+            '<span class="agent-status ' + statusClass + '">' + status + '</span>' +
             '<button class="chat-toggle-btn' + chatActive + '" data-chat-toggle="' + safeId + '" title="Chat">&#x2709;</button>' +
             '</div>' +
             '</div>' +

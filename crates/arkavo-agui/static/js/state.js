@@ -19,7 +19,7 @@ var AppState = {
     learningAgents: {},
     routingHistory: [],
     routingAnimations: [],
-    pathWeights: {},
+    pathWeights: Object.create(null),
     qualityTrends: [],
     lessons: [],
     lessonCount: 0,

@@ -39,8 +39,9 @@ pub fn set_api_keys(keys: &HashMap<String, String>) {
     let mut store = API_KEY_STORE.write().unwrap();
     let map = store.get_or_insert_with(HashMap::new);
     for (key, value) in keys {
-        println!("AG-UI: Setting {} (value hidden)", key);
+        let count = map.len();
         map.insert(key.clone(), value.clone());
+        eprintln!("AG-UI: API key configured ({} total)", count + 1);
     }
 }
 

@@ -23,6 +23,7 @@ impl HttpTransport {
             .connect_timeout(timeout);
 
         if !config.tls_config.verify_cert {
+            warn!("TLS certificate verification is disabled — vulnerable to MITM attacks");
             builder = builder.danger_accept_invalid_certs(true);
         }
 
