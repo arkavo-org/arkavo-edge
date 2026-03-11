@@ -77,20 +77,21 @@ function handleRoutingEvaluation(event) {
     }
 
     // Track path weight for selected agent
-    var sel = event.selectedAgent;
-    if (safeAgentKey(sel)) {
-        AppState.pathWeights[sel] = (AppState.pathWeights[sel] || 0) + 1;
+    var safeSel = safeAgentKey(event.selectedAgent);
+    if (safeSel) {
+        AppState.pathWeights[safeSel] = (AppState.pathWeights[safeSel] || 0) + 1;
     }
 
     // Write selected agent back to task object for detail view
-    if (event.taskId && safeAgentKey(event.taskId) && Object.prototype.hasOwnProperty.call(AppState.tasks, event.taskId)) {
-        AppState.tasks[event.taskId].target_agent = sel;
+    var safeTaskId = safeAgentKey(event.taskId);
+    if (safeTaskId && Object.prototype.hasOwnProperty.call(AppState.tasks, safeTaskId)) {
+        AppState.tasks[safeTaskId].target_agent = safeSel;
     }
 
     // Add to routing history
     AppState.routingHistory.push({
         taskId: event.taskId,
-        selectedAgent: sel,
+        selectedAgent: safeSel,
         wasExploration: event.wasExploration,
         outcome: null,
         category: event.category || null,

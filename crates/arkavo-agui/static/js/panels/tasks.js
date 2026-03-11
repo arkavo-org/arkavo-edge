@@ -4,7 +4,9 @@ var _pendingTaskDescription = null;
 var MAX_TASK_EVENTS = 50;
 
 function addTaskEvent(taskId, evt) {
-    if (!taskId || !AppState.tasks[taskId]) return;
+    var safeKey = safeTaskKey(taskId);
+    if (!safeKey || !AppState.tasks[safeKey]) return;
+    taskId = safeKey;
     var task = AppState.tasks[taskId];
     if (!task._events) task._events = [];
     task._events.unshift(evt);
@@ -38,7 +40,8 @@ function handleTaskSubmitted(event) {
         _events: []
     };
     if (task.source === 'ui') _pendingTaskDescription = null;
-    if (safeTaskKey(task.id)) AppState.tasks[task.id] = task;
+    var safeId = safeTaskKey(task.id);
+    if (safeId) AppState.tasks[safeId] = task;
     AppState.taskCount++;
 
     var evt = {
@@ -55,8 +58,8 @@ function handleTaskSubmitted(event) {
 }
 
 function handleTaskStatusChanged(event) {
-    var id = event.taskId || event.task_id;
-    if (safeTaskKey(id) && AppState.tasks[id]) {
+    var id = safeTaskKey(event.taskId || event.task_id);
+    if (id && AppState.tasks[id]) {
         AppState.tasks[id].status = event.status;
         if (event.progress !== undefined) {
             AppState.tasks[id].progress = event.progress;
