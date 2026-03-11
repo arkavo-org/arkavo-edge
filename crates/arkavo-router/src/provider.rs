@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
 
+#[cfg(feature = "llama-cpp")]
 fn sampling_config_for(model: &ModelChoice) -> arkavo_llm::SamplingConfig {
     if let Some((temp, top_p, thinking)) = model.optimal_sampling() {
         arkavo_llm::SamplingConfig {

@@ -37,6 +37,15 @@ pub use stream::StreamResponse;
 pub use tool_executor::{ToolExecutionError, ToolExecutionResult, ToolExecutor};
 pub use tool_parser::{ParsedToolCall, ToolParseError, ToolParser};
 
+/// Explicit thinking mode override from autoresearch tuning.
+/// Always available (no feature gate) so the router can reference it
+/// without requiring llama-cpp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingMode {
+    On,
+    Off,
+}
+
 #[cfg(feature = "kimi")]
 mod kimi_adapter;
 #[cfg(feature = "kimi")]
@@ -70,7 +79,7 @@ pub use conversation_context::{
     ConversationContext, ConversationContextManager, ConversationContextRef, ConversationId,
 };
 #[cfg(feature = "llama-cpp")]
-pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, ThinkingMode, is_gpu_accelerated};
+pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use model_registry::{ModelInfo, ModelRegistry};
 #[cfg(all(feature = "llama-cpp", target_env = "musl"))]

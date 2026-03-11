@@ -18,11 +18,7 @@ use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 use crate::mcp_converter::{LocalToolFormat, McpConverter};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThinkingMode {
-    On,
-    Off,
-}
+pub use crate::ThinkingMode;
 
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
