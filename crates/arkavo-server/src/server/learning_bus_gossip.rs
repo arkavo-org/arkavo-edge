@@ -29,6 +29,12 @@ impl LearningBus {
             None
         };
 
+        let experiment_announce = if let GossipMessage::ExperimentAnnounce(ref ann) = message {
+            Some(ann.clone())
+        } else {
+            None
+        };
+
         // Forward patchlet gossip to AutoLearner's bridge for processing
         if matches!(
             &message,
@@ -88,6 +94,16 @@ impl LearningBus {
 
         if let Some(ann) = advisor_announce {
             self.apply_remote_adjustment(&ann).await;
+        }
+
+        if let Some(ann) = experiment_announce {
+            tracing::info!(
+                experiment_id = %ann.experiment_id,
+                originator = %ann.originator,
+                weighted_quality = ann.weighted_quality,
+                kept = ann.kept,
+                "Received autoresearch experiment result via gossip"
+            );
         }
 
         responses
