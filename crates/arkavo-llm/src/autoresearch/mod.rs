@@ -8,9 +8,11 @@
 //! - Weighted quality metric: quality_per_token × ln(1 + tok/s)
 
 mod config;
+pub mod context_sweep;
 mod evaluator;
 mod thompson;
 
 pub use config::{ExperimentConfig, ExperimentResult, SearchSpace};
+pub use context_sweep::{ContextConfig, ContextMetrics, ContextSearchSpace, ContextVariant};
 pub use evaluator::evaluate_quality;
 pub use thompson::{BetaPrior, Rng, ThompsonSampler};
