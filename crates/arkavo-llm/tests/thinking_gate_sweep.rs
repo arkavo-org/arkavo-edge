@@ -4,7 +4,7 @@
 //! 1. Read config — load experiment parameters
 //! 2. Mutate — apply one parameter change from the search space
 //! 3. Execute — run inference with the parameter configuration
-//! 4. Evaluate — measure quality_per_token via CriticPipeline + perf_context
+//! 4. Evaluate — measure quality_per_token via inline critic + wall-clock timing
 //! 5. Decide — keep/revert based on metric improvement
 //! 6. Log — append results to TSV for analysis
 //! 7. Loop — repeat until wall-clock budget exhausted
@@ -20,8 +20,7 @@
 
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_get_one, batch_get_one_with_logits, create_sampler_chain,
-    decode_batch, init_llama_logging, perf_context, perf_context_reset, token_to_piece,
-    tokenize_with_model,
+    decode_batch, init_llama_logging, perf_context_reset, token_to_piece, tokenize_with_model,
 };
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -159,9 +158,11 @@ fn run_experiment(
 
     let tokens = tokenize_with_model(vocab, full_prompt.as_bytes()).ok()?;
 
-    // Prompt eval
+    // Prompt eval — measure TTFT via wall clock
+    let prompt_start = Instant::now();
     let batch = batch_get_one_with_logits(&tokens, true);
     decode_batch(&ctx, batch).ok()?;
+    let ttft_ms = prompt_start.elapsed().as_secs_f64() * 1000.0;
 
     // Create sampler with experiment config
     let sampler = create_sampler_chain(config.temperature, config.top_p, config.top_k, 42).ok()?;
@@ -169,6 +170,9 @@ fn run_experiment(
     let eos = model.get_eos_token();
     let mut generated_text = String::new();
     let mut tokens_generated = 0u32;
+
+    // Generation phase — measure tok/s via wall clock
+    let gen_start = Instant::now();
 
     for _ in 0..config.max_tokens {
         let token = sampler.sample(&ctx, -1);
@@ -187,13 +191,14 @@ fn run_experiment(
         tokens_generated += 1;
     }
 
-    let metrics = perf_context(&ctx);
-    Some((
-        metrics.tok_per_sec(),
-        metrics.ttft_ms(),
-        tokens_generated,
-        generated_text,
-    ))
+    let gen_elapsed = gen_start.elapsed().as_secs_f64();
+    let tok_per_sec = if gen_elapsed > 0.0 && tokens_generated > 0 {
+        tokens_generated as f64 / gen_elapsed
+    } else {
+        0.0
+    };
+
+    Some((tok_per_sec, ttft_ms, tokens_generated, generated_text))
 }
 
 /// The search space: all configurations to sweep
