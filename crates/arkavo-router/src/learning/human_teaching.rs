@@ -54,6 +54,100 @@ pub fn classify_intent(text: &str, last_trace_id: Option<Uuid>) -> TeachingInten
     TeachingIntent::Question
 }
 
+/// Classify intent with pattern matching first, LLM fallback for ambiguous cases.
+///
+/// When pattern matching returns `Question`, the 0.8B fast model is consulted.
+/// If the LLM is unavailable or returns unparseable output, `Question` is returned.
+pub async fn classify_intent_llm(
+    text: &str,
+    last_trace_id: Option<Uuid>,
+    router: &crate::Router,
+) -> TeachingIntent {
+    let pattern_result = classify_intent(text, last_trace_id);
+    if pattern_result != TeachingIntent::Question {
+        return pattern_result;
+    }
+
+    let prompt = build_intent_prompt(text);
+    let messages = vec![arkavo_llm::Message {
+        role: arkavo_llm::Role::User,
+        content: prompt,
+        images: None,
+        tool_call_id: None,
+        tool_name: None,
+    }];
+
+    let stream = match router
+        .route_fast("teaching intent classification", messages)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!(error = %e, "LLM intent classification unavailable, using pattern match");
+            return TeachingIntent::Question;
+        }
+    };
+
+    let response = match stream.complete().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, "LLM intent classification failed");
+            return TeachingIntent::Question;
+        }
+    };
+
+    parse_intent_response(&response.content, last_trace_id)
+}
+
+fn build_intent_prompt(text: &str) -> String {
+    format!(
+        r#"Classify this user message into exactly ONE intent.
+
+Categories:
+- question: asking for information or normal conversation. Example: "how many colonists are alive?"
+- instruction: telling the agent to change behavior. Example: "it might be better to focus on defense"
+- correction: disapproving or noting a problem with a recent action. Example: "the colony keeps running out of medicine"
+- reinforcement: praising or approving behavior. Example: "that approach is working well"
+
+Message: {text}
+
+Reply with ONLY two lines:
+Intent: [question|instruction|correction|reinforcement]
+Scope: [global|situational|oneshot]"#
+    )
+}
+
+fn parse_intent_response(response: &str, last_trace_id: Option<Uuid>) -> TeachingIntent {
+    let lower = response.to_lowercase();
+    let mut intent_str = None;
+    let mut scope_str = None;
+
+    for line in lower.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("intent:") {
+            intent_str = Some(val.trim().to_string());
+        } else if let Some(val) = trimmed.strip_prefix("scope:") {
+            scope_str = Some(val.trim().to_string());
+        }
+    }
+
+    match intent_str.as_deref() {
+        Some("correction") => TeachingIntent::Correction {
+            trace_id: last_trace_id,
+        },
+        Some("reinforcement") => TeachingIntent::Reinforcement,
+        Some("instruction") => {
+            let scope = match scope_str.as_deref() {
+                Some("situational") => LessonScope::Situational,
+                Some("oneshot") => LessonScope::OneShot,
+                _ => LessonScope::Global,
+            };
+            TeachingIntent::Instruction { scope }
+        }
+        _ => TeachingIntent::Question,
+    }
+}
+
 /// Create a lesson from a human instruction
 pub fn create_instruction_lesson(
     instruction: &str,
@@ -518,5 +612,87 @@ ALWAYS run clippy before pushing
         );
         assert_eq!(lesson.confidence, 0.95);
         assert_eq!(lesson.scope, LessonScope::Situational);
+    }
+
+    #[test]
+    fn test_parse_intent_response_all_intents() {
+        let tid = Uuid::new_v4();
+
+        assert_eq!(
+            parse_intent_response("Intent: correction\nScope: global", Some(tid)),
+            TeachingIntent::Correction {
+                trace_id: Some(tid)
+            }
+        );
+        assert_eq!(
+            parse_intent_response("Intent: reinforcement\nScope: global", None),
+            TeachingIntent::Reinforcement
+        );
+        assert_eq!(
+            parse_intent_response("Intent: instruction\nScope: situational", None),
+            TeachingIntent::Instruction {
+                scope: LessonScope::Situational
+            }
+        );
+        assert_eq!(
+            parse_intent_response("Intent: instruction\nScope: oneshot", None),
+            TeachingIntent::Instruction {
+                scope: LessonScope::OneShot
+            }
+        );
+        assert_eq!(
+            parse_intent_response("Intent: question\nScope: global", None),
+            TeachingIntent::Question
+        );
+    }
+
+    #[test]
+    fn test_parse_intent_response_garbage() {
+        assert_eq!(parse_intent_response("", None), TeachingIntent::Question);
+        assert_eq!(
+            parse_intent_response("random text that is not structured", None),
+            TeachingIntent::Question
+        );
+        assert_eq!(
+            parse_intent_response("Intent: unknown_value\nScope: global", None),
+            TeachingIntent::Question
+        );
+    }
+
+    #[test]
+    fn test_parse_intent_response_whitespace_tolerance() {
+        let tid = Uuid::new_v4();
+        let result =
+            parse_intent_response("  Intent:   correction  \n  Scope:  global  ", Some(tid));
+        assert_eq!(
+            result,
+            TeachingIntent::Correction {
+                trace_id: Some(tid)
+            }
+        );
+    }
+
+    #[test]
+    fn test_build_intent_prompt_contains_text() {
+        let prompt = build_intent_prompt("the colony keeps running out of medicine");
+        assert!(prompt.contains("the colony keeps running out of medicine"));
+        assert!(prompt.contains("question"));
+        assert!(prompt.contains("instruction"));
+        assert!(prompt.contains("correction"));
+        assert!(prompt.contains("reinforcement"));
+    }
+
+    #[test]
+    fn test_pattern_match_takes_precedence() {
+        // Clear pattern matches should not need LLM
+        assert_ne!(
+            classify_intent("don't do that", None),
+            TeachingIntent::Question
+        );
+        assert_ne!(
+            classify_intent("always prioritize food", None),
+            TeachingIntent::Question
+        );
+        assert_ne!(classify_intent("good job", None), TeachingIntent::Question);
     }
 }
