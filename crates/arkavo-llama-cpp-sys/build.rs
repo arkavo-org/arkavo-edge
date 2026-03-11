@@ -327,19 +327,53 @@ fn main() {
 
     // Link libraries from the CMake build tree that aren't installed to lib/
     // (common, cpp-httplib, build_info are built but not installed by CMake)
+    //
+    // On Windows with MSBuild, CMake places artifacts in config subdirectories
+    // (e.g., build/common/Release/) instead of build/common/ directly.
     let build_dir = dst.join("build");
-    let common_lib = build_dir.join("common");
+    let common_base = build_dir.join("common");
+    let common_lib = if cfg!(target_os = "windows") {
+        // MSBuild uses config-specific subdirectories
+        let release_dir = common_base.join("Release");
+        let relwithdebinfo_dir = common_base.join("RelWithDebInfo");
+        if release_dir.exists() {
+            release_dir
+        } else if relwithdebinfo_dir.exists() {
+            relwithdebinfo_dir
+        } else {
+            common_base.clone()
+        }
+    } else {
+        common_base.clone()
+    };
     if common_lib.exists() {
         println!("cargo:rustc-link-search=native={}", common_lib.display());
         println!("cargo:rustc-link-lib=static=common");
 
-        // build_info is an OBJECT library — link its .o directly
-        let build_info_obj = common_lib.join("CMakeFiles/build_info.dir/build-info.cpp.o");
-        if build_info_obj.exists() {
-            println!("cargo:rustc-link-arg={}", build_info_obj.display());
+        // build_info is an OBJECT library — link its object file directly
+        if cfg!(target_os = "windows") {
+            let build_info_obj = common_base.join("build_info.dir/Release/build-info.obj");
+            if build_info_obj.exists() {
+                println!("cargo:rustc-link-arg={}", build_info_obj.display());
+            }
+        } else {
+            let build_info_obj = common_base.join("CMakeFiles/build_info.dir/build-info.cpp.o");
+            if build_info_obj.exists() {
+                println!("cargo:rustc-link-arg={}", build_info_obj.display());
+            }
         }
     }
-    let httplib = build_dir.join("vendor/cpp-httplib");
+    let httplib_base = build_dir.join("vendor/cpp-httplib");
+    let httplib = if cfg!(target_os = "windows") {
+        let release_dir = httplib_base.join("Release");
+        if release_dir.exists() {
+            release_dir
+        } else {
+            httplib_base.clone()
+        }
+    } else {
+        httplib_base
+    };
     if httplib.exists() {
         println!("cargo:rustc-link-search=native={}", httplib.display());
         println!("cargo:rustc-link-lib=static=cpp-httplib");
@@ -416,11 +450,13 @@ fn main() {
             manifest_dir.join("arkavo_grammar_wrapper.h").display()
         );
 
-        cc::Build::new()
-            .cpp(true)
-            .std("c++17")
-            .flag("-fexceptions")
-            .file(&wrapper_src)
+        let mut cc_build = cc::Build::new();
+        cc_build.cpp(true).std("c++17").file(&wrapper_src);
+        // -fexceptions is GCC/Clang only; MSVC enables exceptions by default
+        if !cfg!(target_os = "windows") {
+            cc_build.flag("-fexceptions");
+        }
+        cc_build
             .include(out_path.join("include"))
             .include(vendor_dir.join("common"))
             .include(vendor_dir.join("include"))
