@@ -161,7 +161,10 @@ async fn handle_websocket(
         }
     }
     forward_task.abort();
-    println!("AG-UI: WebSocket connection closed: {}...", &session_id[..8]);
+    println!(
+        "AG-UI: WebSocket connection closed: {}...",
+        &session_id[..8]
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
