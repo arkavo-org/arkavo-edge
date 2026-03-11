@@ -128,7 +128,7 @@ fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
             role: match msg.role {
                 Role::System => arkavo_deepseek::Role::System,
                 Role::User => arkavo_deepseek::Role::User,
-                Role::Assistant => arkavo_deepseek::Role::Assistant,
+                Role::Assistant | Role::Tool => arkavo_deepseek::Role::Assistant,
             },
             content: MessageContent::Text {
                 content: msg.content,
@@ -146,6 +146,7 @@ fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamRespo
         content: resp.content.unwrap_or_default(),
         reasoning_content: resp.reasoning_content,
         done: resp.done,
+        inference_timing: None,
     }
 }
 
@@ -198,7 +199,9 @@ impl Provider for DeepSeekProvider {
                 role: match msg.role {
                     Role::System => arkavo_deepseek::provider::MessageRole::System,
                     Role::User => arkavo_deepseek::provider::MessageRole::User,
-                    Role::Assistant => arkavo_deepseek::provider::MessageRole::Assistant,
+                    Role::Assistant | Role::Tool => {
+                        arkavo_deepseek::provider::MessageRole::Assistant
+                    }
                 },
                 content: msg.content,
                 images: msg.images,
@@ -309,6 +312,7 @@ impl Provider for DeepSeekProvider {
             reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
             finish_reason,
+            inference_timing: None,
         })
     }
 }

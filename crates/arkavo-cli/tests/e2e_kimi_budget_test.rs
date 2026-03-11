@@ -78,8 +78,18 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
     // Estimate costs before the request
     let estimated_input_tokens = 20u32; // Rough estimate
     let estimated_output_tokens = 10u32;
-    use arkavo_budget::provider_costs::ProviderPricing;
-    let pricing = ProviderPricing::new();
+    use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
+    let mut pricing = ProviderPricing::new();
+    pricing.load_from_entries(&[PricingEntry {
+        model_id: "moonshot-v1-32k".into(),
+        provider: "kimi".into(),
+        input_cents_per_1k: 200,
+        output_cents_per_1k: 600,
+        cached_input_cents_per_1k: None,
+        cache_write_cents_per_1k: None,
+        context_window: Some(32000),
+        max_output_tokens: Some(8192),
+    }]);
     let estimated_cost = pricing
         .estimate_cost(
             "kimi",

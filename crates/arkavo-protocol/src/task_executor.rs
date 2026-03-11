@@ -36,8 +36,10 @@ pub enum TaskEvent {
 pub struct TaskExecutorConfig {
     /// Maximum number of concurrent tasks
     pub max_concurrent_tasks: usize,
-    /// Task timeout in seconds
+    /// Task timeout in seconds (for Working tasks)
     pub task_timeout_seconds: u64,
+    /// Timeout for tasks stuck in Submitted/routing state
+    pub submitted_timeout_seconds: u64,
     /// Interval for checking pending tasks
     pub poll_interval_ms: u64,
     /// Whether to enable metrics collection
@@ -48,9 +50,10 @@ impl Default for TaskExecutorConfig {
     fn default() -> Self {
         Self {
             max_concurrent_tasks: 10,
-            task_timeout_seconds: 300, // 5 minutes
-            poll_interval_ms: 1000,    // 1 second
-            enable_metrics: true,      // Metrics enabled by default
+            task_timeout_seconds: 300,     // 5 minutes for working tasks
+            submitted_timeout_seconds: 60, // 1 minute for stuck routing
+            poll_interval_ms: 1000,        // 1 second
+            enable_metrics: true,          // Metrics enabled by default
         }
     }
 }
@@ -414,6 +417,47 @@ impl TaskExecutor {
                 metrics.record_task_status_change("working", "failed");
 
                 // Remove from start times
+                task_start_times.write().await.remove(&task.id);
+            }
+        }
+
+        // Check for tasks stuck in Submitted (routing never completed)
+        let submitted_tasks = store.get_tasks_by_status(TaskStatus::Submitted).await?;
+        let submit_timeout = Duration::from_secs(config.submitted_timeout_seconds);
+
+        for task in submitted_tasks {
+            let elapsed = now.signed_duration_since(task.updated_at);
+            if elapsed.num_seconds() as u64 > config.submitted_timeout_seconds {
+                warn!(
+                    "Task {} stuck in submitted state for {} seconds",
+                    task.id,
+                    elapsed.num_seconds()
+                );
+
+                let error = TaskError {
+                    code: "SUBMIT_TIMEOUT".to_string(),
+                    message: format!(
+                        "Task stuck in routing for {} seconds",
+                        submit_timeout.as_secs()
+                    ),
+                    details: None,
+                };
+
+                let mut task_copy = task.clone();
+                task_copy.error = Some(error.clone());
+                store.create_task(task_copy).await?;
+                store
+                    .update_task_status(&task.id, TaskStatus::Failed)
+                    .await?;
+
+                event_tx.send(TaskEvent::ErrorOccurred {
+                    task_id: task.id,
+                    error: error.clone(),
+                })?;
+
+                metrics.record_task_error(&error.code);
+                metrics.record_task_status_change("submitted", "failed");
+
                 task_start_times.write().await.remove(&task.id);
             }
         }

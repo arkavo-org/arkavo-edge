@@ -17,6 +17,7 @@ pub mod gateway_security;
 pub mod gateway_static;
 pub mod gateway_status;
 pub mod gateway_task_dispatch;
+pub mod gateway_task_sync;
 pub mod gateway_ws;
 pub mod handler;
 pub mod health;

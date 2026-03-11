@@ -46,7 +46,7 @@ impl super::Router {
         llms.push(LlmInfo {
             name: "Local".to_string(),
             provider: "Local".to_string(),
-            model: "qwen3-0.6b / ministral-3b".to_string(),
+            model: "qwen3.5-0.8b / ministral-3b".to_string(),
             available: true,
         });
         llms

@@ -70,6 +70,7 @@ fn make_response(content: &str, tool_calls: Vec<ParsedToolCall>) -> ProviderResp
         reasoning_content: None,
         tool_calls,
         finish_reason: None,
+        inference_timing: None,
     }
 }
 

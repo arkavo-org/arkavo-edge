@@ -129,7 +129,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.63.0"
+version = "0.64.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -156,7 +156,7 @@ base64 = "0.22.1"
 jsonschema = { version = "0.26.2", default-features = false, features = ["resolve-http", "resolve-file"] }
 thiserror = "2.0.12"
 tempfile = "3.20"
-reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
@@ -180,6 +180,7 @@ serde_yaml = "0.9"
 rand = "0.8"
 bytes = "1.8"
 parking_lot = "0.12"
+sysinfo = "0.34"
 ed25519-dalek = "2.1"
 qrcode = "0.14"
 hex = "0.4"
@@ -282,7 +283,7 @@ overflow-checks = true   # Keep safety checks enabled for tests
 [profile.ci]
 inherits = "release"
 lto = "thin"              # ~70% of fat LTO benefit at ~30% link time
-codegen-units = 8         # Allow parallel codegen (vs 1 for release)
+codegen-units = 2         # Fewer units = better dead-code elimination
 opt-level = 2             # Slightly faster compile than opt-level=3
 strip = true
 panic = "abort"

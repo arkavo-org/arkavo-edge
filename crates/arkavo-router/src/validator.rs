@@ -3,6 +3,7 @@ use arkavo_llm::tool_parser::ParsedToolCall;
 use arkavo_mcp_tools::ToolInfo;
 use serde_json::Value;
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
@@ -45,6 +46,46 @@ impl std::fmt::Display for ValidationError {
 }
 
 impl std::error::Error for ValidationError {}
+
+impl ValidationError {
+    /// Generate a specific, actionable fix suggestion for the model to retry with.
+    pub fn fix_suggestion(&self, available_tools: &[&str]) -> String {
+        match self {
+            ValidationError::HallucinatedTool { tool_name } => {
+                let tools_list = if available_tools.len() <= 10 {
+                    available_tools.join(", ")
+                } else {
+                    let mut list = available_tools[..10].join(", ");
+                    let _ = write!(list, " (and {} more)", available_tools.len() - 10);
+                    list
+                };
+                format!("'{tool_name}' is not a valid tool. Available tools: {tools_list}")
+            }
+            ValidationError::MissingRequiredParam { tool_name, param } => {
+                format!(
+                    "Add the required '{param}' parameter to your '{tool_name}' call. Example:\n```{tool_name}\n{param}: <value>\n```"
+                )
+            }
+            ValidationError::InvalidParamType {
+                tool_name,
+                param,
+                expected,
+            } => {
+                let example = match expected.as_str() {
+                    "string" => "\"example text\"",
+                    "number" | "integer" => "42",
+                    "boolean" => "true",
+                    "array" => "[1, 2, 3]",
+                    "object" => "{\"key\": \"value\"}",
+                    _ => "<value>",
+                };
+                format!(
+                    "Parameter '{param}' in '{tool_name}' must be type {expected}. Example: {param}: {example}"
+                )
+            }
+        }
+    }
+}
 
 pub struct ResponseValidator {
     available_tools: HashSet<String>,
@@ -189,6 +230,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         assert!(validator.quick_validate(&response).is_ok());
@@ -208,6 +250,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -234,6 +277,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -261,6 +305,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -280,6 +325,43 @@ mod tests {
     }
 
     #[test]
+    fn test_fix_suggestion_hallucinated_tool() {
+        let err = ValidationError::HallucinatedTool {
+            tool_name: "fake_tool".to_string(),
+        };
+        let available = vec!["search", "read_file", "write_file"];
+        let fix = err.fix_suggestion(&available);
+        assert!(fix.contains("fake_tool"));
+        assert!(fix.contains("search"));
+        assert!(fix.contains("read_file"));
+    }
+
+    #[test]
+    fn test_fix_suggestion_missing_param() {
+        let err = ValidationError::MissingRequiredParam {
+            tool_name: "search".to_string(),
+            param: "query".to_string(),
+        };
+        let fix = err.fix_suggestion(&[]);
+        assert!(fix.contains("query"));
+        assert!(fix.contains("search"));
+        assert!(fix.contains("```search"));
+    }
+
+    #[test]
+    fn test_fix_suggestion_invalid_type() {
+        let err = ValidationError::InvalidParamType {
+            tool_name: "search".to_string(),
+            param: "limit".to_string(),
+            expected: "number".to_string(),
+        };
+        let fix = err.fix_suggestion(&[]);
+        assert!(fix.contains("limit"));
+        assert!(fix.contains("number"));
+        assert!(fix.contains("42"));
+    }
+
+    #[test]
     fn test_no_tool_calls() {
         let tools = vec![create_test_tool_info("search", &["query"])];
         let validator = ResponseValidator::new(&tools);
@@ -289,6 +371,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         assert!(validator.quick_validate(&response).is_ok());

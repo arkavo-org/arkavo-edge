@@ -19,6 +19,7 @@ pub struct BudgetMiddleware<P> {
     agent_id: String,
     provider_name: String,
     model_id: String,
+    pricing: crate::provider_costs::ProviderPricing,
 }
 
 impl<P> BudgetMiddleware<P> {
@@ -35,16 +36,15 @@ impl<P> BudgetMiddleware<P> {
             agent_id,
             provider_name,
             model_id,
+            pricing: crate::provider_costs::ProviderPricing::new(),
         }
     }
 
     async fn check_budget(&self, estimated_tokens: (u32, u32)) -> Result<TokenCost> {
         let (input_tokens, output_tokens) = estimated_tokens;
 
-        // Estimate cost using the provider costs module
-        use crate::provider_costs::ProviderPricing;
-        let pricing = ProviderPricing::new();
-        let estimated_cost = pricing
+        let estimated_cost = self
+            .pricing
             .estimate_cost(
                 &self.provider_name,
                 &self.model_id,
@@ -96,11 +96,9 @@ impl<P> BudgetMiddleware<P> {
     async fn record_usage(&self, actual_tokens: (u32, u32)) -> Result<()> {
         let (input_tokens, output_tokens) = actual_tokens;
 
-        // Calculate actual cost using the provider costs module
         use crate::cost::TokenUsage;
-        use crate::provider_costs::ProviderPricing;
-        let pricing = ProviderPricing::new();
-        let actual_cost = pricing
+        let actual_cost = self
+            .pricing
             .estimate_cost(
                 &self.provider_name,
                 &self.model_id,
@@ -202,6 +200,7 @@ where
         let agent_id = self.agent_id.clone();
         let provider_name = self.provider_name.clone();
         let model_id = self.model_id.clone();
+        let stream_pricing = crate::provider_costs::ProviderPricing::new();
 
         // Wrap the stream to track tokens
         let mut accumulated_output = String::new();
@@ -210,7 +209,6 @@ where
         let tracked_stream = async_stream::stream! {
             while let Some(item) = inner_stream.next().await {
                 if let Ok(response) = &item {
-                    // Accumulate output for token counting
                     accumulated_output.push_str(&format!("{response:?}"));
                 }
                 yield item;
@@ -218,10 +216,8 @@ where
 
             // After stream completes, record usage
             let output_tokens = (accumulated_output.len() / 4) as u32;
-            use crate::provider_costs::ProviderPricing;
             use crate::cost::TokenUsage;
-            let pricing = ProviderPricing::new();
-            if let Some(cost) = pricing.estimate_cost(&provider_name, &model_id, input_tokens, output_tokens) {
+            if let Some(cost) = stream_pricing.estimate_cost(&provider_name, &model_id, input_tokens, output_tokens) {
                 let usage = TokenUsage::new(input_tokens, output_tokens);
                 if let Err(e) = tracker
                     .record_spending(agent_id.clone(), provider_name, model_id, usage, cost)

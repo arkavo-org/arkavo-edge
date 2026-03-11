@@ -3,8 +3,15 @@ use crate::{Error, Result};
 use arkavo_llm::Message;
 use serde::{Deserialize, Serialize};
 
+/// Match a keyword as a whole word (not as a substring).
+/// "ui" matches " ui " or "ui " at start, but NOT "build" or "blueprint".
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|w| w == word)
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llm::{Provider, Role};
+use arkavo_llm::Provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -25,6 +32,7 @@ pub enum TaskCategory {
     Refactoring,
     CodeGeneration,
     VisionAnalysis,
+    GameSimulation,
     General,
 }
 
@@ -41,6 +49,7 @@ impl TaskCategory {
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
+            "game_simulation" | "game" | "colony" | "simulation" => Self::GameSimulation,
             _ => Self::General,
         }
     }
@@ -57,6 +66,7 @@ impl TaskCategory {
             Self::Refactoring => "refactoring",
             Self::CodeGeneration => "code_generation",
             Self::VisionAnalysis => "vision_analysis",
+            Self::GameSimulation => "game_simulation",
             Self::General => "general",
         }
     }
@@ -102,6 +112,10 @@ impl TaskCategory {
             Self::VisionAnalysis => TokenEstimate {
                 input: 2000,
                 output: 3000,
+            },
+            Self::GameSimulation => TokenEstimate {
+                input: 400,
+                output: 1500,
             },
             Self::General => TokenEstimate {
                 input: 300,
@@ -152,7 +166,7 @@ impl Classification {
     }
 
     /// Detect complexity indicators in a task description
-    fn detect_complexity(task: &str) -> (bool, u8) {
+    pub fn detect_complexity(task: &str) -> (bool, u8) {
         let task_lower = task.to_lowercase();
 
         // Multi-step indicators
@@ -243,14 +257,14 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("tailwind")
         || lower.contains("component")
         || lower.contains("frontend")
-        || lower.contains("ui")
+        || contains_word(&lower, "ui")
     {
         TaskCategory::FrontendUI
-    } else if lower.contains("api")
+    } else if contains_word(&lower, "api")
         || lower.contains("endpoint")
         || lower.contains("backend")
         || lower.contains("database")
-        || lower.contains("auth")
+        || contains_word(&lower, "auth")
     {
         TaskCategory::BackendAPI
     } else if lower.contains("search")
@@ -294,6 +308,20 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("ui from")
     {
         TaskCategory::VisionAnalysis
+    } else if lower.contains("colony")
+        || lower.contains("colonist")
+        || contains_word(&lower, "zone")
+        || lower.contains("defend")
+        || contains_word(&lower, "raid")
+        || lower.contains("harvest")
+        || contains_word(&lower, "craft")
+        || lower.contains("caravan")
+        || lower.contains("rimworld")
+        || lower.contains("pawns")
+        || lower.contains("plant_")
+        || lower.contains("stockpile")
+    {
+        TaskCategory::GameSimulation
     } else {
         TaskCategory::General
     }
@@ -324,9 +352,14 @@ impl TaskClassifier {
         // Use model discovery to find any available model (prefers Qwen3/Ministral)
         let model_path = crate::model_discovery::find_any_gguf()
             .await
-            .ok_or_else(|| Error::Classification(
-                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
-            ))?;
+            .ok_or_else(|| {
+                Error::Classification(format!(
+                    "No local GGUF models found. Download with: {}",
+                    crate::decision::ModelChoice::LocalQwen3
+                        .download_hint()
+                        .unwrap_or_default()
+                ))
+            })?;
 
         let model_name = model_path
             .file_stem()
@@ -403,18 +436,18 @@ impl TaskClassifier {
             || task_lower.contains("tailwind")
             || task_lower.contains("component")
             || task_lower.contains("frontend")
-            || task_lower.contains("ui")
+            || contains_word(&task_lower, "ui")
         {
             (
                 TaskCategory::FrontendUI,
                 0.90,
                 "Keywords match frontend development".to_string(),
             )
-        } else if task_lower.contains("api")
+        } else if contains_word(&task_lower, "api")
             || task_lower.contains("endpoint")
             || task_lower.contains("backend")
             || task_lower.contains("database")
-            || task_lower.contains("auth")
+            || contains_word(&task_lower, "auth")
         {
             (
                 TaskCategory::BackendAPI,
@@ -492,6 +525,24 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
+        } else if task_lower.contains("colony")
+            || task_lower.contains("colonist")
+            || contains_word(&task_lower, "zone")
+            || task_lower.contains("defend")
+            || contains_word(&task_lower, "raid")
+            || task_lower.contains("harvest")
+            || contains_word(&task_lower, "craft")
+            || task_lower.contains("caravan")
+            || task_lower.contains("rimworld")
+            || task_lower.contains("pawns")
+            || task_lower.contains("plant_")
+            || task_lower.contains("stockpile")
+        {
+            (
+                TaskCategory::GameSimulation,
+                0.90,
+                "Keywords match game/simulation tasks".to_string(),
+            )
         } else {
             (
                 TaskCategory::General,
@@ -506,11 +557,7 @@ impl TaskClassifier {
     async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
         let prompt = self.build_classification_prompt(task);
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let provider = self.provider.lock().await;
         let response = provider
@@ -534,6 +581,7 @@ Categories:
 - code_review: Code review, anti-patterns, error handling, code quality
 - documentation: README, API docs, comments, guides
 - refactoring: Code cleanup, optimization, restructuring
+- game_simulation: Colony management, game AI, simulation tasks, crafting, building, defense
 - general: Other coding tasks
 
 Task: {task}
@@ -632,18 +680,18 @@ impl TaskClassifier {
             || task_lower.contains("tailwind")
             || task_lower.contains("component")
             || task_lower.contains("frontend")
-            || task_lower.contains("ui")
+            || contains_word(&task_lower, "ui")
         {
             (
                 TaskCategory::FrontendUI,
                 0.90,
                 "Keywords match frontend development".to_string(),
             )
-        } else if task_lower.contains("api")
+        } else if contains_word(&task_lower, "api")
             || task_lower.contains("endpoint")
             || task_lower.contains("backend")
             || task_lower.contains("database")
-            || task_lower.contains("auth")
+            || contains_word(&task_lower, "auth")
         {
             (
                 TaskCategory::BackendAPI,
@@ -720,6 +768,24 @@ impl TaskClassifier {
                 TaskCategory::VisionAnalysis,
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
+            )
+        } else if task_lower.contains("colony")
+            || task_lower.contains("colonist")
+            || contains_word(&task_lower, "zone")
+            || task_lower.contains("defend")
+            || contains_word(&task_lower, "raid")
+            || task_lower.contains("harvest")
+            || contains_word(&task_lower, "craft")
+            || task_lower.contains("caravan")
+            || task_lower.contains("rimworld")
+            || task_lower.contains("pawns")
+            || task_lower.contains("plant_")
+            || task_lower.contains("stockpile")
+        {
+            (
+                TaskCategory::GameSimulation,
+                0.90,
+                "Keywords match game/simulation tasks".to_string(),
             )
         } else {
             (
@@ -829,6 +895,86 @@ mod tests {
             TaskCategory::Refactoring
         );
         assert_eq!(classify_task_keywords("Hello world"), TaskCategory::General);
+        // "ui" as substring in "build"/"blueprint" must NOT match frontend_ui
+        assert_eq!(
+            classify_task_keywords("Build a bed blueprint"),
+            TaskCategory::General
+        );
+        // "ui" as whole word should match
+        assert_eq!(
+            classify_task_keywords("Create a new UI layout"),
+            TaskCategory::FrontendUI
+        );
+        // Game/simulation tasks
+        assert_eq!(
+            classify_task_keywords("Build a defensive perimeter around the colony"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Plant_Rice in growing zone 1"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Manage colonist work priorities"),
+            TaskCategory::GameSimulation
+        );
+        assert_eq!(
+            classify_task_keywords("Send a caravan to trade"),
+            TaskCategory::GameSimulation
+        );
+    }
+
+    #[test]
+    fn test_detect_complexity_simple_task() {
+        let (is_complex, subtasks) = Classification::detect_complexity("What time is it?");
+        assert!(!is_complex);
+        assert_eq!(subtasks, 1);
+    }
+
+    #[test]
+    fn test_detect_complexity_multi_step_patterns() {
+        let task = "First search for X, and then filter results, finally summarize";
+        let (is_complex, subtasks) = Classification::detect_complexity(task);
+        assert!(is_complex);
+        assert!(subtasks >= 2);
+    }
+
+    #[test]
+    fn test_detect_complexity_keyword() {
+        let (is_complex, _) =
+            Classification::detect_complexity("Comprehensive refactor of the auth module");
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_many_verbs() {
+        let task = "Create the API endpoint. Build the frontend component. \
+                    Write tests for both. Generate documentation for the module.";
+        let (is_complex, subtasks) = Classification::detect_complexity(task);
+        assert!(is_complex);
+        assert!(subtasks >= 2);
+    }
+
+    #[test]
+    fn test_detect_complexity_long_task() {
+        let task = "a ".repeat(200); // 400 chars > 300 threshold
+        let (is_complex, _) = Classification::detect_complexity(&task);
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_step_numbered() {
+        let task = "Step 1: Read the file. Step 2: Parse the data.";
+        let (is_complex, _) = Classification::detect_complexity(task);
+        assert!(is_complex);
+    }
+
+    #[test]
+    fn test_detect_complexity_single_action() {
+        let (is_complex, subtasks) =
+            Classification::detect_complexity("Fix the null pointer bug in parser.rs");
+        assert!(!is_complex);
+        assert_eq!(subtasks, 1);
     }
 
     #[tokio::test]

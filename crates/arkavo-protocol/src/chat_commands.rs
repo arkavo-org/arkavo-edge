@@ -87,7 +87,16 @@ impl ChatSession {
         router: Arc<Router>,
         tool_registry: Option<Arc<ToolRegistry>>,
     ) -> Result<Self, A2aClientError> {
-        let mut client = A2aClient::with_router(router, tool_registry);
+        Self::new_with_model(router, tool_registry, None).await
+    }
+
+    /// Create a new chat session with an optional model override for testing
+    pub async fn new_with_model(
+        router: Arc<Router>,
+        tool_registry: Option<Arc<ToolRegistry>>,
+        model_name: Option<&str>,
+    ) -> Result<Self, A2aClientError> {
+        let mut client = A2aClient::with_router_and_model(router, tool_registry, model_name);
         client.open_session().await?;
 
         Ok(Self {

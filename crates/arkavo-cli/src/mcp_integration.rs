@@ -1,4 +1,4 @@
-use crate::mcp_client::{JsonRpcNotification, McpClient};
+use crate::mcp_client::{HttpMcpClient, JsonRpcNotification, McpClient};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
@@ -21,6 +21,7 @@ pub enum McpConnection {
     #[cfg(all(unix, feature = "mcp-tools"))]
     CrossPlatform(tools::McpConnection),
     External(McpClient),
+    HttpExternal(HttpMcpClient),
 }
 
 impl McpConnection {
@@ -74,8 +75,13 @@ impl McpConnection {
 
     pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
         if let Some(url) = mcp_url {
-            let client = McpClient::new(Some(url))?;
-            Ok(Self::External(client))
+            if url.starts_with("http://") || url.starts_with("https://") {
+                let client = HttpMcpClient::new(url)?;
+                Ok(Self::HttpExternal(client))
+            } else {
+                let client = McpClient::new(Some(url))?;
+                Ok(Self::External(client))
+            }
         } else {
             Err("MCP URL not provided for external connection".into())
         }
@@ -122,6 +128,7 @@ impl McpConnection {
                 Ok(tools)
             }
             Self::External(client) => client.list_tools(),
+            Self::HttpExternal(client) => client.list_tools(),
         }
     }
 
@@ -141,6 +148,7 @@ impl McpConnection {
                 .call_tool(tool_name, args, llm_origin)
                 .map_err(|e| e.into()),
             Self::External(client) => client.call_tool(tool_name, args, llm_origin),
+            Self::HttpExternal(client) => client.call_tool(tool_name, args, llm_origin),
         }
     }
 
@@ -149,6 +157,7 @@ impl McpConnection {
     pub fn subscribe_notifications(&self) -> Option<broadcast::Receiver<JsonRpcNotification>> {
         match self {
             Self::External(client) => Some(client.subscribe_notifications()),
+            Self::HttpExternal(client) => Some(client.subscribe_notifications()),
             #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
             Self::InProcess(_) => None,
             #[cfg(all(unix, feature = "mcp-tools"))]

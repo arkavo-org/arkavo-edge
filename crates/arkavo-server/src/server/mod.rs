@@ -1,11 +1,18 @@
 mod a2a_server;
+mod anti_pattern;
+mod autolearn_bridge;
 mod conductor;
+mod conductor_planner;
+mod conductor_tool_loop;
 mod config_helpers;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
 mod handlers;
 mod learning_bus;
+mod learning_bus_gossip;
+mod learning_bus_synthesis;
+mod llm_intent_analyzer;
 mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
@@ -17,6 +24,8 @@ mod tool_pattern_observer;
 mod well_known;
 
 pub use a2a_server::A2aServer;
+pub use arkavo_autolearn::PainSignal;
+pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
 pub use config_helpers::AgentMetadata;
 pub use episode_buffer::{EpisodeBuffer, ToolObservation};
@@ -25,7 +34,10 @@ pub use gossip_transport::{
     start_advisor_broadcast_loop, start_anti_entropy_loop, start_cleanup_loop,
     start_gossip_transport, start_lesson_propagation_loop,
 };
-pub use learning_bus::{BehaviorAdvice, LearningBus, LearningConfig, LearningEvent};
+pub use learning_bus::{
+    BehaviorAdvice, LearningBus, LearningBusStats, LearningConfig, LearningEvent,
+    LearningPipelineReporter,
+};
 pub use mcp_bridge::McpBridgeTool;
 pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
@@ -57,7 +69,7 @@ use arkavo_protocol::types::{
     DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
     KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
-    TaskGetResponse, TaskResponse, UserMessage,
+    TaskGetResponse, TaskListRequest, TaskListResponse, TaskResponse, UserMessage,
 };
 use arkavo_tasks::task_executor::TaskExecutor;
 use arkavo_tasks::task_store::TaskStore;
@@ -118,6 +130,10 @@ pub trait A2aRpc {
     /// Cancel a running task
     #[method(name = "tasks/cancel")]
     async fn tasks_cancel(&self, request: TaskCancelRequest) -> RpcResult<TaskCancelResponse>;
+
+    /// List recent HRM tasks
+    #[method(name = "tasks/list")]
+    async fn tasks_list(&self, request: TaskListRequest) -> RpcResult<TaskListResponse>;
 
     /// Stream message updates
     #[subscription(name = "message/stream", unsubscribe = "message/stream/unsubscribe", item = MessageDelta)]
@@ -249,6 +265,14 @@ pub trait A2aRpc {
     /// Health check (proxied from GET /health)
     #[method(name = "health")]
     async fn health(&self) -> RpcResult<serde_json::Value>;
+
+    /// Get compute budget status for telemetry monitoring
+    #[method(name = "budget.compute_status")]
+    async fn budget_compute_status(&self) -> RpcResult<serde_json::Value>;
+
+    /// Get process-level system metrics (RSS, CPU) for per-agent observability
+    #[method(name = "system.metrics")]
+    async fn system_metrics(&self) -> RpcResult<serde_json::Value>;
 }
 
 pub struct A2aRpcImpl {
@@ -279,6 +303,12 @@ pub struct A2aRpcImpl {
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
+    /// Per-agent compute budget (specialists check before each tick)
+    pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
+    /// Mesh state for A2A delegation (send_task, list_agents, etc.)
+    pub(crate) mesh_state: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    /// Shared tool memory for tracking recent actions across message/send calls
+    pub(crate) agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -430,6 +460,10 @@ impl A2aRpcServer for A2aRpcImpl {
             self.learning_bus.as_ref(),
             self.budget_manager.as_ref(),
             self.model_hint.clone(),
+            &self.compute_budget,
+            self.mesh_state.as_ref(),
+            &self.agent_metadata,
+            &self.agent_memory,
             request,
         )
         .await
@@ -451,6 +485,16 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.task_store,
             &self.task_executor,
+            request,
+        )
+        .await
+    }
+
+    async fn tasks_list(&self, request: TaskListRequest) -> RpcResult<TaskListResponse> {
+        handlers::tasks::handle_tasks_list(
+            &self.metrics,
+            &self.rate_limiter,
+            &self.conductor,
             request,
         )
         .await
@@ -801,11 +845,32 @@ impl A2aRpcServer for A2aRpcImpl {
             .orchestrator_tick
             .load(std::sync::atomic::Ordering::Relaxed);
 
+        // Include recent routing decisions for the UI dashboard
+        let routing_history: Vec<serde_json::Value> = router
+            .recent_decision_traces(20)
+            .into_iter()
+            .map(|t| {
+                let was_exploration = matches!(
+                    t.selection_reason,
+                    arkavo_router::learning::SelectionReason::Probationary
+                );
+                serde_json::json!({
+                    "taskId": t.trace_id.to_string(),
+                    "selectedAgent": t.selected_model,
+                    "wasExploration": was_exploration,
+                    "category": t.task_category.as_str(),
+                    "qualityScore": null,
+                    "timestamp": t.timestamp.to_rfc3339(),
+                })
+            })
+            .collect();
+
         timer.success();
         Ok(serde_json::json!({
             "agents": agents,
             "selectedModel": router.last_routed_model(),
             "tickCount": tick,
+            "routingHistory": routing_history,
         }))
     }
 
@@ -908,5 +973,58 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn health(&self) -> RpcResult<serde_json::Value> {
         Ok(serde_json::json!({"status": "ok"}))
+    }
+
+    async fn budget_compute_status(&self) -> RpcResult<serde_json::Value> {
+        let budget = self.compute_budget.read().await;
+        let snapshot = budget.snapshot();
+        let agent_meta = self.agent_metadata.read().await;
+        let agent_id = agent_meta.name.clone();
+        drop(agent_meta);
+        drop(budget);
+
+        serde_json::to_value(serde_json::json!({
+            "agent_id": agent_id,
+            "compute_budget": snapshot,
+        }))
+        .map_err(|e| {
+            ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
+        })
+    }
+
+    async fn system_metrics(&self) -> RpcResult<serde_json::Value> {
+        use sysinfo::{Pid, System};
+        let pid = std::process::id();
+        let mut sys = System::new();
+        sys.refresh_memory();
+        sys.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            sysinfo::ProcessRefreshKind::nothing()
+                .with_memory()
+                .with_cpu(),
+        );
+        let (rss_mb, cpu_percent) = if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+            (
+                proc.memory() as f64 / (1024.0 * 1024.0),
+                proc.cpu_usage() as f64,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let total_ram_mb = sys.total_memory() as f64 / (1024.0 * 1024.0);
+        let available_ram_mb = sys.available_memory() as f64 / (1024.0 * 1024.0);
+        let agent_meta = self.agent_metadata.read().await;
+        let agent_id = agent_meta.name.clone();
+        drop(agent_meta);
+
+        Ok(serde_json::json!({
+            "agent_id": agent_id,
+            "rss_mb": rss_mb,
+            "cpu_percent": cpu_percent,
+            "pid": pid,
+            "total_ram_mb": total_ram_mb,
+            "available_ram_mb": available_ram_mb,
+        }))
     }
 }

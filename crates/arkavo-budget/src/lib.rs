@@ -1,4 +1,5 @@
 pub mod api;
+pub mod compute_budget;
 pub mod config;
 pub mod cost;
 pub mod middleware;
@@ -6,10 +7,15 @@ pub mod policy;
 pub mod provider_costs;
 pub mod tracker;
 
+pub use compute_budget::{
+    AgentAllocationSummary, AgentComputeBudget, BudgetAllocation, BudgetPolicy,
+    ComputeBudgetSnapshot, SharedComputeBudget, UrgencyLevel, new_shared_compute_budget,
+};
 pub use config::{BudgetConfig, BudgetLimits, BudgetThresholds};
 pub use cost::TokenCost;
 pub use middleware::{BudgetMiddleware, BudgetProviderBuilder};
 pub use policy::{ModelSelectionPolicy, SelectionCriteria};
+pub use provider_costs::PricingEntry;
 pub use tracker::{
     ArchitectCostMetadata, ArchitectSavingsReport, ArchitectUsageSummary, BudgetStatusWithLimits,
     BudgetTracker,

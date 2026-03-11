@@ -77,7 +77,19 @@ impl SecurityHandler {
         self.audit_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Redact a sensitive string value for UI display.
+    fn redact_sensitive(value: &str) -> String {
+        if value.is_empty() {
+            return String::new();
+        }
+        arkavo_validation::sanitize::REDACTED_SENTINEL.to_string()
+    }
+
     /// Handle security-related UI events.
+    ///
+    /// Redacts sensitive values (KAS URL, agent ID, key ID) before
+    /// sending to the UI to prevent exposure via browser DevTools or
+    /// UI state inspection.
     pub async fn handle_event(
         &self,
         event: &AgUiEvent,
@@ -86,9 +98,9 @@ impl SecurityHandler {
         if let AgUiEvent::GetSecurityStatus = event {
             let response = AgUiEvent::SecurityStatusUpdate {
                 kas_enabled: self.kas_enabled,
-                kas_url: self.kas_url.clone(),
-                agent_id: self.agent_id.clone(),
-                key_id: self.key_id.clone(),
+                kas_url: Self::redact_sensitive(&self.kas_url),
+                agent_id: Self::redact_sensitive(&self.agent_id),
+                key_id: Self::redact_sensitive(&self.key_id),
                 encryption_algorithm: "AES-256-GCM".to_string(),
                 audit_count: self.audit_count.load(Ordering::Relaxed),
                 preflight_enabled: self.preflight_enabled,
@@ -157,7 +169,8 @@ mod tests {
         } = response
         {
             assert!(!kas_enabled);
-            assert_eq!(kas_url, "http://localhost:8360");
+            // KAS URL is now redacted for UI display
+            assert_eq!(kas_url, arkavo_validation::sanitize::REDACTED_SENTINEL);
             assert_eq!(audit_count, 1);
             assert_eq!(encryption_algorithm, "AES-256-GCM");
         } else {

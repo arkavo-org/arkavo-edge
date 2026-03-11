@@ -41,6 +41,7 @@ arkavo-debugger = { path = "../arkavo-debugger" }
 arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-validation = { path = "../arkavo-validation" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }

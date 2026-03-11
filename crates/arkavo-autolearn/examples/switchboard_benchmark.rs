@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use torg_core::{Builder, Graph, Token};
 
 #[cfg(feature = "llm")]
-use arkavo_autolearn::{MinistralSynthesizer, SynthesizerConfig};
+use arkavo_autolearn::{PolicySynthesizer, SynthesizerConfig};
 #[cfg(feature = "llm")]
 use arkavo_ensemble::LlmSynthesizer;
 
@@ -133,7 +133,7 @@ async fn compile_with_real_llm(policy_text: &str) -> anyhow::Result<(Graph, f64)
     println!("Loading model from: {}", model_path);
 
     let config = SynthesizerConfig::default();
-    let synthesizer = MinistralSynthesizer::with_model(config, std::path::Path::new(&model_path))?;
+    let synthesizer = PolicySynthesizer::with_model(config, std::path::Path::new(&model_path))?;
 
     // Time real LLM synthesis
     println!("Compiling policy with LLM...");

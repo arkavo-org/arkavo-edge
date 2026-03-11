@@ -197,11 +197,11 @@ impl AgentConnection {
     }
 
     async fn wait_for_disconnection(&self) {
-        // Monitor connection health with exponential backoff
-        let mut check_interval = Duration::from_secs(5);
-        let max_interval = Duration::from_secs(30);
+        // Monitor connection health — detect dead connections quickly
+        let mut check_interval = Duration::from_secs(2);
+        let max_interval = Duration::from_secs(15);
         let mut consecutive_failures = 0;
-        const MAX_FAILURES: u32 = 3;
+        const MAX_FAILURES: u32 = 2;
 
         loop {
             sleep(check_interval).await;
@@ -215,7 +215,7 @@ impl AgentConnection {
                 {
                     Ok(_) => {
                         consecutive_failures = 0;
-                        check_interval = Duration::from_secs(5); // Reset to fast check
+                        check_interval = Duration::from_secs(2); // Reset to fast check
                         true
                     }
                     Err(e) => {
@@ -239,6 +239,9 @@ impl AgentConnection {
                     self.agent_id, consecutive_failures
                 );
 
+                // Clear the dead client so callers don't use a stale connection
+                *self.client.write().await = None;
+
                 // Send terminal deltas to all active chat broadcasts
                 self.notify_connection_lost().await;
                 break;
@@ -252,6 +255,9 @@ impl AgentConnection {
     }
 
     async fn notify_connection_lost(&self) {
+        // Clear stale session IDs so reconnection creates fresh sessions
+        self.chat_sessions.write().await.clear();
+
         let broadcasts = self.chat_broadcasts.read().await;
 
         for (agent_id, broadcast_tx) in broadcasts.iter() {
@@ -286,16 +292,13 @@ impl AgentConnection {
         self.client.read().await.is_some()
     }
 
-    /// Send a JSON-RPC request to the agent
+    /// Send a JSON-RPC request to the agent, retrying once after reconnect on connection errors
     pub async fn send_request(
         &self,
         method: &str,
         params: Value,
         session_id: &str,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let client_guard = self.client.read().await;
-        let client = client_guard.as_ref().ok_or("Not connected")?;
-
         // Emit telemetry for outbound message
         let _ = self
             .telemetry_tx
@@ -308,9 +311,50 @@ impl AgentConnection {
             })
             .await;
 
-        let result = client.request(method, rpc_params![params]).await?;
+        // First attempt
+        let first_err = {
+            let client_guard = self.client.read().await;
+            let client = match client_guard.as_ref() {
+                Some(c) => c,
+                None => return Err("Not connected".into()),
+            };
+            match client.request(method, rpc_params![params.clone()]).await {
+                Ok(result) => {
+                    self.emit_response_telemetry(method, session_id).await;
+                    return Ok(result);
+                }
+                Err(e) => e,
+            }
+        }; // read lock dropped
 
-        // Emit telemetry for inbound response
+        // Only retry on connection-level errors (not application errors like invalid params)
+        if !is_connection_error(&first_err) {
+            return Err(first_err.into());
+        }
+
+        eprintln!(
+            "Agent {} request {method} failed with connection error, reconnecting: {first_err}",
+            self.agent_id
+        );
+
+        // Reconnect and retry once
+        if let Err(e) = self.connect().await {
+            return Err(format!(
+                "Reconnect failed after connection error: {e} (original: {first_err})"
+            )
+            .into());
+        }
+
+        let client_guard = self.client.read().await;
+        let client = client_guard
+            .as_ref()
+            .ok_or("Not connected after reconnect")?;
+        let result = client.request(method, rpc_params![params]).await?;
+        self.emit_response_telemetry(method, session_id).await;
+        Ok(result)
+    }
+
+    async fn emit_response_telemetry(&self, method: &str, session_id: &str) {
         let _ = self
             .telemetry_tx
             .send(TelemetryEvent::MessageRouted {
@@ -321,8 +365,6 @@ impl AgentConnection {
                 timestamp: chrono::Utc::now(),
             })
             .await;
-
-        Ok(result)
     }
 
     /// Subscribe to chat streaming for a given agent with optional authentication
@@ -332,6 +374,30 @@ impl AgentConnection {
         ui_tx: mpsc::Sender<crate::types::AgUiEvent>, // Bounded channel
         auth_token: Option<String>,                   // JWT token for authenticated sessions
     ) -> Result<SubscriptionHandle, Box<dyn std::error::Error + Send + Sync>> {
+        // Wait for connection if agent is reconnecting (up to 10s)
+        let mut retries = 0;
+        loop {
+            let status = self.status.read().await.clone();
+            match status {
+                ConnectionStatus::Connected => break,
+                ConnectionStatus::Connecting | ConnectionStatus::Reconnecting { .. }
+                    if retries < 10 =>
+                {
+                    retries += 1;
+                    drop(status);
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                _ => {
+                    return Err(format!(
+                        "Agent {} not connected (status: {:?})",
+                        self.agent_id, status
+                    )
+                    .into());
+                }
+            }
+        }
+
         let client_guard = self.client.read().await;
         let client = client_guard.as_ref().ok_or("Not connected")?;
 
@@ -527,7 +593,20 @@ impl AgentConnection {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     let _ = ui_tx_clone.try_send(telemetry);
-                    continue; // Don't forward Metadata as MessageDelta
+
+                    // Forward teaching_intent as MessageDelta so chat UI can render badges
+                    if key == "teaching_intent" {
+                        let teaching_event = crate::types::AgUiEvent::MessageDelta {
+                            agent_id: agent_id_for_forward.clone(),
+                            message_id: ordered_delta.delta.message_id.clone(),
+                            delta: crate::types::MessageDeltaContent::Metadata {
+                                key: key.clone(),
+                                value: value.clone(),
+                            },
+                        };
+                        let _ = ui_tx_clone.try_send(teaching_event);
+                    }
+                    continue; // Don't forward other Metadata as MessageDelta
                 }
 
                 let event = crate::types::AgUiEvent::MessageDelta {
@@ -628,9 +707,6 @@ impl AgentConnection {
                 .clone()
         };
 
-        let _message_id = uuid::Uuid::new_v4().to_string();
-        let _trace_id = uuid::Uuid::new_v4().to_string();
-
         // Get the session ID for this agent
         let session_id = {
             let sessions = self.chat_sessions.read().await;
@@ -640,23 +716,77 @@ impl AgentConnection {
                 .ok_or("No active chat session for this agent")?
         };
 
-        let client_guard = self.client.read().await;
-        let client = client_guard.as_ref().ok_or("Not connected")?;
-
-        // Create user message
         let user_message = UserMessage {
-            content: text,
+            content: text.clone(),
             attachments: None,
             metadata: None,
         };
 
-        // Send the message to the session
-        client
-            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
-            .await
-            .map_err(|e| format!("Failed to send message: {e}"))?;
+        // Try sending with current session
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
 
-        Ok(())
+        let result = client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(e) if e.to_string().contains("Session not found") => {
+                drop(client_guard); // release read lock before reconnect
+
+                // Session is stale — open a fresh one and retry
+                tracing::info!(agent_id, "Stale chat session detected, opening new session");
+                let new_session_id = self.reopen_chat_session(agent_id).await?;
+
+                let client_guard = self.client.read().await;
+                let client = client_guard.as_ref().ok_or("Not connected")?;
+                let retry_msg = UserMessage {
+                    content: text,
+                    attachments: None,
+                    metadata: None,
+                };
+                client
+                    .request::<(), _>("chat_send", rpc_params![new_session_id, retry_msg])
+                    .await
+                    .map_err(|e| format!("Failed to send message after session refresh: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to send message: {e}").into()),
+        }
+    }
+
+    /// Re-open a chat session for an agent after the previous one became stale
+    async fn reopen_chat_session(
+        &self,
+        agent_id: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        let open_request = ChatOpenRequest {
+            token: None,
+            context: None,
+            metadata: None,
+        };
+
+        let session: ChatSession = client
+            .request("chat_open", rpc_params![open_request])
+            .await
+            .map_err(|e| format!("Failed to reopen chat session: {e}"))?;
+
+        self.chat_sessions
+            .write()
+            .await
+            .insert(agent_id.to_string(), session.session_id.clone());
+
+        tracing::info!(
+            agent_id,
+            session_id = %session.session_id,
+            "Reopened chat session after stale session"
+        );
+
+        Ok(session.session_id)
     }
 
     /// Unsubscribe from chat for a specific agent
@@ -683,6 +813,32 @@ impl AgentConnection {
         self.chat_broadcasts.write().await.clear();
 
         // No local LLM streams to abort - all handled by agent's protocol server
+    }
+
+    /// Get compute budget status via JSON-RPC telemetry
+    pub async fn get_compute_budget(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let result: serde_json::Value = client
+            .request("budget.compute_status", rpc_params![])
+            .await?;
+
+        Ok(result)
+    }
+
+    /// Get per-agent process metrics (RSS, CPU) via JSON-RPC
+    pub async fn get_system_metrics(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let result: serde_json::Value = client.request("system.metrics", rpc_params![]).await?;
+
+        Ok(result)
     }
 
     /// Get agent configuration
@@ -780,6 +936,15 @@ impl AgentConnection {
 
         Ok(response)
     }
+}
+
+/// Check if a jsonrpsee error indicates the connection is dead (vs an application-level error)
+fn is_connection_error(err: &jsonrpsee::core::ClientError) -> bool {
+    use jsonrpsee::core::ClientError;
+    matches!(
+        err,
+        ClientError::Transport(_) | ClientError::RestartNeeded(_) | ClientError::RequestTimeout
+    )
 }
 
 impl Drop for AgentConnection {

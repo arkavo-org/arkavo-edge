@@ -15,6 +15,12 @@
 .DS_Store
 **/test_results/
 
+# Example logs and runtime artifacts
+examples/*/logs/
+examples/*/.agent_pids
+examples/*/responses/
+examples/*/benchmark-report.json
+
 # Test/demo scripts
 test_*.sh
 demo_*.sh

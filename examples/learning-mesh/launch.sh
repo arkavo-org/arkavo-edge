@@ -42,10 +42,10 @@ check_prerequisites() {
     print_status "SUCCESS" "Arkavo binary found"
 
     local hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-    if [ -d "$hf_cache/models--unsloth--Qwen3.5-27B-GGUF" ]; then
-        print_status "SUCCESS" "Qwen3.5-27B model available"
+    if [ -d "$hf_cache/models--unsloth--GLM-4.7-Flash-GGUF" ]; then
+        print_status "SUCCESS" "GLM-4.7-Flash model available"
     else
-        print_status "WARNING" "Qwen3.5-27B not found. Run: hf download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q6_K_XL.gguf"
+        print_status "WARNING" "GLM-4.7-Flash not found. Run: hf download unsloth/GLM-4.7-Flash-GGUF GLM-4.7-Flash-Q4_K_M.gguf"
     fi
 }
 
@@ -89,6 +89,7 @@ start_mesh() {
     start_agent "code-analyzer" "$SCRIPT_DIR/code-analyzer" 8412
     start_agent "test-generator" "$SCRIPT_DIR/test-generator" 8414
     start_agent "security-auditor" "$SCRIPT_DIR/security-auditor" 8416
+    start_agent "task-generator" "$SCRIPT_DIR/task-generator" 8418
 
     print_status "INFO" "Waiting for agents to initialize and discover peers..."
     sleep 3
@@ -99,7 +100,7 @@ show_status() {
     echo "Learning Mesh Status:"
     echo "====================="
 
-    local agents=("orchestrator:8410" "code-analyzer:8412" "test-generator:8414" "security-auditor:8416")
+    local agents=("orchestrator:8410" "code-analyzer:8412" "test-generator:8414" "security-auditor:8416" "task-generator:8418")
 
     for agent in "${agents[@]}"; do
         local name="${agent%:*}"

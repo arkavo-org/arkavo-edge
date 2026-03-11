@@ -10,6 +10,7 @@ keywords = ["mcp", "tools", "mesh", "agent", "orchestration"]
 categories = ["development-tools"]
 
 [dependencies]
+arkavo-budget = { path = "../arkavo-budget" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-protocol = { path = "../arkavo-protocol" }

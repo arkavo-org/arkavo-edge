@@ -13,7 +13,6 @@ use tracing::{debug, info, warn};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolverConfig {
     pub max_context_tokens: u32,
-    pub max_quality_retries: u8,
     pub include_dependencies: bool,
     pub include_tests: bool,
     pub search_depth: usize,
@@ -25,7 +24,6 @@ impl Default for SolverConfig {
     fn default() -> Self {
         Self {
             max_context_tokens: 131_072, // 128K default (supports most cloud models)
-            max_quality_retries: 3,
             include_dependencies: true,
             include_tests: true,
             search_depth: 5,
@@ -125,14 +123,12 @@ impl CodeSolver {
 
         // Always try local model first (cost optimization goal)
         info!("Attempting code generation with local model");
-        #[allow(deprecated)]
         let response = self
             .router
-            .route_with_quality_gate(
+            .route_with_tools(
                 "code_generation: Generate a unified git diff patch to solve the problem",
                 messages.clone(),
                 Some(&tool_registry),
-                self.config.max_quality_retries,
             )
             .await
             .map_err(|e| Error::External(format!("Router error: {e}")))?;
@@ -160,13 +156,11 @@ impl CodeSolver {
             metrics.escalated_to_cloud = true;
 
             info!("Escalating to Gemini for complete patch generation");
-            #[allow(deprecated)]
             self.router
-                .route_with_quality_gate(
+                .route_with_tools(
                     "code_generation: Generate a complete unified git diff patch with full context",
                     messages,
                     Some(&tool_registry),
-                    self.config.max_quality_retries,
                 )
                 .await
                 .map_err(|e| Error::External(format!("Cloud escalation error: {e}")))?

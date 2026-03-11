@@ -3,7 +3,7 @@ use crate::classifier::TaskCategory;
 use crate::decision::ModelChoice;
 use crate::selector::ProviderAvailability;
 use crate::{Error, Result};
-use arkavo_llm::{Message, Provider, Role};
+use arkavo_llm::{Message, Provider};
 use serde::Deserialize;
 
 /// Creates execution plans by decomposing complex tasks using Opus
@@ -27,11 +27,7 @@ impl ArchitectPlanner {
         let provider = self.get_planning_provider()?;
 
         let prompt = self.build_planning_prompt(task);
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         // Use complete_with_tools to get ProviderResponse with reasoning_content
         let response = provider
@@ -235,8 +231,8 @@ Guidelines:
                 }
             }
 
-            // General: Use balanced default
-            TaskCategory::General => {
+            // Game/simulation and general: Use balanced default
+            TaskCategory::GameSimulation | TaskCategory::General => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {

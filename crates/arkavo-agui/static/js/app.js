@@ -50,6 +50,12 @@ function routeEvent(event) {
         case 'costMetricsUpdate':
             handleCostMetricsUpdate(event);
             break;
+        case 'computeBudgetUpdate':
+            handleComputeBudgetUpdate(event);
+            break;
+        case 'agentSystemMetrics':
+            handleAgentSystemMetrics(event);
+            break;
         case 'securityStatusUpdate':
             handleSecurityStatusUpdate(event);
             break;
@@ -71,8 +77,14 @@ function routeEvent(event) {
         case 'routingOutcome':
             handleRoutingOutcome(event);
             break;
+        case 'lessonExtracted':
+            handleLessonExtracted(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
+            break;
+        case 'error':
+            handleChatError(event);
             break;
         default:
             if (event.type) {
@@ -111,13 +123,13 @@ function switchView(viewId) {
         requestBudgetData();
     } else if (viewId === 'security') {
         requestSecurityData();
-    } else if (viewId === 'learning') {
+    } else if (viewId === 'learning' || viewId === 'router') {
         wsSend({ type: 'requestLearningStatus' });
         startLearningPolling();
     }
 
     // Stop learning polling when navigating away
-    if (viewId !== 'learning') {
+    if (viewId !== 'learning' && viewId !== 'router') {
         stopLearningPolling();
     }
 }

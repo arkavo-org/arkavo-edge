@@ -6,7 +6,7 @@
 //! 3. Refine based on judge feedback
 
 use crate::judge::{JudgmentResult, ResponseJudge};
-use arkavo_llm::{Message, Provider, ProviderResponse, Role, tool_executor::ToolExecutionResult};
+use arkavo_llm::{Message, Provider, ProviderResponse, tool_executor::ToolExecutionResult};
 use arkavo_mcp_tools::ToolInfo;
 use std::sync::Arc;
 
@@ -104,6 +104,7 @@ impl Deliberator {
                 reasoning_content: None,
                 tool_calls: vec![],
                 finish_reason: None,
+                inference_timing: None,
             }
         };
 
@@ -167,13 +168,10 @@ impl Deliberator {
         messages: &[Message],
     ) -> crate::Result<ProviderResponse> {
         // Add a system prompt to encourage reasoning
-        let mut enhanced_messages = vec![Message {
-            role: Role::System,
-            content: "Think through this problem step-by-step before providing your answer. \
-                      Consider multiple approaches and potential issues."
-                .to_string(),
-            images: None,
-        }];
+        let mut enhanced_messages = vec![Message::system(
+            "Think through this problem step-by-step before providing your answer. \
+                      Consider multiple approaches and potential issues.",
+        )];
         enhanced_messages.extend(messages.iter().cloned());
 
         let content = self
@@ -185,9 +183,10 @@ impl Deliberator {
         // TODO: When streaming or using reasoning models, extract reasoning_content
         Ok(ProviderResponse {
             content,
-            reasoning_content: None, // Will be populated by reasoning-capable providers
+            reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 
@@ -217,11 +216,7 @@ Otherwise, list the specific issues found."#,
 
         let critique_response = self
             .thinking_provider
-            .complete(vec![Message {
-                role: Role::User,
-                content: critique_prompt,
-                images: None,
-            }])
+            .complete(vec![Message::user(critique_prompt)])
             .await
             .map_err(|e| crate::Error::ModelExecution(e.to_string()))?;
 
@@ -274,21 +269,13 @@ Otherwise, list the specific issues found."#,
         let mut messages = original_messages.to_vec();
 
         // Add the assistant's previous response
-        messages.push(Message {
-            role: Role::Assistant,
-            content: current_response.content.clone(),
-            images: None,
-        });
+        messages.push(Message::assistant(current_response.content.clone()));
 
         // Add the critique as user feedback
-        messages.push(Message {
-            role: Role::User,
-            content: format!(
-                "The previous response had these issues:\n{critique}\n\n\
-                 Please provide an improved response that addresses these concerns for the task: {task}"
-            ),
-            images: None,
-        });
+        messages.push(Message::user(format!(
+            "The previous response had these issues:\n{critique}\n\n\
+             Please provide an improved response that addresses these concerns for the task: {task}"
+        )));
 
         let refined = self
             .thinking_provider
@@ -301,6 +288,7 @@ Otherwise, list the specific issues found."#,
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 
@@ -315,11 +303,7 @@ Otherwise, list the specific issues found."#,
         let mut messages = original_messages.to_vec();
 
         // Add the assistant's previous response
-        messages.push(Message {
-            role: Role::Assistant,
-            content: current_response.content.clone(),
-            images: None,
-        });
+        messages.push(Message::assistant(current_response.content.clone()));
 
         // Add the judgment feedback
         let issue_description = match judgment.issue_type {
@@ -339,18 +323,14 @@ Otherwise, list the specific issues found."#,
             _ => "The response had quality issues.",
         };
 
-        messages.push(Message {
-            role: Role::User,
-            content: format!(
-                "Quality check failed: {}\n\
-                 Reason: {}\n\n\
-                 Please provide a corrected response for the task: {}",
-                issue_description,
-                judgment.reason.as_deref().unwrap_or("No specific reason"),
-                task
-            ),
-            images: None,
-        });
+        messages.push(Message::user(format!(
+            "Quality check failed: {}\n\
+             Reason: {}\n\n\
+             Please provide a corrected response for the task: {}",
+            issue_description,
+            judgment.reason.as_deref().unwrap_or("No specific reason"),
+            task
+        )));
 
         let refined = self
             .thinking_provider
@@ -363,6 +343,7 @@ Otherwise, list the specific issues found."#,
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         })
     }
 }
@@ -453,11 +434,7 @@ mod tests {
         let result = deliberator
             .deliberate(
                 "Test task",
-                vec![Message {
-                    role: Role::User,
-                    content: "Do the task".to_string(),
-                    images: None,
-                }],
+                vec![Message::user("Do the task")],
                 &[create_test_tool_info("test_tool")],
                 None,
             )
@@ -489,16 +466,7 @@ mod tests {
         );
 
         let result = deliberator
-            .deliberate(
-                "Test task",
-                vec![Message {
-                    role: Role::User,
-                    content: "Do the task".to_string(),
-                    images: None,
-                }],
-                &[],
-                None,
-            )
+            .deliberate("Test task", vec![Message::user("Do the task")], &[], None)
             .await
             .unwrap();
 
@@ -530,16 +498,7 @@ mod tests {
         let deliberator = Deliberator::new(provider, config);
 
         let result = deliberator
-            .deliberate(
-                "Test task",
-                vec![Message {
-                    role: Role::User,
-                    content: "Do the task".to_string(),
-                    images: None,
-                }],
-                &[],
-                None,
-            )
+            .deliberate("Test task", vec![Message::user("Do the task")], &[], None)
             .await
             .unwrap();
 

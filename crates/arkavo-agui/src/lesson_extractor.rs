@@ -1,9 +1,43 @@
 use crate::response_judge::{FailureMode, TaskJudgment};
 use arkavo_router::learning::{Lesson, LessonPattern};
 
+/// Remove JSON object fragments from text to keep lesson conditions readable
+fn strip_json_fragments(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut depth = 0i32;
+    for ch in s.chars() {
+        if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth = (depth - 1).max(0);
+        } else if depth == 0 {
+            result.push(ch);
+        }
+    }
+    // Collapse multiple spaces left by removed JSON
+    let mut prev_space = false;
+    let collapsed: String = result
+        .chars()
+        .filter(|c| {
+            if *c == ' ' {
+                if prev_space {
+                    return false;
+                }
+                prev_space = true;
+            } else {
+                prev_space = false;
+            }
+            true
+        })
+        .collect();
+    collapsed.trim().to_string()
+}
+
 pub struct LessonContext {
     pub agent_id: String,
     pub task_category: String,
+    pub task_description: Option<String>,
+    pub response_snippet: Option<String>,
 }
 
 /// Extract a lesson from judge output (no LLM required)
@@ -17,9 +51,20 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
     }
 
     let primary = &judgment.failure_modes[0];
+    let task_hint = ctx
+        .task_description
+        .as_deref()
+        .map(|d| {
+            let cleaned = strip_json_fragments(d);
+            format!(" (task: {})", &cleaned[..cleaned.len().min(80)])
+        })
+        .unwrap_or_default();
     let (condition, action, expected) = match primary {
         FailureMode::Empty => (
-            format!("Agent {} returns empty responses", ctx.agent_id),
+            format!(
+                "Agent {} returns empty responses for {}{}",
+                ctx.agent_id, ctx.task_category, task_hint
+            ),
             format!(
                 "Avoid routing {} tasks to {}",
                 ctx.task_category, ctx.agent_id
@@ -28,8 +73,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::Generic => (
             format!(
-                "Agent {} returns generic non-answers for {}",
-                ctx.agent_id, ctx.task_category
+                "Agent {} returns generic non-answers for {}{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!(
                 "Reduce routing weight for {} on {} tasks",
@@ -39,8 +84,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::TooShort => (
             format!(
-                "Agent {} produces overly brief {} responses",
-                ctx.agent_id, ctx.task_category
+                "Agent {} produces overly brief {} responses{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!("Prefer verbose agents for {} tasks", ctx.task_category),
             "Response proportional to task complexity".to_string(),
@@ -50,8 +95,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
             total_count,
         } => (
             format!(
-                "Agent {} has {}/{} tool call failures on {} tasks",
-                ctx.agent_id, error_count, total_count, ctx.task_category
+                "Agent {} has {}/{} tool call failures on {} tasks{}",
+                ctx.agent_id, error_count, total_count, ctx.task_category, task_hint
             ),
             format!(
                 "Route {} tasks to agents with reliable tool access",
@@ -61,8 +106,8 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
         ),
         FailureMode::HallucinatedTool { count } => (
             format!(
-                "Agent {} hallucinated {} tools on {} tasks",
-                ctx.agent_id, count, ctx.task_category
+                "Agent {} hallucinated {} tools on {} tasks{}",
+                ctx.agent_id, count, ctx.task_category, task_hint
             ),
             format!(
                 "Avoid {} for tool-heavy {} tasks",
@@ -70,10 +115,21 @@ pub fn extract_lesson(judgment: &TaskJudgment, ctx: &LessonContext) -> Option<Le
             ),
             "Only call registered tools".to_string(),
         ),
+        FailureMode::PolicyViolation { count } => (
+            format!(
+                "Agent {} attempted {} blocked operations on {} tasks{}",
+                ctx.agent_id, count, ctx.task_category, task_hint
+            ),
+            format!(
+                "Agent {} must not call shell_exec or destructive commands; use only declared MCP tools",
+                ctx.agent_id
+            ),
+            "Only call tools explicitly listed in agent skills".to_string(),
+        ),
         FailureMode::OutputLoop => (
             format!(
-                "Agent {} enters output loops on {} tasks",
-                ctx.agent_id, ctx.task_category
+                "Agent {} enters output loops on {} tasks{}",
+                ctx.agent_id, ctx.task_category, task_hint
             ),
             format!(
                 "Reduce routing weight for {} on {}",
@@ -105,7 +161,22 @@ mod tests {
         LessonContext {
             agent_id: agent.to_string(),
             task_category: cat.to_string(),
+            task_description: None,
+            response_snippet: None,
         }
+    }
+
+    #[test]
+    fn test_strip_json_fragments() {
+        assert_eq!(strip_json_fragments("hello world"), "hello world");
+        assert_eq!(
+            strip_json_fragments(r#"Plant rice {"Action":{"Height":6,"Plant":"Plant_Rice"}}"#),
+            "Plant rice"
+        );
+        assert_eq!(
+            strip_json_fragments(r#"do {"a":1} and {"b":2} things"#),
+            "do and things"
+        );
     }
 
     #[test]
@@ -186,6 +257,20 @@ mod tests {
             .and_then(|v| v.as_f64())
             .expect("quality_score should be a number");
         assert!((score - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_lesson_from_policy_violation() {
+        let judgment = TaskJudgment {
+            quality_score: 0.1,
+            issues: vec!["2 tool calls blocked by security policy".into()],
+            failure_modes: vec![FailureMode::PolicyViolation { count: 2 }],
+        };
+        let lesson = extract_lesson(&judgment, &ctx("commander", "game_action")).unwrap();
+        assert!(lesson.pattern.condition.contains("blocked operations"));
+        assert!(lesson.pattern.action.contains("shell_exec"));
+        assert!(lesson.pattern.expected_outcome.contains("agent skills"));
+        assert!((lesson.confidence - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]

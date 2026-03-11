@@ -195,6 +195,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         assert!(validator.quick_validate(&response).is_ok());
@@ -214,6 +215,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -240,6 +242,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -267,6 +270,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = validator.quick_validate(&response);
@@ -295,6 +299,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         assert!(validator.quick_validate(&response).is_ok());

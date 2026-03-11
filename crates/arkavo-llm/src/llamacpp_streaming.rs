@@ -1,5 +1,6 @@
 #![allow(clippy::redundant_pub_crate)]
 
+use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::ModelFormat;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -11,8 +12,8 @@ use arkavo_llama_cpp::multimodal::{
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, batch_init_with_tokens_seq,
-    create_sampler_chain, create_sampler_chain_with_dry, decode_batch, token_to_bytes,
-    tokenize_with_model,
+    create_sampler_chain, create_sampler_chain_with_dry, decode_batch, perf_context,
+    token_to_bytes, tokenize_with_model,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -127,6 +128,12 @@ pub(crate) struct StreamingConfig {
     pub use_dry_sampling: bool,
     /// Model format for stop-sequence detection (prevents self-prompting)
     pub model_format: ModelFormat,
+    /// Optional GBNF grammar for constrained decoding (tool calling)
+    pub grammar: Option<String>,
+    /// Trigger patterns for lazy grammar activation (e.g., "```")
+    pub grammar_triggers: Option<Vec<String>>,
+    /// Additional stop sequences from template engine (e.g., to prevent <think> blocks)
+    pub additional_stops: Vec<String>,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -188,6 +195,13 @@ pub(crate) async fn generate_tokens_with_context(
 
         tracing::info!("Input tokenized to {} tokens", input_tokens.len());
         if is_debug() {
+            let tail_start = prompt_bytes.len().saturating_sub(300);
+            if let Ok(tail) = std::str::from_utf8(&prompt_bytes[tail_start..]) {
+                eprintln!("Prompt tail ({} bytes):\n«{tail}»", prompt_bytes.len());
+            }
+            eprintln!("Stops: {:?}, Grammar: {}", config.additional_stops, config.grammar.is_some());
+        }
+        if is_debug() {
             eprintln!(
                 "🔍 First 10 tokens: {:?}",
                 input_tokens.iter().take(10).collect::<Vec<_>>()
@@ -216,6 +230,23 @@ pub(crate) async fn generate_tokens_with_context(
             create_sampler_chain(config.temperature, config.top_p, config.top_k, config.seed)
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
+
+        // Add grammar sampler for constrained decoding of tool calls
+        if let Some(ref grammar_str) = config.grammar {
+            let vocab = model.get_vocab();
+            if let Some(ref triggers) = config.grammar_triggers {
+                let trigger_refs: Vec<&str> = triggers.iter().map(|s| s.as_str()).collect();
+                unsafe {
+                    sampler.add_grammar_lazy(vocab, grammar_str, "root", &trigger_refs);
+                }
+                tracing::debug!("Grammar sampler added (lazy, triggers: {triggers:?})");
+            } else {
+                unsafe {
+                    sampler.add_grammar(vocab, grammar_str, "root");
+                }
+                tracing::debug!("Grammar sampler added (strict)");
+            }
+        }
 
         let eos_token = model.get_eos_token();
         if is_debug() {
@@ -262,6 +293,7 @@ pub(crate) async fn generate_tokens_with_context(
                         content: piece,
                         reasoning_content: None,
                         done: false,
+                        inference_timing: None,
                     }));
                 }
                 break;
@@ -284,7 +316,33 @@ pub(crate) async fn generate_tokens_with_context(
                     content: special_text,
                     reasoning_content: None,
                     done: false,
+                    inference_timing: None,
                 }));
+            }
+
+            // Check for additional stop sequences (e.g., <think> when thinking is disabled)
+            let additional_stop = config.additional_stops.iter().find_map(|stop| {
+                detection_buffer.find(stop.as_str()).map(|pos| (pos, stop.clone()))
+            });
+            if let Some((stop_pos, stop_seq)) = additional_stop {
+                if is_debug() {
+                    eprintln!(
+                        "⛔ Additional stop detected: '{stop_seq}' at byte {stop_pos}"
+                    );
+                }
+                tracing::info!("Generation stopped: additional stop sequence '{stop_seq}'");
+                if !utf8_buffer.is_empty() {
+                    let piece = extract_valid_utf8(&mut utf8_buffer);
+                    if !piece.is_empty() {
+                        let _ = tx.send(Ok(StreamResponse {
+                            content: piece,
+                            reasoning_content: None,
+                            done: false,
+                            inference_timing: None,
+                        }));
+                    }
+                }
+                break;
             }
 
             // Check for self-prompting using the detection buffer (with special tokens)
@@ -303,6 +361,7 @@ pub(crate) async fn generate_tokens_with_context(
                             content: piece,
                             reasoning_content: None,
                             done: false,
+                            inference_timing: None,
                         }));
                     }
                 }
@@ -331,6 +390,7 @@ pub(crate) async fn generate_tokens_with_context(
                     content: piece,
                     reasoning_content: None,
                     done: false,
+                    inference_timing: None,
                 };
 
                 if tx.send(Ok(response)).is_err() {
@@ -364,28 +424,33 @@ pub(crate) async fn generate_tokens_with_context(
                         content: piece,
                         reasoning_content: None,
                         done: false,
+                        inference_timing: None,
                     }));
                 }
-                let _ = tx.send(Ok(StreamResponse {
-                    content: String::new(),
-                    reasoning_content: None,
-                    done: true,
-                }));
                 break;
             }
         }
 
-        Ok::<(u32, Option<Instant>), Error>((tokens_generated, first_token_time))
+        let perf = perf_context(&ctx);
+        let timing = InferenceTiming {
+            prompt_eval_ms: perf.t_p_eval_ms,
+            generation_ms: perf.t_eval_ms,
+            n_prompt_eval: perf.n_p_eval.max(0) as u32,
+            n_eval: perf.n_eval.max(0) as u32,
+        };
+
+        Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
     }
     .await;
 
     match result {
-        Ok((tokens_generated, first_token_time)) => {
+        Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
                 content: String::new(),
                 reasoning_content: None,
                 done: true,
+                inference_timing: Some(timing),
             }));
         }
         Err(e) => {

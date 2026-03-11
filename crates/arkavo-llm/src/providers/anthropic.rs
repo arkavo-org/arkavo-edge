@@ -280,7 +280,7 @@ impl AnthropicProvider {
                         });
                     }
                 }
-                Role::Assistant => {
+                Role::Assistant | Role::Tool => {
                     // Skip empty assistant messages (unless it's the last one)
                     if !content.is_empty() {
                         api_messages.push(ApiMessage {
@@ -576,6 +576,7 @@ impl Provider for AnthropicProvider {
                                                 content: text,
                                                 reasoning_content: None,
                                                 done: false,
+                                                inference_timing: None,
                                             }))
                                             .await
                                             .is_err()
@@ -595,6 +596,7 @@ impl Provider for AnthropicProvider {
                                                 content: String::new(),
                                                 reasoning_content: None,
                                                 done: true,
+                                                inference_timing: None,
                                             }))
                                             .await
                                             .is_err()
@@ -723,6 +725,7 @@ impl Provider for AnthropicProvider {
             },
             tool_calls,
             finish_reason: message.stop_reason,
+            inference_timing: None,
         })
     }
 }
@@ -737,26 +740,10 @@ mod tests {
         let provider = AnthropicProvider::new(config).unwrap();
 
         let messages = vec![
-            Message {
-                role: Role::System,
-                content: "You are a helpful assistant".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::User,
-                content: "Hello".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::Assistant,
-                content: "Hi there!".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::User,
-                content: "How are you?".to_string(),
-                images: None,
-            },
+            Message::system("You are a helpful assistant"),
+            Message::user("Hello"),
+            Message::assistant("Hi there!"),
+            Message::user("How are you?"),
         ];
 
         let (system, api_messages) = provider.convert_messages(messages);
@@ -774,21 +761,9 @@ mod tests {
         let provider = AnthropicProvider::new(config).unwrap();
 
         let messages = vec![
-            Message {
-                role: Role::User,
-                content: "First message".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::User,
-                content: "Second message".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::Assistant,
-                content: "Response".to_string(),
-                images: None,
-            },
+            Message::user("First message"),
+            Message::user("Second message"),
+            Message::assistant("Response"),
         ];
 
         let (_, api_messages) = provider.convert_messages(messages);

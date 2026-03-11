@@ -25,11 +25,13 @@ function handleTaskSubmitted(event) {
     var task = {
         id: event.taskId || event.task_id,
         description: event.description || _pendingTaskDescription || 'Task',
+        summary: event.summary || null,
         status: event.status || 'submitted',
+        source: event.source || 'ui',
         created_at: event.timestamp,
         _events: []
     };
-    _pendingTaskDescription = null;
+    if (task.source === 'ui') _pendingTaskDescription = null;
     AppState.tasks[task.id] = task;
     AppState.taskCount++;
 
@@ -73,7 +75,43 @@ function handleTaskStatusChanged(event) {
     addTaskEvent(id, evt);
     addTelemetry(evt);
 
-    renderTasks();
+    // If viewing task detail, refresh that; otherwise update card in-place
+    if (AppState.selectedTaskId) {
+        renderTaskDetail();
+        return;
+    }
+    if (!updateTaskCardInPlace(id)) {
+        renderTasks();
+    }
+}
+
+function updateTaskCardInPlace(taskId) {
+    var card = document.querySelector('.task-card-clickable[data-task-id="' + CSS.escape(taskId) + '"]');
+    if (!card) return false;
+    var task = AppState.tasks[taskId];
+    if (!task) return false;
+
+    var statusEl = card.querySelector('.task-status');
+    if (statusEl) {
+        var status = task.status || '';
+        statusEl.textContent = status;
+        statusEl.className = 'task-status ' + status.replace(/[^a-zA-Z0-9-]/g, '');
+    }
+
+    var progressBar = card.querySelector('.task-progress-bar');
+    if (progressBar && typeof task.progress === 'number') {
+        var pct = Math.min(100, Math.max(0, task.progress * 100));
+        progressBar.style.width = pct + '%';
+    } else if (!progressBar && typeof task.progress === 'number') {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'task-progress';
+        var bar = document.createElement('div');
+        bar.className = 'task-progress-bar';
+        bar.style.width = Math.min(100, Math.max(0, task.progress * 100)) + '%';
+        wrapper.appendChild(bar);
+        card.appendChild(wrapper);
+    }
+    return true;
 }
 
 function selectTask(taskId) {
@@ -115,17 +153,18 @@ function renderTasks() {
         var agent = getTaskAgent(task, task.id);
         var agentDisplay = agent ? shortAgentName(agent) : 'Routing...';
         var progress = typeof task.progress === 'number' ? Math.min(100, Math.max(0, task.progress * 100)) : null;
+        var sourceBadge = task.source === 'agent' ? '<span class="source-badge agent">auto</span> ' : '';
         return '<div class="task-card task-card-clickable" data-task-id="' + escapeHtml(task.id) + '">' +
             '<div class="task-header">' +
-            '<span class="task-id">#' + taskId + '</span>' +
+            sourceBadge + '<span class="task-id">#' + taskId + '</span>' +
             '<span class="task-status ' + statusClass + '">' + status + '</span>' +
             '</div>' +
-            '<div class="task-description">' + (escapeHtml(task.description) || 'Task') + '</div>' +
+            '<div class="task-description">' + escapeHtml(task.summary || task.description || 'Task') + '</div>' +
             '<div class="task-meta">' +
             escapeHtml(agentDisplay) +
             ((task.created_at || task.createdAt) ? ' | ' + escapeHtml(formatTime(task.created_at || task.createdAt)) : '') +
             '</div>' +
-            (progress !== null ? '<div class="task-progress"><div class="task-progress-bar" style="width: ' + progress + '%"></div></div>' : '') +
+            (progress !== null ? '<div class="task-progress"><div class="task-progress-bar" style="width:' + progress + '%"></div></div>' : '') +
             '</div>';
     }).join('');
 

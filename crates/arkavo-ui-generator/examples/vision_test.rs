@@ -46,12 +46,16 @@ async fn main() -> Result<()> {
             role: Role::User,
             content: "Describe what you see in this image in detail.".to_string(),
             images: Some(vec![img]),
+            tool_call_id: None,
+            tool_name: None,
         }
     } else {
         Message {
             role: Role::User,
             content: "What is 2+2?".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     };
 

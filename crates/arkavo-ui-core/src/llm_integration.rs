@@ -91,6 +91,7 @@ impl LlmIntegration {
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalQwen35_9B
             | ModelChoice::LocalQwen35_27B
             | ModelChoice::LocalGlm47Flash
             | ModelChoice::LocalGemma270M

@@ -318,110 +318,94 @@ pub async fn process_with_tools(
                 reasoning_content: None,
                 tool_calls: result.tool_calls,
                 finish_reason: None,
+                inference_timing: None,
             }
         } else {
-            // Subsequent iterations - use quality gate directly
-            #[allow(deprecated)]
+            // Subsequent iterations - use Thompson Sampling routing
             match router
-                .route_with_quality_gate(task_description, messages.clone(), Some(&registry_arc), 3)
+                .route_with_tools(task_description, messages.clone(), Some(&registry_arc))
                 .await
             {
                 Ok(r) => r,
-                Err(e) => {
-                    // Check if judge detected missing tool usage
-                    let error_msg = e.to_string();
-                    if error_msg.starts_with("MISSING_TOOL_USE:") {
-                        // Tool discovery doesn't count as an iteration
-                        // Extract keywords from error message
-                        let keywords_str =
-                            error_msg.strip_prefix("MISSING_TOOL_USE:").unwrap_or("");
-                        let keywords: Vec<String> = keywords_str
-                            .trim_matches(|c| c == '[' || c == ']' || c == '"')
-                            .split(',')
-                            .map(|s| s.trim().trim_matches('"').to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
+                Err(arkavo_router::Error::MissingToolUse { keywords }) => {
+                    tracing::info!(
+                        "Judge detected missing tool usage, searching for: {:?}",
+                        keywords
+                    );
 
-                        tracing::info!(
-                            "Judge detected missing tool usage, searching for: {:?}",
-                            keywords
-                        );
-
-                        // Search for tools matching the judge's suggested keywords
-                        let mut expanded_tools = Vec::new();
-                        for keyword in &keywords {
-                            let found = registry_arc
-                                .search_tools(keyword, arkavo_mcp_tools::DetailLevel::FullSchema);
-                            tracing::debug!("Keyword '{}' matched {} tools", keyword, found.len());
-                            expanded_tools.extend(found);
-                        }
-
-                        // Filter out already-disclosed tools (only disclose once per context)
-                        let new_tools: Vec<_> = expanded_tools
-                            .into_iter()
-                            .filter(|t| !disclosed_tools.contains(&t.name))
-                            .collect();
-
-                        // Log if no NEW tools were found
-                        if new_tools.is_empty() {
-                            tracing::warn!(
-                                target: "arkavo_tools::judge_keyword_miss",
-                                keywords = ?keywords,
-                                "Judge suggested keywords but no new tools matched (already disclosed or not found)"
-                            );
-                        }
-
-                        // Track newly disclosed tools
-                        for tool in &new_tools {
-                            disclosed_tools.insert(tool.name.clone());
-                        }
-
-                        // Feed back the tool definitions to the LLM
-                        let tool_list = new_tools
-                            .iter()
-                            .map(|t| {
-                                let aliases_text = if let Some(aliases) = &t.aliases {
-                                    if !aliases.is_empty() {
-                                        format!(" (aliases: {})", aliases.join(", "))
-                                    } else {
-                                        String::new()
-                                    }
-                                } else {
-                                    String::new()
-                                };
-                                format!(
-                                    "- {}{}: {}",
-                                    t.name,
-                                    aliases_text,
-                                    t.description.as_deref().unwrap_or("No description")
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        let tool_response = if new_tools.is_empty() {
-                            "No matching tools found for the requested information.".to_string()
-                        } else {
-                            format!(
-                                "Found {} relevant tool(s):\n{}\n\nPlease use these tools to answer the question.",
-                                new_tools.len(),
-                                tool_list
-                            )
-                        };
-
-                        messages.push(Message::user(&tool_response));
-
-                        // Safeguard against infinite discovery loops
-                        discovery_iterations += 1;
-                        if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
-                            return Err(format!(
-                                "Maximum discovery iterations ({MAX_DISCOVERY_ITERATIONS}) exceeded - possible infinite loop"
-                            ).into());
-                        }
-                        continue; // Re-route with expanded knowledge (doesn't count as iteration)
+                    // Search for tools matching the judge's suggested keywords
+                    let mut expanded_tools = Vec::new();
+                    for keyword in &keywords {
+                        let found = registry_arc
+                            .search_tools(keyword, arkavo_mcp_tools::DetailLevel::FullSchema);
+                        tracing::debug!("Keyword '{}' matched {} tools", keyword, found.len());
+                        expanded_tools.extend(found);
                     }
 
-                    // Not a missing tool error, propagate it
+                    // Filter out already-disclosed tools (only disclose once per context)
+                    let new_tools: Vec<_> = expanded_tools
+                        .into_iter()
+                        .filter(|t| !disclosed_tools.contains(&t.name))
+                        .collect();
+
+                    if new_tools.is_empty() {
+                        tracing::warn!(
+                            target: "arkavo_tools::judge_keyword_miss",
+                            keywords = ?keywords,
+                            "Judge suggested keywords but no new tools matched (already disclosed or not found)"
+                        );
+                    }
+
+                    // Track newly disclosed tools
+                    for tool in &new_tools {
+                        disclosed_tools.insert(tool.name.clone());
+                    }
+
+                    // Feed back the tool definitions to the LLM
+                    let tool_list = new_tools
+                        .iter()
+                        .map(|t| {
+                            let aliases_text = if let Some(aliases) = &t.aliases {
+                                if !aliases.is_empty() {
+                                    format!(" (aliases: {})", aliases.join(", "))
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+                            format!(
+                                "- {}{}: {}",
+                                t.name,
+                                aliases_text,
+                                t.description.as_deref().unwrap_or("No description")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let tool_response = if new_tools.is_empty() {
+                        "No matching tools found for the requested information.".to_string()
+                    } else {
+                        format!(
+                            "Found {} relevant tool(s):\n{}\n\nPlease use these tools to answer the question.",
+                            new_tools.len(),
+                            tool_list
+                        )
+                    };
+
+                    messages.push(Message::user(&tool_response));
+
+                    // Safeguard against infinite discovery loops
+                    discovery_iterations += 1;
+                    if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
+                        return Err(format!(
+                            "Maximum discovery iterations ({MAX_DISCOVERY_ITERATIONS}) exceeded - possible infinite loop"
+                        ).into());
+                    }
+                    continue; // Re-route with expanded knowledge (doesn't count as iteration)
+                }
+                Err(e) => {
                     return Err(e.into());
                 }
             }
@@ -633,6 +617,21 @@ pub async fn process_with_tools(
                 if let Ok(result_pretty) = serde_json::to_string_pretty(&result.result) {
                     println!("{result_pretty}");
                 }
+            }
+
+            // Learn from tool errors: feed domain-specific failures into the
+            // prompt advisor so future prompts include corrections
+            if !result.success
+                && let Some(ref error_msg) = result.error
+                && let Some(model_name) = router.last_routed_model()
+            {
+                let model_family = Router::detect_model_family(&model_name);
+                router.advisor().observe_tool_error(
+                    &model_family,
+                    &tool_call.tool_name,
+                    error_msg,
+                    &tool_call.arguments,
+                );
             }
 
             tool_results.push(result.clone());
@@ -880,6 +879,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result =
@@ -895,6 +895,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

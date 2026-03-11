@@ -73,6 +73,7 @@ fn issue_to_category(issue: FeedbackIssue, model_family: &str) -> String {
         FeedbackIssue::OutputLoop => "loop",
         FeedbackIssue::WrongExpertRouting => "wrong_expert",
         FeedbackIssue::EmptyOrTimeout => "timeout",
+        FeedbackIssue::ToolError => "tool_error",
         FeedbackIssue::Correct => "correct",
     };
     format!("model:{model_family}:{issue_name}")

@@ -104,6 +104,8 @@ impl ModelSelectionPolicy {
                     provider: model.provider_name.clone(),
                     input_cost_per_thousand: input_cost,
                     output_cost_per_thousand: output_cost,
+                    cached_input_cost_per_thousand: None,
+                    cache_write_cost_per_thousand: None,
                     context_window: model.context_window,
                     max_output_tokens: model.max_output_tokens,
                     effective_date: model_pricing.effective_date,
@@ -180,6 +182,22 @@ impl ModelSelectionPolicy {
         true
     }
 
+    // Scoring weights by priority mode
+    const W_COST_LOW: f64 = 0.7;
+    const W_CTX_LOW: f64 = 0.2;
+    const W_PROV_LOW: f64 = 0.1;
+
+    const W_COST_PERF: f64 = 0.2;
+    const W_CTX_PERF: f64 = 0.5;
+    const W_PROV_PERF: f64 = 0.3;
+
+    const W_COST_BAL: f64 = 0.4;
+    const W_CTX_BAL: f64 = 0.4;
+    const W_PROV_BAL: f64 = 0.2;
+
+    const FREE_MODEL_BONUS: f64 = 0.2;
+    const NON_PREFERRED_PROVIDER_SCORE: f64 = 0.5;
+
     fn score_candidates(&self, candidates: &mut [ModelCandidate], criteria: &SelectionCriteria) {
         let min_cost = candidates
             .iter()
@@ -202,21 +220,32 @@ impl ModelSelectionPolicy {
             let provider_score = if criteria.preferred_providers.contains(&candidate.provider) {
                 1.0
             } else {
-                0.5
+                Self::NON_PREFERRED_PROVIDER_SCORE
             };
 
-            let is_free = candidate.estimated_cost.is_zero();
-            let free_bonus = if is_free { 0.2 } else { 0.0 };
+            let free_bonus = if candidate.estimated_cost.is_zero() {
+                Self::FREE_MODEL_BONUS
+            } else {
+                0.0
+            };
 
             candidate.score = match criteria.priority {
                 SelectionPriority::LowestCost => {
-                    cost_score * 0.7 + context_score * 0.2 + provider_score * 0.1 + free_bonus
+                    cost_score * Self::W_COST_LOW
+                        + context_score * Self::W_CTX_LOW
+                        + provider_score * Self::W_PROV_LOW
+                        + free_bonus
                 }
                 SelectionPriority::BestPerformance => {
-                    cost_score * 0.2 + context_score * 0.5 + provider_score * 0.3
+                    cost_score * Self::W_COST_PERF
+                        + context_score * Self::W_CTX_PERF
+                        + provider_score * Self::W_PROV_PERF
                 }
                 SelectionPriority::Balanced => {
-                    cost_score * 0.4 + context_score * 0.4 + provider_score * 0.2 + free_bonus
+                    cost_score * Self::W_COST_BAL
+                        + context_score * Self::W_CTX_BAL
+                        + provider_score * Self::W_PROV_BAL
+                        + free_bonus
                 }
             };
         }
@@ -281,7 +310,12 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 metadata: None,
-                pricing: None,
+                pricing: Some(arkavo_dataflow::nodes::model_registry::ModelPricing {
+                    input_cost_per_thousand_cents: 3000,
+                    output_cost_per_thousand_cents: 6000,
+                    effective_date: Utc::now(),
+                    currency: "USD".to_string(),
+                }),
                 snpe_metadata: None,
             },
             ModelInfo {
@@ -306,7 +340,12 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 metadata: None,
-                pricing: None,
+                pricing: Some(arkavo_dataflow::nodes::model_registry::ModelPricing {
+                    input_cost_per_thousand_cents: 50,
+                    output_cost_per_thousand_cents: 150,
+                    effective_date: Utc::now(),
+                    currency: "USD".to_string(),
+                }),
                 snpe_metadata: None,
             },
             ModelInfo {
@@ -331,7 +370,12 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 metadata: None,
-                pricing: None,
+                pricing: Some(arkavo_dataflow::nodes::model_registry::ModelPricing {
+                    input_cost_per_thousand_cents: 25,
+                    output_cost_per_thousand_cents: 125,
+                    effective_date: Utc::now(),
+                    currency: "USD".to_string(),
+                }),
                 snpe_metadata: None,
             },
             ModelInfo {

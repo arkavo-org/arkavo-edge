@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Process start time for computing uptime
+pub(crate) static PROCESS_START: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
 /// AG-UI Event types as per specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -334,6 +338,45 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Compute budget telemetry events (per-agent, polled from agents)
+    ComputeBudgetUpdate {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "computeBudget")]
+        compute_budget: serde_json::Value,
+        timestamp: String,
+    },
+
+    // Per-agent process metrics (self-reported by each agent binary)
+    AgentSystemMetrics {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        /// Resident set size in MB
+        #[serde(rename = "rssMb")]
+        rss_mb: f64,
+        /// CPU usage percentage (0-100+, multi-core can exceed 100)
+        #[serde(rename = "cpuPercent")]
+        cpu_percent: f64,
+        /// OS process ID
+        pid: u32,
+        /// Total system RAM in MB
+        #[serde(rename = "totalRamMb", skip_serializing_if = "Option::is_none")]
+        total_ram_mb: Option<f64>,
+        /// Available (free) system RAM in MB
+        #[serde(rename = "availableRamMb", skip_serializing_if = "Option::is_none")]
+        available_ram_mb: Option<f64>,
+    },
+
+    // Per-agent task counts
+    AgentTaskCounts {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        pending: u32,
+        active: u32,
+        completed: u32,
+        failed: u32,
+    },
+
     // Security / TDF audit events
     GetSecurityStatus,
     SecurityStatusUpdate {
@@ -392,6 +435,8 @@ pub enum AgUiEvent {
         quality_trends: Vec<QualityTrend>,
         #[serde(rename = "lessonCount", default)]
         lesson_count: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lessons: Vec<LessonInfo>,
         timestamp: String,
     },
     RoutingEvaluation {
@@ -421,6 +466,16 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    LessonExtracted {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        category: String,
+        condition: String,
+        action: String,
+        confidence: f64,
+        timestamp: String,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -437,7 +492,11 @@ pub enum AgUiEvent {
         task_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
         status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         timestamp: String,
     },
     TaskStatusChanged {
@@ -456,16 +515,33 @@ pub enum AgUiEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskMetrics {
-    #[serde(rename = "tokensGenerated")]
+    #[serde(rename = "tokensGenerated", default)]
     pub tokens_generated: u32,
-    #[serde(rename = "tokensPerSec")]
+    #[serde(rename = "tokensPerSec", default)]
     pub tokens_per_sec: f64,
-    #[serde(rename = "ttftMs")]
+    #[serde(rename = "ttftMs", default)]
     pub ttft_ms: u64,
-    #[serde(rename = "inferenceDurationMs")]
+    #[serde(rename = "inferenceDurationMs", default)]
     pub inference_duration_ms: u64,
-    #[serde(rename = "energyWh")]
+    #[serde(rename = "energyWh", default)]
     pub energy_wh: f64,
+    #[serde(rename = "qualityScore", skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f64>,
+    /// Context window utilization (0-100%)
+    #[serde(
+        rename = "contextUtilizationPct",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_utilization_pct: Option<f64>,
+    /// Prompt evaluation / prefill time (ms) — from llama.cpp timings
+    #[serde(rename = "promptEvalMs", skip_serializing_if = "Option::is_none")]
+    pub prompt_eval_ms: Option<u64>,
+    /// Token generation time (ms) — from llama.cpp timings
+    #[serde(rename = "generationMs", skip_serializing_if = "Option::is_none")]
+    pub generation_ms: Option<u64>,
+    /// KV cache hit rate (0-100%) — tokens served from cache
+    #[serde(rename = "cacheHitPct", skip_serializing_if = "Option::is_none")]
+    pub cache_hit_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,6 +564,8 @@ pub struct MeshAgentInfo {
 pub struct TaskInfo {
     pub id: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub status: String,
     #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
     pub target_agent: Option<String>,
@@ -495,6 +573,8 @@ pub struct TaskInfo {
     pub created_at: String,
     #[serde(rename = "completedAt", skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,6 +632,8 @@ pub struct AgentLearningInfo {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub category_stats: Vec<CategoryStat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -574,6 +656,17 @@ pub struct RoutingRecord {
     pub quality_issues: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LessonInfo {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub category: String,
+    pub condition: String,
+    pub action: String,
+    pub confidence: f64,
     pub timestamp: String,
 }
 
@@ -634,7 +727,7 @@ pub enum MessageDeltaContent {
         #[serde(rename = "isError")]
         is_error: bool,
     },
-    /// Internal metadata (never serialized to frontend)
+    /// Metadata (selectively forwarded to frontend, e.g. teaching_intent)
     Metadata {
         key: String,
         value: serde_json::Value,

@@ -152,6 +152,7 @@ impl OpenAIProvider {
                     Role::System => "system".to_string(),
                     Role::User => "user".to_string(),
                     Role::Assistant => "assistant".to_string(),
+                    Role::Tool => "tool".to_string(),
                 },
                 content: msg.content,
             })
@@ -385,6 +386,7 @@ impl Provider for OpenAIProvider {
                                             content: String::new(),
                                             reasoning_content: None,
                                             done: true,
+                                            inference_timing: None,
                                         }))
                                         .await
                                         .is_err()
@@ -399,6 +401,7 @@ impl Provider for OpenAIProvider {
                                             content: content.clone(),
                                             reasoning_content: None,
                                             done: choice.finish_reason.is_some(),
+                                            inference_timing: None,
                                         }))
                                         .await
                                         .is_err()
@@ -473,16 +476,8 @@ mod tests {
         let provider = OpenAIProvider::new(config).unwrap();
 
         let messages = vec![
-            Message {
-                role: Role::System,
-                content: "You are a helpful assistant".to_string(),
-                images: None,
-            },
-            Message {
-                role: Role::User,
-                content: "Hello".to_string(),
-                images: None,
-            },
+            Message::system("You are a helpful assistant"),
+            Message::user("Hello"),
         ];
 
         let api_messages = provider.convert_messages(messages);

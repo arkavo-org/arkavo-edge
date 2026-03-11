@@ -253,15 +253,81 @@ impl ToolParser {
     }
 
     fn parse_xml_single(xml: &str) -> Result<ParsedToolCall, ToolParseError> {
-        let name = Self::extract_xml_tag(xml, "name")?;
-        let args_str = Self::extract_xml_tag(xml, "arguments")?;
-        let args: Value = serde_json::from_str(&args_str)?;
+        // Primary format: <name>X</name><arguments>Y</arguments>
+        if let (Ok(name), Ok(args_str)) = (
+            Self::extract_xml_tag(xml, "name"),
+            Self::extract_xml_tag(xml, "arguments"),
+        ) {
+            let args: Value = serde_json::from_str(&args_str)?;
+            return Ok(ParsedToolCall {
+                tool_name: name,
+                arguments: args,
+                call_id: None,
+            });
+        }
+
+        // Qwen format: <function=tool_name> with optional key=value params
+        Self::parse_function_eq_format(xml)
+    }
+
+    /// Parse Qwen-style `<function=tool_name>{"key":"val"}</function>` format.
+    ///
+    /// Also handles the no-args variant: `<function=tool_name>\n</function>`
+    /// and the key=value variant: `<function=tool_name>\n<parameter>{"key":"val"}</parameter>\n</function>`
+    /// and named-parameter variant: `<function=tool_name>\n<parameter=key>value</parameter>\n</function>`
+    fn parse_function_eq_format(xml: &str) -> Result<ParsedToolCall, ToolParseError> {
+        let re = Regex::new(r"<function=([a-zA-Z][a-zA-Z0-9_-]*)>")
+            .map_err(|e| ToolParseError::InvalidFormat(e.to_string()))?;
+        let caps = re
+            .captures(xml)
+            .ok_or_else(|| ToolParseError::MissingField("function name".to_string()))?;
+        let name = caps[1].to_string();
+        let tag_end = caps.get(0).unwrap().end();
+
+        // Try named-parameter format: <parameter=key>value</parameter>
+        let named_params = Self::extract_named_parameters(xml);
+        let args = if !named_params.is_empty() {
+            Value::Object(named_params)
+        } else if let Ok(param_str) = Self::extract_xml_tag(xml, "parameter") {
+            // Try <parameter>JSON</parameter>
+            serde_json::from_str(&param_str).unwrap_or_else(|_| Value::Object(Map::new()))
+        } else {
+            // Try inline JSON between <function=NAME> and </function>
+            let after_tag = &xml[tag_end..];
+            let before_close = after_tag
+                .find("</function>")
+                .map(|i| &after_tag[..i])
+                .unwrap_or(after_tag);
+            let trimmed = before_close.trim();
+            if trimmed.is_empty() {
+                Value::Object(Map::new())
+            } else {
+                serde_json::from_str(trimmed).unwrap_or_else(|_| Value::Object(Map::new()))
+            }
+        };
 
         Ok(ParsedToolCall {
             tool_name: name,
             arguments: args,
             call_id: None,
         })
+    }
+
+    /// Extract `<parameter=key>value</parameter>` named parameters (Qwen3.5 format).
+    fn extract_named_parameters(xml: &str) -> Map<String, Value> {
+        let mut map = Map::new();
+        let re =
+            match Regex::new(r"<parameter=([a-zA-Z][a-zA-Z0-9_]*)>\s*([\s\S]*?)\s*</parameter>") {
+                Ok(r) => r,
+                Err(_) => return map,
+            };
+        for cap in re.captures_iter(xml) {
+            if let (Some(key), Some(val)) = (cap.get(1), cap.get(2)) {
+                let value = Self::infer_value_type(val.as_str().trim());
+                map.insert(key.as_str().to_string(), value);
+            }
+        }
+        map
     }
 
     /// Parse JSON-based tool calls from local model text responses
@@ -853,5 +919,78 @@ Goodbye"#;
         assert!(result.contains("Goodbye"));
         assert!(!result.contains("tool1"));
         assert!(!result.contains("tool2"));
+    }
+
+    #[test]
+    fn test_parse_xml_qwen_function_eq_format_no_args() {
+        let xml = "<tool_call>\n<function=get_time_status>\n</function>\n</tool_call>";
+        let calls = ToolParser::parse_xml(xml).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_time_status");
+        assert_eq!(calls[0].arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_parse_xml_qwen_function_eq_format_with_json_args() {
+        let xml = r#"<tool_call>
+<function=get_time>{"timezone": "UTC"}
+</function>
+</tool_call>"#;
+        let calls = ToolParser::parse_xml(xml).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_time");
+        assert_eq!(calls[0].arguments, serde_json::json!({"timezone": "UTC"}));
+    }
+
+    #[test]
+    fn test_parse_xml_qwen_function_eq_format_with_parameter_tag() {
+        let xml = r#"<tool_call>
+<function=search_files>
+<parameter>{"query": "test", "path": "/src"}</parameter>
+</function>
+</tool_call>"#;
+        let calls = ToolParser::parse_xml(xml).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "search_files");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({"query": "test", "path": "/src"})
+        );
+    }
+
+    #[test]
+    fn test_parse_xml_qwen_named_parameter_tags() {
+        let xml = r#"<tool_call>
+<function=get_weather>
+<parameter=location>
+Tokyo
+</parameter>
+<parameter=unit>
+celsius
+</parameter>
+</function>
+</tool_call>"#;
+        let calls = ToolParser::parse_xml(xml).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_weather");
+        assert_eq!(calls[0].arguments["location"], "Tokyo");
+        assert_eq!(calls[0].arguments["unit"], "celsius");
+    }
+
+    #[test]
+    fn test_parse_xml_qwen_named_parameter_numeric() {
+        let xml = r#"<tool_call>
+<function=search>
+<parameter=query>error handling</parameter>
+<parameter=limit>10</parameter>
+<parameter=case_sensitive>true</parameter>
+</function>
+</tool_call>"#;
+        let calls = ToolParser::parse_xml(xml).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "search");
+        assert_eq!(calls[0].arguments["query"], "error handling");
+        assert_eq!(calls[0].arguments["limit"], 10);
+        assert_eq!(calls[0].arguments["case_sensitive"], true);
     }
 }

@@ -657,6 +657,302 @@ fn is_empty_result(result: Option<&Value>) -> bool {
     }
 }
 
+/// HTTP Streamable MCP client for connecting to remote MCP servers via HTTP POST.
+/// Uses `reqwest::blocking` to avoid nested tokio runtime issues.
+#[derive(Debug, Clone)]
+pub struct HttpMcpClient {
+    url: String,
+    session_id: Arc<Mutex<Option<String>>>,
+    request_id: Arc<Mutex<u64>>,
+    client: Arc<reqwest::blocking::Client>,
+    notification_tx: broadcast::Sender<JsonRpcNotification>,
+    server_name: String,
+}
+
+impl HttpMcpClient {
+    /// Create a new HTTP MCP client and perform the initialize handshake.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn new(url: String) -> Result<Self, Box<dyn std::error::Error>> {
+        log_mcp(&format!("HTTP MCP: connecting to {url}"));
+
+        // Build blocking client in a dedicated thread to avoid tokio runtime conflicts
+        let url_clone = url.clone();
+        let (client, session_id) = std::thread::spawn(
+            move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()?;
+
+                // Initialize handshake
+                let body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "arkavo-agent",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
+                    }
+                });
+
+                let resp = client
+                    .post(&url_clone)
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .map_err(|e| format!("HTTP MCP initialize failed: {e}"))?;
+
+                let session_id = resp
+                    .headers()
+                    .get("mcp-session-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                if let Some(ref sid) = session_id {
+                    log_mcp(&format!("HTTP MCP: session={sid}"));
+                }
+
+                let _body: serde_json::Value = resp
+                    .json()
+                    .map_err(|e| format!("HTTP MCP init parse: {e}"))?;
+
+                log_mcp("HTTP MCP: initialized");
+                Ok((client, session_id))
+            },
+        )
+        .join()
+        .expect("init thread panicked")
+        .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+        let (notification_tx, _) = broadcast::channel(64);
+
+        Ok(Self {
+            url,
+            session_id: Arc::new(Mutex::new(session_id)),
+            request_id: Arc::new(Mutex::new(2)), // 1 was used for initialize
+            client: Arc::new(client),
+            notification_tx,
+            server_name: String::new(),
+        })
+    }
+
+    fn next_id(&self) -> u64 {
+        let mut id = self.request_id.lock().unwrap();
+        let current = *id;
+        *id += 1;
+        current
+    }
+
+    fn session_header(&self) -> Option<String> {
+        self.session_id.lock().ok().and_then(|s| s.clone())
+    }
+
+    /// Re-initialize the MCP session (e.g. after session expiry or server restart).
+    fn reinitialize(&self) -> Result<(), Box<dyn std::error::Error>> {
+        log_mcp("HTTP MCP: re-initializing session");
+        let url = self.url.clone();
+        let client = self.client.clone();
+
+        let new_session = std::thread::spawn(
+            move || -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+                let body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "arkavo-agent",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
+                    }
+                });
+                let resp = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .map_err(|e| format!("HTTP MCP reinit: {e}"))?;
+                let sid = resp
+                    .headers()
+                    .get("mcp-session-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let _body: serde_json::Value = resp
+                    .json()
+                    .map_err(|e| format!("HTTP MCP reinit parse: {e}"))?;
+                Ok(sid)
+            },
+        )
+        .join()
+        .expect("reinit thread panicked")
+        .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+        if let Ok(mut sid) = self.session_id.lock() {
+            *sid = new_session;
+        }
+        log_mcp("HTTP MCP: session re-initialized");
+        Ok(())
+    }
+
+    /// Send a blocking JSON-RPC request in a dedicated thread (safe from async contexts).
+    /// Automatically re-initializes the session on session/connection errors and retries once.
+    fn send_request(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<JsonRpcResponse, Box<dyn std::error::Error>> {
+        match self.send_request_once(method, params.clone()) {
+            Ok(result) => {
+                // Check for JSON-RPC session errors
+                if let Some(ref error) = result.error
+                    && (error.message.contains("Session")
+                        || error.message.contains("session")
+                        || error.message.contains("initialize"))
+                {
+                    log_mcp(&format!(
+                        "HTTP MCP: session error '{}', re-initializing",
+                        error.message
+                    ));
+                    if self.reinitialize().is_ok() {
+                        return self.send_request_once(method, params);
+                    }
+                }
+                Ok(result)
+            }
+            Err(e) => {
+                // Connection-level failure (server down, refused, timeout)
+                let msg = e.to_string();
+                if msg.contains("connect")
+                    || msg.contains("refused")
+                    || msg.contains("timeout")
+                    || msg.contains("reset")
+                    || msg.contains("broken pipe")
+                    || msg.contains("HTTP MCP send")
+                {
+                    log_mcp(&format!(
+                        "HTTP MCP: connection error '{msg}', re-initializing",
+                    ));
+                    if self.reinitialize().is_ok() {
+                        return self.send_request_once(method, params);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn send_request_once(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<JsonRpcResponse, Box<dyn std::error::Error>> {
+        let id = self.next_id();
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params.unwrap_or_else(|| serde_json::json!({}))
+        });
+
+        let url = self.url.clone();
+        let session = self.session_header();
+        let client = self.client.clone();
+
+        // Run blocking HTTP in a dedicated thread to avoid blocking the tokio runtime
+        let result = std::thread::spawn(move || -> Result<JsonRpcResponse, String> {
+            let mut req = client.post(&url).header("Content-Type", "application/json");
+
+            if let Some(sid) = session {
+                req = req.header("Mcp-Session-Id", sid);
+            }
+
+            let resp = req
+                .json(&body)
+                .send()
+                .map_err(|e| format!("HTTP MCP send: {e}"))?;
+            resp.json::<JsonRpcResponse>()
+                .map_err(|e| format!("HTTP MCP parse: {e}"))
+        })
+        .join()
+        .expect("request thread panicked")
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+        Ok(result)
+    }
+
+    pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
+        log_mcp("HTTP MCP: tools/list");
+        let response = self.send_request("tools/list", Some(json!({})))?;
+
+        if let Some(error) = &response.error {
+            log_mcp(&format!("HTTP MCP tools/list FAILED: {}", error.message));
+            return Ok(vec![]);
+        }
+
+        if let Some(result) = response.result {
+            if let Some(tools_value) = result.get("tools") {
+                let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+                log_mcp(&format!("HTTP MCP: {} tools discovered", tools.len()));
+                Ok(tools)
+            } else {
+                log_mcp("HTTP MCP: no tools in response");
+                Ok(vec![])
+            }
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    pub fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: Value,
+        llm_origin: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        log_mcp(&format!("HTTP MCP tool call: {tool_name}"));
+        eprintln!(
+            "[MCP Tool Call] HTTP | LLM: {llm_origin} | Tool: {tool_name} | Args: {}",
+            serde_json::to_string(&arguments).unwrap_or_default()
+        );
+
+        let params = json!({
+            "name": tool_name,
+            "arguments": arguments
+        });
+
+        let response = self.send_request("tools/call", Some(params))?;
+
+        if let Some(error) = response.error {
+            return Err(format!("Tool execution error: {}", error.message).into());
+        }
+
+        if let Some(result) = response.result {
+            if let Some(content_array) = result.get("content").and_then(|c| c.as_array())
+                && let Some(first_content) = content_array.first()
+                && let Some(text) = first_content.get("text").and_then(|t| t.as_str())
+            {
+                return Ok(json!({ "result": text }));
+            }
+            Ok(result)
+        } else {
+            Ok(json!({}))
+        }
+    }
+
+    pub fn subscribe_notifications(&self) -> broadcast::Receiver<JsonRpcNotification> {
+        self.notification_tx.subscribe()
+    }
+
+    pub fn set_server_name(&mut self, name: String) {
+        self.server_name = name;
+    }
+}
+
 /// Polling loop that runs in a tokio::spawn task
 async fn polling_loop(
     client: Arc<McpClient>,

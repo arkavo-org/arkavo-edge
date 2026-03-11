@@ -34,6 +34,7 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::LocalGemma12B
         | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
         ModelChoice::LocalMinistral8B
+        | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalGlm47Flash
         | ModelChoice::GeminiFlash
@@ -101,9 +102,7 @@ const LANG_IDENTIFIERS: &[&str] = &[
 /// When a local LLM returns a fence like ```python\ncontext_search(...)```,
 /// the provider parses this as tool_name="python" with the code as arguments.
 /// This function detects language identifiers and extracts the nested tool calls.
-pub(crate) fn filter_and_extract_tool_calls(
-    tool_calls: Vec<ParsedToolCall>,
-) -> Vec<ParsedToolCall> {
+pub fn filter_and_extract_tool_calls(tool_calls: Vec<ParsedToolCall>) -> Vec<ParsedToolCall> {
     tool_calls
         .into_iter()
         .flat_map(|call| {
@@ -150,7 +149,7 @@ pub(crate) fn filter_and_extract_tool_calls(
 }
 
 /// Extract tool calls from text content using multiple parsing strategies
-pub(crate) fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall> {
+pub fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall> {
     if let Ok(calls) = ToolParser::parse_fence(content) {
         let filtered: Vec<_> = calls
             .into_iter()
@@ -162,13 +161,17 @@ pub(crate) fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall>
                         Ok(s) => s,
                         Err(e) => {
                             tracing::warn!("Failed to serialize JSON fence arguments: {e}");
-                            return vec![call];
+                            return vec![];
                         }
                     };
                     if let Some(extracted) = extract_json_tool_calls(&json_str) {
                         return extracted;
                     }
-                    vec![call]
+                    // JSON fence without tool_name/tool/name fields is formatted
+                    // output, not a tool call — drop it instead of returning
+                    // a call with tool_name="json".
+                    tracing::debug!("JSON fence did not contain tool call wrapper, skipping");
+                    vec![]
                 } else if LANG_IDENTIFIERS.contains(&tool_lower.as_str()) {
                     let fence_content = match serde_json::to_string(&call.arguments) {
                         Ok(s) => s.trim_matches('"').to_string(),
@@ -207,8 +210,43 @@ pub(crate) fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall>
     if let Some(calls) = extract_python_function_calls(content) {
         return calls;
     }
+    if let Some(calls) = extract_curly_brace_tool_calls(content) {
+        return calls;
+    }
 
     Vec::new()
+}
+
+/// Extract `tool_name{json}` or `tool_name{}` format (Ministral/Mistral models)
+fn extract_curly_brace_tool_calls(content: &str) -> Option<Vec<ParsedToolCall>> {
+    let re = regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9_-]*)\{([^}]*)\}").ok()?;
+    let mut calls = Vec::new();
+
+    for cap in re.captures_iter(content) {
+        let name = cap.get(1)?.as_str();
+        let body = cap.get(2)?.as_str().trim();
+
+        // Skip common non-tool patterns
+        if name.len() <= 2 || ["if", "for", "while", "match", "fn", "let", "var"].contains(&name) {
+            continue;
+        }
+
+        let args = if body.is_empty() {
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            // Try parsing as JSON object content: tool_name{"key": "val"}
+            serde_json::from_str(&format!("{{{body}}}"))
+                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+        };
+
+        calls.push(ParsedToolCall {
+            tool_name: name.to_string(),
+            arguments: args,
+            call_id: None,
+        });
+    }
+
+    if calls.is_empty() { None } else { Some(calls) }
 }
 
 /// Extract Python-style function calls from text
@@ -575,5 +613,49 @@ echo "hello"
 "#;
         let extracted = extract_code_block_content(content);
         assert!(extracted.contains("result = context_search"));
+    }
+
+    #[test]
+    fn test_curly_brace_tool_call_no_args() {
+        let calls = extract_curly_brace_tool_calls("get_agent_time{}").unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_agent_time");
+        assert_eq!(calls[0].arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_curly_brace_tool_call_with_args() {
+        let calls = extract_curly_brace_tool_calls(r#"get_time{"timezone": "UTC"}"#).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_time");
+        assert_eq!(calls[0].arguments, serde_json::json!({"timezone": "UTC"}));
+    }
+
+    #[test]
+    fn test_curly_brace_skips_keywords() {
+        assert!(extract_curly_brace_tool_calls("if{}").is_none());
+        assert!(extract_curly_brace_tool_calls("fn{}").is_none());
+    }
+
+    #[test]
+    fn test_json_fence_without_tool_wrapper_is_dropped() {
+        // Model outputs ```json with raw data (no tool/tool_name/name field).
+        // Should return empty, not a call with tool_name="json".
+        let content = "```json\n{\"Action\":{\"Type\":\"DesignateHunt\",\"TargetId\":\"Deer123\"},\"AgentId\":\"player1\"}\n```";
+        let calls = extract_tool_calls_from_text(content);
+        assert!(
+            calls.is_empty() || calls.iter().all(|c| c.tool_name != "json"),
+            "Should not produce a tool call with name 'json', got: {:?}",
+            calls.iter().map(|c| &c.tool_name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_json_fence_with_tool_wrapper_extracts() {
+        // Model outputs ```json with proper tool call wrapper — should extract.
+        let content = "```json\n{\"tool\":\"game-rl:step\",\"parameters\":{\"Action\":{\"Type\":\"DesignateHunt\"}}}\n```";
+        let calls = extract_tool_calls_from_text(content);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "game-rl:step");
     }
 }

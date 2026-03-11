@@ -38,8 +38,8 @@ impl Default for LearningConfig {
             max_recent_bursts: 100,
             decay_factor: 0.99,
             decay_interval: 1000,
-            exploration_bonus: 0.1,
-            probationary_budget_ratio: 0.01,
+            exploration_bonus: 0.2,
+            probationary_budget_ratio: 0.10,
         }
     }
 }

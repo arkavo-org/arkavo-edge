@@ -38,6 +38,10 @@ pub struct TrackedTask {
     pub completed_at: Option<String>,
     pub task_category: Option<String>,
     pub first_working_at: Option<String>,
+    /// "ui" for user-submitted, "agent" for autonomous agent tasks
+    pub source: String,
+    /// LLM-generated short summary for task list display
+    pub summary: Option<String>,
 }
 
 #[derive(Clone)]
@@ -376,6 +380,27 @@ impl AgUiGateway {
             lesson_tx: Some(lesson_tx),
             lesson_store,
         };
+
+        // Register learning pipeline health reporter (uses gateway shared stores)
+        {
+            use arkavo_observability::health_reporter::HealthRegistry;
+            let reporter = Arc::new(crate::health::LearningPipelineHealthReporter::new(
+                state.task_store.clone(),
+                state.lesson_store.clone(),
+                state.routing_history.clone(),
+            ));
+            HealthRegistry::global().register(reporter).await;
+        }
+
+        // Sync agent-internal HRM tasks into the UI dashboard
+        crate::gateway_task_sync::spawn_agent_task_sync(
+            state.connections.clone(),
+            state.agent_connections.clone(),
+            state.task_store.clone(),
+            state.learning_module.clone(),
+            state.routing_history.clone(),
+            state.lesson_tx.clone(),
+        );
 
         // Rate-limited API routes
         let api_routes = Router::new()

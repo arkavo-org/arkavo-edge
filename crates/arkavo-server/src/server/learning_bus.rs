@@ -4,33 +4,34 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
-use arkavo_crypto::{AgentKeypair, AgentPublicKey};
-use arkavo_gossip::{
-    AdvisorAdjustmentAnnouncement, GossipConfig, GossipMessage, GossipProtocol, KeyRegistry,
-    LessonAnnouncement, LessonDigest, advisor_message::AdjustmentStats, sign_advisor_announcement,
-    sign_lesson_announcement,
-};
+use arkavo_autolearn::{GossipNetworkBridge, PainSignal, PainSource};
+use arkavo_ensemble::SynthesisContext;
+
+use arkavo_crypto::AgentKeypair;
+use arkavo_gossip::{GossipConfig, GossipMessage, GossipProtocol, KeyRegistry};
 use arkavo_router::Router;
-use arkavo_router::learning::{
-    AgentContribution, BurstFeedback, Episode, LearningModule, Lesson, LessonPattern,
-    ToolCallFormat,
-};
+use arkavo_router::learning::{AgentContribution, LearningModule, LearningStore};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
 
-use super::episode_buffer::{EpisodeBuffer, ToolObservation};
+use super::episode_buffer::EpisodeBuffer;
 use super::policy_cache::PolicyCache;
-use super::synthesis;
 use super::tool_pattern_observer::ToolPatternObserver;
 
+use arkavo_memory::case_retrieval::CaseIndex;
+use arkavo_memory::embeddings::EmbeddingService;
+
 /// Minimum success rate required before broadcasting an advisor adjustment to peers
-const BROADCAST_MIN_SUCCESS_RATE: f64 = 0.7;
+pub(super) const BROADCAST_MIN_SUCCESS_RATE: f64 = 0.7;
 /// Minimum feedback count before broadcasting an advisor adjustment to peers
-const BROADCAST_MIN_FEEDBACK_COUNT: u32 = 5;
+pub(super) const BROADCAST_MIN_FEEDBACK_COUNT: u32 = 5;
 /// Minimum applications before broadcasting an advisor adjustment to peers
-const BROADCAST_MIN_APPLICATIONS: u32 = 3;
+pub(super) const BROADCAST_MIN_APPLICATIONS: u32 = 3;
 
 /// Configuration for learning thresholds and channel capacities
 #[derive(Debug, Clone)]
@@ -69,6 +70,15 @@ pub enum LearningEvent {
         result: String,
         success: bool,
         latency_ms: u64,
+        /// Links to the routing decision
+        #[serde(default)]
+        decision_trace_id: Option<Uuid>,
+        /// Position in multi-step execution
+        #[serde(default)]
+        step_index: u16,
+        /// Which model generated this call
+        #[serde(default)]
+        model_name: Option<String>,
     },
     /// Task completed
     TaskComplete {
@@ -79,6 +89,20 @@ pub enum LearningEvent {
     },
     /// Gossip message received from peer
     GossipReceived(GossipMessage),
+    /// Human correction of a recent action
+    HumanCorrection {
+        text: String,
+        /// DecisionTrace ID of the action being corrected
+        trace_id: Option<Uuid>,
+        /// Model that produced the corrected action
+        model_name: Option<String>,
+    },
+    /// Human reinforcement of a recent action
+    HumanReinforcement {
+        text: String,
+        /// DecisionTrace ID of the action being reinforced
+        trace_id: Option<Uuid>,
+    },
 }
 
 /// Behavior advice based on learned lessons
@@ -100,34 +124,58 @@ pub enum BehaviorAdvice {
     },
 }
 
+/// Snapshot of learning pipeline health metrics
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LearningBusStats {
+    pub events_received: u64,
+    pub episodes_synthesized: u64,
+    pub lessons_stored: u64,
+    pub gossip_peers: usize,
+    pub last_event_secs_ago: Option<u64>,
+}
+
 /// Central bus connecting event capture to learning and gossip
 pub struct LearningBus {
-    agent_id: String,
-    swarm_id: String,
+    pub(super) agent_id: String,
+    pub(super) swarm_id: String,
     /// Learning configuration
-    config: LearningConfig,
+    pub(super) config: LearningConfig,
     /// Channel for incoming learning events
     event_tx: mpsc::Sender<LearningEvent>,
     /// Event receiver (taken by event processing loop)
     event_rx: Arc<RwLock<Option<mpsc::Receiver<LearningEvent>>>>,
     /// Gossip protocol handler
-    gossip: Arc<RwLock<GossipProtocol>>,
+    pub(super) gossip: Arc<RwLock<GossipProtocol>>,
     /// Learning module for Thompson Sampling updates
-    learning: Arc<RwLock<LearningModule>>,
+    pub(super) learning: Arc<RwLock<LearningModule>>,
     /// Agent keypair for signing messages
-    keypair: Arc<AgentKeypair>,
+    pub(super) keypair: Arc<AgentKeypair>,
     /// Channel for outgoing gossip messages (peer_id, message)
-    gossip_out_tx: broadcast::Sender<(String, GossipMessage)>,
+    pub(super) gossip_out_tx: broadcast::Sender<(String, GossipMessage)>,
     /// Peer addresses for RPC calls (peer_id -> address)
-    peer_addresses: Arc<RwLock<HashMap<String, String>>>,
+    pub(super) peer_addresses: Arc<RwLock<HashMap<String, String>>>,
     /// Cache of learned lessons for behavior policy checks
-    policy_cache: Arc<RwLock<PolicyCache>>,
+    pub(super) policy_cache: Arc<RwLock<PolicyCache>>,
     /// Buffer for accumulating observations and episodes
     episode_buffer: Arc<RwLock<EpisodeBuffer>>,
     /// Router for LLM calls during synthesis (interior mutability for Arc usage)
-    router: Arc<RwLock<Option<Arc<Router>>>>,
+    pub(super) router: Arc<RwLock<Option<Arc<Router>>>>,
     /// Observer for capturing tool call patterns
-    tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
+    pub(super) tool_pattern_observer: Arc<RwLock<ToolPatternObserver>>,
+    /// Case-based retrieval index for episodes
+    pub(super) case_index: Arc<CaseIndex>,
+    /// SQLite-backed persistent store for lessons and episodes
+    pub(super) learning_store: Arc<RwLock<Option<Arc<LearningStore>>>>,
+    /// Atomic counter for events received
+    events_received: Arc<AtomicU64>,
+    /// Atomic counter for episodes synthesized
+    episodes_synthesized: Arc<AtomicU64>,
+    /// Timestamp of last event received
+    last_event_at: Arc<RwLock<Option<Instant>>>,
+    /// Lock-free pain signal sender for AutoLearner (set once before Arc wrapping)
+    pain_tx: Option<mpsc::Sender<PainSignal>>,
+    /// Lock-free bridge for patchlet message forwarding (set once at startup)
+    patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
 }
 
 impl LearningBus {
@@ -173,6 +221,8 @@ impl LearningBus {
 
         let gossip = Arc::new(RwLock::new(gossip_protocol));
         let learning = Arc::new(RwLock::new(LearningModule::new()));
+        let embedding_service = Arc::new(EmbeddingService::new());
+        let case_index = Arc::new(CaseIndex::new(embedding_service));
 
         Self {
             agent_id,
@@ -194,12 +244,41 @@ impl LearningBus {
             tool_pattern_observer: Arc::new(RwLock::new(ToolPatternObserver::new(
                 "unknown".to_string(),
             ))),
+            case_index,
+            learning_store: Arc::new(RwLock::new(None)),
+            events_received: Arc::new(AtomicU64::new(0)),
+            episodes_synthesized: Arc::new(AtomicU64::new(0)),
+            last_event_at: Arc::new(RwLock::new(None)),
+            pain_tx: None,
+            patchlet_bridge: OnceLock::new(),
         }
     }
 
-    /// Set the router for LLM-based synthesis
-    pub async fn set_router(&self, router: Arc<Router>) {
-        *self.router.write().await = Some(router);
+    /// Initialize the persistent learning store and load existing lessons
+    pub async fn init_persistence(&self, db_path: &std::path::Path) {
+        match LearningStore::new(db_path).await {
+            Ok(store) => {
+                let store = Arc::new(store);
+                // Load existing lessons into policy cache
+                if let Ok(lessons) = store.get_lessons(&self.swarm_id).await
+                    && !lessons.is_empty()
+                {
+                    let mut cache = self.policy_cache.write().await;
+                    for lesson in &lessons {
+                        cache.add_lesson(lesson.clone());
+                    }
+                    tracing::info!(
+                        count = lessons.len(),
+                        "Loaded persisted lessons into policy cache"
+                    );
+                }
+                *self.learning_store.write().await = Some(store);
+                tracing::info!("Learning store initialized at {}", db_path.display());
+            }
+            Err(e) => {
+                tracing::warn!("Learning persistence unavailable: {e}");
+            }
+        }
     }
 
     /// Get agent ID
@@ -222,80 +301,58 @@ impl LearningBus {
         self.gossip_out_tx.subscribe()
     }
 
-    /// Handle incoming gossip message from peer
-    ///
-    /// For lesson announcements that pass signature verification, immediately
-    /// adds the lesson to the local policy cache for behavior guidance injection.
-    /// For advisor adjustment announcements, applies keep-best merge to local advisor.
-    pub async fn handle_gossip(&self, message: GossipMessage) -> Vec<GossipMessage> {
-        // Capture announcement metadata before passing to gossip protocol
-        let lesson_announce = if let GossipMessage::LessonAnnounce(ref ann) = message {
-            Some(ann.clone())
-        } else {
-            None
-        };
+    /// Get gossip protocol reference for direct access
+    pub fn gossip(&self) -> &Arc<RwLock<GossipProtocol>> {
+        &self.gossip
+    }
 
-        let advisor_announce = if let GossipMessage::AdvisorAdjustmentAnnounce(ref ann) = message {
-            Some(ann.clone())
-        } else {
-            None
-        };
+    /// Get learning module reference for direct access
+    pub fn learning(&self) -> &Arc<RwLock<LearningModule>> {
+        &self.learning
+    }
 
-        let gossip = self.gossip.read().await;
-        let responses = match gossip.handle_message(message).await {
-            Ok(responses) => responses,
-            Err(e) => {
-                tracing::warn!("Gossip message error: {}", e);
-                return vec![];
-            }
-        };
-        drop(gossip);
+    /// Get keypair reference
+    pub fn keypair(&self) -> &Arc<AgentKeypair> {
+        &self.keypair
+    }
 
-        // If the lesson announcement passed signature verification (didn't error),
-        // add it to the policy cache for immediate behavior guidance injection
-        if let Some(ann) = lesson_announce {
-            let pattern = LessonPattern::new(
-                ann.condition
-                    .clone()
-                    .unwrap_or_else(|| ann.category.clone()),
-                ann.action
-                    .clone()
-                    .unwrap_or_else(|| "adjust approach".to_string()),
-                ann.expected_outcome
-                    .clone()
-                    .unwrap_or_else(|| "improved quality".to_string()),
-            );
-            let lesson = Lesson::new(
-                ann.originator.clone(),
-                self.swarm_id.clone(),
-                ann.category.clone(),
-                pattern,
-                ann.confidence,
-                1,
-            );
+    /// Get the policy cache reference
+    pub fn policy_cache(&self) -> &Arc<RwLock<PolicyCache>> {
+        &self.policy_cache
+    }
 
-            let mut cache = self.policy_cache.write().await;
-            cache.add_lesson(lesson);
-            drop(cache);
+    /// Get the episode buffer reference
+    pub fn episode_buffer(&self) -> &Arc<RwLock<EpisodeBuffer>> {
+        &self.episode_buffer
+    }
 
-            tracing::info!(
-                lesson_id = %ann.lesson_id,
-                category = %ann.category,
-                originator = %ann.originator,
-                "Gossip lesson applied to policy cache for guidance injection"
-            );
-        }
+    /// Take the event receiver for the event processing loop (can only be called once)
+    pub async fn take_event_receiver(&self) -> Option<mpsc::Receiver<LearningEvent>> {
+        self.event_rx.write().await.take()
+    }
 
-        // If the advisor adjustment passed signature verification, apply keep-best merge
-        if let Some(ann) = advisor_announce {
-            self.apply_remote_adjustment(&ann).await;
-        }
+    /// Get the learning configuration
+    pub fn config(&self) -> &LearningConfig {
+        &self.config
+    }
 
-        responses
+    /// Get the router reference for advisor access
+    pub fn router(&self) -> &Arc<RwLock<Option<Arc<Router>>>> {
+        &self.router
+    }
+
+    /// Get the gossip outbound channel sender
+    pub fn gossip_out_tx(&self) -> &broadcast::Sender<(String, GossipMessage)> {
+        &self.gossip_out_tx
+    }
+
+    /// Get the case-based retrieval index
+    pub fn case_index(&self) -> &Arc<CaseIndex> {
+        &self.case_index
     }
 
     /// Add a peer to gossip protocol with their public key
-    pub async fn add_peer(&self, peer_id: String, public_key: AgentPublicKey) {
+    pub async fn add_peer(&self, peer_id: String, public_key: arkavo_crypto::AgentPublicKey) {
         let gossip = self.gossip.write().await;
         gossip.add_peer(peer_id.clone()).await;
         gossip.register_key(peer_id, public_key).await;
@@ -312,7 +369,6 @@ impl LearningBus {
         gossip.add_peer(peer_id.clone()).await;
         drop(gossip);
 
-        // Store address if provided
         if let Some(addr) = address {
             self.peer_addresses.write().await.insert(peer_id, addr);
         }
@@ -325,7 +381,6 @@ impl LearningBus {
         gossip.remove_peer(peer_id).await;
         drop(gossip);
 
-        // Remove address
         self.peer_addresses.write().await.remove(peer_id);
     }
 
@@ -340,7 +395,11 @@ impl LearningBus {
     }
 
     /// Register a peer's public key for signature verification
-    pub async fn register_peer_key(&self, peer_id: String, public_key: AgentPublicKey) {
+    pub async fn register_peer_key(
+        &self,
+        peer_id: String,
+        public_key: arkavo_crypto::AgentPublicKey,
+    ) {
         let gossip = self.gossip.write().await;
         gossip.register_key(peer_id.clone(), public_key).await;
         tracing::info!("Registered public key for peer: {}", peer_id);
@@ -351,499 +410,157 @@ impl LearningBus {
         self.gossip.read().await.peer_count().await
     }
 
-    /// Run anti-entropy synchronization with peers
-    pub async fn run_anti_entropy(&self) -> Result<(), String> {
-        let gossip = self.gossip.read().await;
-        let digest = gossip.create_digest().await;
-        let lesson_digest = gossip.create_lesson_digest().await;
-        drop(gossip);
-
-        // Select peers to send digests to
-        let gossip = self.gossip.read().await;
-        let peers = gossip.select_propagation_peers(None).await;
-        drop(gossip);
-
-        // Send patch digest to selected peers
-        for peer_id in &peers {
-            let _ = self
-                .gossip_out_tx
-                .send((peer_id.clone(), GossipMessage::AntiEntropy(digest.clone())));
-            let _ = self.gossip_out_tx.send((
-                peer_id.clone(),
-                GossipMessage::LessonDigest(lesson_digest.clone()),
-            ));
+    /// Record that an event was received
+    pub fn record_event(&self) {
+        self.events_received.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut last) = self.last_event_at.try_write() {
+            *last = Some(Instant::now());
         }
-
-        tracing::debug!(
-            "Anti-entropy sent to {} peers: {} patches, {} lessons",
-            peers.len(),
-            digest.known_patches.len(),
-            lesson_digest.known_lessons.len()
-        );
-
-        Ok(())
     }
 
-    /// Synthesize and propagate lessons from accumulated learning
-    pub async fn synthesize_and_propagate_lessons(&self) -> Result<(), String> {
-        // Get learning stats for all agents
-        let learning = self.learning.read().await;
-        let stats = learning.get_all_stats().await;
-        drop(learning);
-
-        // For now, we only propagate if we have significant learning
-        if stats.is_empty() {
-            return Ok(());
-        }
-
-        tracing::debug!(
-            "Learning stats available for {} agents (lesson synthesis pending)",
-            stats.len()
-        );
-
-        Ok(())
+    /// Record that an episode was synthesized
+    pub fn record_episode_synthesized(&self) {
+        self.episodes_synthesized.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Announce a lesson to the gossip network (signs before sending)
-    pub async fn announce_lesson(
-        &self,
-        mut announcement: LessonAnnouncement,
-    ) -> Result<(), String> {
-        // Sign the announcement with our keypair
-        sign_lesson_announcement(&mut announcement, &self.keypair)
-            .map_err(|e| format!("Failed to sign lesson: {e}"))?;
-
-        let gossip = self.gossip.read().await;
-        let peers = gossip.select_propagation_peers(None).await;
-        drop(gossip);
-
-        let peer_count = peers.len();
-        for peer_id in peers {
-            let _ = self
-                .gossip_out_tx
-                .send((peer_id, GossipMessage::LessonAnnounce(announcement.clone())));
-        }
-
-        tracing::debug!(
-            "Announced signed lesson {} to {} peers",
-            announcement.lesson_id,
-            peer_count
-        );
-        Ok(())
+    /// Set the pain signal sender (call before Arc wrapping — takes &mut self, no lock)
+    pub fn set_pain_sender(&mut self, tx: mpsc::Sender<PainSignal>) {
+        self.pain_tx = Some(tx);
     }
 
-    /// Get gossip protocol reference for direct access
-    pub fn gossip(&self) -> &Arc<RwLock<GossipProtocol>> {
-        &self.gossip
+    /// Register the AutoLearner's gossip bridge for patchlet forwarding (OnceLock, lock-free reads)
+    pub fn set_autolearn_bridge(&self, bridge: Arc<GossipNetworkBridge>) {
+        let _ = self.patchlet_bridge.set(bridge);
     }
 
-    /// Get learning module reference for direct access
-    pub fn learning(&self) -> &Arc<RwLock<LearningModule>> {
-        &self.learning
+    /// Get the AutoLearner's patchlet bridge (lock-free read)
+    pub(super) fn patchlet_bridge(&self) -> Option<&Arc<GossipNetworkBridge>> {
+        self.patchlet_bridge.get()
     }
 
-    /// Get keypair reference
-    pub fn keypair(&self) -> &Arc<AgentKeypair> {
-        &self.keypair
-    }
-
-    /// Create a lesson digest for anti-entropy
-    pub async fn create_lesson_digest(&self) -> LessonDigest {
-        self.gossip.read().await.create_lesson_digest().await
-    }
-
-    /// Check behavior policy for a sector based on learned lessons
-    pub async fn check_behavior_policy(&self, sector_id: &str) -> BehaviorAdvice {
-        let cache = self.policy_cache.read().await;
-
-        // Check for avoid lessons first (highest priority)
-        if let Some(lesson) = cache.should_avoid(sector_id) {
-            return BehaviorAdvice::AvoidSector {
-                reason: lesson.pattern.condition.clone(),
-                lesson_id: lesson.id,
-                confidence: lesson.confidence,
-            };
-        }
-
-        // Check for slowdown lessons
-        if let Some(lesson) = cache.should_slowdown(sector_id) {
-            return BehaviorAdvice::SlowDown {
-                reason: lesson.pattern.condition.clone(),
-                lesson_id: lesson.id,
-                confidence: lesson.confidence,
-            };
-        }
-
-        BehaviorAdvice::Default
-    }
-
-    /// Get the policy cache reference
-    pub fn policy_cache(&self) -> &Arc<RwLock<PolicyCache>> {
-        &self.policy_cache
-    }
-
-    /// Subscribe to lesson approval notifications
-    pub async fn subscribe_lesson_approvals(
-        &self,
-    ) -> Option<broadcast::Receiver<LessonAnnouncement>> {
-        self.gossip.read().await.subscribe_lesson_approvals()
-    }
-
-    /// Add a lesson to the policy cache
-    pub async fn add_lesson_to_cache(&self, lesson: Lesson) {
-        let mut cache = self.policy_cache.write().await;
-        cache.add_lesson(lesson);
-    }
-
-    /// Get count of cached lessons
-    pub async fn cached_lesson_count(&self) -> usize {
-        self.policy_cache.read().await.len()
-    }
-
-    /// Get the episode buffer reference
-    pub fn episode_buffer(&self) -> &Arc<RwLock<EpisodeBuffer>> {
-        &self.episode_buffer
-    }
-
-    /// Take the event receiver for the event processing loop (can only be called once)
-    pub async fn take_event_receiver(&self) -> Option<mpsc::Receiver<LearningEvent>> {
-        self.event_rx.write().await.take()
-    }
-
-    /// Synthesize an episode from observations using LLM
-    pub async fn synthesize_episode(
-        &self,
-        observations: &[ToolObservation],
-        category: &str,
-    ) -> Result<Episode, String> {
-        let router_guard = self.router.read().await;
-        let router = router_guard.as_ref().ok_or("Router not configured")?;
-        synthesis::synthesize_episode(
-            router,
-            &self.agent_id,
-            &self.swarm_id,
-            observations,
-            category,
-        )
-        .await
-    }
-
-    /// Synthesize a lesson from episodes using LLM
-    pub async fn synthesize_lesson(
-        &self,
-        episodes: &[Episode],
-        category: &str,
-    ) -> Result<Option<Lesson>, String> {
-        let router_guard = self.router.read().await;
-        let router = router_guard.as_ref().ok_or("Router not configured")?;
-        synthesis::synthesize_lesson(
-            router,
-            &self.agent_id,
-            &self.swarm_id,
-            episodes,
-            category,
-            self.config.min_lesson_confidence,
-        )
-        .await
-    }
-
-    /// Get the learning configuration
-    pub fn config(&self) -> &LearningConfig {
-        &self.config
-    }
-
-    /// Get the tool pattern observer reference
-    pub fn tool_pattern_observer(&self) -> &Arc<RwLock<ToolPatternObserver>> {
-        &self.tool_pattern_observer
-    }
-
-    /// Record a successful tool call pattern
-    pub async fn record_tool_pattern_success(
-        &self,
-        tool_name: &str,
-        format: ToolCallFormat,
-        raw_invocation: &str,
-        args: &serde_json::Value,
-    ) {
-        let mut observer = self.tool_pattern_observer.write().await;
-        observer.record_success(tool_name, format, raw_invocation, args);
-    }
-
-    /// Add a tool pattern lesson to the policy cache
-    pub async fn add_tool_pattern_to_cache(&self, lesson: Lesson) {
-        let mut cache = self.policy_cache.write().await;
-        cache.add_lesson(lesson);
-    }
-
-    /// Get few-shot examples for prompt injection from policy cache
-    pub async fn get_few_shot_examples(
-        &self,
-        tool_names: &[String],
-        _format: ToolCallFormat,
-    ) -> String {
-        let cache = self.policy_cache.read().await;
-        cache.get_few_shot_examples(tool_names)
-    }
-
-    /// Get behavior guidance for prompt injection from cached lessons
-    pub async fn get_behavior_guidance(&self, category: Option<&str>) -> String {
-        let cache = self.policy_cache.read().await;
-        cache.get_behavior_guidance(category)
-    }
-
-    /// Record a quality score for an (agent, category) pair
-    pub async fn record_quality(&self, agent_id: &str, category: &str, score: f64) {
-        let mut cache = self.policy_cache.write().await;
-        cache.record_quality(agent_id, category, score);
-    }
-
-    /// Get all quality trends from the policy cache
-    pub async fn get_quality_trends(&self) -> Vec<super::policy_cache::QualityTrend> {
-        let cache = self.policy_cache.read().await;
-        cache.get_all_trends()
-    }
-
-    /// Get behavior lesson count
-    pub async fn behavior_lesson_count(&self) -> usize {
-        let cache = self.policy_cache.read().await;
-        cache.behavior_lesson_count()
-    }
-
-    /// Update the model name for pattern attribution
-    pub async fn set_model_name(&self, model_name: String) {
-        let mut observer = self.tool_pattern_observer.write().await;
-        observer.set_model_name(model_name);
-    }
-
-    /// Start receiving lessons from the gateway and propagating via gossip
-    ///
-    /// Signs each lesson as an announcement and sends to the gossip network.
-    pub fn start_lesson_receiver(&self, mut rx: mpsc::Receiver<Lesson>) {
-        let gossip = self.gossip.clone();
-        let keypair = self.keypair.clone();
-        let gossip_out_tx = self.gossip_out_tx.clone();
-        let learning = self.learning.clone();
-        let swarm_id = self.swarm_id.clone();
-        let policy_cache = self.policy_cache.clone();
-
-        tokio::spawn(async move {
-            while let Some(lesson) = rx.recv().await {
-                tracing::info!(
-                    "Learning bus received lesson: {} (category={})",
-                    lesson.pattern.condition,
-                    lesson.category
-                );
-
-                // Store in policy cache for behavior guidance injection
-                {
-                    let mut cache = policy_cache.write().await;
-                    cache.add_lesson(lesson.clone());
-                }
-
-                // Apply locally: inject negative feedback for the originator+category
-                Self::apply_lesson_to_local_routing(&learning, &lesson).await;
-
-                // Create and sign announcement for gossip propagation
-                let mut announcement = LessonAnnouncement::new(
-                    lesson.id,
-                    lesson.compute_hash(),
-                    lesson.agent_id.clone(),
-                    swarm_id.clone(),
-                    lesson.category.clone(),
-                    lesson.confidence,
-                )
-                .with_pattern(
-                    lesson.pattern.condition.clone(),
-                    lesson.pattern.action.clone(),
-                    lesson.pattern.expected_outcome.clone(),
-                );
-
-                if let Err(e) = sign_lesson_announcement(&mut announcement, &keypair) {
-                    tracing::warn!("Failed to sign lesson announcement: {}", e);
-                    continue;
-                }
-
-                let g = gossip.read().await;
-                let peers = g.select_propagation_peers(None).await;
-                drop(g);
-
-                let peer_count = peers.len();
-                for peer_id in peers {
-                    let _ = gossip_out_tx
-                        .send((peer_id, GossipMessage::LessonAnnounce(announcement.clone())));
-                }
-
-                tracing::info!(
-                    "Propagated lesson {} to {} peers",
-                    announcement.lesson_id,
-                    peer_count
-                );
-            }
-        });
-    }
-
-    /// Apply a received gossip lesson to local routing by injecting synthetic feedback
-    async fn apply_lesson_to_local_routing(
-        learning: &Arc<RwLock<LearningModule>>,
-        lesson: &Lesson,
-    ) {
-        let feedback = BurstFeedback::failure(Uuid::new_v4(), lesson.category.clone(), 0)
-            .with_quality(1.0 - lesson.confidence);
-
-        learning
-            .write()
-            .await
-            .immediate_update(&lesson.agent_id, &feedback)
-            .await;
-
-        tracing::debug!(
-            "Applied lesson locally: agent={}, category={}, confidence={}",
-            lesson.agent_id,
-            lesson.category,
-            lesson.confidence
-        );
-    }
-
-    /// Check if there are patterns ready for lesson synthesis
-    pub async fn has_ready_patterns(&self) -> bool {
-        let observer = self.tool_pattern_observer.read().await;
-        observer.has_ready_patterns()
-    }
-
-    /// Get the number of cached tool format lessons
-    pub async fn cached_tool_pattern_count(&self) -> usize {
-        self.policy_cache.read().await.tool_format_lesson_count()
-    }
-
-    /// Get the router reference for advisor access
-    pub fn router(&self) -> &Arc<RwLock<Option<Arc<Router>>>> {
-        &self.router
-    }
-
-    /// Get the gossip outbound channel sender
-    pub fn gossip_out_tx(&self) -> &broadcast::Sender<(String, GossipMessage)> {
-        &self.gossip_out_tx
-    }
-
-    /// Broadcast proven advisor adjustments to the gossip network
-    ///
-    /// Reads the Router's advisor, filters by quality threshold, signs each
-    /// as an AdvisorAdjustmentAnnouncement, and sends via gossip.
-    pub async fn broadcast_advisor_adjustments(&self) {
-        let router_guard = self.router.read().await;
-        let router = match router_guard.as_ref() {
-            Some(r) => r,
-            None => return,
-        };
-
-        let snapshots = router.advisor().export_dynamic();
-        drop(router_guard);
-
-        if snapshots.is_empty() {
-            return;
-        }
-
-        // Quality threshold: only broadcast proven adjustments
-        let quality_snapshots: Vec<_> = snapshots
-            .into_iter()
-            .filter(|s| {
-                s.success_rate >= BROADCAST_MIN_SUCCESS_RATE
-                    && s.feedback_count >= BROADCAST_MIN_FEEDBACK_COUNT
-                    && s.applications >= BROADCAST_MIN_APPLICATIONS
-            })
-            .collect();
-
-        if quality_snapshots.is_empty() {
-            return;
-        }
-
-        let gossip = self.gossip.read().await;
-        let peers = gossip.select_propagation_peers(None).await;
-        drop(gossip);
-
-        if peers.is_empty() {
-            return;
-        }
-
-        let mut broadcast_count = 0;
-        for snap in &quality_snapshots {
-            let issue_str = snap.issue.to_string();
-            let mut ann = AdvisorAdjustmentAnnouncement::new(
-                self.agent_id.clone(),
-                snap.model_family.clone(),
-                issue_str,
-                snap.label.clone(),
-                snap.text.clone(),
-                AdjustmentStats {
-                    success_rate: snap.success_rate,
-                    feedback_count: snap.feedback_count,
-                    applications: snap.applications,
-                    updated_at: chrono::Utc::now(),
+    /// Report a quality failure as an AutoLearner pain signal (sync, non-blocking)
+    pub fn report_autolearn_pain(&self, severity: f64, model_name: &str, description: &str) {
+        if let Some(tx) = &self.pain_tx {
+            let ctx = SynthesisContext::new(model_name.to_string(), description.to_string());
+            let signal = PainSignal::new(
+                PainSource::External {
+                    description: description.to_string(),
                 },
+                severity,
+                ctx,
             );
-
-            if sign_advisor_announcement(&mut ann, &self.keypair).is_err() {
-                continue;
-            }
-
-            for peer_id in &peers {
-                let _ = self.gossip_out_tx.send((
-                    peer_id.clone(),
-                    GossipMessage::AdvisorAdjustmentAnnounce(ann.clone()),
-                ));
-            }
-            broadcast_count += 1;
-        }
-
-        if broadcast_count > 0 {
-            tracing::info!(
-                "Broadcast {} advisor adjustments to {} peers",
-                broadcast_count,
-                peers.len()
-            );
+            let _ = tx.try_send(signal);
         }
     }
 
-    /// Apply a remote advisor adjustment using keep-best merge
-    async fn apply_remote_adjustment(&self, ann: &AdvisorAdjustmentAnnouncement) {
-        use arkavo_router::prompt_advisor::{AdvisorIssue, DynamicSnapshot};
+    /// Get a snapshot of pipeline health stats
+    pub async fn stats(&self) -> LearningBusStats {
+        let last_event_secs_ago = self
+            .last_event_at
+            .read()
+            .await
+            .map(|t| t.elapsed().as_secs());
+        let lessons_stored = self.policy_cache.read().await.len() as u64;
+        let gossip_peers = self.gossip.read().await.peer_count().await;
 
-        let issue = match ann.issue.parse::<AdvisorIssue>() {
-            Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("{}", e);
-                return;
-            }
-        };
-
-        let snapshot = DynamicSnapshot {
-            label: ann.label.clone(),
-            model_family: ann.model_family.clone(),
-            issue,
-            text: ann.text.clone(),
-            success_rate: ann.stats.success_rate,
-            applications: ann.stats.applications,
-            feedback_count: ann.stats.feedback_count,
-        };
-
-        let router_guard = self.router.read().await;
-        if let Some(router) = router_guard.as_ref() {
-            router.advisor().import_dynamic_merge_best(vec![snapshot]);
-            tracing::info!(
-                "Applied remote advisor adjustment from {}: {} ({}, {})",
-                ann.originator,
-                ann.label,
-                ann.model_family,
-                ann.issue
-            );
+        LearningBusStats {
+            events_received: self.events_received.load(Ordering::Relaxed),
+            episodes_synthesized: self.episodes_synthesized.load(Ordering::Relaxed),
+            lessons_stored,
+            gossip_peers,
+            last_event_secs_ago,
         }
+    }
+}
+
+/// HealthReporter implementation for the learning pipeline
+pub struct LearningPipelineReporter {
+    bus: Arc<LearningBus>,
+    started_at: Instant,
+}
+
+impl LearningPipelineReporter {
+    pub fn new(bus: Arc<LearningBus>) -> Self {
+        Self {
+            bus,
+            started_at: Instant::now(),
+        }
+    }
+
+    /// Register this reporter in the global HealthRegistry
+    pub async fn register(bus: Arc<LearningBus>) {
+        use arkavo_observability::health_reporter::HealthRegistry;
+        let reporter = Arc::new(Self::new(bus));
+        HealthRegistry::global().register(reporter).await;
+        tracing::info!("Registered learning_pipeline health reporter");
+    }
+}
+
+#[async_trait::async_trait]
+impl arkavo_observability::health_reporter::HealthReporter for LearningPipelineReporter {
+    async fn check_health(&self) -> arkavo_observability::health_reporter::HealthReport {
+        use arkavo_observability::health_reporter::HealthReport;
+        let stats = self.bus.stats().await;
+        let uptime_secs = self.started_at.elapsed().as_secs();
+
+        let status_str =
+            if stats.events_received > 0 && (stats.lessons_stored > 0 || uptime_secs < 300) {
+                "healthy"
+            } else if stats.events_received > 0 {
+                "degraded"
+            } else if uptime_secs < 60 {
+                "healthy" // warming up
+            } else {
+                "stalled"
+            };
+
+        let message = format!(
+            "events={}, episodes={}, lessons={}, peers={}",
+            stats.events_received,
+            stats.episodes_synthesized,
+            stats.lessons_stored,
+            stats.gossip_peers
+        );
+
+        let mut details = std::collections::HashMap::new();
+        details.insert(
+            "events_received".to_string(),
+            serde_json::json!(stats.events_received),
+        );
+        details.insert(
+            "episodes_synthesized".to_string(),
+            serde_json::json!(stats.episodes_synthesized),
+        );
+        details.insert(
+            "lessons_stored".to_string(),
+            serde_json::json!(stats.lessons_stored),
+        );
+        details.insert(
+            "gossip_peers".to_string(),
+            serde_json::json!(stats.gossip_peers),
+        );
+        if let Some(secs) = stats.last_event_secs_ago {
+            details.insert("last_event_secs_ago".to_string(), serde_json::json!(secs));
+        }
+
+        match status_str {
+            "healthy" => HealthReport::healthy("learning_pipeline", message).with_details(details),
+            "degraded" => {
+                HealthReport::degraded("learning_pipeline", message).with_details(details)
+            }
+            _ => HealthReport::unhealthy("learning_pipeline", message).with_details(details),
+        }
+    }
+
+    fn component_name(&self) -> &'static str {
+        "learning_pipeline"
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_router::learning::LessonPattern;
+    use arkavo_router::learning::{Lesson, LessonPattern};
 
     fn make_bus() -> LearningBus {
         let keypair = Arc::new(AgentKeypair::generate());
@@ -972,5 +689,30 @@ mod tests {
             guidance.contains("empty responses"),
             "guidance should contain lesson condition text"
         );
+    }
+
+    #[tokio::test]
+    async fn test_stats_initial() {
+        let bus = make_bus();
+        let stats = bus.stats().await;
+        assert_eq!(stats.events_received, 0);
+        assert_eq!(stats.episodes_synthesized, 0);
+        assert_eq!(stats.lessons_stored, 0);
+        assert_eq!(stats.gossip_peers, 0);
+        assert!(stats.last_event_secs_ago.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stats_after_events() {
+        let bus = make_bus();
+        bus.record_event();
+        bus.record_event();
+        bus.record_episode_synthesized();
+
+        let stats = bus.stats().await;
+        assert_eq!(stats.events_received, 2);
+        assert_eq!(stats.episodes_synthesized, 1);
+        assert!(stats.last_event_secs_ago.is_some());
+        assert!(stats.last_event_secs_ago.unwrap() < 2);
     }
 }

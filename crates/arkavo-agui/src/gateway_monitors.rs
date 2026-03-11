@@ -32,10 +32,7 @@ pub fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, Connecti
             let system_status = SystemStatus {
                 uptime: format!(
                     "{} seconds",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
+                    crate::types::PROCESS_START.elapsed().as_secs()
                 ),
                 memory_usage: "N/A".to_string(),
                 active_connections: conns.len() as u32,

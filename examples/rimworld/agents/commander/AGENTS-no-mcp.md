@@ -1,6 +1,6 @@
 # AGENTS.md - Test config without MCP (for chat testing)
 
-## rimworld-commander
+## commander
 purpose: |
   Colony commander for RimWorld. Keep colonists alive.
   This is a test configuration without MCP servers for debugging chat functionality.

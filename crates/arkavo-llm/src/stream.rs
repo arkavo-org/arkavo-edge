@@ -1,3 +1,4 @@
+use crate::provider::InferenceTiming;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7,4 +8,7 @@ pub struct StreamResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     pub done: bool,
+    /// LLM inference timing from local providers (populated on final done=true message)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference_timing: Option<InferenceTiming>,
 }

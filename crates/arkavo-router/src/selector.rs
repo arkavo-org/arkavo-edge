@@ -34,6 +34,9 @@ pub struct ModelSelector {
     pub(crate) budget_threshold: f64,
     pub(crate) availability: ProviderAvailability,
     pub(crate) gpu_available: bool,
+    /// Per-agent memory budget in bytes. Models exceeding this are excluded from
+    /// feasible set. 0 means unconstrained (backward compat).
+    pub(crate) max_memory_bytes: std::sync::atomic::AtomicU64,
 }
 
 impl ModelSelector {
@@ -42,6 +45,7 @@ impl ModelSelector {
             budget_threshold: 0.80,
             availability: ProviderAvailability::from_env(),
             gpu_available: Self::check_gpu_status(),
+            max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -50,7 +54,15 @@ impl ModelSelector {
             budget_threshold,
             availability: ProviderAvailability::from_env(),
             gpu_available: Self::check_gpu_status(),
+            max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Update the per-agent memory budget. Models whose weight files exceed
+    /// this limit are excluded from the feasible set.
+    pub fn set_memory_budget(&self, bytes: u64) {
+        self.max_memory_bytes
+            .store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Create selector with explicit provider availability (for testing)
@@ -60,6 +72,7 @@ impl ModelSelector {
             budget_threshold: 0.80,
             availability,
             gpu_available: true, // Assume GPU available in tests
+            max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -97,9 +110,17 @@ impl ModelSelector {
     /// This prevents 20+ second waits on CPU-only devices.
     /// GLM-4.7-Flash requires 32GB+ RAM (unified memory on Apple Silicon).
     fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
+        let mem_budget = self
+            .max_memory_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        let fits_budget = |m: &ModelChoice| mem_budget == 0 || m.size_bytes() <= mem_budget;
+
         // If no GPU, skip large models to avoid slow CPU-only inference
         if !self.gpu_available {
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B)
+                && fits_budget(&ModelChoice::LocalMinistral3B)
+            {
                 return ModelChoice::LocalMinistral3B;
             }
             return ModelChoice::LocalQwen3;
@@ -109,15 +130,21 @@ impl ModelSelector {
             // GLM-4.7-Flash: 30B MoE, highest quality local model
             if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram(32)
+                && fits_budget(&ModelChoice::LocalGlm47Flash)
             {
                 ModelChoice::LocalGlm47Flash
             } else if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
+                && fits_budget(&ModelChoice::LocalQwen35_27B)
             {
                 ModelChoice::LocalQwen35_27B
-            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B)
+                && fits_budget(&ModelChoice::LocalMinistral8B)
+            {
                 ModelChoice::LocalMinistral8B
-            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B)
+                && fits_budget(&ModelChoice::LocalMinistral3B)
+            {
                 ModelChoice::LocalMinistral3B
             } else {
                 ModelChoice::LocalQwen3
@@ -128,14 +155,15 @@ impl ModelSelector {
     }
 
     /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// These need speed, not quality — always pick the smallest cached model.
+    /// Ministral-3B preferred: 422ms avg, 8/8 tool accuracy.
+    /// Qwen3.5-0.8B is slower (~22s) with poor tool calling (1/8).
     pub fn fastest_local_model(&self) -> ModelChoice {
-        if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
-            ModelChoice::LocalQwen3
-        } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+        if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
             ModelChoice::LocalMinistral3B
-        } else {
+        } else if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
             ModelChoice::LocalQwen3
+        } else {
+            ModelChoice::LocalMinistral3B
         }
     }
 
@@ -161,26 +189,8 @@ impl ModelSelector {
 
     /// Check if a local model is cached (static helper)
     fn is_local_model_cached(model: &ModelChoice) -> bool {
-        match model {
-            ModelChoice::LocalQwen3 => {
-                model_discovery::is_model_cached("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf")
-            }
-            ModelChoice::LocalMinistral3B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
-                "Ministral-3-3B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalMinistral8B => model_discovery::is_model_cached(
-                "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
-                "Ministral-3-8B-Instruct-2512-Q5_K_M.gguf",
-            ),
-            ModelChoice::LocalQwen35_27B => model_discovery::is_model_cached(
-                "unsloth/Qwen3.5-27B-GGUF",
-                "Qwen3.5-27B-UD-Q6_K_XL.gguf",
-            ),
-            ModelChoice::LocalGlm47Flash => model_discovery::is_model_cached(
-                "unsloth/GLM-4.7-Flash-GGUF",
-                "GLM-4.7-Flash-Q4_K_M.gguf",
-            ),
+        match (model.repo_id(), model.gguf_filename()) {
+            (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
             _ => false,
         }
     }
@@ -206,7 +216,11 @@ impl ModelSelector {
     }
 
     pub(crate) fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
-        match classification.category {
+        let mem_budget = self
+            .max_memory_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        let model = match classification.category {
             TaskCategory::FrontendUI if classification.confidence > 0.75 => {
                 self.best_cloud_model(false)
             }
@@ -248,17 +262,29 @@ impl ModelSelector {
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
-            // General tasks use larger local model for better tool calling and reasoning
-            TaskCategory::General => self.best_available_local_model(true),
+            // Game/simulation and general tasks use larger local model
+            TaskCategory::GameSimulation | TaskCategory::General => {
+                self.best_available_local_model(true)
+            }
 
             // Other tasks: prefer larger models when GPU available for better tool calling
             _ => self.best_available_local_model(self.gpu_available),
-        }
+        };
+
+        // Enforce per-agent memory budget on the selected model
+        model.downgrade_for_budget(mem_budget)
     }
 
-    /// All models currently feasible (cached local + API keys for cloud)
+    /// All models currently feasible (cached local + API keys for cloud).
+    ///
+    /// When `max_memory_bytes` is set (> 0), local models whose weight files
+    /// exceed the budget are excluded so Thompson Sampling never selects a
+    /// model that would blow the agent's memory allocation.
     pub fn feasible_models(&self) -> Vec<ModelChoice> {
         let mut models = Vec::new();
+        let mem_budget = self
+            .max_memory_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         // Local models
         if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
@@ -283,7 +309,21 @@ impl ModelSelector {
             }
         }
 
-        // Cloud models
+        // Per-agent memory budget: exclude local models that exceed the allocation
+        if mem_budget > 0 {
+            let before = models.len();
+            models.retain(|m| m.size_bytes() == 0 || m.size_bytes() <= mem_budget);
+            if models.len() < before {
+                tracing::info!(
+                    budget_mb = mem_budget / (1024 * 1024),
+                    kept = models.len(),
+                    excluded = before - models.len(),
+                    "Memory budget: excluded models exceeding per-agent allocation"
+                );
+            }
+        }
+
+        // Cloud models (unconstrained by memory)
         if self.availability.gemini {
             models.push(ModelChoice::GeminiFlash);
             models.push(ModelChoice::GeminiPro);

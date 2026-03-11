@@ -115,6 +115,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new("prompt".to_string(), response, vec![])

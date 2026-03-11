@@ -1,10 +1,11 @@
-//! LLM-based policy synthesis using Ministral-3B
+//! LLM-based policy synthesis
 //!
-//! Implements the `LlmSynthesizer` trait from arkavo-ensemble using
-//! Ministral-3B with constrained decoding via arkavo-torg.
+//! Implements the `LlmSynthesizer` trait from arkavo-ensemble
+//! with constrained decoding via arkavo-torg.
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use torg_core::Graph;
 
@@ -61,11 +62,11 @@ enum TokenMapVariant {
     },
 }
 
-/// Ministral-3B based policy synthesizer
+/// LLM-based policy synthesizer
 ///
 /// When the `llm` feature is enabled, this uses arkavo-torg for
 /// constrained decoding. Otherwise, it returns an error.
-pub struct MinistralSynthesizer {
+pub struct PolicySynthesizer {
     config: SynthesizerConfig,
     #[cfg(feature = "llm")]
     model: Option<LlamaModel>,
@@ -73,7 +74,7 @@ pub struct MinistralSynthesizer {
     token_map: Option<TokenMapVariant>,
 }
 
-impl MinistralSynthesizer {
+impl PolicySynthesizer {
     /// Create a new synthesizer with default config (no model loaded)
     ///
     /// Without loading a model, synthesis will return an error.
@@ -174,15 +175,51 @@ impl MinistralSynthesizer {
     pub fn build_prompt(&self, signal: &PainSignal) -> String {
         signal.context.build_prompt()
     }
+
+    /// Synthesize on a blocking thread pool to avoid stalling the async runtime.
+    pub async fn synthesize_patchlet_nonblocking(
+        self: &Arc<Self>,
+        signal: &PainSignal,
+    ) -> Result<Graph, SynthesisError> {
+        let this = Arc::clone(self);
+        let prompt = signal.context.build_prompt();
+        tokio::task::spawn_blocking(move || this.synthesize_sync(&prompt))
+            .await
+            .map_err(|e| SynthesisError {
+                message: e.to_string(),
+            })?
+    }
+
+    fn synthesize_sync(&self, prompt: &str) -> Result<Graph, SynthesisError> {
+        #[cfg(feature = "llm")]
+        {
+            let (model, token_map) = match (&self.model, &self.token_map) {
+                (Some(m), Some(t)) => (m, t),
+                _ => {
+                    return Err(SynthesisError {
+                        message: "Model not loaded. Call with_model() to load an LLM.".to_string(),
+                    });
+                }
+            };
+            synthesize_with_torg(model, token_map, prompt, &self.config)
+        }
+        #[cfg(not(feature = "llm"))]
+        {
+            let _ = prompt;
+            Err(SynthesisError {
+                message: "LLM synthesis requires the 'llm' feature".to_string(),
+            })
+        }
+    }
 }
 
-impl Default for MinistralSynthesizer {
+impl Default for PolicySynthesizer {
     fn default() -> Self {
         Self::new().expect("Failed to create default synthesizer")
     }
 }
 
-impl LlmSynthesizer for MinistralSynthesizer {
+impl LlmSynthesizer for PolicySynthesizer {
     fn synthesize(
         &self,
         prompt: &str,
@@ -207,13 +244,7 @@ impl LlmSynthesizer for MinistralSynthesizer {
             let config = self.config.clone();
             let prompt = prompt.to_string();
 
-            // Note: synthesize_with_torg is synchronous (blocking LLM inference)
-            // We wrap it in spawn_blocking to avoid blocking the async runtime
-            Box::pin(async move {
-                // For now, run synchronously since llama.cpp context is not Send
-                // TODO: Consider spawn_blocking if this becomes a bottleneck
-                synthesize_with_torg(model, token_map, &prompt, &config)
-            })
+            Box::pin(async move { synthesize_with_torg(model, token_map, &prompt, &config) })
         }
 
         // When the llm feature is disabled, return an error
@@ -384,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_synthesizer_creation() {
-        let synthesizer = MinistralSynthesizer::new().unwrap();
+        let synthesizer = PolicySynthesizer::new().unwrap();
         assert_eq!(synthesizer.model_id(), "ministral-3b");
     }
 
@@ -396,6 +427,27 @@ mod tests {
         let result = mock.synthesize("test prompt").await.unwrap();
         assert_eq!(result.inputs, graph.inputs);
         assert_eq!(result.outputs, graph.outputs);
+    }
+
+    #[tokio::test]
+    async fn test_synthesize_nonblocking() {
+        use std::sync::Arc;
+
+        let synth = Arc::new(PolicySynthesizer::new().unwrap());
+        let ctx = arkavo_ensemble::SynthesisContext::new(
+            "test-model".to_string(),
+            "Test policy".to_string(),
+        );
+        let signal = crate::signals::PainSignal::new(
+            crate::signals::PainSource::External {
+                description: "test".to_string(),
+            },
+            0.5,
+            ctx,
+        );
+
+        let result = synth.synthesize_patchlet_nonblocking(&signal).await;
+        assert!(result.is_err(), "Should error without a loaded model");
     }
 
     #[test]
@@ -416,7 +468,7 @@ mod tests {
             ctx,
         );
 
-        let synthesizer = MinistralSynthesizer::new().unwrap();
+        let synthesizer = PolicySynthesizer::new().unwrap();
         let prompt = synthesizer.build_prompt(&signal);
 
         assert!(prompt.contains("Allow if admin"));

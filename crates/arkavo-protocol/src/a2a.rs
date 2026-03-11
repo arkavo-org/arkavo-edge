@@ -55,7 +55,25 @@ impl A2aClient {
 
     /// Create A2A client with router for chat sessions
     pub fn with_router(router: Arc<Router>, tool_registry: Option<Arc<ToolRegistry>>) -> Self {
-        let session_manager = ChatSessionManager::with_router(router, tool_registry);
+        Self::with_router_and_model(router, tool_registry, None)
+    }
+
+    /// Create A2A client with router and optional model override
+    pub fn with_router_and_model(
+        router: Arc<Router>,
+        tool_registry: Option<Arc<ToolRegistry>>,
+        model_name: Option<&str>,
+    ) -> Self {
+        let mut session_manager = ChatSessionManager::with_router(router, tool_registry);
+        if let Some(name) = model_name {
+            if let Some(model) = arkavo_router::ModelChoice::from_name(name) {
+                session_manager.set_model_override(model);
+            } else {
+                eprintln!(
+                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash"
+                );
+            }
+        }
         Self {
             mcp_bridge: None,
             session_manager: Some(session_manager),

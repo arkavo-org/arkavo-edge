@@ -441,26 +441,24 @@ impl Tool for ShellExecTool {
                 "service_account_info": Self::service_account_docs()
             })),
             ApprovalResult::RequiresReview => {
-                // For now, execute with a warning. In a full implementation,
-                // this would trigger a human approval workflow.
-                let (success, exit_code, stdout, stderr, duration_ms) = self
-                    .execute_command(
-                        command,
-                        working_dir,
-                        timeout_secs,
-                        env_vars.as_ref(),
-                        capture_stderr,
-                    )
-                    .await?;
-
+                // Policy-gated execution: RequiresReview commands are denied
+                // unless a TaskPolicyManager explicitly permits them.
+                // The orchestrator evaluates entitlements, budget, and invariants
+                // before allowing execution. Without an active policy context,
+                // default to deny for safety.
                 Ok(json!({
-                    "success": success,
-                    "exit_code": exit_code,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "duration_ms": duration_ms,
-                    "approval": "executed_with_review_warning",
-                    "warning": "This command was executed but may require review in production"
+                    "success": false,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": format!(
+                        "Command '{}' requires policy approval. \
+                         Configure a TaskPolicyManager with appropriate entitlements \
+                         to permit this command.",
+                        command
+                    ),
+                    "duration_ms": 0,
+                    "approval": "policy_denied",
+                    "reason": "RequiresReview commands need explicit policy approval via TaskPolicyManager"
                 }))
             }
         }

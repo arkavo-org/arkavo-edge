@@ -36,17 +36,30 @@
 mod agent_utility;
 mod config;
 pub mod coordination;
+pub mod decision_trace;
+mod feedback_types;
+pub mod human_teaching;
 mod module;
 mod persistence;
+mod planner_score;
 mod store;
 pub mod tool_patterns;
+pub mod uncertainty;
+pub mod velocity;
 
-pub use agent_utility::{
-    AgentContribution, AgentUtility, BetaPrior, BurstFeedback, FinalTaskReport, QualityMetrics,
-};
+pub use agent_utility::{AgentUtility, BetaPrior};
 pub use config::LearningConfig;
 pub use coordination::{CoordinationMetrics, MetricsCollector, MovingAverage};
+pub use decision_trace::{DecisionTrace, SelectionReason};
+pub use feedback_types::{AgentContribution, BurstFeedback, FinalTaskReport, QualityMetrics};
+pub use human_teaching::TeachingIntent;
 pub use module::{AgentUtilityStats, LearningModule};
-pub use persistence::{Episode, EpisodeOutcome, Lesson, LessonPattern, Observation};
+pub use persistence::{
+    Episode, EpisodeOutcome, Lesson, LessonPattern, LessonScope, LessonSource, MemoryTier,
+    Observation,
+};
+pub use planner_score::{PlannerScore, SubtaskOutcome};
 pub use store::{LearningStore, StoreError};
 pub use tool_patterns::{ToolCallFormat, sanitize_args};
+pub use uncertainty::UncertaintyEstimate;
+pub use velocity::{LearningVelocity, VelocityTracker};

@@ -242,6 +242,7 @@ impl Provider for OllamaClient {
                                         content: resp.message.content,
                                         reasoning_content: None,
                                         done: resp.done,
+                                        inference_timing: None,
                                     }));
                                 }
                                 Err(e) => {
@@ -259,6 +260,7 @@ impl Provider for OllamaClient {
                                             content: stream_resp.response.unwrap_or_default(),
                                             reasoning_content: None,
                                             done: stream_resp.done,
+                                            inference_timing: None,
                                         }));
                                     } else {
                                         warn!("Failed to parse response: {line}");

@@ -47,7 +47,6 @@ use std::ffi::CString;
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
 #[cfg(not(target_env = "musl"))]
-use std::panic;
 #[cfg(not(target_env = "musl"))]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -313,6 +312,11 @@ impl LlamaModel {
         // SAFETY: Null return is checked immediately after this call
         unsafe { ffi::llama_model_n_embd_inp(self.ptr) }
     }
+
+    /// Create chat templates from this model's GGUF metadata
+    pub fn chat_templates(&self) -> Result<ChatTemplates, String> {
+        ChatTemplates::new(self.ptr as *const ffi::llama_model)
+    }
 }
 
 /// Result of llama_params_fit operation
@@ -446,31 +450,21 @@ impl LlamaContext {
             gpu_params.offload_kqv = true;
             gpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO;
 
-            // Try with panic catching (Vulkan may abort)
-            // SAFETY: Null return is checked immediately after this call
-            let gpu_result = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
-                ffi::llama_new_context_with_model(model.ptr, gpu_params)
-            }));
+            // SAFETY: Null return is checked immediately after this call.
+            // Note: catch_unwind is NOT used here because llama.cpp (C++) can throw
+            // exceptions across FFI, which catch_unwind cannot handle and would abort.
+            let context = unsafe { ffi::llama_new_context_with_model(model.ptr, gpu_params) };
 
-            match gpu_result {
-                Ok(context) if !context.is_null() => {
-                    GPU_STATUS.store(1, Ordering::Relaxed);
-                    if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-                        eprintln!("✓ GPU context created successfully");
-                    }
-                    return Ok(Self { ptr: context });
+            if !context.is_null() {
+                GPU_STATUS.store(1, Ordering::Relaxed);
+                if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+                    eprintln!("✓ GPU context created successfully");
                 }
-                Ok(_) => {
-                    GPU_STATUS.store(2, Ordering::Relaxed);
-                    eprintln!("⚠ GPU context creation failed (returned null), falling back to CPU");
-                }
-                Err(_) => {
-                    GPU_STATUS.store(2, Ordering::Relaxed);
-                    eprintln!(
-                        "⚠ GPU context creation crashed (Vulkan driver error), falling back to CPU"
-                    );
-                }
+                return Ok(Self { ptr: context });
             }
+
+            GPU_STATUS.store(2, Ordering::Relaxed);
+            eprintln!("⚠ GPU context creation failed (returned null), falling back to CPU");
         }
 
         // CPU fallback
@@ -741,6 +735,276 @@ pub fn apply_chat_template_with_format(
         }
         let need = wrote.checked_neg().unwrap_or(128 * 1024) as usize;
         buf.resize(need, 0);
+    }
+}
+
+/// Grammar trigger type from llama.cpp's template engine
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrammarTriggerType {
+    Token = 0,
+    Word = 1,
+    Pattern = 2,
+    PatternFull = 3,
+}
+
+/// A grammar trigger returned by the template engine
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone)]
+pub struct GrammarTrigger {
+    pub trigger_type: GrammarTriggerType,
+    pub value: String,
+    pub token: i32,
+}
+
+/// Tool choice for template application
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolChoice {
+    #[default]
+    Auto = 0,
+    Required = 1,
+    None = 2,
+}
+
+/// Result from applying a chat template via the Jinja engine
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone)]
+pub struct ChatResult {
+    pub prompt: Vec<u8>,
+    pub grammar: Option<String>,
+    pub grammar_lazy: bool,
+    pub thinking_forced_open: bool,
+    pub grammar_triggers: Vec<GrammarTrigger>,
+    pub additional_stops: Vec<String>,
+}
+
+/// Tool definition for template rendering
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone)]
+pub struct ChatTool {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: String,
+}
+
+/// Inputs for chat template application
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Default)]
+pub struct ChatInputs {
+    pub tools: Vec<ChatTool>,
+    pub tool_choice: ToolChoice,
+    pub enable_thinking: bool,
+    pub add_generation_prompt: bool,
+}
+
+/// Per-message metadata for Jinja template rendering (tool results)
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Default)]
+pub struct ChatMessageMeta {
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+}
+
+/// Safe wrapper around llama.cpp's common_chat_templates (Jinja template engine)
+#[cfg(not(target_env = "musl"))]
+pub struct ChatTemplates {
+    ptr: *mut ffi::arkavo_chat_templates,
+}
+
+#[cfg(not(target_env = "musl"))]
+unsafe impl Send for ChatTemplates {}
+#[cfg(not(target_env = "musl"))]
+unsafe impl Sync for ChatTemplates {}
+
+#[cfg(not(target_env = "musl"))]
+impl Drop for ChatTemplates {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { ffi::arkavo_chat_templates_free(self.ptr) };
+        }
+    }
+}
+
+#[cfg(not(target_env = "musl"))]
+impl ChatTemplates {
+    /// Initialize chat templates from a loaded model's GGUF metadata
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn new(model_ptr: *const ffi::llama_model) -> Result<Self, String> {
+        if model_ptr.is_null() {
+            return Err("Model pointer is null".to_string());
+        }
+        let ptr = unsafe { ffi::arkavo_chat_templates_init(model_ptr, std::ptr::null()) };
+        if ptr.is_null() {
+            return Err("Failed to initialize chat templates from model".to_string());
+        }
+        Ok(Self { ptr })
+    }
+
+    /// Apply chat template with messages, tools, and configuration.
+    /// Returns the rendered prompt, grammar constraints, and triggers.
+    pub fn apply(
+        &self,
+        messages: &[ffi::llama_chat_message],
+        inputs: &ChatInputs,
+    ) -> Result<ChatResult, String> {
+        self.apply_with_meta(messages, &[], inputs)
+    }
+
+    /// Apply chat template with messages, tool metadata, and configuration.
+    /// `meta` carries tool_call_id/tool_name for tool-role messages (indexed
+    /// parallel to `messages`; shorter slices are padded with None).
+    pub fn apply_with_meta(
+        &self,
+        messages: &[ffi::llama_chat_message],
+        meta: &[ChatMessageMeta],
+        inputs: &ChatInputs,
+    ) -> Result<ChatResult, String> {
+        // Keep CStrings alive for the duration of the FFI call
+        let meta_cstrings: Vec<(Option<CString>, Option<CString>)> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let m = meta.get(i);
+                let tc_id = m
+                    .and_then(|m| m.tool_call_id.as_deref())
+                    .and_then(|s| CString::new(s).ok());
+                let t_name = m
+                    .and_then(|m| m.tool_name.as_deref())
+                    .and_then(|s| CString::new(s).ok());
+                (tc_id, t_name)
+            })
+            .collect();
+
+        let c_msgs: Vec<ffi::arkavo_chat_msg> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, m)| ffi::arkavo_chat_msg {
+                role: m.role,
+                content: m.content,
+                tool_call_id: meta_cstrings[i]
+                    .0
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                tool_name: meta_cstrings[i]
+                    .1
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+            })
+            .collect();
+
+        // Convert tools to C structs with CString ownership
+        let tool_names: Vec<CString> = inputs
+            .tools
+            .iter()
+            .map(|t| CString::new(t.name.as_str()).unwrap())
+            .collect();
+        let tool_descs: Vec<CString> = inputs
+            .tools
+            .iter()
+            .map(|t| CString::new(t.description.as_str()).unwrap())
+            .collect();
+        let tool_params: Vec<CString> = inputs
+            .tools
+            .iter()
+            .map(|t| CString::new(t.parameters_json.as_str()).unwrap())
+            .collect();
+        let c_tools: Vec<ffi::arkavo_chat_tool> = (0..inputs.tools.len())
+            .map(|i| ffi::arkavo_chat_tool {
+                name: tool_names[i].as_ptr(),
+                description: tool_descs[i].as_ptr(),
+                parameters_json: tool_params[i].as_ptr(),
+            })
+            .collect();
+
+        let mut result = unsafe {
+            ffi::arkavo_chat_templates_apply(
+                self.ptr,
+                c_msgs.as_ptr(),
+                c_msgs.len() as i32,
+                if c_tools.is_empty() {
+                    std::ptr::null()
+                } else {
+                    c_tools.as_ptr()
+                },
+                c_tools.len() as i32,
+                inputs.tool_choice as i32,
+                if inputs.enable_thinking { 1 } else { 0 },
+                if inputs.add_generation_prompt { 1 } else { 0 },
+            )
+        };
+
+        // Extract prompt
+        if result.prompt.is_null() {
+            return Err("Template application returned null prompt".to_string());
+        }
+        let prompt = unsafe {
+            let c_str = std::ffi::CStr::from_ptr(result.prompt);
+            c_str.to_bytes().to_vec()
+        };
+
+        // Extract grammar
+        let grammar = if result.grammar.is_null() {
+            None
+        } else {
+            let g = unsafe { std::ffi::CStr::from_ptr(result.grammar) };
+            let s = g.to_str().unwrap_or("").to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
+        // Extract triggers
+        let mut grammar_triggers = Vec::new();
+        for i in 0..result.num_triggers {
+            let t = unsafe { &*result.triggers.add(i as usize) };
+            let value = if t.value.is_null() {
+                String::new()
+            } else {
+                unsafe { std::ffi::CStr::from_ptr(t.value) }
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let trigger_type = match t.type_ {
+                0 => GrammarTriggerType::Token,
+                1 => GrammarTriggerType::Word,
+                2 => GrammarTriggerType::Pattern,
+                3 => GrammarTriggerType::PatternFull,
+                _ => GrammarTriggerType::Word,
+            };
+            grammar_triggers.push(GrammarTrigger {
+                trigger_type,
+                value,
+                token: t.token,
+            });
+        }
+
+        // Extract additional stops
+        let mut additional_stops = Vec::new();
+        for i in 0..result.num_additional_stops {
+            let s_ptr = unsafe { *result.additional_stops.add(i as usize) };
+            if !s_ptr.is_null() {
+                let s = unsafe { std::ffi::CStr::from_ptr(s_ptr) };
+                additional_stops.push(s.to_str().unwrap_or("").to_string());
+            }
+        }
+
+        let chat_result = ChatResult {
+            prompt,
+            grammar,
+            grammar_lazy: result.grammar_lazy != 0,
+            thinking_forced_open: result.thinking_forced_open != 0,
+            grammar_triggers,
+            additional_stops,
+        };
+
+        // Free the C-allocated result
+        unsafe { ffi::arkavo_chat_result_free(&mut result) };
+
+        Ok(chat_result)
     }
 }
 
@@ -1164,14 +1428,81 @@ impl LlamaSampler {
         }
     }
 
+    /// Add a GBNF grammar sampler to constrain token generation to valid syntax.
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_grammar(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+        // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
+        let grammar_sampler = unsafe {
+            ffi::arkavo_sampler_init_grammar(vocab, grammar_cstr.as_ptr(), root_cstr.as_ptr())
+        };
+        if !grammar_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
+    /// Add a lazy grammar sampler that only activates when a trigger pattern is detected.
+    ///
+    /// This allows the model to output free text until it starts a tool call (e.g., "```"),
+    /// at which point the grammar constrains output to valid syntax.
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    pub unsafe fn add_grammar_lazy(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+        trigger_patterns: &[&str],
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+        let pattern_cstrings: Vec<CString> = trigger_patterns
+            .iter()
+            .filter_map(|p| CString::new(*p).ok())
+            .collect();
+        let mut pattern_ptrs: Vec<*const std::os::raw::c_char> =
+            pattern_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+
+        // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
+        let grammar_sampler = unsafe {
+            ffi::arkavo_sampler_init_grammar_lazy(
+                vocab,
+                grammar_cstr.as_ptr(),
+                root_cstr.as_ptr(),
+                pattern_ptrs.as_mut_ptr(),
+                pattern_ptrs.len() as i32,
+            )
+        };
+        if !grammar_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
-        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
-        unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }
+        // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
+        unsafe { ffi::arkavo_sampler_sample(self.ptr, ctx.ptr, idx) }
     }
 
     pub fn accept(&self, token: ffi::llama_token) {
-        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
-        unsafe { ffi::llama_sampler_accept(self.ptr, token) };
+        // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
+        unsafe { ffi::arkavo_sampler_accept(self.ptr, token) };
     }
 }
 
@@ -1182,9 +1513,9 @@ unsafe impl Send for LlamaSampler {}
 #[cfg(not(target_env = "musl"))]
 impl Drop for LlamaSampler {
     fn drop(&mut self) {
-        // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
+        // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
         unsafe {
-            ffi::llama_sampler_free(self.ptr);
+            ffi::arkavo_sampler_free(self.ptr);
         }
     }
 }
@@ -1337,6 +1668,56 @@ pub unsafe fn create_sampler_chain_with_dry(
     }
 
     Ok(sampler)
+}
+
+/// Performance metrics from llama_perf_context
+#[cfg(not(target_env = "musl"))]
+pub struct PerfMetrics {
+    pub t_p_eval_ms: f64,
+    pub t_eval_ms: f64,
+    pub n_p_eval: i32,
+    pub n_eval: i32,
+}
+
+#[cfg(not(target_env = "musl"))]
+impl PerfMetrics {
+    /// Tokens per second during generation (eval phase)
+    pub fn tok_per_sec(&self) -> f64 {
+        if self.t_eval_ms > 0.0 {
+            (self.n_eval as f64 / self.t_eval_ms) * 1000.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Time to first token in milliseconds (prompt processing)
+    pub fn ttft_ms(&self) -> f64 {
+        self.t_p_eval_ms
+    }
+}
+
+/// Get performance metrics from a context
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context(ctx: &LlamaContext) -> PerfMetrics {
+    let data = unsafe { ffi::llama_perf_context(ctx.ptr) };
+    PerfMetrics {
+        t_p_eval_ms: data.t_p_eval_ms,
+        t_eval_ms: data.t_eval_ms,
+        n_p_eval: data.n_p_eval,
+        n_eval: data.n_eval,
+    }
+}
+
+/// Print performance metrics via llama.cpp's built-in logger
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context_print(ctx: &LlamaContext) {
+    unsafe { ffi::llama_perf_context_print(ctx.ptr) };
+}
+
+/// Reset performance counters on a context
+#[cfg(not(target_env = "musl"))]
+pub fn perf_context_reset(ctx: &mut LlamaContext) {
+    unsafe { ffi::llama_perf_context_reset(ctx.ptr) };
 }
 
 /// Minimal FFI test harness to verify llama.cpp initialization

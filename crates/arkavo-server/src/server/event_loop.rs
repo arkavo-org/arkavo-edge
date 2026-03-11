@@ -92,6 +92,7 @@ pub async fn start_event_processing_loop(
     loop {
         match event_rx.recv().await {
             Some(event) => {
+                learning_bus.record_event();
                 match event {
                     LearningEvent::ToolCall {
                         tool_name,
@@ -99,6 +100,9 @@ pub async fn start_event_processing_loop(
                         result,
                         success,
                         latency_ms,
+                        decision_trace_id,
+                        step_index,
+                        model_name,
                     } => {
                         tracing::debug!(
                             "Event processing: tool={} success={} latency={}ms",
@@ -115,6 +119,9 @@ pub async fn start_event_processing_loop(
                             success,
                             latency_ms,
                             timestamp: Utc::now(),
+                            decision_trace_id,
+                            step_index,
+                            model_name,
                         };
 
                         // Add to buffer
@@ -146,11 +153,46 @@ pub async fn start_event_processing_loop(
                                 .await
                             {
                                 Ok(episode) => {
+                                    learning_bus.record_episode_synthesized();
                                     tracing::info!(
                                         "Episode synthesized: {} (success={})",
                                         episode.id,
                                         episode.outcome.success
                                     );
+
+                                    // Persist episode to SQLite
+                                    if let Some(ref store) =
+                                        *learning_bus.learning_store.read().await
+                                        && let Err(e) = store.store_episode(&episode).await
+                                    {
+                                        tracing::warn!("Failed to persist episode: {e}");
+                                    }
+
+                                    // Index in case retrieval for similarity search
+                                    let summary = format!(
+                                        "{}: {}",
+                                        episode.observation.action_taken,
+                                        if episode.outcome.success {
+                                            "succeeded"
+                                        } else {
+                                            "failed"
+                                        }
+                                    );
+                                    let quality = episode.outcome.quality_metrics.overall();
+                                    let case_index = learning_bus.case_index().clone();
+                                    let ep_id = episode.id;
+                                    let ep_cat = episode.task_category.clone();
+                                    let ep_success = episode.outcome.success;
+                                    tokio::spawn(async move {
+                                        if let Err(e) = case_index
+                                            .index_episode(
+                                                ep_id, &summary, &ep_cat, quality, ep_success,
+                                            )
+                                            .await
+                                        {
+                                            tracing::debug!("Case indexing skipped: {e}");
+                                        }
+                                    });
 
                                     // Add to buffer
                                     {
@@ -188,6 +230,17 @@ pub async fn start_event_processing_loop(
                                                     lesson.pattern.condition,
                                                     lesson.confidence
                                                 );
+
+                                                // Persist to SQLite
+                                                if let Some(ref store) =
+                                                    *learning_bus.learning_store.read().await
+                                                    && let Err(e) =
+                                                        store.store_lesson(&lesson).await
+                                                {
+                                                    tracing::warn!(
+                                                        "Failed to persist synthesized lesson: {e}"
+                                                    );
+                                                }
 
                                                 // Create announcement and gossip
                                                 let announcement = LessonAnnouncement::new(
@@ -251,6 +304,24 @@ pub async fn start_event_processing_loop(
                     }
                     LearningEvent::GossipReceived(_) => {
                         // Gossip messages are handled separately via handle_gossip
+                    }
+                    LearningEvent::HumanCorrection {
+                        text,
+                        trace_id,
+                        model_name,
+                    } => {
+                        tracing::info!(
+                            "Human correction received: {} (trace={:?})",
+                            &text[..text.len().min(60)],
+                            trace_id
+                        );
+                        learning_bus
+                            .record_human_correction(&text, trace_id, model_name.as_deref())
+                            .await;
+                    }
+                    LearningEvent::HumanReinforcement { trace_id, .. } => {
+                        tracing::info!("Human reinforcement received (trace={:?})", trace_id);
+                        learning_bus.record_human_reinforcement(trace_id).await;
                     }
                 }
             }

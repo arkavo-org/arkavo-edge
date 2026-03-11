@@ -62,21 +62,33 @@ pub fn load_api_keys_from_config() {
 /// * `Ok(PathBuf)` - Path to the model file
 /// * `Err(String)` - Error with user-friendly message including download instructions
 pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
-    use hf_hub::api::tokio::Api;
-
     tracing::debug!(
         "find_gguf_model: looking for repo={} filename={}",
         repo_id,
         filename
     );
 
+    // 1. Check local cache first (no network, instant)
+    if let Some(cache) = get_hf_cache_dir() {
+        let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
+        let snapshots_dir = cache.join(&repo_cache_name).join("snapshots");
+        if let Some(path) = find_file_in_dir(&snapshots_dir, filename) {
+            tracing::debug!("find_gguf_model: found in local cache at {:?}", path);
+            return Ok(path);
+        }
+    }
+
+    // 2. Not cached — try downloading via hf_hub API
+    use hf_hub::api::tokio::Api;
     let api = Api::new().map_err(|e| format!("Failed to initialize HuggingFace API: {e}"))?;
 
-    // 1. Try preferred model first (download if needed, or use cached)
     let repo = api.repo(hf_hub::Repo::model(repo_id.to_string()));
     match repo.get(filename).await {
         Ok(path) => {
-            tracing::debug!("find_gguf_model: found via hf_hub API at {:?}", path);
+            tracing::debug!(
+                "find_gguf_model: downloaded/found via hf_hub API at {:?}",
+                path
+            );
             return Ok(path);
         }
         Err(e) => {
@@ -84,13 +96,13 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         }
     }
 
-    // 2. Scan cache for any GGUF in the preferred repo
+    // 3. Scan cache for any GGUF in the preferred repo
     if let Some(path) = scan_cache_for_gguf(&api, repo_id).await {
         tracing::debug!("find_gguf_model: found via cache scan at {:?}", path);
         return Ok(path);
     }
 
-    // 3. Fallback: use ANY available .gguf file from cache
+    // 4. Fallback: use ANY available .gguf file from cache
     if let Some(path) = find_any_gguf().await {
         tracing::info!(
             "Using fallback model: {}",
@@ -101,7 +113,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         return Ok(path);
     }
 
-    // 4. Nothing found - provide helpful error
+    // 5. Nothing found - provide helpful error
     Err(format!(
         "No GGUF models found in HuggingFace cache. Download with: hf download {repo_id} {filename}"
     ))
@@ -191,7 +203,7 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
 /// Check if a specific model exists in the HuggingFace cache (no download, no fallback)
 ///
 /// Returns true if the model file is already cached, false otherwise.
-/// Used by upgrade_model to only upgrade to models that are available.
+/// Used by `is_model_available` to check if a model is cached locally.
 pub fn is_model_cached(repo_id: &str, filename: &str) -> bool {
     let Some(cache) = get_hf_cache_dir() else {
         return false;
@@ -235,11 +247,12 @@ fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
 /// Find the mmproj (vision projector) file for a given model GGUF path.
 ///
 /// Scans the parent directory of the resolved model path for files matching
-/// `mmproj*.gguf`. In the HuggingFace cache layout, the mmproj file lives
-/// alongside the model GGUF in the same snapshot directory.
+/// `mmproj*.gguf`. When multiple quant variants exist, prefers the smallest
+/// (F16 over BF16/F32) to minimize memory overhead.
 pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
     let parent = model_path.parent()?;
     let entries = std::fs::read_dir(parent).ok()?;
+    let mut candidates: Vec<PathBuf> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file()
@@ -247,9 +260,31 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
             && name.starts_with("mmproj")
             && name.ends_with(".gguf")
         {
-            tracing::info!("Found mmproj for vision support: {}", path.display());
-            return Some(path);
+            candidates.push(path);
         }
+    }
+    // Prefer smallest quant: Q4 > Q8 > F16 > BF16 > F32
+    candidates.sort_by_key(|p| {
+        let name = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_uppercase();
+        if name.contains("Q4") {
+            0
+        } else if name.contains("Q8") {
+            1
+        } else if name.contains("F16") && !name.contains("BF16") {
+            2
+        } else if name.contains("BF16") {
+            3
+        } else {
+            4
+        }
+    });
+    if let Some(best) = candidates.first() {
+        tracing::info!("Found mmproj for vision support: {}", best.display());
+        return Some(best.clone());
     }
     None
 }
@@ -261,17 +296,22 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
 
-    // Priority order: prefer larger models first for better quality
-    let preferred_repos = [
-        "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
-        "models--unsloth--Qwen3.5-27B-GGUF",
-        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
-        "models--Qwen--Qwen3-0.6B-GGUF",
-    ];
+    // Priority order: prefer smallest models first — classifier/judge need speed, not quality.
+    // Loading large models here wastes memory (bypasses per-agent memory budget).
+    use crate::decision::ModelChoice;
+    let preferred_repos: Vec<String> = [
+        ModelChoice::LocalQwen3,
+        ModelChoice::LocalMinistral3B,
+        ModelChoice::LocalMinistral8B,
+        ModelChoice::LocalQwen35_27B,
+    ]
+    .iter()
+    .filter_map(ModelChoice::cache_dir_name)
+    .collect();
 
     // Check preferred repos first
     for repo_name in &preferred_repos {
-        let repo_path = cache.join(repo_name);
+        let repo_path = cache.join(repo_name.as_str());
         if repo_path.exists()
             && let Some(gguf) = find_gguf_in_dir(&repo_path)
         {
@@ -333,7 +373,10 @@ mod tests {
     async fn test_find_gguf_model() {
         // This test will only pass if the model is already cached
         // or if network is available
-        let result = find_gguf_model("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf").await;
+        use crate::decision::ModelChoice;
+        let repo = ModelChoice::LocalQwen3.repo_id().unwrap();
+        let file = ModelChoice::LocalQwen3.gguf_filename().unwrap();
+        let result = find_gguf_model(repo, file).await;
 
         match result {
             Ok(path) => {

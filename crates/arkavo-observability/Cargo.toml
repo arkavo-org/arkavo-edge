@@ -35,6 +35,9 @@ uuid.workspace = true
 regex = { workspace = true }
 toml = { workspace = true }
 
+# System metrics
+sysinfo = { workspace = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 

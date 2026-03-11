@@ -44,12 +44,33 @@ use tokio::sync::RwLock;
 // Re-export error type for mesh-specific errors
 pub use arkavo_mcp_tools::ToolError as MeshToolError;
 
+/// A specialist task that was delegated via `send_task` and is awaiting response.
+#[derive(Debug, Clone)]
+pub struct PendingDelegation {
+    pub task_id: String,
+    pub agent_id: String,
+    pub address: String,
+    pub sent_at: std::time::Instant,
+}
+
+/// A specialist delegation whose response has been fetched.
+#[derive(Debug, Clone)]
+pub struct CompletedDelegation {
+    pub agent_id: String,
+    pub response: String,
+    pub response_latency_ms: u64,
+    /// Budget snapshot from the specialist (if available)
+    pub budget_snapshot: Option<arkavo_budget::ComputeBudgetSnapshot>,
+}
+
 /// Shared state for mesh tools
 pub struct MeshToolsState {
     /// Registry of discovered agents
     pub registry: Arc<AgentRegistry>,
     /// Cache of agent addresses discovered via mDNS
     pub agent_addresses: Arc<RwLock<HashMap<String, String>>>,
+    /// Delegated tasks awaiting specialist responses
+    pub pending_delegations: Arc<RwLock<Vec<PendingDelegation>>>,
 }
 
 impl MeshToolsState {
@@ -57,6 +78,96 @@ impl MeshToolsState {
         Self {
             registry: Arc::new(AgentRegistry::new()),
             agent_addresses: Arc::new(RwLock::new(HashMap::new())),
+            pending_delegations: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Fetch all completed specialist responses, removing them from pending.
+    ///
+    /// Called by the orchestrator before each tick so the commander can act on
+    /// specialist advice immediately without wasting iterations on `get_task_status`.
+    pub async fn collect_completed(&self) -> Vec<CompletedDelegation> {
+        let mut pending = self.pending_delegations.write().await;
+        if pending.is_empty() {
+            return Vec::new();
+        }
+
+        let mut completed = Vec::new();
+        let mut still_pending = Vec::new();
+
+        for delegation in pending.drain(..) {
+            // Expire delegations older than 5 minutes
+            if delegation.sent_at.elapsed() > Duration::from_secs(300) {
+                tracing::warn!(
+                    agent_id = %delegation.agent_id,
+                    task_id = %delegation.task_id,
+                    "Delegation expired after 5 minutes"
+                );
+                continue;
+            }
+
+            match fetch_task_result(&delegation).await {
+                Ok(Some(response)) => {
+                    let latency_ms = delegation.sent_at.elapsed().as_millis() as u64;
+                    // Fetch budget snapshot from specialist for feedback to commander
+                    let budget_snapshot =
+                        fetch_budget_snapshot(&delegation.address, &delegation.agent_id).await;
+                    if let Some(ref snap) = budget_snapshot {
+                        tracing::info!(
+                            agent_id = %delegation.agent_id,
+                            response_len = response.len(),
+                            remaining_inferences = snap.remaining_inferences,
+                            status = %snap.status,
+                            "Specialist response pre-fetched with budget feedback"
+                        );
+                    } else {
+                        tracing::info!(
+                            agent_id = %delegation.agent_id,
+                            response_len = response.len(),
+                            "Specialist response pre-fetched (no budget data)"
+                        );
+                    }
+                    completed.push(CompletedDelegation {
+                        agent_id: delegation.agent_id,
+                        response,
+                        response_latency_ms: latency_ms,
+                        budget_snapshot,
+                    });
+                }
+                Ok(None) => {
+                    // Not done yet — keep pending
+                    still_pending.push(delegation);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        agent_id = %delegation.agent_id,
+                        error = %e,
+                        "Failed to fetch delegation status"
+                    );
+                    still_pending.push(delegation);
+                }
+            }
+        }
+
+        *pending = still_pending;
+        completed
+    }
+}
+
+impl MeshToolsState {
+    /// Trigger mDNS discovery to populate agent_addresses.
+    ///
+    /// Called by the orchestrator loop so broadcast/budget-refresh
+    /// can reach specialists without waiting for the LLM to call send_task.
+    pub async fn discover_peers(&self) {
+        match discover_and_register_agents(self).await {
+            Ok(()) => {
+                let count = self.agent_addresses.read().await.len();
+                tracing::info!(count, "Peer discovery complete");
+            }
+            Err(e) => {
+                tracing::debug!("Peer discovery failed: {e}");
+            }
         }
     }
 }
@@ -282,6 +393,55 @@ impl SendTaskTool {
             state,
         }
     }
+
+    /// Resolve an agent ID to its address, auto-discovering peers if needed.
+    /// Handles typos via fuzzy matching (edit distance ≤ 2).
+    async fn resolve_agent_address(&self, agent_id: &str) -> crate::Result<String> {
+        // First try with current known agents
+        if let Some(addr) = self.try_find_address(agent_id).await {
+            return Ok(addr);
+        }
+
+        // No match — trigger mDNS discovery and retry
+        tracing::info!("Agent '{agent_id}' not found, triggering auto-discovery");
+        let _ = discover_and_register_agents(&self.state).await;
+
+        // Retry after discovery
+        if let Some(addr) = self.try_find_address(agent_id).await {
+            return Ok(addr);
+        }
+
+        let available: Vec<_> = self
+            .state
+            .agent_addresses
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        Err(MeshToolError::Execution(format!(
+            "Agent '{agent_id}' not found after discovery. Available: {available:?}"
+        )))
+    }
+
+    async fn try_find_address(&self, agent_id: &str) -> Option<String> {
+        let addresses = self.state.agent_addresses.read().await;
+        if let Some(addr) = addresses.get(agent_id) {
+            return Some(addr.clone());
+        }
+        // Fuzzy match: edit distance ≤ 2 handles common LLM typos
+        addresses
+            .iter()
+            .find(|(id, _)| levenshtein_close(id, agent_id))
+            .map(|(matched_id, addr)| {
+                tracing::info!(
+                    requested = agent_id,
+                    matched = %matched_id,
+                    "Fuzzy-matched agent ID"
+                );
+                addr.clone()
+            })
+    }
 }
 
 #[async_trait]
@@ -303,17 +463,8 @@ impl Tool for SendTaskTool {
 
         let metadata = args.get("metadata").cloned();
 
-        // Get agent address
-        let addresses = self.state.agent_addresses.read().await;
-        let address = addresses
-            .get(agent_id)
-            .ok_or_else(|| {
-                MeshToolError::Execution(format!(
-                    "Agent '{agent_id}' not found. Try list_agents with refresh=true first."
-                ))
-            })?
-            .clone();
-        drop(addresses);
+        // Get agent address — auto-discover if needed, fuzzy match on typos
+        let address = self.resolve_agent_address(agent_id).await?;
 
         // Create transport
         let transport_config = TransportConfig {
@@ -343,17 +494,24 @@ impl Tool for SendTaskTool {
             .await
             .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
 
-        // Build message
+        // Build message with budget allocation for specialist compute control
+        let default_budget = arkavo_budget::BudgetAllocation::default();
+        let mut final_metadata = metadata.unwrap_or_else(|| {
+            json!({
+                "source": "orchestrator",
+                "task_type": "delegated"
+            })
+        });
+        if final_metadata.get("budget_allocation").is_none() {
+            final_metadata["budget_allocation"] =
+                serde_json::to_value(&default_budget).unwrap_or_default();
+        }
+
         let message = Message {
             parts: vec![MessagePart::Text {
                 content: task.to_string(),
             }],
-            metadata: metadata.or_else(|| {
-                Some(json!({
-                    "source": "orchestrator",
-                    "task_type": "delegated"
-                }))
-            }),
+            metadata: Some(final_metadata),
         };
 
         let send_request = MessageSendRequest {
@@ -377,6 +535,20 @@ impl Tool for SendTaskTool {
                     serde_json::from_value(result).map_err(|e| {
                         MeshToolError::Execution(format!("Failed to parse response: {e}"))
                     })?;
+
+                // Track delegation so orchestrator can pre-fetch the response
+                if !send_response.task_id.is_empty() {
+                    self.state
+                        .pending_delegations
+                        .write()
+                        .await
+                        .push(PendingDelegation {
+                            task_id: send_response.task_id.clone(),
+                            agent_id: agent_id.to_string(),
+                            address: address.clone(),
+                            sent_at: std::time::Instant::now(),
+                        });
+                }
 
                 Ok(json!({
                     "success": true,
@@ -547,6 +719,118 @@ impl Tool for GetTaskStatusTool {
     }
 }
 
+/// Fetch the result of a pending delegation from the specialist agent.
+///
+/// Returns `Ok(Some(response))` if the task is completed,
+/// `Ok(None)` if still in progress, or `Err` on transport failure.
+async fn fetch_task_result(
+    delegation: &PendingDelegation,
+) -> std::result::Result<Option<String>, String> {
+    let transport_config = TransportConfig {
+        timeout_ms: 5000, // Short timeout — just a status check
+        max_retries: 0,
+        tls_config: TlsConfig {
+            require_tls: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let transport = Arc::new(
+        HttpTransport::new(transport_config)
+            .map_err(|e| format!("Transport creation failed: {e}"))?,
+    );
+
+    let endpoint = A2aEndpoint {
+        url: delegation.address.clone(),
+        agent_id: delegation.agent_id.clone(),
+        public_key: None,
+    };
+
+    transport
+        .connect(&endpoint)
+        .await
+        .map_err(|e| format!("Connection failed: {e}"))?;
+
+    let get_request = TaskGetRequest {
+        task_id: delegation.task_id.clone(),
+    };
+    let rpc_request = A2aRequest::new("tasks/get", json!([get_request]));
+
+    let response = transport
+        .send_request(rpc_request)
+        .await
+        .map_err(|e| format!("Request failed: {e}"))?;
+
+    let _ = transport.close().await;
+
+    match response {
+        A2aResponse::Success { result, .. } => {
+            let task_response: TaskGetResponse =
+                serde_json::from_value(result).map_err(|e| format!("Parse failed: {e}"))?;
+
+            if matches!(
+                task_response.status,
+                TaskStatus::Completed | TaskStatus::Failed
+            ) {
+                let text = task_response
+                    .result
+                    .map(|msg| {
+                        msg.parts
+                            .iter()
+                            .filter_map(|p| {
+                                if let MessagePart::Text { content } = p {
+                                    Some(content.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                Ok(Some(text))
+            } else {
+                Ok(None) // Still in progress
+            }
+        }
+        A2aResponse::Error { error, .. } => Err(format!("{}: {}", error.code, error.message)),
+    }
+}
+
+/// Fetch compute budget snapshot from a specialist agent via JSON-RPC.
+async fn fetch_budget_snapshot(
+    address: &str,
+    agent_id: &str,
+) -> Option<arkavo_budget::ComputeBudgetSnapshot> {
+    let transport_config = TransportConfig {
+        timeout_ms: 3000,
+        max_retries: 0,
+        tls_config: TlsConfig {
+            require_tls: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let transport = Arc::new(HttpTransport::new(transport_config).ok()?);
+    let endpoint = A2aEndpoint {
+        url: address.to_string(),
+        agent_id: agent_id.to_string(),
+        public_key: None,
+    };
+
+    transport.connect(&endpoint).await.ok()?;
+    let rpc_request = A2aRequest::new("budget.compute_status", json!({}));
+    let response = transport.send_request(rpc_request).await.ok()?;
+    let _ = transport.close().await;
+
+    match response {
+        A2aResponse::Success { result, .. } => serde_json::from_value(result).ok(),
+        _ => None,
+    }
+}
+
 /// Discover agents via mDNS and register them
 #[cfg(feature = "mdns")]
 async fn discover_and_register_agents(
@@ -631,6 +915,26 @@ async fn discover_and_register_agents(
     _state: &MeshToolsState,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Err("mDNS feature not enabled - cannot discover agents".into())
+}
+
+/// Check if two strings are within edit distance 2 (handles common LLM typos)
+fn levenshtein_close(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (m, n) = (a.len(), b.len());
+    if m.abs_diff(n) > 2 {
+        return false;
+    }
+    let mut prev = (0..=n).collect::<Vec<_>>();
+    let mut curr = vec![0; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n] <= 2
 }
 
 /// Register mesh orchestration tools with a ToolRegistry

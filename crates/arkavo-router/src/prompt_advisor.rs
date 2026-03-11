@@ -12,6 +12,8 @@ pub enum AdvisorIssue {
     OutputLoop,
     WrongExpert,
     Timeout,
+    ToolError,
+    NoToolCalls,
 }
 
 impl std::fmt::Display for AdvisorIssue {
@@ -21,6 +23,8 @@ impl std::fmt::Display for AdvisorIssue {
             Self::OutputLoop => write!(f, "OutputLoop"),
             Self::WrongExpert => write!(f, "WrongExpert"),
             Self::Timeout => write!(f, "Timeout"),
+            Self::ToolError => write!(f, "ToolError"),
+            Self::NoToolCalls => write!(f, "NoToolCalls"),
         }
     }
 }
@@ -34,6 +38,8 @@ impl std::str::FromStr for AdvisorIssue {
             "OutputLoop" => Ok(Self::OutputLoop),
             "WrongExpert" => Ok(Self::WrongExpert),
             "Timeout" => Ok(Self::Timeout),
+            "ToolError" => Ok(Self::ToolError),
+            "NoToolCalls" => Ok(Self::NoToolCalls),
             other => Err(format!("unknown AdvisorIssue: {other}")),
         }
     }
@@ -159,8 +165,11 @@ impl PromptAdvisor {
                 match a.issue {
                     // Only include code-fence and wrong-expert for simple queries
                     AdvisorIssue::UnwantedCodeFence | AdvisorIssue::WrongExpert => is_simple_query,
-                    // Always include output-loop and timeout
-                    AdvisorIssue::OutputLoop | AdvisorIssue::Timeout => true,
+                    // Always include output-loop, timeout, and tool-error corrections
+                    AdvisorIssue::OutputLoop
+                    | AdvisorIssue::Timeout
+                    | AdvisorIssue::ToolError
+                    | AdvisorIssue::NoToolCalls => true,
                 }
             })
             .filter(|a| {
@@ -315,6 +324,47 @@ impl PromptAdvisor {
         }
     }
 
+    /// Observe that a model produced text but made no tool calls.
+    ///
+    /// Creates a `NoToolCalls` adjustment so future prompts include an
+    /// explicit instruction to use tools.
+    pub fn observe_no_tool_calls(&self, model_family: &str, response: &str) {
+        if !response.is_empty() && !self.has_static(model_family, &AdvisorIssue::NoToolCalls) {
+            self.learn(
+                model_family,
+                AdvisorIssue::NoToolCalls,
+                advice_text_for(&AdvisorIssue::NoToolCalls).to_string(),
+            );
+        }
+    }
+
+    /// Observe a tool execution error and learn a correction.
+    ///
+    /// Extracts actionable corrections from error messages (e.g., wrong entity
+    /// names, missing required parameters) and creates dynamic adjustments so
+    /// future prompts include the correction.
+    pub fn observe_tool_error(
+        &self,
+        model_family: &str,
+        tool_name: &str,
+        error_msg: &str,
+        args: &serde_json::Value,
+    ) {
+        let correction = extract_tool_correction(tool_name, error_msg, args);
+        if correction.is_empty() {
+            return;
+        }
+
+        tracing::info!(
+            model = %model_family,
+            tool = %tool_name,
+            correction = %correction,
+            "Learned tool error correction"
+        );
+
+        self.learn(model_family, AdvisorIssue::ToolError, correction);
+    }
+
     /// Check if a static adjustment exists for the given family and issue.
     fn has_static(&self, model_family: &str, issue: &AdvisorIssue) -> bool {
         let Ok(adjustments) = self.adjustments.read() else {
@@ -461,7 +511,81 @@ fn advice_text_for(issue: &AdvisorIssue) -> &'static str {
             "This is a conversational question. Respond naturally without code, imports, or function definitions."
         }
         AdvisorIssue::Timeout => "Keep your response brief and direct.",
+        AdvisorIssue::ToolError => {
+            "Check tool parameter names carefully. Use exact values from previous error messages."
+        }
+        AdvisorIssue::NoToolCalls => {
+            "You MUST use tools to complete tasks. Do not just describe what you would do — call a tool NOW. Start with list_agents or filesystem_tools."
+        }
     }
+}
+
+/// Extract a correction from a tool error message.
+///
+/// Parses common error patterns to produce actionable advice:
+/// - "Unknown X 'Foo'" → "Use correct name for X (not 'Foo')"
+/// - "Cannot get ... with null Y" → "Always provide Y parameter"
+/// - "X not found" → "Check that X exists before using it"
+fn extract_tool_correction(tool_name: &str, error_msg: &str, args: &serde_json::Value) -> String {
+    let lower = error_msg.to_lowercase();
+
+    // Pattern: "Unknown <type> '<value>'" — wrong entity/def name
+    if lower.contains("unknown") {
+        // Try to extract the bad value from quotes in the error
+        if let Some(start) = error_msg.find('\'')
+            && let Some(end) = error_msg[start + 1..].find('\'')
+        {
+            let bad_value = &error_msg[start + 1..start + 1 + end];
+            // Try to find what arg contained this value
+            if let Some(obj) = args.as_object() {
+                for (key, val) in obj {
+                    if let Some(s) = val.as_str()
+                        && s == bad_value
+                    {
+                        return format!(
+                            "TOOL CORRECTION for {tool_name}: The {key} value '{bad_value}' is invalid. {error_msg}"
+                        );
+                    }
+                }
+            }
+            return format!(
+                "TOOL CORRECTION for {tool_name}: '{bad_value}' is not a valid name. {error_msg}"
+            );
+        }
+        return format!("TOOL CORRECTION for {tool_name}: {error_msg}");
+    }
+
+    // Pattern: "Cannot get ... with null <param>" — missing required parameter
+    if lower.contains("null") && (lower.contains("cannot") || lower.contains("can't")) {
+        // Extract what's null from error
+        let words: Vec<&str> = error_msg.split_whitespace().collect();
+        if let Some(pos) = words.iter().position(|w| w.to_lowercase() == "null") {
+            let param = if pos > 0 { words[pos - 1] } else { "parameter" };
+            return format!(
+                "TOOL CORRECTION for {tool_name}: Always provide the {param} parameter. {error_msg}"
+            );
+        }
+        return format!("TOOL CORRECTION for {tool_name}: {error_msg}");
+    }
+
+    // Pattern: "not found" — entity doesn't exist
+    if lower.contains("not found") || lower.contains("does not exist") {
+        return format!(
+            "TOOL CORRECTION for {tool_name}: {error_msg}. Verify the value exists first."
+        );
+    }
+
+    // Pattern: "invalid" — generic parameter error
+    if lower.contains("invalid") {
+        return format!("TOOL CORRECTION for {tool_name}: {error_msg}");
+    }
+
+    // Generic fallback — only if there's something useful
+    if error_msg.len() > 10 {
+        return format!("TOOL CORRECTION for {tool_name}: {error_msg}");
+    }
+
+    String::new()
 }
 
 /// Truncate text at the last complete sentence that fits within `max_len`.
@@ -891,6 +1015,8 @@ mod tests {
             AdvisorIssue::OutputLoop,
             AdvisorIssue::WrongExpert,
             AdvisorIssue::Timeout,
+            AdvisorIssue::ToolError,
+            AdvisorIssue::NoToolCalls,
         ] {
             let s = issue.to_string();
             let parsed: AdvisorIssue = s.parse().unwrap();
@@ -903,6 +1029,98 @@ mod tests {
         let result = "Unknown".parse::<AdvisorIssue>();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown AdvisorIssue"));
+    }
+
+    #[test]
+    fn test_extract_tool_correction_unknown() {
+        let correction = extract_tool_correction(
+            "sim_step",
+            "Unknown plant 'PlantPotato'",
+            &serde_json::json!({"Plant": "PlantPotato", "X": 120}),
+        );
+        assert!(correction.contains("TOOL CORRECTION"));
+        assert!(correction.contains("PlantPotato"));
+        assert!(correction.contains("Plant"));
+    }
+
+    #[test]
+    fn test_extract_tool_correction_null_param() {
+        let correction = extract_tool_correction(
+            "sim_step",
+            "Cannot get AdjustedCostList for Bed with null Stuff",
+            &serde_json::json!({"Building": "Bed"}),
+        );
+        assert!(correction.contains("TOOL CORRECTION"));
+        assert!(correction.contains("Stuff"));
+    }
+
+    #[test]
+    fn test_extract_tool_correction_short_error_skipped() {
+        let correction = extract_tool_correction("sim_step", "fail", &serde_json::json!({}));
+        assert!(correction.is_empty());
+    }
+
+    #[test]
+    fn test_observe_tool_error_unknown_entity() {
+        let advisor = PromptAdvisor::new();
+        let initial = advisor.stats().len();
+        advisor.observe_tool_error(
+            "glm",
+            "sim_step",
+            "Unknown plant 'PlantPotato'",
+            &serde_json::json!({"Plant": "PlantPotato", "X": 120, "Y": 120}),
+        );
+        let stats = advisor.stats();
+        assert_eq!(stats.len(), initial + 1);
+        let dynamic = stats
+            .iter()
+            .find(|s| s.label.contains("toolerror"))
+            .unwrap();
+        assert!(!dynamic.is_static);
+        assert_eq!(dynamic.model_family, "glm");
+    }
+
+    #[test]
+    fn test_observe_tool_error_null_param() {
+        let advisor = PromptAdvisor::new();
+        let initial = advisor.stats().len();
+        advisor.observe_tool_error(
+            "qwen",
+            "sim_step",
+            "Cannot get AdjustedCostList for Bed with null Stuff",
+            &serde_json::json!({"Building": "Bed", "X": 115, "Y": 120}),
+        );
+        let stats = advisor.stats();
+        assert_eq!(stats.len(), initial + 1);
+        let dynamic = stats
+            .iter()
+            .find(|s| s.label.contains("toolerror"))
+            .unwrap();
+        assert!(!dynamic.is_static);
+    }
+
+    #[test]
+    fn test_observe_tool_error_injects_into_advice() {
+        let advisor = PromptAdvisor::new();
+        advisor.observe_tool_error(
+            "glm",
+            "sim_step",
+            "Unknown plant 'PlantPotato'",
+            &serde_json::json!({"Plant": "PlantPotato"}),
+        );
+        // ToolError adjustments should appear in advice for any query type
+        let advice = advisor.advise("glm", false).unwrap();
+        assert!(
+            advice
+                .applied_labels
+                .iter()
+                .any(|l| l.contains("toolerror")),
+            "ToolError correction should be included in advice"
+        );
+        assert!(
+            advice.system_text.contains("TOOL CORRECTION"),
+            "Advice should contain the correction text"
+        );
     }
 
     #[test]

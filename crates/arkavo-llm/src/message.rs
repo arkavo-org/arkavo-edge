@@ -6,6 +6,7 @@ pub enum Role {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +15,12 @@ pub struct Message {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<String>>,
+    /// Tool call ID for tool result messages (role=Tool)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Tool name for tool result messages (role=Tool)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
 impl Message {
@@ -22,6 +29,8 @@ impl Message {
             role: Role::System,
             content: content.into(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 
@@ -30,6 +39,8 @@ impl Message {
             role: Role::User,
             content: content.into(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 
@@ -38,6 +49,25 @@ impl Message {
             role: Role::Assistant,
             content: content.into(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
+        }
+    }
+
+    /// Create a tool result message with call ID and tool name.
+    /// Jinja templates expect role="tool" with these fields to maintain
+    /// proper conversation alternation.
+    pub fn tool_result(
+        content: impl Into<String>,
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: Role::Tool,
+            content: content.into(),
+            images: None,
+            tool_call_id: Some(call_id.into()),
+            tool_name: Some(name.into()),
         }
     }
 
@@ -46,6 +76,8 @@ impl Message {
             role: Role::User,
             content: content.into(),
             images: Some(images),
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 }
@@ -162,5 +194,30 @@ mod tests {
             msg.images,
             Some(vec!["img1".to_string(), "img2".to_string()])
         );
+    }
+
+    #[test]
+    fn test_tool_result_message() {
+        let msg = Message::tool_result(r#"{"result": "success"}"#, "call_123", "get_time");
+        assert_eq!(msg.role, Role::Tool);
+        assert_eq!(msg.tool_call_id, Some("call_123".to_string()));
+        assert_eq!(msg.tool_name, Some("get_time".to_string()));
+    }
+
+    #[test]
+    fn test_tool_role_serialization() {
+        let msg = Message::tool_result("result", "id1", "tool1");
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""role":"tool"#));
+        assert!(json.contains(r#""tool_call_id":"id1"#));
+        assert!(json.contains(r#""tool_name":"tool1"#));
+    }
+
+    #[test]
+    fn test_non_tool_messages_omit_tool_fields() {
+        let msg = Message::user("test");
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("tool_call_id"));
+        assert!(!json.contains("tool_name"));
     }
 }

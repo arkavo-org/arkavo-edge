@@ -12,6 +12,8 @@
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::LlamaModel;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llama_cpp::multimodal::MtmdContext;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::collections::HashMap;
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 use std::collections::HashSet;
@@ -32,6 +34,8 @@ pub struct ModelRegistry {
     models: RwLock<HashMap<String, Arc<LlamaModel>>>,
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     context_pool: ContextPool,
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    vision_contexts: RwLock<HashMap<String, Arc<MtmdContext>>>,
     // Stub fields for non-llama-cpp builds to maintain struct size consistency
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     models: RwLock<HashSet<String>>,
@@ -50,6 +54,7 @@ impl ModelRegistry {
         Self {
             models: RwLock::new(HashMap::new()),
             context_pool: ContextPool::with_max_contexts(max_contexts),
+            vision_contexts: RwLock::new(HashMap::new()),
         }
     }
 
@@ -71,19 +76,27 @@ impl ModelRegistry {
     /// Returns an error if the model fails to load from the given path
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn load(&self, name: &str, path: &str) -> Result<()> {
+        // Double-check under read lock to avoid concurrent duplicate loads
+        if self.is_loaded(name) {
+            return Ok(());
+        }
+
         let model = LlamaModel::from_file(path)
             .map_err(|e| Error::Config(format!("Failed to load model from {path}: {e}")))?;
 
         let model_arc = Arc::new(model);
-
-        // Register with context pool for concurrent context management
-        self.context_pool.register_model(name, model_arc.clone())?;
 
         {
             let mut models = self
                 .models
                 .write()
                 .map_err(|_| Error::Internal("Lock poisoned".to_string()))?;
+            // Final check under write lock — another thread may have loaded it
+            if models.contains_key(name) {
+                return Ok(());
+            }
+            // Register with context pool for concurrent context management
+            self.context_pool.register_model(name, model_arc.clone())?;
             models.insert(name.to_string(), model_arc);
         }
 
@@ -128,6 +141,23 @@ impl ModelRegistry {
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn acquire_fresh_context(&self, name: &str) -> Result<PooledContext> {
         self.context_pool.acquire_fresh(name)
+    }
+
+    /// Get a cached vision context for a model, if one has been stored.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn get_vision_ctx(&self, name: &str) -> Option<Arc<MtmdContext>> {
+        self.vision_contexts
+            .read()
+            .ok()
+            .and_then(|ctxs| ctxs.get(name).cloned())
+    }
+
+    /// Store a vision context for a model so subsequent provider creations skip the load.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn store_vision_ctx(&self, name: &str, ctx: Arc<MtmdContext>) {
+        if let Ok(mut ctxs) = self.vision_contexts.write() {
+            ctxs.insert(name.to_string(), ctx);
+        }
     }
 
     /// Release a context back to the pool

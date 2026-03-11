@@ -44,6 +44,9 @@ pub enum Error {
     #[error("Context decomposition error: {0}")]
     ContextDecomposition(String),
 
+    #[error("Missing tool use: suggested keywords {keywords:?}")]
+    MissingToolUse { keywords: Vec<String> },
+
     #[error("Manifest not found: {0}")]
     ManifestNotFound(String),
 

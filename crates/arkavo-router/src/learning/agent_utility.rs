@@ -5,7 +5,8 @@ use rand::Rng;
 use rand_distr::{Beta, Distribution};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use uuid::Uuid;
+
+use super::feedback_types::BurstFeedback;
 
 /// Beta distribution parameters for Thompson Sampling
 ///
@@ -186,9 +187,6 @@ impl AgentUtility {
     pub fn record_outcome(&mut self, feedback: &BurstFeedback, max_recent: usize) {
         // Use quality-weighted update when quality_score is available
         if let Some(quality) = feedback.quality_score {
-            // Quality is 0.0 to 1.0, convert to update weight
-            // Success: quality directly as alpha weight (high quality = more credit)
-            // Failure: (1 - quality) as beta weight (low quality = more penalty)
             if feedback.success {
                 self.prior.apply_fractional_update(quality);
                 self.window_prior.apply_fractional_update(quality);
@@ -197,15 +195,12 @@ impl AgentUtility {
                 self.prior.apply_fractional_update(weight);
                 self.window_prior.apply_fractional_update(weight);
             }
+        } else if feedback.success {
+            self.prior.record_success();
+            self.window_prior.record_success();
         } else {
-            // No quality score: use binary +1/-1 as before
-            if feedback.success {
-                self.prior.record_success();
-                self.window_prior.record_success();
-            } else {
-                self.prior.record_failure();
-                self.window_prior.record_failure();
-            }
+            self.prior.record_failure();
+            self.window_prior.record_failure();
         }
 
         // Update counts (binary for stats tracking)
@@ -265,10 +260,15 @@ impl AgentUtility {
         self.get_prior(category).sample_default()
     }
 
+    /// Minimum selection probability floor.
+    /// Prevents any model from being starved after heavy beta accumulation.
+    const EXPLORATION_FLOOR: f64 = 0.05;
+
     /// Sample blending global and windowed priors for concept drift adaptation
     ///
     /// Uses weighted average: `(1 - window_weight) * global + window_weight * windowed`
     /// The `window_weight` increases as windowed observations accumulate.
+    /// Applies an exploration floor so no model drops below 5% selection probability.
     pub fn sample_blended(&self, category: Option<&str>) -> f64 {
         let global_prior = self.get_prior(category);
 
@@ -276,15 +276,18 @@ impl AgentUtility {
         let window_obs = (self.window_successes + self.window_failures) as f64;
         let window_weight = (window_obs / 20.0).min(0.5); // Max 50% weight at 20+ observations
 
-        if window_weight < 0.01 {
+        let raw_sample = if window_weight < 0.01 {
             // Not enough windowed data, use global only
-            return global_prior.sample_default();
-        }
+            global_prior.sample_default()
+        } else {
+            let global_sample = global_prior.sample_default();
+            let window_sample = self.window_prior.sample_default();
+            global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+        };
 
-        let global_sample = global_prior.sample_default();
-        let window_sample = self.window_prior.sample_default();
-
-        global_sample.mul_add(1.0 - window_weight, window_sample * window_weight)
+        // Apply exploration floor: blend raw sample with floor to guarantee
+        // minimum selection probability even for heavily penalized models
+        raw_sample.max(Self::EXPLORATION_FLOOR)
     }
 
     /// Total observations for this agent
@@ -307,179 +310,10 @@ impl AgentUtility {
     }
 }
 
-/// Burst-level (immediate) feedback
-///
-/// # Format Learning
-///
-/// To track tool call format success, use category naming convention:
-/// - `"format:fence"` - for fence-based tool calls (```tool_name)
-/// - `"format:xml"` - for XML-style tool calls (<tool_call>)
-/// - `"format:json"` - for raw JSON tool calls
-/// - `"format:python"` - for Python function call syntax
-///
-/// Example:
-/// ```ignore
-/// let feedback = BurstFeedback::success(burst_id, "format:fence".to_string(), latency_ms);
-/// ```
-///
-/// The existing `category_priors` in `AgentUtility` will automatically track
-/// format-specific success rates via Thompson Sampling.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BurstFeedback {
-    /// Burst identifier
-    pub burst_id: Uuid,
-    /// When this feedback was recorded
-    pub timestamp: DateTime<Utc>,
-    /// Latency in milliseconds
-    pub latency_ms: u64,
-    /// Whether the burst succeeded
-    pub success: bool,
-    /// Optional quality score (0.0 to 1.0)
-    pub quality_score: Option<f64>,
-    /// Task category for category-specific learning
-    /// Use "format:<type>" for format learning (e.g., "format:fence")
-    pub task_category: String,
-    /// Cost incurred
-    pub cost_usd: f64,
-    /// Tokens used
-    pub tokens_used: u64,
-}
-
-impl BurstFeedback {
-    /// Create a success feedback
-    pub fn success(burst_id: Uuid, task_category: String, latency_ms: u64) -> Self {
-        Self {
-            burst_id,
-            timestamp: Utc::now(),
-            latency_ms,
-            success: true,
-            quality_score: None,
-            task_category,
-            cost_usd: 0.0,
-            tokens_used: 0,
-        }
-    }
-
-    /// Create a failure feedback
-    pub fn failure(burst_id: Uuid, task_category: String, latency_ms: u64) -> Self {
-        Self {
-            burst_id,
-            timestamp: Utc::now(),
-            latency_ms,
-            success: false,
-            quality_score: None,
-            task_category,
-            cost_usd: 0.0,
-            tokens_used: 0,
-        }
-    }
-
-    /// Set quality score
-    pub fn with_quality(mut self, score: f64) -> Self {
-        self.quality_score = Some(score.clamp(0.0, 1.0));
-        self
-    }
-
-    /// Set usage metrics
-    pub fn with_usage(mut self, cost_usd: f64, tokens: u64) -> Self {
-        self.cost_usd = cost_usd;
-        self.tokens_used = tokens;
-        self
-    }
-}
-
-/// Task-level (retrospective) report for credit assignment
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalTaskReport {
-    /// Task identifier
-    pub task_id: Uuid,
-    /// When the task completed
-    pub completed_at: DateTime<Utc>,
-    /// Ordered list of agents that contributed
-    pub agent_contributions: Vec<AgentContribution>,
-    /// Overall task success (0.0 to 1.0)
-    pub final_reward: f64,
-    /// Optional quality assessment
-    pub quality_metrics: Option<QualityMetrics>,
-}
-
-impl FinalTaskReport {
-    /// Create a successful task report
-    pub fn success(task_id: Uuid, contributions: Vec<AgentContribution>) -> Self {
-        Self {
-            task_id,
-            completed_at: Utc::now(),
-            agent_contributions: contributions,
-            final_reward: 1.0,
-            quality_metrics: None,
-        }
-    }
-
-    /// Create a failed task report
-    pub fn failure(task_id: Uuid, contributions: Vec<AgentContribution>) -> Self {
-        Self {
-            task_id,
-            completed_at: Utc::now(),
-            agent_contributions: contributions,
-            final_reward: 0.0,
-            quality_metrics: None,
-        }
-    }
-
-    /// Set final reward
-    pub fn with_reward(mut self, reward: f64) -> Self {
-        self.final_reward = reward.clamp(0.0, 1.0);
-        self
-    }
-
-    /// Set quality metrics
-    pub fn with_quality(mut self, metrics: QualityMetrics) -> Self {
-        self.quality_metrics = Some(metrics);
-        self
-    }
-}
-
-/// Contribution from a single agent to a task
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentContribution {
-    /// Agent identifier
-    pub agent_id: String,
-    /// Position in the task sequence (0 = first)
-    pub position: usize,
-    /// Immediate reward for this step
-    pub immediate_reward: f64,
-}
-
-/// Quality metrics for a completed task
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QualityMetrics {
-    /// Correctness score (0.0 to 1.0)
-    pub correctness: f64,
-    /// Completeness score (0.0 to 1.0)
-    pub completeness: f64,
-    /// Efficiency score (0.0 to 1.0)
-    pub efficiency: f64,
-}
-
-impl QualityMetrics {
-    /// Create new quality metrics
-    pub fn new(correctness: f64, completeness: f64, efficiency: f64) -> Self {
-        Self {
-            correctness: correctness.clamp(0.0, 1.0),
-            completeness: completeness.clamp(0.0, 1.0),
-            efficiency: efficiency.clamp(0.0, 1.0),
-        }
-    }
-
-    /// Overall quality score (average of components)
-    pub fn overall(&self) -> f64 {
-        (self.correctness + self.completeness + self.efficiency) / 3.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_beta_prior_cold_start() {
@@ -612,6 +446,35 @@ mod tests {
         assert!(
             (utility4.prior.alpha - initial_alpha - 1.0).abs() < 0.01,
             "No quality should add full 1.0 to alpha"
+        );
+    }
+
+    #[test]
+    fn test_exploration_floor_prevents_starvation() {
+        let mut utility = AgentUtility::new("starved-model".to_string());
+
+        // Accumulate heavy failures to drive expected value very low
+        for _ in 0..200 {
+            utility.prior.record_failure();
+            utility.window_prior.record_failure();
+            utility.window_failures += 1;
+            utility.total_failures += 1;
+        }
+
+        // Expected value should be very low: 2 / (2 + 201) ≈ 0.01
+        assert!(
+            utility.prior.expected_value() < 0.02,
+            "Expected value should be near zero after 200 failures"
+        );
+
+        // But blended sample should never drop below the exploration floor
+        let samples: Vec<f64> = (0..1000).map(|_| utility.sample_blended(None)).collect();
+        let min_sample = samples.iter().cloned().fold(f64::INFINITY, f64::min);
+
+        assert!(
+            min_sample >= AgentUtility::EXPLORATION_FLOOR,
+            "No sample should be below exploration floor {}, got {min_sample}",
+            AgentUtility::EXPLORATION_FLOOR,
         );
     }
 }

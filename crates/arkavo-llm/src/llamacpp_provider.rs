@@ -4,8 +4,8 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResp
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
-    LlamaModel, ModelFormat, apply_chat_template_with_format, detect_model_format, ffi,
-    init_llama_logging, test_minimal_init,
+    ChatInputs, ChatMessageMeta, LlamaModel, ModelFormat, apply_chat_template_with_format,
+    detect_model_format, ffi, init_llama_logging, test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -28,6 +28,16 @@ pub struct SamplingConfig {
     pub debug: bool,
     /// Tool call format for local models (default: Fence for best small model reliability)
     pub tool_format: LocalToolFormat,
+    /// Optional GBNF grammar for constrained tool call decoding
+    pub grammar: Option<String>,
+    /// Trigger patterns for lazy grammar activation (e.g., "```")
+    pub grammar_triggers: Option<Vec<String>>,
+    /// Tool definitions for native template rendering (passed to Jinja engine)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub chat_tools: Vec<arkavo_llama_cpp::ChatTool>,
+    /// Tool choice for native template rendering
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub chat_tool_choice: arkavo_llama_cpp::ToolChoice,
 }
 
 impl Default for SamplingConfig {
@@ -40,6 +50,12 @@ impl Default for SamplingConfig {
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
+            grammar: None,
+            grammar_triggers: None,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            chat_tools: Vec::new(),
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            chat_tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
         }
     }
 }
@@ -48,6 +64,18 @@ use crate::ModelRegistry;
 
 /// Type alias for conversation identifiers
 type ConversationId = String;
+
+/// Check if a model name indicates a sub-1B parameter model.
+/// Sub-1B models lack capacity for useful chain-of-thought reasoning.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn is_small_model(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    // Match sub-1B size indicators: "0.6b", "0.8b", "270m", "500m", etc.
+    lower.contains("0.6b")
+        || lower.contains("0.8b")
+        || lower.contains("270m")
+        || lower.contains("500m")
+}
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct LlamaCppProvider {
@@ -216,6 +244,17 @@ impl LlamaCppProvider {
         Ok(self)
     }
 
+    /// Enable vision with a pre-loaded context (avoids reloading mmproj from disk).
+    pub fn enable_vision_cached(mut self, ctx: Arc<MtmdContext>) -> Self {
+        self.mtmd_ctx = Some(ctx);
+        self
+    }
+
+    /// Get the vision context (for caching in the registry).
+    pub fn vision_ctx(&self) -> Option<Arc<MtmdContext>> {
+        self.mtmd_ctx.clone()
+    }
+
     /// Get the model reference, either from owned or registry
     fn get_model(&self) -> Result<Arc<LlamaModel>> {
         if let Some(ref model) = self.model {
@@ -290,45 +329,111 @@ impl LlamaCppProvider {
 
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
 
+        // Build per-message metadata for tool-role messages
+        let meta: Vec<ChatMessageMeta> = messages
+            .iter()
+            .map(|m| ChatMessageMeta {
+                tool_call_id: m.tool_call_id.clone(),
+                tool_name: m.tool_name.clone(),
+            })
+            .collect();
+
         // Detect model format from model name
         let format = detect_model_format(&self.name);
+        let model = self.get_model()?;
 
-        let prompt_bytes = apply_chat_template_with_format(&llama_messages, true, format)
-            .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
+        // Disable thinking for sub-1B Qwen models (they lack capacity for CoT)
+        let enable_thinking = !(format == ModelFormat::Qwen3 && is_small_model(&self.name));
+
+        // Try the Jinja template engine first (reads template from GGUF metadata),
+        // fall back to legacy pattern-matched templates
+        let (
+            prompt_bytes,
+            template_grammar,
+            template_triggers,
+            _thinking_forced_open,
+            template_stops,
+        ) = match model.chat_templates() {
+            Ok(tmpls) => {
+                let inputs = ChatInputs {
+                    tools: self.config.chat_tools.clone(),
+                    tool_choice: self.config.chat_tool_choice,
+                    enable_thinking,
+                    add_generation_prompt: true,
+                };
+                match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
+                    Ok(result) => {
+                        if crate::llamacpp_streaming::is_debug() {
+                            if let Ok(s) = std::str::from_utf8(&result.prompt) {
+                                eprintln!("Chat template output (Jinja):\n{s}");
+                            }
+                            eprintln!(
+                                "✓ Template from GGUF metadata (enable_thinking={enable_thinking})"
+                            );
+                            if result.grammar.is_some() {
+                                eprintln!(
+                                    "  grammar: {} bytes, lazy={}",
+                                    result.grammar.as_ref().map_or(0, |g| g.len()),
+                                    result.grammar_lazy
+                                );
+                            }
+                            if result.thinking_forced_open {
+                                eprintln!("  thinking_forced_open=true");
+                            }
+                        }
+                        // Template grammar uses character-level GBNF rules (e.g., "<tool_call>")
+                        // but models tokenize these as single special tokens. This mismatch
+                        // causes GGML_ASSERT failures in the grammar sampler. The template
+                        // grammar is designed for llama-server's integrated grammar handler
+                        // which resolves special tokens — our standalone sampler cannot use it.
+                        // We rely on the template's prompt formatting + enable_thinking=false
+                        // to guide generation, and use our own fence grammar if configured.
+                        (
+                            result.prompt,
+                            None,
+                            None,
+                            result.thinking_forced_open,
+                            result.additional_stops,
+                        )
+                    }
+                    Err(e) => {
+                        tracing::warn!("Jinja template apply failed: {e}, falling back to legacy");
+                        let bytes = apply_chat_template_with_format(&llama_messages, true, format)
+                            .map_err(|e| {
+                                Error::Config(format!("Failed to apply chat template: {e}"))
+                            })?;
+                        (bytes, None, None, false, Vec::new())
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
+                let bytes = apply_chat_template_with_format(&llama_messages, true, format)
+                    .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
+                (bytes, None, None, false, Vec::new())
+            }
+        };
 
         if crate::llamacpp_streaming::is_debug()
             && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
         {
-            eprintln!("Chat template output:\n{prompt_str}");
-            match format {
-                ModelFormat::Gemma3 => {
-                    if prompt_str.contains("<start_of_turn>") {
-                        eprintln!("✓ Template is using correct Gemma-3 format");
-                    }
-                }
-                ModelFormat::MistralV3 => {
-                    if prompt_str.contains("[INST]") {
-                        eprintln!("✓ Template is using correct Mistral V3 format");
-                    }
-                }
-                ModelFormat::Qwen3 => {
-                    if prompt_str.contains("<|im_start|>") {
-                        eprintln!("✓ Template is using correct Qwen3 ChatML format");
-                    }
-                }
-                ModelFormat::GLM4 => {
-                    if prompt_str.contains("<|user|>") || prompt_str.contains("[gMASK]") {
-                        eprintln!("✓ Template is using correct GLM-4 format");
-                    }
-                }
+            // Only show legacy format checks when using legacy path
+            if template_grammar.is_none() {
+                eprintln!("Chat template output:\n{prompt_str}");
             }
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let model = self.get_model()?;
 
         // Enable dry sampling for repetition prevention (all models can loop)
         let use_dry_sampling = true;
+
+        // Merge template grammar with config grammar (template takes precedence)
+        let grammar = template_grammar.or_else(|| self.config.grammar.clone());
+        let grammar_triggers_merged =
+            template_triggers.or_else(|| self.config.grammar_triggers.clone());
+
+        let additional_stops = template_stops;
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -338,6 +443,9 @@ impl LlamaCppProvider {
             seed: self.config.seed,
             use_dry_sampling,
             model_format: format,
+            grammar,
+            grammar_triggers: grammar_triggers_merged,
+            additional_stops,
         };
 
         tokio::spawn(async move {
@@ -372,6 +480,9 @@ impl LlamaCppProvider {
             seed: self.config.seed,
             use_dry_sampling,
             model_format: format,
+            grammar: None,
+            grammar_triggers: None,
+            additional_stops: Vec::new(),
         };
 
         tokio::spawn(async move {
@@ -379,6 +490,48 @@ impl LlamaCppProvider {
         });
 
         Ok(UnboundedReceiverStream::new(rx))
+    }
+
+    async fn complete_with_timing(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<(String, Option<crate::provider::InferenceTiming>)> {
+        let custom_provider;
+        let provider = if let Some(max) = max_tokens {
+            let mut config = self.config.clone();
+            config.max_tokens = max as u32;
+            custom_provider = Self {
+                model: self.model.clone(),
+                registry: self.registry.clone(),
+                name: self.name.clone(),
+                config,
+                mtmd_ctx: self.mtmd_ctx.clone(),
+                conversation_id: self.conversation_id.clone(),
+            };
+            &custom_provider
+        } else {
+            self
+        };
+
+        let mut stream = provider.generate_streaming(messages)?;
+        let mut full_response = String::new();
+        let mut timing = None;
+
+        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+            match chunk {
+                Ok(response) => {
+                    full_response.push_str(&response.content);
+                    if response.done {
+                        timing = response.inference_timing;
+                        break;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok((full_response, timing))
     }
 
     fn messages_to_llama_chat_static(
@@ -393,6 +546,7 @@ impl LlamaCppProvider {
                 Role::System => "system",
                 Role::User => "user",
                 Role::Assistant => "assistant",
+                Role::Tool => "tool",
             };
 
             let role_cstring = CString::new(role_str)
@@ -485,6 +639,8 @@ impl Provider for LlamaCppProvider {
         let format = detect_model_format(&self.name);
         let is_glm = matches!(format, ModelFormat::GLM4);
 
+        let mut tool_grammar: Option<(String, Vec<String>)> = None;
+
         let system_prompt = if let Some(tools_value) = tools.as_ref() {
             let tools_array = tools_value
                 .as_array()
@@ -502,6 +658,22 @@ impl Provider for LlamaCppProvider {
                 })
                 .collect();
 
+            // Generate GBNF grammar for fence-format tool calls when explicitly enabled.
+            // Grammar enforcement is opt-in via SamplingConfig because lazy grammar
+            // triggers can cause crashes on some model/quant combinations.
+            if self.config.grammar.is_some()
+                && matches!(self.config.tool_format, LocalToolFormat::Fence)
+                && !tool_infos.is_empty()
+            {
+                let (grammar, _root) =
+                    crate::tool_grammar::fence_grammar_after_trigger(&tool_infos);
+                let triggers: Vec<String> = crate::tool_grammar::fence_trigger_patterns()
+                    .into_iter()
+                    .map(String::from)
+                    .collect();
+                tool_grammar = Some((grammar, triggers));
+            }
+
             // Use GLM-specific prompt that emphasizes tools are optional
             if is_glm {
                 McpConverter::to_glm_prompt(&tool_infos)
@@ -518,28 +690,73 @@ impl Provider for LlamaCppProvider {
                 if first.role == Role::System {
                     first.content = format!("{}\n\n{}", system_prompt, first.content);
                 } else {
-                    modified_messages.insert(
-                        0,
-                        Message {
-                            role: Role::System,
-                            content: system_prompt,
-                            images: None,
-                        },
-                    );
+                    modified_messages.insert(0, Message::system(system_prompt));
                 }
             } else {
-                modified_messages.push(Message {
-                    role: Role::System,
-                    content: system_prompt,
-                    images: None,
-                });
+                modified_messages.push(Message::system(system_prompt));
             }
         }
 
-        // For GLM with tools, use lower temperature (0.15) for more reliable tool calling
-        let raw_content = if is_glm && tools.is_some() {
+        // Model-specific temperature tuning for tool calling reliability
+        let tool_temperature = if tools.is_some() {
+            let name_lower = self.name.to_lowercase();
+            if is_glm {
+                Some(0.15)
+            } else if name_lower.contains("0.6b")
+                || name_lower.contains("0.8b")
+                || name_lower.contains("270m")
+            {
+                Some(0.1) // Near-greedy for tiny models
+            } else if name_lower.contains("3b") || name_lower.contains("4b") {
+                Some(0.2)
+            } else {
+                None // Keep default for 8B+
+            }
+        } else {
+            None
+        };
+
+        // Convert tool definitions to ChatTool format for native template rendering
+        let chat_tools: Vec<arkavo_llama_cpp::ChatTool> = if let Some(ref tools_value) = tools {
+            tools_value
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| {
+                            Some(arkavo_llama_cpp::ChatTool {
+                                name: t.get("name")?.as_str()?.to_string(),
+                                description: t
+                                    .get("description")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                parameters_json: t
+                                    .get("input_schema")
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_default(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let (raw_content, inference_timing) = {
             let mut config = self.config.clone();
-            config.temperature = 0.15;
+            if let Some(temp) = tool_temperature {
+                config.temperature = temp;
+            }
+            if let Some((grammar, triggers)) = tool_grammar {
+                config.grammar = Some(grammar);
+                config.grammar_triggers = Some(triggers);
+            }
+            // Pass tools to the Jinja template engine for native grammar generation
+            if !chat_tools.is_empty() {
+                config.chat_tools = chat_tools;
+                config.chat_tool_choice = arkavo_llama_cpp::ToolChoice::Required;
+            }
             let custom_provider = Self {
                 model: self.model.clone(),
                 registry: self.registry.clone(),
@@ -549,14 +766,11 @@ impl Provider for LlamaCppProvider {
                 conversation_id: self.conversation_id.clone(),
             };
             custom_provider
-                .complete_with_options(modified_messages, max_tokens)
-                .await?
-        } else {
-            self.complete_with_options(modified_messages, max_tokens)
+                .complete_with_timing(modified_messages, max_tokens)
                 .await?
         };
 
-        // Extract thinking blocks for GLM models
+        // Extract thinking blocks for GLM models; also strip for sub-1B Qwen defensively
         let (content, reasoning_content) = if is_glm {
             let extraction = ToolParser::extract_thinking_blocks(&raw_content);
             let reasoning = if extraction.thinking.is_empty() {
@@ -565,6 +779,9 @@ impl Provider for LlamaCppProvider {
                 Some(extraction.thinking)
             };
             (extraction.content, reasoning)
+        } else if format == ModelFormat::Qwen3 && is_small_model(&self.name) {
+            let extraction = ToolParser::extract_thinking_blocks(&raw_content);
+            (extraction.content, None)
         } else {
             (raw_content, None)
         };
@@ -611,6 +828,7 @@ impl Provider for LlamaCppProvider {
             reasoning_content,
             tool_calls,
             finish_reason: None,
+            inference_timing,
         })
     }
 }
@@ -672,5 +890,25 @@ impl Provider for LlamaCppProvider {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    use super::is_small_model;
+
+    #[test]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn test_is_small_model() {
+        assert!(is_small_model("qwen3.5-0.8b"));
+        assert!(is_small_model("Qwen3-0.6B"));
+        assert!(is_small_model("gemma-3-270m-it"));
+        assert!(is_small_model("custom-500m-model"));
+
+        assert!(!is_small_model("qwen3.5-27b"));
+        assert!(!is_small_model("ministral-3b"));
+        assert!(!is_small_model("ministral-8b"));
+        assert!(!is_small_model("glm-4.7-flash"));
     }
 }

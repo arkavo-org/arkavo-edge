@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
-use crate::learning::LearningModule;
+use crate::learning::{DecisionTrace, LearningModule};
 use crate::selector::ModelSelector;
 
 impl ModelSelector {
@@ -48,6 +48,9 @@ impl ModelSelector {
             (TaskCategory::General, ModelChoice::LocalQwen3) => {
                 "General task: Fast local Qwen3 for quick responses"
             }
+            (TaskCategory::GameSimulation, _) => {
+                "Game/simulation task: Local model for domain-specific reasoning"
+            }
             (TaskCategory::General, _) => "General task: Local model for efficiency",
         };
 
@@ -59,6 +62,7 @@ impl ModelSelector {
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
+            ModelChoice::LocalQwen35_9B => "9B dense reasoning (4s), zero cost, good quality",
             ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
@@ -140,7 +144,7 @@ impl ModelSelector {
                     ModelChoice::LocalMinistral3B
                 }
             }
-            TaskCategory::General => ModelChoice::LocalQwen3,
+            TaskCategory::GameSimulation | TaskCategory::General => ModelChoice::LocalQwen3,
             #[allow(unreachable_patterns)]
             _ => {
                 if self.availability.anthropic {
@@ -177,6 +181,12 @@ impl ModelSelector {
                 decision.reasoning
             );
 
+            decision.trace = DecisionTrace::budget_constrained(
+                classification.category,
+                f64::from(classification.confidence),
+                local_fallback.name(),
+                budget_usage_percent,
+            );
             decision.recommended_model = local_fallback;
             decision.estimated_cost_usd = 0.0;
         }
@@ -212,17 +222,27 @@ impl ModelSelector {
             feasible.push(ModelChoice::LocalQwen3);
         }
 
+        let excluded_names: Vec<String> = excluded.to_vec();
+
         if feasible.len() == 1 {
             let model = feasible
                 .into_iter()
                 .next()
                 .unwrap_or(ModelChoice::LocalQwen3);
             let reasoning = format!("Single feasible model: {}", model.name());
-            return Ok(RoutingDecision::new(
+            let trace = DecisionTrace::single_feasible(
+                classification.category,
+                f64::from(classification.confidence),
+                model.name(),
+                budget_usage,
+                excluded_names,
+            );
+            return Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
                 classification.confidence,
                 reasoning,
+                trace,
             ));
         }
 
@@ -261,11 +281,22 @@ impl ModelSelector {
                 score,
                 classification.category.as_str()
             );
-            Ok(RoutingDecision::new(
+            let trace = DecisionTrace::thompson(
+                classification.category,
+                f64::from(classification.confidence),
+                model_ids,
+                ranked.clone(),
+                model.name(),
+                0,
+                budget_usage,
+                excluded_names,
+            );
+            Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
                 classification.confidence,
                 reasoning,
+                trace,
             ))
         } else {
             self.select(classification, "")
@@ -282,6 +313,16 @@ pub fn compute_response_quality(response: &str, latency_ms: u64, category: &str)
     }
 
     let mut score: f64 = 1.0;
+
+    // Error responses should not score high
+    let lower = response.to_lowercase();
+    if lower.starts_with("error:")
+        || lower.contains("tool execution error")
+        || lower.contains("serialization error")
+        || lower.contains("failed to execute")
+    {
+        score -= 0.6;
+    }
 
     if response.len() < 20 {
         score -= 0.3;
@@ -545,6 +586,27 @@ mod tests {
         assert!(
             quality > 0.9,
             "Adequate response should score high: {quality}"
+        );
+    }
+
+    #[test]
+    fn test_compute_response_quality_error_detection() {
+        let error_resp = "Error: Tool execution error: Serialization error: data did not match any variant of untagged enum";
+        let quality = compute_response_quality(error_resp, 500, "general");
+        assert!(quality < 0.5, "Error response should score low: {quality}");
+
+        let tool_error = "Something happened then tool execution error occurred in the process";
+        let quality2 = compute_response_quality(tool_error, 500, "general");
+        assert!(
+            quality2 < 0.5,
+            "Tool error response should score low: {quality2}"
+        );
+
+        let failed = "failed to execute the requested tool call";
+        let quality3 = compute_response_quality(failed, 500, "general");
+        assert!(
+            quality3 < 0.5,
+            "Failed execution should score low: {quality3}"
         );
     }
 

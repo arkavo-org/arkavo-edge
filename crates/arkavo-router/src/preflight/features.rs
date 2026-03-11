@@ -182,11 +182,15 @@ mod tests {
     }
 
     #[test]
-    fn test_homoglyph_bypass_limitation() {
-        // Documents known limitation: Unicode homoglyphs bypass detection
+    fn test_homoglyph_bypass_detected_after_normalization() {
+        use crate::preflight::normalize::normalize;
+
         let feature = PreflightFeature::InputContainsSQLKeywords;
         assert!(feature.extract("DROP TABLE"));
-        // Cyrillic 'О' (U+041E) looks like Latin 'O'
-        assert!(!feature.extract("DRОР TABLE")); // Known bypass
+        // Raw feature does not catch Cyrillic homoglyph
+        assert!(!feature.extract("DR\u{041E}P TABLE"));
+        // After normalization (as the moderator applies), the bypass is caught
+        let normalized = normalize("DR\u{041E}P TABLE");
+        assert!(feature.extract(&normalized));
     }
 }

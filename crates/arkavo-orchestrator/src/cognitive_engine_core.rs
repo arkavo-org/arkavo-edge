@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use arkavo_budget::BudgetTracker;
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_github::IssueOperations;
-use arkavo_llm::{Message as LlmMessage, Role};
+use arkavo_llm::Message as LlmMessage;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_memory::{PlanStateStore, PlanStatus};
 use arkavo_router::Router;
@@ -302,16 +302,11 @@ impl CognitiveEngine {
                 step.step_number, step.description, command
             );
 
-            let messages = vec![LlmMessage {
-                role: Role::User,
-                content: task_prompt.clone(),
-                images: None,
-            }];
+            let messages = vec![LlmMessage::user(task_prompt.clone())];
 
-            #[allow(deprecated)]
             let response = self
                 .router
-                .route_with_quality_gate(command, messages, Some(&self.tool_registry), 3)
+                .route_with_tools(command, messages, Some(&self.tool_registry))
                 .await
                 .map_err(|e| Error::Other(anyhow::anyhow!("Command execution failed: {e}")))?;
 

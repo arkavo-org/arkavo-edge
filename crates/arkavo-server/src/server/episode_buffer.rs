@@ -22,6 +22,12 @@ pub struct ToolObservation {
     pub latency_ms: u64,
     /// When this observation was recorded
     pub timestamp: DateTime<Utc>,
+    /// Links to the routing decision that led to this tool call
+    pub decision_trace_id: Option<uuid::Uuid>,
+    /// Position in a multi-step execution
+    pub step_index: u16,
+    /// Which model generated this tool call
+    pub model_name: Option<String>,
 }
 
 /// Buffer for accumulating tool call observations before episode synthesis
@@ -180,6 +186,9 @@ mod tests {
             success,
             latency_ms: 100,
             timestamp: Utc::now(),
+            decision_trace_id: None,
+            step_index: 0,
+            model_name: None,
         }
     }
 
@@ -350,6 +359,9 @@ mod tests {
                 success: true,
                 latency_ms: (i + 1) as u64 * 100,
                 timestamp: Utc::now(),
+                decision_trace_id: None,
+                step_index: 0,
+                model_name: None,
             });
         }
         let taken = buffer.take_observations("navigation");

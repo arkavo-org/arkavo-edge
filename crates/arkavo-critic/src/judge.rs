@@ -6,7 +6,7 @@
 //! - Refusals when tools should have been used
 //! - Tool error acknowledgment failures
 
-use arkavo_llm::{Message, Provider, ProviderResponse, Role, tool_executor::ToolExecutionResult};
+use arkavo_llm::{Message, Provider, ProviderResponse, tool_executor::ToolExecutionResult};
 use arkavo_mcp_tools::ToolInfo;
 use std::sync::Arc;
 
@@ -120,11 +120,7 @@ impl ResponseJudge {
 
         let judgment_text = self
             .judge_provider
-            .complete(vec![Message {
-                role: Role::User,
-                content: judge_prompt,
-                images: None,
-            }])
+            .complete(vec![Message::user(judge_prompt)])
             .await
             .map_err(|e| {
                 tracing::warn!("Judge LLM failed, falling back to heuristics: {}", e);
@@ -626,6 +622,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = judge
@@ -655,6 +652,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let result = judge
@@ -681,6 +679,7 @@ mod tests {
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
+            inference_timing: None,
         };
 
         // Tool execution failed

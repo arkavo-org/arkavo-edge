@@ -8,6 +8,7 @@ pub mod health_reporter;
 pub mod metrics;
 pub mod metrics_snapshot;
 pub mod session;
+pub mod subsystem_timing;
 pub mod task_tracker;
 
 /// Configuration for observability setup
@@ -47,6 +48,7 @@ pub fn init_observability(config: ObservabilityConfig) -> Result<ObservabilityHa
     // Console logging layer
     if config.console_logging {
         let console_layer = tracing_subscriber::fmt::layer()
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
             .with_file(true)
             .with_line_number(true)
             .with_thread_ids(true)

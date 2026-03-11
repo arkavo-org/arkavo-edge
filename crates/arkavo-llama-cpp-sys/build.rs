@@ -44,14 +44,6 @@ fn get_vendor_commit(vendor_dir: &std::path::Path) -> Option<String> {
 }
 
 fn file_contains(vendor_dir: &std::path::Path, pattern: &str) -> bool {
-    // Search in the Metal device file specifically
-    let target_file = vendor_dir.join("ggml/src/ggml-metal/ggml-metal-device.m");
-    if target_file.exists() {
-        if let Ok(content) = std::fs::read_to_string(&target_file) {
-            return content.contains(pattern);
-        }
-    }
-    // Fallback: grep the whole vendor dir
     Command::new("grep")
         .args(["-rq", pattern])
         .current_dir(vendor_dir)
@@ -103,58 +95,48 @@ fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
             }
         }
 
-        // Check if patch is already applied by doing a dry-run
-        let check = Command::new("patch")
-            .args(["--dry-run", "-p1", "-N", "-i"])
+        // Check if patch is already applied by trying a reverse dry-run
+        // -f prevents interactive prompts that default to "yes" in non-tty contexts
+        let reverse_check = Command::new("patch")
+            .args(["--dry-run", "-R", "-f", "-p1", "-i"])
             .arg(&patch_path)
             .current_dir(vendor_dir)
             .output()
             .expect("Failed to run patch command");
 
-        if check.status.success() {
-            // Patch not yet applied, apply it
-            eprintln!("Applying patch: {}", patch_name);
-            let result = Command::new("patch")
-                .args(["-p1", "-N", "-i"])
-                .arg(&patch_path)
-                .current_dir(vendor_dir)
-                .output()
-                .expect("Failed to apply patch");
+        if reverse_check.status.success() {
+            // Reverse applies cleanly = patch is already applied
+            eprintln!("Patch already applied: {}", patch_name);
+            continue;
+        }
 
-            if !result.status.success() {
-                eprintln!("Patch output: {}", String::from_utf8_lossy(&result.stdout));
-                eprintln!("Patch stderr: {}", String::from_utf8_lossy(&result.stderr));
+        // Patch not yet applied, apply it
+        eprintln!("Applying patch: {}", patch_name);
+        let result = Command::new("patch")
+            .args(["-p1", "-N", "--no-backup-if-mismatch", "-i"])
+            .arg(&patch_path)
+            .current_dir(vendor_dir)
+            .output()
+            .expect("Failed to apply patch");
+
+        if !result.status.success() {
+            eprintln!("Patch output: {}", String::from_utf8_lossy(&result.stdout));
+            eprintln!("Patch stderr: {}", String::from_utf8_lossy(&result.stderr));
+            panic!(
+                "Failed to apply patch: {}. The upstream code may have changed. \
+                 Check if the fix was merged or if the patch needs updating.",
+                patch_name
+            );
+        }
+
+        // Verify patch was applied correctly
+        if let Some(ref present_text) = meta.verify_present {
+            if !file_contains(vendor_dir, present_text) {
                 panic!(
-                    "Failed to apply patch: {}. The upstream code may have changed. \
-                     Check if the fix was merged or if the patch needs updating.",
+                    "Patch {} applied but VERIFY_PRESENT text not found. \
+                     The patch may have applied incorrectly.",
                     patch_name
                 );
-            }
-
-            // Verify patch was applied correctly
-            if let Some(ref present_text) = meta.verify_present {
-                if !file_contains(vendor_dir, present_text) {
-                    panic!(
-                        "Patch {} applied but VERIFY_PRESENT text not found. \
-                         The patch may have applied incorrectly.",
-                        patch_name
-                    );
-                }
-            }
-        } else {
-            // Patch didn't apply - either already applied or conflicts
-            if let Some(ref present_text) = meta.verify_present {
-                if file_contains(vendor_dir, present_text) {
-                    eprintln!("Patch already applied: {}", patch_name);
-                } else {
-                    panic!(
-                        "Patch {} failed to apply and fix is not present. \
-                         The upstream code may have changed incompatibly.",
-                        patch_name
-                    );
-                }
-            } else {
-                eprintln!("Patch already applied (assumed): {}", patch_name);
             }
         }
     }
@@ -290,7 +272,8 @@ fn main() {
         .define("LLAMA_BUILD_MTMD", "ON") // Enable multimodal support
         .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
         .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples
-        .define("LLAMA_BUILD_SERVER", "OFF"); // Don't build server
+        .define("LLAMA_BUILD_SERVER", "OFF") // Don't build server
+        .define("LLAMA_BUILD_COMMON", "ON"); // Build common library (chat templates, Jinja, grammar)
 
     // Use ccache or sccache if available for faster rebuilds
     if let Ok(ccache) = which::which("ccache") {
@@ -340,6 +323,60 @@ fn main() {
                 }
             }
         }
+    }
+
+    // Link libraries from the CMake build tree that aren't installed to lib/
+    // (common, cpp-httplib, build_info are built but not installed by CMake)
+    //
+    // On Windows with MSBuild, CMake places artifacts in config subdirectories
+    // (e.g., build/common/Release/) instead of build/common/ directly.
+    let build_dir = dst.join("build");
+    let common_base = build_dir.join("common");
+    let common_lib = if cfg!(target_os = "windows") {
+        // MSBuild uses config-specific subdirectories
+        let release_dir = common_base.join("Release");
+        let relwithdebinfo_dir = common_base.join("RelWithDebInfo");
+        if release_dir.exists() {
+            release_dir
+        } else if relwithdebinfo_dir.exists() {
+            relwithdebinfo_dir
+        } else {
+            common_base.clone()
+        }
+    } else {
+        common_base.clone()
+    };
+    if common_lib.exists() {
+        println!("cargo:rustc-link-search=native={}", common_lib.display());
+        println!("cargo:rustc-link-lib=static=common");
+
+        // build_info is an OBJECT library — link its object file directly
+        if cfg!(target_os = "windows") {
+            let build_info_obj = common_base.join("build_info.dir/Release/build-info.obj");
+            if build_info_obj.exists() {
+                println!("cargo:rustc-link-arg={}", build_info_obj.display());
+            }
+        } else {
+            let build_info_obj = common_base.join("CMakeFiles/build_info.dir/build-info.cpp.o");
+            if build_info_obj.exists() {
+                println!("cargo:rustc-link-arg={}", build_info_obj.display());
+            }
+        }
+    }
+    let httplib_base = build_dir.join("vendor/cpp-httplib");
+    let httplib = if cfg!(target_os = "windows") {
+        let release_dir = httplib_base.join("Release");
+        if release_dir.exists() {
+            release_dir
+        } else {
+            httplib_base.clone()
+        }
+    } else {
+        httplib_base
+    };
+    if httplib.exists() {
+        println!("cargo:rustc-link-search=native={}", httplib.display());
+        println!("cargo:rustc-link-lib=static=cpp-httplib");
     }
 
     // Platform-specific linking
@@ -399,6 +436,37 @@ fn main() {
     }
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // Compile the C++ chat wrapper that bridges to common_chat_templates_apply()
+    let wrapper_src = manifest_dir.join("arkavo_chat_wrapper.cpp");
+    if wrapper_src.exists() {
+        println!("cargo:rerun-if-changed={}", wrapper_src.display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join("arkavo_chat_wrapper.h").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join("arkavo_grammar_wrapper.h").display()
+        );
+
+        let mut cc_build = cc::Build::new();
+        cc_build.cpp(true).std("c++17").file(&wrapper_src);
+        // -fexceptions is GCC/Clang only; MSVC enables exceptions by default
+        if !cfg!(target_os = "windows") {
+            cc_build.flag("-fexceptions");
+        }
+        cc_build
+            .include(out_path.join("include"))
+            .include(vendor_dir.join("common"))
+            .include(vendor_dir.join("include"))
+            .include(vendor_dir.join("vendor"))
+            .include(vendor_dir.join("ggml/include"))
+            .include(&manifest_dir)
+            .compile("arkavo_chat_wrapper");
+        eprintln!("Compiled arkavo_chat_wrapper.cpp");
+    }
+
     let bindings_path = out_path.join("bindings.rs");
     let header = out_path.join("include").join("llama.h");
     let mtmd_header = out_path.join("include").join("mtmd.h");
@@ -427,11 +495,22 @@ fn main() {
     if should_regenerate {
         eprintln!("Generating Rust bindings for llama.cpp");
 
-        // Create a wrapper header that includes both llama.h and mtmd.h
+        // Create a wrapper header that includes llama.h, mtmd.h, and chat wrapper
         let wrapper_header = out_path.join("wrapper.h");
         let mut wrapper_content = format!("#include \"{}\"\n", header.display());
         if mtmd_header.exists() {
             wrapper_content.push_str(&format!("#include \"{}\"\n", mtmd_header.display()));
+        }
+        let chat_wrapper_header = manifest_dir.join("arkavo_chat_wrapper.h");
+        if chat_wrapper_header.exists() {
+            wrapper_content.push_str(&format!("#include \"{}\"\n", chat_wrapper_header.display()));
+        }
+        let grammar_wrapper_header = manifest_dir.join("arkavo_grammar_wrapper.h");
+        if grammar_wrapper_header.exists() {
+            wrapper_content.push_str(&format!(
+                "#include \"{}\"\n",
+                grammar_wrapper_header.display()
+            ));
         }
         std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");
 
@@ -443,10 +522,12 @@ fn main() {
             .allowlist_function("ggml_.*")
             .allowlist_function("mtmd_.*")
             .allowlist_function("clip_.*")
+            .allowlist_function("arkavo_.*")
             .allowlist_type("llama_.*")
             .allowlist_type("ggml_.*")
             .allowlist_type("mtmd_.*")
             .allowlist_type("clip_.*")
+            .allowlist_type("arkavo_.*")
             .allowlist_var("LLAMA_.*")
             .allowlist_var("GGML_.*")
             .allowlist_var("MTMD_.*")

@@ -326,9 +326,12 @@ impl TaskStrategy for LocalTaskStrategy {
             ui.error("No models available");
             ui.error("Please either:");
             ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
-            ui.error(
-                "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF",
-            );
+            ui.error(&format!(
+                "  - Download a local model with: {}",
+                arkavo_router::decision::ModelChoice::LocalQwen3
+                    .download_hint()
+                    .unwrap_or_default()
+            ));
             Error::Model {
                 operation: "select models for task".to_string(),
                 details: "no local or cloud models available".to_string(),
@@ -429,10 +432,18 @@ impl LocalTaskStrategy {
                 break;
             }
 
-            // Execute tool calls
+            // Add the assistant response (contains tool call markup) before results
+            conversation.push(Message::assistant(&response.content));
+
+            // Execute tool calls — results use Role::Tool for Jinja template compliance
             if let Some(registry) = &self.tool_registry {
                 for tool_call in &response.tool_calls {
                     ui.status(&format!("Executing tool: {}", tool_call.tool_name));
+
+                    let call_id = tool_call
+                        .call_id
+                        .clone()
+                        .unwrap_or_else(|| format!("call_{}", iterations));
 
                     if let Some(tool) = registry.get(&tool_call.tool_name) {
                         match tool.execute(tool_call.arguments.clone()).await {
@@ -440,26 +451,28 @@ impl LocalTaskStrategy {
                                 ui.status(&format!("Tool result: {}", result));
                                 changes_made = true;
 
-                                // Add tool result to conversation
-                                conversation.push(Message::assistant(format!(
-                                    "Called {} with result: {}",
-                                    tool_call.tool_name, result
-                                )));
+                                conversation.push(Message::tool_result(
+                                    result.to_string(),
+                                    &call_id,
+                                    &tool_call.tool_name,
+                                ));
                             }
                             Err(e) => {
                                 ui.warn(&format!("Tool {} failed: {}", tool_call.tool_name, e));
-                                conversation.push(Message::assistant(format!(
-                                    "Tool {} failed: {}",
-                                    tool_call.tool_name, e
-                                )));
+                                conversation.push(Message::tool_result(
+                                    format!("Error: {e}"),
+                                    &call_id,
+                                    &tool_call.tool_name,
+                                ));
                             }
                         }
                     } else {
                         ui.warn(&format!("Tool not found: {}", tool_call.tool_name));
-                        conversation.push(Message::assistant(format!(
-                            "Tool {} not found",
-                            tool_call.tool_name
-                        )));
+                        conversation.push(Message::tool_result(
+                            format!("Tool {} not found", tool_call.tool_name),
+                            &call_id,
+                            &tool_call.tool_name,
+                        ));
                     }
                 }
             } else {

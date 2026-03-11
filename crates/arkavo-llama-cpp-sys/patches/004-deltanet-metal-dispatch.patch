@@ -1,0 +1,127 @@
+# BASE_COMMIT: 2446419
+# VERIFY_PRESENT: ggml_metal_op_delta_net
+# Source: llama.cpp PR #20091 (ggml-org/llama.cpp#20091)
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.cpp b/ggml/src/ggml-metal/ggml-metal-device.cpp
+index 06f3d8045..01e237a9e 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-device.cpp
+@@ -577,6 +577,24 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_rwkv(ggml_metal_
+     return res;
+ }
+
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_delta_net(ggml_metal_library_t lib, const ggml_tensor * op) {
++    const int64_t C = op->ne[0];
++    const int64_t H = op->src[0]->ne[1];
++
++    GGML_ASSERT(op->src[5]->type == GGML_TYPE_F32);
++    GGML_ASSERT(C % H == 0);
++    GGML_ASSERT(C / H == 64 || C / H == 128);
++
++    const char * name = "kernel_delta_net_f32";
++
++    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
++    if (!res.pipeline) {
++        res = ggml_metal_library_compile_pipeline(lib, name, name, nullptr);
++    }
++
++    return res;
++}
++
+ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_solve_tri(ggml_metal_library_t lib, const ggml_tensor * op) {
+     char base[256];
+     char name[256];
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.h b/ggml/src/ggml-metal/ggml-metal-device.h
+index 93d7f6a21..753d469d5 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.h
++++ b/ggml/src/ggml-metal/ggml-metal-device.h
+@@ -125,6 +125,7 @@ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_ssm_conv
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_ssm_conv_batched  (ggml_metal_library_t lib, const struct ggml_tensor * op, int ssm_conv_bs);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_ssm_scan          (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_rwkv              (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_delta_net         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_solve_tri         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_ext        (ggml_metal_library_t lib, enum ggml_type tsrc0, enum ggml_type tsrc1, int nsg, int nxpsg, int r1ptg);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mm            (ggml_metal_library_t lib, const struct ggml_tensor * op);
+diff --git a/ggml/src/ggml-metal/ggml-metal-device.m b/ggml/src/ggml-metal/ggml-metal-device.m
+index 3db7f1262..004787bab 100644
+--- a/ggml/src/ggml-metal/ggml-metal-device.m
++++ b/ggml/src/ggml-metal/ggml-metal-device.m
+@@ -1154,6 +1154,7 @@ bool ggml_metal_device_supports_op(ggml_metal_device_t dev, const struct ggml_te
+             return has_simdgroup_reduction;
+         case GGML_OP_RWKV_WKV6:
+         case GGML_OP_RWKV_WKV7:
++        case GGML_OP_DELTA_NET:
+             return true;
+         case GGML_OP_SOLVE_TRI:
+         case GGML_OP_MUL_MAT:
+diff --git a/ggml/src/ggml-metal/ggml-metal-ops.cpp b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index 3d5db0b79..a2bc950f6 100644
+--- a/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -333,6 +333,10 @@ static int ggml_metal_op_encode_impl(ggml_metal_op_t ctx, int idx) {
+             {
+                 n_fuse = ggml_metal_op_rwkv(ctx, idx);
+             } break;
++        case GGML_OP_DELTA_NET:
++            {
++                n_fuse = ggml_metal_op_delta_net(ctx, idx);
++            } break;
+         case GGML_OP_SOLVE_TRI:
+             {
+                 n_fuse = ggml_metal_op_solve_tri(ctx, idx);
+@@ -1562,6 +1566,43 @@ int ggml_metal_op_rwkv(ggml_metal_op_t ctx, int idx) {
+     return 1;
+ }
+
++int ggml_metal_op_delta_net(ggml_metal_op_t ctx, int idx) {
++    ggml_tensor * op = ctx->node(idx);
++
++    ggml_metal_library_t lib = ctx->lib;
++    ggml_metal_encoder_t enc = ctx->enc;
++
++    const int64_t B = op->src[5]->ne[1]; // n_seqs from state
++    const int64_t T = op->src[0]->ne[2]; // total tokens
++    const int64_t C = op->ne[0];         // S * H
++    const int64_t H = op->src[0]->ne[1]; // num heads
++    const float scale = ggml_get_op_params_f32(op, 0);
++    const int64_t G = (int64_t) ggml_get_op_params_i32(op, 1); // gate_ne0: 1=GDA, S=KDA
++
++    auto pipeline = ggml_metal_library_get_pipeline_delta_net(lib, op);
++
++    int ida = 0;
++
++    ggml_metal_encoder_set_pipeline(enc, pipeline);
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[0]), ida++); // k
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[1]), ida++); // v
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[2]), ida++); // q
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[3]), ida++); // gate
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[4]), ida++); // beta
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[5]), ida++); // state
++    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op),         ida++); // dst
++    ggml_metal_encoder_set_bytes   (enc, (void *) &B, sizeof(B), ida++);
++    ggml_metal_encoder_set_bytes   (enc, (void *) &T, sizeof(T), ida++);
++    ggml_metal_encoder_set_bytes   (enc, (void *) &C, sizeof(C), ida++);
++    ggml_metal_encoder_set_bytes   (enc, (void *) &H, sizeof(H), ida++);
++    ggml_metal_encoder_set_bytes   (enc, (void *) &scale, sizeof(scale), ida++);
++    ggml_metal_encoder_set_bytes   (enc, (void *) &G, sizeof(G), ida++);  // gate_ne0
++
++    ggml_metal_encoder_dispatch_threadgroups(enc, B * H, 1, 1, C/H, 1, 1);
++
++    return 1;
++}
++
+ int ggml_metal_op_solve_tri(ggml_metal_op_t ctx, int idx) {
+     ggml_tensor * op = ctx->node(idx);
+
+diff --git a/ggml/src/ggml-metal/ggml-metal-ops.h b/ggml/src/ggml-metal/ggml-metal-ops.h
+index f3e38c7aa..ee974e1ce 100644
+--- a/ggml/src/ggml-metal/ggml-metal-ops.h
++++ b/ggml/src/ggml-metal/ggml-metal-ops.h
+@@ -58,6 +58,7 @@ int ggml_metal_op_soft_max          (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_ssm_conv          (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_ssm_scan          (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_rwkv              (ggml_metal_op_t ctx, int idx);
++int ggml_metal_op_delta_net         (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_solve_tri         (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_set               (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_cpy               (ggml_metal_op_t ctx, int idx);

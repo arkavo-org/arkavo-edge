@@ -32,6 +32,7 @@ pub mod error_sanitizer;
 pub mod log_sanitizer;
 pub mod revocation;
 pub mod timeout;
+pub mod visibility;
 
 // Re-export session-related modules from arkavo-protocol
 pub use arkavo_protocol::chat_session;

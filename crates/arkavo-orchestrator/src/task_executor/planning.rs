@@ -145,9 +145,8 @@ impl CollaborativePlanner {
         format!(
             r#"Task: {task}
 
-Use MCP tools to gather information. Be concise.
-- @filesystem {{"action": "list_directory", "dir_path": "."}}
-- @git_status
+Use the available tools to gather information about the current project. Be concise.
+List files, check git status, and explore the codebase as needed.
 
 Report your findings in 3-4 sentences. Then ask the planning agent 2-3 specific questions about what needs to be done."#
         )
@@ -161,15 +160,9 @@ Report your findings in 3-4 sentences. Then ask the planning agent 2-3 specific 
 Based on the local agent's findings:
 {gather_findings}
 
-Create a detailed plan.
+Create a detailed plan. Use the available tools to read files and verify your assumptions.
 
-**Available MCP Tools:**
-- @filesystem {{"action": "read_file", "file_path": "path"}}
-- @filesystem {{"action": "list_directory", "dir_path": "path"}}
-- @git_status
-- @git_diff
-
-Use tools to verify your assumptions. Output your plan:
+Output your plan:
 
 ## Analysis
 [Key findings]
@@ -188,10 +181,10 @@ Ask the local agent to verify anything uncertain."#
     /// Build prompt for Round 3: Verification
     pub fn build_verify_prompt(plan_content: &str) -> String {
         format!(
-            r#"Based on the cloud agent's plan:
+            r#"Based on the planning agent's plan:
 {plan_content}
 
-Verify the details using MCP tools. Read the mentioned files and confirm the plan makes sense. Report any issues."#
+Verify the details using the available tools. Read the mentioned files and confirm the plan makes sense. Report any issues."#
         )
     }
 
@@ -202,13 +195,7 @@ Verify the details using MCP tools. Read the mentioned files and confirm the pla
 
 Task: {task}
 
-Use MCP tools to make the actual changes:
-- @filesystem {{"action": "write_file", "file_path": "path", "content": "..."}}
-- @filesystem {{"action": "edit_file", "file_path": "path", "old_content": "...", "new_content": "..."}}
-- @git_status
-- @git_diff
-
-Execute the plan step by step. Show what you're doing."#
+Use the available tools to make the actual changes. Execute the plan step by step. Show what you're doing."#
         )
     }
 }
@@ -231,11 +218,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gather_prompt_includes_tools() {
+    fn test_gather_prompt_includes_task() {
         let prompt = CollaborativePlanner::build_gather_prompt("Fix bug");
-        assert!(prompt.contains("@filesystem"));
-        assert!(prompt.contains("@git_status"));
         assert!(prompt.contains("Fix bug"));
+        assert!(prompt.contains("available tools"));
     }
 
     #[test]
@@ -247,9 +233,9 @@ mod tests {
     }
 
     #[test]
-    fn test_execution_prompt_includes_write_tools() {
+    fn test_execution_prompt_includes_task() {
         let prompt = CollaborativePlanner::build_execution_prompt("Create file");
-        assert!(prompt.contains("write_file"));
-        assert!(prompt.contains("edit_file"));
+        assert!(prompt.contains("Create file"));
+        assert!(prompt.contains("available tools"));
     }
 }

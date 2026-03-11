@@ -132,18 +132,30 @@ pub fn estimate_tokens(text: &str) -> usize {
 }
 
 /// Get default model context size based on model hint.
+///
+/// Resolves full model names (e.g. "qwen3.5-27b") via `ModelChoice::from_name`
+/// before falling back to bare suffix matching (e.g. "7B").
 pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
     if is_cloud {
-        131_072 // 128K for cloud models
-    } else {
-        match model_hint {
-            Some("270M") => 2_048,
-            Some("1B") => 4_096,
-            Some("2B" | "3B") => 8_192,
-            Some("7B" | "8B") => 32_768,
-            Some("14B") => 32_768,
-            _ => 8_192, // Default
-        }
+        return 131_072; // 128K for cloud models
+    }
+    if let Some(hint) = model_hint
+        && let Some(choice) = arkavo_router::ModelChoice::from_name(hint)
+    {
+        return match choice.capability() {
+            arkavo_router::PlannerTier::Small => 2_048,
+            arkavo_router::PlannerTier::Medium => 8_192,
+            arkavo_router::PlannerTier::Large => 32_768,
+        };
+    }
+    // Legacy bare suffix fallback
+    match model_hint {
+        Some("270M") => 2_048,
+        Some("1B") => 4_096,
+        Some("2B" | "3B") => 8_192,
+        Some("7B" | "8B") => 32_768,
+        Some("14B") => 32_768,
+        _ => 8_192, // Default
     }
 }
 
@@ -163,6 +175,15 @@ mod tests {
         assert_eq!(model_context_size(Some("270M"), false), 2_048);
         assert_eq!(model_context_size(Some("7B"), false), 32_768);
         assert_eq!(model_context_size(None, true), 131_072);
+    }
+
+    #[test]
+    fn test_model_context_size_full_names() {
+        assert_eq!(model_context_size(Some("qwen3.5-27b"), false), 32_768);
+        assert_eq!(model_context_size(Some("glm-4.7-flash"), false), 32_768);
+        assert_eq!(model_context_size(Some("ministral-8b"), false), 32_768);
+        assert_eq!(model_context_size(Some("ministral-3b"), false), 8_192);
+        assert_eq!(model_context_size(Some("qwen3.5-0.8b"), false), 2_048);
     }
 
     #[tokio::test]

@@ -14,6 +14,12 @@ pub struct RoutingMetrics {
     pub average_confidence: f64,
     pub started_at: DateTime<Utc>,
     pub last_updated: DateTime<Utc>,
+    /// Rolling average of router decision latency (inference + classification)
+    #[serde(default)]
+    pub avg_router_decision_ms: f64,
+    /// Number of router decisions with latency recorded
+    #[serde(default)]
+    pub router_decision_count: u64,
 }
 
 impl RoutingMetrics {
@@ -27,6 +33,8 @@ impl RoutingMetrics {
             average_confidence: 0.0,
             started_at: Utc::now(),
             last_updated: Utc::now(),
+            avg_router_decision_ms: 0.0,
+            router_decision_count: 0,
         }
     }
 
@@ -54,6 +62,15 @@ impl RoutingMetrics {
         ) / self.total_routes as f64;
 
         self.last_updated = Utc::now();
+    }
+
+    /// Record router decision latency (classification + inference)
+    pub fn record_router_latency(&mut self, latency_ms: u64) {
+        self.router_decision_count += 1;
+        self.avg_router_decision_ms = self
+            .avg_router_decision_ms
+            .mul_add((self.router_decision_count - 1) as f64, latency_ms as f64)
+            / self.router_decision_count as f64;
     }
 
     fn calculate_cost_saved(&self, category: TaskCategory, decision: &RoutingDecision) -> f64 {

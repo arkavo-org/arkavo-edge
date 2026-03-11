@@ -70,5 +70,9 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "concurrent_inference_benchmark"
 harness = false
+
+[[bench]]
+name = "deltanet_throughput"
+harness = false
 [lints]
 workspace = true

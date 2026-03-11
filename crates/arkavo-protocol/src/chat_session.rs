@@ -5,7 +5,7 @@ use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
 use arkavo_llm::{
-    DeltaType, LlmClientAdapter, Message, Role, StreamLlmModel, ToolExecutionResult, ToolExecutor,
+    DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutionResult, ToolExecutor,
 };
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_observability::{
@@ -23,6 +23,23 @@ use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
+/// A teaching event emitted when the chat path detects a human teaching intent
+#[derive(Debug, Clone)]
+pub enum ChatTeachingEvent {
+    /// Human gave a behavioral instruction
+    Instruction {
+        text: String,
+        scope: arkavo_router::learning::LessonScope,
+    },
+    /// Human corrected a recent action
+    Correction {
+        text: String,
+        trace_id: Option<Uuid>,
+    },
+    /// Human reinforced a recent action
+    Reinforcement { trace_id: Option<Uuid> },
+}
+
 /// Manages active chat sessions
 pub struct ChatSessionManager {
     sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
@@ -34,6 +51,15 @@ pub struct ChatSessionManager {
     task_tracker: ObservableTaskTracker,
     _ttl_seconds: u64,
     buffer_config: BufferConfig,
+    /// Shared learning context string, updated by the server from LearningBus.
+    /// Prepended as a system message before each chat inference.
+    learning_context: Option<Arc<RwLock<String>>>,
+    /// Channel for emitting human teaching events to the learning bus
+    teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
+    /// Agent purpose/system prompt from AGENTS.md, prepended to every chat context
+    system_prompt: Option<String>,
+    /// Override the default model selection (for testing/benchmarking)
+    model_override: Option<arkavo_router::ModelChoice>,
 }
 
 struct ChatSessionState {
@@ -132,7 +158,35 @@ impl ChatSessionManager {
             task_tracker,
             _ttl_seconds: ttl_seconds,
             buffer_config,
+            learning_context: None,
+            teaching_tx: None,
+            system_prompt: None,
+            model_override: None,
         }
+    }
+
+    /// Set a shared learning context that will be prepended to chat messages.
+    /// The server updates this string from LearningBus (lessons, quality trends).
+    pub fn set_learning_context(&mut self, context: Arc<RwLock<String>>) {
+        self.learning_context = Some(context);
+    }
+
+    /// Set the teaching event channel for human teaching through chat.
+    pub fn set_teaching_tx(&mut self, tx: mpsc::Sender<ChatTeachingEvent>) {
+        self.teaching_tx = Some(tx);
+    }
+
+    /// Set the agent's purpose/system prompt from AGENTS.md.
+    /// Prepended as a system message to every chat context window.
+    pub fn set_system_prompt(&mut self, prompt: String) {
+        if !prompt.is_empty() {
+            self.system_prompt = Some(prompt);
+        }
+    }
+
+    /// Override the default model selection for chat inference.
+    pub fn set_model_override(&mut self, model: arkavo_router::ModelChoice) {
+        self.model_override = Some(model);
     }
 
     /// Create a new chat session with optional authentication
@@ -214,6 +268,10 @@ impl ChatSessionManager {
             let sessions = self.sessions.clone();
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
+            let learning_context = self.learning_context.clone();
+            let teaching_tx = self.teaching_tx.clone();
+            let system_prompt = self.system_prompt.clone();
+            let model_override = self.model_override.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -226,6 +284,10 @@ impl ChatSessionManager {
                         sessions,
                         session_metrics,
                         metrics_collector,
+                        learning_context,
+                        teaching_tx,
+                        system_prompt,
+                        model_override,
                     )
                     .await;
                 });
@@ -756,7 +818,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -767,6 +829,10 @@ impl ChatSessionManager {
         sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
+        learning_context: Option<Arc<RwLock<String>>>,
+        teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
+        system_prompt: Option<String>,
+        model_override: Option<arkavo_router::ModelChoice>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -784,66 +850,169 @@ impl ChatSessionManager {
                     metrics_collector.record_message_received();
 
                     // Add to conversation context
-                    conversation_context.push(Message {
-                        role: Role::User,
-                        content: user_message.content.clone(),
-                        images: None,
-                    });
+                    conversation_context.push(Message::user(user_message.content.clone()));
 
                     let message_id = Uuid::new_v4().to_string();
                     session_observability::log_stream_start(&session_id, None);
 
                     let mut final_response;
 
-                    // Classify first to get routing decision for telemetry
-                    let inference_start = std::time::Instant::now();
-                    let decision = router.classify(&user_message.content).await;
+                    // Chat path: fastest local model on separate semaphore
+                    // Sliding window prevents unbounded context growth
+                    const CHAT_WINDOW_SIZE: usize = 8;
+                    let mut windowed_context: Vec<Message> = if conversation_context.len() > CHAT_WINDOW_SIZE {
+                        conversation_context[conversation_context.len() - CHAT_WINDOW_SIZE..].to_vec()
+                    } else {
+                        conversation_context.clone()
+                    };
 
-                    let route_result = match decision {
-                        Ok(decision) => {
-                            // Emit model_selected metadata delta
-                            let metadata_delta = MessageDelta {
-                                session_id: session_id.clone(),
-                                message_id: message_id.clone(),
-                                sequence: 0,
-                                delta: MessageDeltaContent::Metadata {
-                                    key: "model_selected".to_string(),
-                                    value: serde_json::json!({
-                                        "model": decision.recommended_model.name(),
-                                        "category": decision.task_category.as_str(),
-                                        "reasoning": decision.reasoning,
-                                        "estimated_cost_usd": decision.estimated_cost_usd,
-                                    }),
-                                },
-                                timestamp: chrono::Utc::now(),
-                            };
-                            let _ = delta_tx.send(metadata_delta);
+                    // Prepend learning context as system message (lessons, quality trends)
+                    if let Some(ref lc) = learning_context {
+                        let ctx = lc.read().await;
+                        if !ctx.is_empty() {
+                            windowed_context.insert(0, Message::system(ctx.clone()));
+                        }
+                    }
 
-                            // Route with pre-computed decision (max 3 retries with model escalation)
-                            // Timeout prevents hanging when LLM inference stalls
-                            let inner = tokio::time::timeout(
-                                std::time::Duration::from_secs(120),
-                                router.route_with_quality_gate_from(
-                                    decision,
-                                    &user_message.content,
-                                    conversation_context.clone(),
-                                    tool_registry.as_deref(),
-                                    3, // max_retries
-                                ),
-                            )
-                            .await;
+                    // Prepend agent purpose/system prompt from AGENTS.md (always first)
+                    if let Some(ref prompt) = system_prompt {
+                        windowed_context.insert(0, Message::system(prompt.clone()));
+                    }
 
-                            match inner {
-                                Ok(result) => result,
-                                Err(_elapsed) => {
-                                    error!(session.id = %session_id, "LLM inference timed out after 120s");
-                                    Err(arkavo_router::Error::ModelExecution(
-                                        "LLM inference timed out after 120s".to_string(),
-                                    ))
+                    // Emit tool search telemetry before routing
+                    if let Some(ref registry) = tool_registry {
+                        let keywords = arkavo_router::tool_search_keywords(&user_message.content);
+                        let tool_names: Vec<String> = registry
+                            .search_tools(&keywords, arkavo_mcp_tools::DetailLevel::NameOnly)
+                            .iter()
+                            .map(|t| t.name.clone())
+                            .collect();
+                        let tool_search_delta = MessageDelta {
+                            session_id: session_id.clone(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Metadata {
+                                key: "tool_search".to_string(),
+                                value: serde_json::json!({
+                                    "keywords": keywords,
+                                    "tools_found": tool_names.len(),
+                                    "tool_names": tool_names,
+                                }),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = delta_tx.send(tool_search_delta);
+                    }
+
+                    // Classify human teaching intent before routing
+                    let last_trace = router.last_decision_trace().map(|t| t.trace_id);
+                    let intent = arkavo_router::learning::human_teaching::classify_intent(
+                        &user_message.content,
+                        last_trace,
+                    );
+
+                    if intent != arkavo_router::learning::TeachingIntent::Question {
+                        // Emit intent metadata delta so the UI can display it
+                        let intent_label = match &intent {
+                            arkavo_router::learning::TeachingIntent::Instruction { scope } => {
+                                format!("instruction ({scope})")
+                            }
+                            arkavo_router::learning::TeachingIntent::Correction { .. } => {
+                                "correction".to_string()
+                            }
+                            arkavo_router::learning::TeachingIntent::Reinforcement => {
+                                "reinforcement".to_string()
+                            }
+                            arkavo_router::learning::TeachingIntent::Question => unreachable!(),
+                        };
+                        let intent_delta = MessageDelta {
+                            session_id: session_id.clone(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Metadata {
+                                key: "teaching_intent".to_string(),
+                                value: serde_json::json!({
+                                    "intent": intent_label,
+                                    "text": &user_message.content,
+                                }),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
+                        let _ = delta_tx.send(intent_delta);
+
+                        // Forward teaching event to learning bus
+                        if let Some(ref tx) = teaching_tx {
+                            let event = match &intent {
+                                arkavo_router::learning::TeachingIntent::Instruction { scope } => {
+                                    Some(ChatTeachingEvent::Instruction {
+                                        text: user_message.content.clone(),
+                                        scope: *scope,
+                                    })
                                 }
+                                arkavo_router::learning::TeachingIntent::Correction { trace_id } => {
+                                    Some(ChatTeachingEvent::Correction {
+                                        text: user_message.content.clone(),
+                                        trace_id: *trace_id,
+                                    })
+                                }
+                                arkavo_router::learning::TeachingIntent::Reinforcement => {
+                                    Some(ChatTeachingEvent::Reinforcement {
+                                        trace_id: last_trace,
+                                    })
+                                }
+                                _ => None,
+                            };
+                            if let Some(evt) = event {
+                                let _ = tx.send(evt).await;
                             }
                         }
-                        Err(e) => Err(e),
+
+                        info!(
+                            session.id = %session_id,
+                            intent = %intent_label,
+                            "Teaching intent detected in chat"
+                        );
+                    }
+
+                    let model = model_override
+                        .clone()
+                        .unwrap_or_else(|| router.fastest_local_model());
+                    let reasoning = if model_override.is_some() {
+                        format!("--model override: {}", model.name())
+                    } else {
+                        "Chat path: fastest local model, separate semaphore".to_string()
+                    };
+                    let metadata_delta = MessageDelta {
+                        session_id: session_id.clone(),
+                        message_id: message_id.clone(),
+                        sequence: 0,
+                        delta: MessageDeltaContent::Metadata {
+                            key: "model_selected".to_string(),
+                            value: serde_json::json!({
+                                "model": model.name(),
+                                "category": "chat",
+                                "reasoning": reasoning,
+                            }),
+                        },
+                        timestamp: chrono::Utc::now(),
+                    };
+                    let _ = delta_tx.send(metadata_delta);
+
+                    let inference_start = std::time::Instant::now();
+                    let chat_timeout_secs = 60;
+                    let route_result = match tokio::time::timeout(
+                        std::time::Duration::from_secs(chat_timeout_secs),
+                        router.route_chat(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
+                    )
+                    .await
+                    {
+                        Ok(inner) => inner,
+                        Err(_elapsed) => {
+                            error!(session.id = %session_id, "Chat inference timed out after {chat_timeout_secs}s");
+                            Err(arkavo_router::Error::ModelExecution(
+                                format!("Chat inference timed out after {chat_timeout_secs}s"),
+                            ))
+                        }
                     };
 
                     match route_result {
@@ -851,37 +1020,66 @@ impl ChatSessionManager {
                             final_response = response.content.clone();
                             let elapsed = inference_start.elapsed();
 
-                            // Emit quality_feedback metadata delta
+                            // Emit quality_feedback metadata delta with inference timing
+                            let mut quality_value = serde_json::json!({
+                                "latency_ms": elapsed.as_millis() as u64,
+                                "response_len": response.content.len(),
+                                "has_tool_calls": !response.tool_calls.is_empty(),
+                                "tool_call_count": response.tool_calls.len(),
+                            });
+                            // Include tool call names for diagnostics
+                            if !response.tool_calls.is_empty() {
+                                let tool_names: Vec<&str> = response.tool_calls
+                                    .iter()
+                                    .map(|tc| tc.tool_name.as_str())
+                                    .collect();
+                                quality_value["tool_names"] = serde_json::json!(tool_names);
+                            }
+                            // Include inference timing from provider (local models)
+                            if let Some(ref timing) = response.inference_timing {
+                                quality_value["prompt_eval_ms"] = serde_json::json!(timing.prompt_eval_ms);
+                                quality_value["generation_ms"] = serde_json::json!(timing.generation_ms);
+                                quality_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
+                                quality_value["generated_tokens"] = serde_json::json!(timing.n_eval);
+                                if timing.n_eval > 0 && timing.generation_ms > 0.0 {
+                                    let tok_per_sec = timing.n_eval as f64 / (timing.generation_ms / 1000.0);
+                                    quality_value["tokens_per_sec"] = serde_json::json!(format!("{tok_per_sec:.1}"));
+                                }
+                            }
                             let quality_delta = MessageDelta {
                                 session_id: session_id.clone(),
                                 message_id: message_id.clone(),
                                 sequence: 1,
                                 delta: MessageDeltaContent::Metadata {
                                     key: "quality_feedback".to_string(),
-                                    value: serde_json::json!({
-                                        "latency_ms": elapsed.as_millis() as u64,
-                                        "response_len": response.content.len(),
-                                        "has_tool_calls": !response.tool_calls.is_empty(),
-                                    }),
+                                    value: quality_value,
                                 },
                                 timestamp: chrono::Utc::now(),
                             };
                             let _ = delta_tx.send(quality_delta);
 
-                            // Send text delta (sequence 2+, after metadata deltas)
-                            let text_delta = MessageDelta {
-                                session_id: session_id.clone(),
-                                message_id: message_id.clone(),
-                                sequence: 2,
-                                delta: MessageDeltaContent::Text {
-                                    text: response.content.clone(),
-                                },
-                                timestamp: chrono::Utc::now(),
-                            };
-                            let _ = delta_tx.send(text_delta);
-
                             // Check for tool calls and execute them
                             if !response.tool_calls.is_empty() {
+                                // Strip tool call markup from content before sending text delta.
+                                // Handles XML (<tool_call>) and text-extracted calls (tool_name{}).
+                                let mut clean = arkavo_router::strip_tool_blocks(&response.content);
+                                // If content is just the raw tool call text, suppress it
+                                for tc in &response.tool_calls {
+                                    clean = clean.replace(&tc.tool_name, "");
+                                }
+                                let clean = clean.trim().trim_matches(|c: char| c == '{' || c == '}' || c == '(' || c == ')').trim().to_string();
+                                if !clean.is_empty() {
+                                    let text_delta = MessageDelta {
+                                        session_id: session_id.clone(),
+                                        message_id: message_id.clone(),
+                                        sequence: 2,
+                                        delta: MessageDeltaContent::Text {
+                                            text: clean,
+                                        },
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    let _ = delta_tx.send(text_delta);
+                                }
                                 // Send tool call deltas
                                 for (idx, tool_call) in response.tool_calls.iter().enumerate() {
                                     let tool_delta = MessageDelta {
@@ -905,19 +1103,11 @@ impl ChatSessionManager {
                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
                                     // Add assistant message with tool calls to context
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content.clone(),
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::assistant(response.content.clone()));
 
                                     // Format and add tool results to context as user message
                                     let results_message = format_tool_results(&tool_results);
-                                    conversation_context.push(Message {
-                                        role: Role::User,
-                                        content: results_message,
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::user(results_message));
 
                                     // Send tool result deltas
                                     for (idx, result) in tool_results.iter().enumerate() {
@@ -935,16 +1125,10 @@ impl ChatSessionManager {
                                         let _ = delta_tx.send(result_delta);
                                     }
 
-                                    // Route again to get final response with tool results
-                                    #[allow(deprecated)]
+                                    // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
                                         std::time::Duration::from_secs(120),
-                                        router.route_with_quality_gate(
-                                            &user_message.content,
-                                            conversation_context.clone(),
-                                            tool_registry.as_deref(),
-                                            3,
-                                        ),
+                                        router.route_chat(conversation_context.clone(), None, model_override.as_ref()),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
@@ -955,26 +1139,47 @@ impl ChatSessionManager {
                                     };
                                     match retry_result {
                                         Ok(final_resp) => {
-                                            final_response = final_resp.content.clone();
+                                            // Strip think blocks from final response (second inference
+                                            // may use a larger model that produces <think> tags)
+                                            let clean_content = arkavo_router::strip_think_blocks(&final_resp.content);
+                                            final_response = clean_content.clone();
+
+                                            // Emit telemetry for second inference
+                                            let mut tool_loop_value = serde_json::json!({
+                                                "phase": "tool_result_synthesis",
+                                                "latency_ms": inference_start.elapsed().as_millis() as u64,
+                                                "response_len": clean_content.len(),
+                                            });
+                                            if let Some(ref timing) = final_resp.inference_timing {
+                                                tool_loop_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
+                                                tool_loop_value["generated_tokens"] = serde_json::json!(timing.n_eval);
+                                            }
+                                            let tool_loop_delta = MessageDelta {
+                                                session_id: session_id.clone(),
+                                                message_id: message_id.clone(),
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 3) as u64,
+                                                delta: MessageDeltaContent::Metadata {
+                                                    key: "quality_feedback".to_string(),
+                                                    value: tool_loop_value,
+                                                },
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            let _ = delta_tx.send(tool_loop_delta);
 
                                             // Send final text delta
                                             let final_delta = MessageDelta {
                                                 session_id: session_id.clone(),
                                                 message_id: message_id.clone(),
-                                                sequence: (response.tool_calls.len() + tool_results.len() + 3) as u64,
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 4) as u64,
                                                 delta: MessageDeltaContent::Text {
-                                                    text: final_resp.content.clone(),
+                                                    text: clean_content.clone(),
                                                 },
                                                 timestamp: chrono::Utc::now(),
                                             };
                                             let _ = delta_tx.send(final_delta);
 
                                             // Add final assistant response to context
-                                            conversation_context.push(Message {
-                                                role: Role::Assistant,
-                                                content: final_resp.content,
-                                                images: None,
-                                            });
+                                            conversation_context.push(Message::assistant(clean_content));
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
@@ -984,43 +1189,32 @@ impl ChatSessionManager {
                                 } else {
                                     warn!("Tool calls received but no tool registry available");
                                     // Add assistant message to context without tool execution
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content,
-                                        images: None,
-                                    });
+                                    conversation_context.push(Message::assistant(response.content));
                                 }
                             } else {
-                                // No tool calls - add assistant message to context
-                                conversation_context.push(Message {
-                                    role: Role::Assistant,
-                                    content: response.content,
-                                    images: None,
-                                });
+                                // No tool calls - send text delta and add to context
+                                let text_delta = MessageDelta {
+                                    session_id: session_id.clone(),
+                                    message_id: message_id.clone(),
+                                    sequence: 2,
+                                    delta: MessageDeltaContent::Text {
+                                        text: response.content.clone(),
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = delta_tx.send(text_delta);
+                                conversation_context.push(Message::assistant(response.content));
                             }
                         }
                         Err(e) => {
-                            let error_msg = e.to_string();
-
                             // Check if Judge detected missing tool usage
-                            if error_msg.contains("MISSING_TOOL_USE:") {
+                            if let arkavo_router::Error::MissingToolUse { ref keywords } = e {
                                 if let Some(ref registry) = tool_registry {
-                                    // Extract keywords from error message
-                                    let keywords_str = error_msg
-                                        .strip_prefix("Model execution failed: MISSING_TOOL_USE:")
-                                        .unwrap_or("");
-                                    let keywords: Vec<String> = keywords_str
-                                        .trim_matches(|c| c == '[' || c == ']' || c == '"')
-                                        .split(',')
-                                        .map(|s| s.trim().trim_matches('"').to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect();
-
                                     info!("Judge detected missing tool usage, searching for: {:?}", keywords);
 
                                     // Search for tools matching the judge's suggested keywords
                                     let mut tools_found = Vec::new();
-                                    for keyword in &keywords {
+                                    for keyword in keywords {
                                         let found = registry.search_tools(
                                             keyword,
                                             arkavo_mcp_tools::DetailLevel::FullSchema,
@@ -1040,21 +1234,15 @@ impl ChatSessionManager {
                                         );
 
                                         // Add tool hints to conversation
-                                        conversation_context.push(Message {
-                                            role: Role::User,
-                                            content: tool_msg,
-                                            images: None,
-                                        });
+                                        conversation_context.push(Message::user(tool_msg));
 
                                         // Retry with tool hints
-                                        #[allow(deprecated)]
                                         let hint_result = tokio::time::timeout(
                                             std::time::Duration::from_secs(120),
-                                            router.route_with_quality_gate(
+                                            router.route_with_tools(
                                                 &user_message.content,
                                                 conversation_context.clone(),
                                                 tool_registry.as_deref(),
-                                                3,
                                             ),
                                         )
                                         .await;
@@ -1103,11 +1291,7 @@ impl ChatSessionManager {
                                                 }
 
                                                 // Add response to context
-                                                conversation_context.push(Message {
-                                                    role: Role::Assistant,
-                                                    content: response.content,
-                                                    images: None,
-                                                });
+                                                conversation_context.push(Message::assistant(response.content));
                                             }
                                             Err(retry_err) => {
                                                 final_response = String::new();

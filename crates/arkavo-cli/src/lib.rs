@@ -34,6 +34,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     INIT.call_once(|| {
         use tracing_subscriber::{EnvFilter, fmt};
         fmt()
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
             .with_env_filter(
                 // Default to error-only for clean CLI output; use RUST_LOG for more
                 EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error")),
@@ -221,6 +222,34 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        #[cfg(feature = "llama-cpp")]
+        "tool-bench" => {
+            let run_async = async {
+                use clap::Parser;
+
+                #[derive(Parser)]
+                #[command(name = "tool-bench")]
+                #[command(about = "Benchmark tool calling across local models")]
+                struct Cli {
+                    #[command(flatten)]
+                    command: commands::tool_bench::ToolBenchCommand,
+                }
+
+                let cli = Cli::parse_from(
+                    std::iter::once("tool-bench")
+                        .chain(args[1..].iter().map(std::string::String::as_str)),
+                );
+                commands::tool_bench::run(&cli.command).await
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
+        }
         "help" => {
             print_usage();
             Ok(())
@@ -270,7 +299,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     }
 
     // Small model for classification, large model based on system
-    let small_model = RecommendedModel::Qwen3_0_6B;
+    let small_model = RecommendedModel::Qwen35_0_8B;
     let large_model = caps.recommended_model;
 
     let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;

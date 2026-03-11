@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::judge;
 use crate::learning::BurstFeedback;
 use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
-use arkavo_llm::{Message, ProviderResponse, Role};
+use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
 
 impl super::Router {
@@ -33,7 +33,19 @@ impl super::Router {
         let mut current_decision = self.classify(task_description).await?;
 
         if let Some(hint) = model_hint {
-            if self.is_model_available(hint) {
+            let consecutive = self.get_cooldown_consecutive(hint.name()).await;
+            // Hinted models get 3 chances to learn from feedback before
+            // Thompson Sampling takes over. A quick cooldown means a
+            // systemic issue, not a model issue.
+            const HINT_OVERRIDE_THRESHOLD: u32 = 3;
+            if consecutive >= HINT_OVERRIDE_THRESHOLD {
+                tracing::info!(
+                    hint = hint.name(),
+                    consecutive,
+                    selected = current_decision.recommended_model.name(),
+                    "Model hint failed {consecutive}x, letting Thompson Sampling select"
+                );
+            } else if self.is_model_available(hint) {
                 tracing::info!(
                     hint = hint.name(),
                     original = current_decision.recommended_model.name(),
@@ -71,9 +83,13 @@ impl super::Router {
                     )
                     .await;
 
-                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
-                        &tool_infos,
-                    ))
+                    let json = match current_decision.recommended_model {
+                        crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                            arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                        }
+                        _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                    };
+                    Some(json)
                 }
                 None => None,
             };
@@ -249,16 +265,16 @@ impl super::Router {
                         .await;
 
                     if attempt + 1 < MAX_RETRIES {
-                        // RL FEEDBACK: Inject validation error back into conversation
-                        // so the model can learn the correct format and retry
-                        let feedback_msg = Message {
-                            role: Role::User,
-                            content: format!(
-                                "ERROR: {validation_error}\n\nYou MUST include ALL required parameters inside the fence. Example:\n```tool_name\nparam1: value1\nparam2: value2\n```\nTry again with the correct parameters.",
-                            ),
-                            images: None,
-                        };
-                        feedback_messages.push(feedback_msg);
+                        // RL FEEDBACK: Inject specific validation error with actionable fix.
+                        // Insert assistant→user pair to maintain role alternation
+                        // required by Jinja chat templates (Qwen3.5, Ministral).
+                        let available_tool_names: Vec<&str> =
+                            tool_infos.iter().map(|t| t.name.as_str()).collect();
+                        let fix = validation_error.fix_suggestion(&available_tool_names);
+                        feedback_messages.push(Message::assistant(response.content.clone()));
+                        feedback_messages.push(Message::user(format!(
+                            "ERROR: {validation_error}\n\nFix: {fix}",
+                        )));
                         tracing::info!(
                             "RL feedback: injecting validation error for retry (attempt {})",
                             attempt + 1
@@ -316,27 +332,24 @@ impl super::Router {
                                 if judgment.issue_type == IssueType::MissingToolUse
                                     && !judgment.suggested_keywords.is_empty()
                                 {
-                                    tracing::warn!(
-                                        "Judge suggested tools {:?} but available tools may differ — continuing with response",
-                                        judgment.suggested_keywords
-                                    );
+                                    return Err(Error::MissingToolUse {
+                                        keywords: judgment.suggested_keywords.clone(),
+                                    });
                                 }
 
                                 if attempt + 1 < MAX_RETRIES {
                                     // RL FEEDBACK: Inject judge rejection reason back into
-                                    // conversation so the model can learn from the feedback
+                                    // conversation. Insert assistant→user pair for Jinja
+                                    // role alternation compliance.
                                     let reason = judgment
                                         .reason
                                         .as_deref()
                                         .unwrap_or("Quality check failed");
-                                    let feedback_msg = Message {
-                                        role: Role::User,
-                                        content: format!(
-                                            "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
-                                        ),
-                                        images: None,
-                                    };
-                                    feedback_messages.push(feedback_msg);
+                                    feedback_messages
+                                        .push(Message::assistant(response.content.clone()));
+                                    feedback_messages.push(Message::user(format!(
+                                        "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
+                                    )));
                                     tracing::info!(
                                         "RL feedback: injecting judge rejection for retry (attempt {})",
                                         attempt + 1
@@ -365,6 +378,15 @@ impl super::Router {
                 .await;
 
             let elapsed = inference_start.elapsed();
+            let latency_ms = elapsed.as_millis() as u64;
+            self.metrics.write().await.record_router_latency(latency_ms);
+            arkavo_observability::subsystem_timing::global_timing()
+                .router_decisions
+                .record(latency_ms);
+            arkavo_observability::subsystem_timing::global_timing()
+                .inference
+                .record(latency_ms);
+
             let quality = selector_quality::compute_response_quality(
                 &response.content,
                 elapsed.as_millis() as u64,
@@ -397,6 +419,19 @@ impl super::Router {
                 *guard = Some(current_decision.recommended_model.name().to_string());
             }
 
+            // Store the decision trace for downstream attribution
+            if let Ok(mut guard) = self.last_decision_trace.write() {
+                *guard = Some(current_decision.trace.clone());
+            }
+
+            // Append to recent traces ring buffer for UI dashboard
+            if let Ok(mut guard) = self.recent_traces.write() {
+                guard.push_back(current_decision.trace.clone());
+                while guard.len() > 50 {
+                    guard.pop_front();
+                }
+            }
+
             return Ok(response);
         }
 
@@ -406,6 +441,7 @@ impl super::Router {
             reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: None,
+            inference_timing: None,
         })
     }
 }

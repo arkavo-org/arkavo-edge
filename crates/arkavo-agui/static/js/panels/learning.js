@@ -13,7 +13,7 @@ var learningPollInterval = null;
 function startLearningPolling() {
     stopLearningPolling();
     learningPollInterval = setInterval(function() {
-        if (AppState.activeView === 'learning') {
+        if (AppState.activeView === 'learning' || AppState.activeView === 'router') {
             wsSend({ type: 'requestLearningStatus' });
         } else {
             stopLearningPolling();
@@ -36,7 +36,8 @@ function handleLearningStatusUpdate(event) {
     }
     AppState.routingHistory = event.routingHistory || [];
     AppState.qualityTrends = event.qualityTrends || [];
-    AppState.lessonCount = event.lessonCount || 0;
+    AppState.lessons = event.lessons || AppState.lessons || [];
+    AppState.lessonCount = AppState.lessons.length || event.lessonCount || 0;
     renderLearningPanel();
 
     // Keep polling while on the learning panel
@@ -124,6 +125,8 @@ function renderLearningPanel() {
     }
 
     container.innerHTML =
+        renderSummaryBar() +
+        renderQualityChart() +
         '<div class="learning-layout">' +
             '<div class="connectome-area">' +
                 '<svg id="connectome-svg" class="connectome-svg" viewBox="0 0 ' + CONNECTOME_SIZE + ' ' + CONNECTOME_SIZE + '"></svg>' +
@@ -135,15 +138,31 @@ function renderLearningPanel() {
         '<div class="routing-timeline-section">' +
             '<div class="timeline-header">Routing Timeline</div>' +
             '<div class="routing-timeline" id="routing-timeline"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="lesson-feed-section">' +
+            '<div class="timeline-header">Lessons Learned</div>' +
+            '<div class="lesson-feed" id="lesson-feed"></div>' +
+        '</div>' +
+        renderTeachingSection();
 
     renderConnectome(agentIds);
     renderTimeline();
+    renderLessonFeed();
 }
 
 function renderConnectome(agentIds) {
     var svg = document.getElementById('connectome-svg');
     if (!svg) return;
+
+    // Filter out model names that may appear as agent IDs
+    // Model names contain patterns like "8b", "27b", "0.8b", "3.5", "flash"
+    agentIds = agentIds.filter(function(id) {
+        if (id.indexOf('.gguf') !== -1 || id.indexOf('/') !== -1) return false;
+        if (/\d+[\.\d]*b$/i.test(id)) return false;
+        if (/^\w+-\d+\.\d+/.test(id)) return false;
+        if (/-(flash|turbo|pro|ultra|nano|micro|mini|base|large|medium|small)$/i.test(id)) return false;
+        return true;
+    });
 
     var ns = 'http://www.w3.org/2000/svg';
     svg.innerHTML = '';
@@ -224,6 +243,19 @@ function renderConnectome(agentIds) {
         label.textContent = shortAgentName(agentIds[i]);
         g.appendChild(label);
 
+        // Model label below agent name
+        var agentInfo = AppState.agents[agentIds[i]];
+        var modelName = (agentInfo && agentInfo.model) ? shortModelName(agentInfo.model)
+            : (agent && agent.model ? shortModelName(agent.model) : '');
+        if (modelName) {
+            var modelLabel = document.createElementNS(ns, 'text');
+            modelLabel.setAttribute('x', x);
+            modelLabel.setAttribute('y', y + nodeR + 26);
+            modelLabel.setAttribute('class', 'node-model');
+            modelLabel.textContent = modelName;
+            g.appendChild(modelLabel);
+        }
+
         // EV text inside node
         var evText = document.createElementNS(ns, 'text');
         evText.setAttribute('x', x);
@@ -232,6 +264,27 @@ function renderConnectome(agentIds) {
         var ev = agent ? agent.expectedValue : 0.667;
         evText.textContent = ev.toFixed(2);
         g.appendChild(evText);
+
+        // Per-agent lesson count badge
+        var agentLessonCount = 0;
+        for (var li = 0; li < (AppState.lessons || []).length; li++) {
+            if (AppState.lessons[li].agentId === agentIds[i]) agentLessonCount++;
+        }
+        if (agentLessonCount > 0) {
+            var bx = x + nodeR * 0.7, by = y - nodeR * 0.7;
+            var bc = document.createElementNS(ns, 'circle');
+            bc.setAttribute('cx', bx);
+            bc.setAttribute('cy', by);
+            bc.setAttribute('r', '8');
+            bc.setAttribute('class', 'lesson-badge-circle');
+            g.appendChild(bc);
+            var bt = document.createElementNS(ns, 'text');
+            bt.setAttribute('x', bx);
+            bt.setAttribute('y', by + 3);
+            bt.setAttribute('class', 'lesson-badge-text');
+            bt.textContent = agentLessonCount;
+            g.appendChild(bt);
+        }
 
         // Click handler
         (function(aid) {
@@ -327,10 +380,14 @@ function renderTimeline() {
             qualityBadge = ' <span class="quality-badge ' + qClass + '">' + (r.qualityScore * 100).toFixed(0) + '%</span>';
         }
 
-        // Category badge
+        // Category badge — infer from agent context when router returns "general"
+        var displayCat = r.category;
+        if ((!displayCat || displayCat === 'general') && inferredDomainCategory()) {
+            displayCat = inferredDomainCategory();
+        }
         var categoryBadge = '';
-        if (r.category) {
-            categoryBadge = ' <span class="category-badge">' + escapeHtml(shortCategory(r.category)) + '</span>';
+        if (displayCat) {
+            categoryBadge = ' <span class="category-badge">' + escapeHtml(shortCategory(displayCat)) + '</span>';
         }
 
         // Quality issues tooltip
@@ -397,9 +454,9 @@ function renderBetaCard(agentId) {
             '<table class="category-table"><thead><tr><th>Category</th><th>E[V]</th><th>Obs</th></tr></thead><tbody>';
         for (var ci = 0; ci < catStats.length; ci++) {
             var cs = catStats[ci];
-            var evColor = cs.expectedValue > 0.7 ? 'var(--success)' : (cs.expectedValue > 0.4 ? 'var(--warning)' : 'var(--error)');
+            var evClass = cs.expectedValue > 0.7 ? 'ev-good' : (cs.expectedValue > 0.4 ? 'ev-mid' : 'ev-bad');
             catHtml += '<tr><td>' + escapeHtml(shortCategory(cs.category)) + '</td>' +
-                '<td style="color:' + evColor + '">' + cs.expectedValue.toFixed(3) + '</td>' +
+                '<td class="' + evClass + '">' + cs.expectedValue.toFixed(3) + '</td>' +
                 '<td>' + cs.observations + '</td></tr>';
         }
         catHtml += '</tbody></table></div>';
@@ -408,9 +465,22 @@ function renderBetaCard(agentId) {
     // Quality trends for this agent
     var trendsHtml = renderQualityTrends(agentId);
 
-    // Lesson count badge
+    // Lesson details for this agent
+    var agentLessons = (AppState.lessons || []).filter(function(l) { return l.agentId === agentId; });
     var lessonBadge = '';
-    if (AppState.lessonCount > 0) {
+    if (agentLessons.length > 0) {
+        lessonBadge = '<div class="lesson-list-section"><div class="category-breakdown-title">Lessons (' + agentLessons.length + ')</div>';
+        for (var li = 0; li < agentLessons.length && li < 5; li++) {
+            var lesson = agentLessons[li];
+            lessonBadge += '<div class="lesson-item">' +
+                '<div class="lesson-condition">' + escapeHtml(sanitizeCondition(lesson.condition)) + '</div>' +
+                '<div class="lesson-action">' + escapeHtml(lesson.action) + '</div>' +
+                '<div class="lesson-meta">' + escapeHtml(shortCategory(lesson.category)) +
+                    ' | conf: ' + lesson.confidence.toFixed(2) + '</div>' +
+                '</div>';
+        }
+        lessonBadge += '</div>';
+    } else if (AppState.lessonCount > 0) {
         lessonBadge = '<div class="lesson-count-badge">' + AppState.lessonCount + ' lessons cached</div>';
     }
 
@@ -436,50 +506,7 @@ function renderBetaCard(agentId) {
     '</div>';
 }
 
-function renderSparkline(scores) {
-    if (!scores || scores.length < 2) return '<span class="trend-no-data">-</span>';
 
-    var w = 80, h = 20, pad = 2;
-    var min = Math.min.apply(null, scores);
-    var max = Math.max.apply(null, scores);
-    var range = max - min || 1;
-
-    var points = [];
-    for (var i = 0; i < scores.length; i++) {
-        var x = pad + (i / (scores.length - 1)) * (w - 2 * pad);
-        var y = (h - pad) - ((scores[i] - min) / range) * (h - 2 * pad);
-        points.push(x.toFixed(1) + ',' + y.toFixed(1));
-    }
-
-    var last = scores[scores.length - 1];
-    var color = last > 0.7 ? 'var(--success)' : (last > 0.3 ? 'var(--warning)' : 'var(--error)');
-
-    return '<svg class="sparkline-svg" viewBox="0 0 ' + w + ' ' + h + '">' +
-        '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" />' +
-        '</svg>';
-}
-
-function renderQualityTrends(agentId) {
-    var trends = AppState.qualityTrends || [];
-    var agentTrends = [];
-    for (var i = 0; i < trends.length; i++) {
-        if (trends[i].agentId === agentId) {
-            agentTrends.push(trends[i]);
-        }
-    }
-
-    if (agentTrends.length === 0) return '';
-
-    var html = '<div class="quality-trend-section"><div class="category-breakdown-title">Quality Trends</div>';
-    for (var j = 0; j < agentTrends.length; j++) {
-        html += '<div class="trend-row">' +
-            '<span class="trend-label">' + escapeHtml(shortCategory(agentTrends[j].category)) + '</span>' +
-            renderSparkline(agentTrends[j].scores) +
-            '</div>';
-    }
-    html += '</div>';
-    return html;
-}
 
 function selectLearningAgent(agentId) {
     selectedLearningAgent = agentId;
@@ -521,14 +548,23 @@ function lnGamma(x) {
     return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(w) - w + Math.log(t);
 }
 
-function successRateColor(rate) {
-    // Interpolate from error (red) through warning (yellow) to success (green)
-    if (rate < 0.5) {
-        return 'var(--error)';
-    } else if (rate < 0.75) {
-        return 'var(--warning)';
+
+
+function inferredDomainCategory() {
+    // If connected agents belong to a specific domain, infer that for "general" records
+    var agentIds = Object.keys(AppState.agents || {});
+    if (agentIds.length === 0) return null;
+    var gameCount = 0;
+    for (var i = 0; i < agentIds.length; i++) {
+        var id = agentIds[i].toLowerCase();
+        if (id.indexOf('rimworld') !== -1 || id.indexOf('colony') !== -1 || id.indexOf('game') !== -1) {
+            gameCount++;
+        }
     }
-    return 'var(--success)';
+    if (gameCount > 0 && gameCount >= agentIds.length / 2) {
+        return 'game_simulation';
+    }
+    return null;
 }
 
 function shortAgentName(id) {
@@ -552,7 +588,155 @@ function shortCategory(cat) {
         'refactoring': 'refactor',
         'code_generation': 'codegen',
         'vision_analysis': 'vision',
+        'game_simulation': 'game',
         'general': 'general'
     };
     return map[cat] || cat;
+}
+
+function handleLessonExtracted(event) {
+    AppState.lessons.unshift({
+        agentId: event.agentId,
+        category: event.category,
+        condition: event.condition,
+        action: event.action,
+        confidence: event.confidence,
+        timestamp: event.timestamp
+    });
+    if (AppState.lessons.length > 50) AppState.lessons.pop();
+    AppState.lessonCount = AppState.lessons.length;
+
+    animateLesson(event);
+    renderLessonFeed();
+    var sidebar = document.getElementById('beta-sidebar');
+    if (sidebar && selectedLearningAgent === event.agentId) {
+        sidebar.innerHTML = renderBetaCard(event.agentId);
+    }
+}
+
+function animateLesson(event) {
+    var node = document.getElementById('node-' + event.agentId);
+    if (!node) return;
+    node.classList.add('lesson-pulse');
+    setTimeout(function() { node.classList.remove('lesson-pulse'); }, 2000);
+}
+
+function lessonFailureType(condition) {
+    if (condition.indexOf('empty responses') !== -1) return 'empty';
+    if (condition.indexOf('generic non-answers') !== -1) return 'generic';
+    if (condition.indexOf('overly brief') !== -1) return 'too_short';
+    if (condition.indexOf('tool call failures') !== -1) return 'tool_error';
+    if (condition.indexOf('hallucinated') !== -1) return 'hallucinated';
+    if (condition.indexOf('output loops') !== -1) return 'output_loop';
+    return condition.substring(0, 30);
+}
+
+function sanitizeCondition(text) {
+    if (!text) return '';
+    // Strip "(task: ...)" suffix that may contain JSON noise
+    var taskIdx = text.indexOf(' (task: ');
+    if (taskIdx !== -1) {
+        var taskPart = text.substring(taskIdx + 7);
+        // Remove JSON fragments from task part
+        taskPart = taskPart.replace(/\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
+        taskPart = taskPart.replace(/\)$/, '');
+        if (taskPart.length > 60) taskPart = taskPart.substring(0, 58) + '..';
+        text = text.substring(0, taskIdx) + (taskPart ? ' (' + taskPart + ')' : '');
+    }
+    if (text.length > 120) text = text.substring(0, 118) + '..';
+    return text;
+}
+
+function renderLessonFeed() {
+    var feed = document.getElementById('lesson-feed');
+    if (!feed) return;
+    var lessons = AppState.lessons || [];
+    if (lessons.length === 0) {
+        feed.innerHTML = '<span class="empty-timeline">No lessons extracted yet</span>';
+        return;
+    }
+
+    // Deduplicate by (agentId, failureType) — keep highest confidence, count occurrences
+    var groups = {};
+    for (var i = 0; i < lessons.length; i++) {
+        var l = lessons[i];
+        var key = l.agentId + '|' + lessonFailureType(l.condition);
+        if (!groups[key] || l.confidence > groups[key].confidence) {
+            groups[key] = { agentId: l.agentId, category: l.category, condition: l.condition, action: l.action, confidence: l.confidence, timestamp: l.timestamp, count: (groups[key] ? groups[key].count : 0) + 1 };
+        } else {
+            groups[key].count++;
+        }
+    }
+
+    // Sort by confidence descending
+    var deduped = [];
+    var keys = Object.keys(groups);
+    for (var j = 0; j < keys.length; j++) deduped.push(groups[keys[j]]);
+    deduped.sort(function(a, b) { return b.confidence - a.confidence; });
+
+    var html = '';
+    var limit = Math.min(deduped.length, 10);
+    for (var k = 0; k < limit; k++) {
+        var d = deduped[k];
+        var catBadge = d.category ? '<span class="category-badge">' + escapeHtml(shortCategory(d.category)) + '</span>' : '';
+        var confClass = d.confidence > 0.7 ? 'conf-high' : 'conf-mid';
+        var countBadge = d.count > 1 ? '<span class="lesson-count">x' + d.count + '</span>' : '';
+        html += '<div class="lesson-feed-item">' +
+            '<span class="route-agent">' + escapeHtml(shortAgentName(d.agentId)) + '</span>' +
+            countBadge +
+            catBadge +
+            '<span class="lesson-feed-condition">' + escapeHtml(sanitizeCondition(d.condition)) + '</span>' +
+            '<span class="lesson-conf ' + confClass + '">' + d.confidence.toFixed(2) + '</span>' +
+            '<span class="route-time">' + formatTime(d.timestamp) + '</span>' +
+            '</div>';
+    }
+    feed.innerHTML = html;
+}
+
+function shortModelName(model) {
+    if (!model) return '';
+    var name = model.split('/').pop().replace('.gguf', '');
+    if (name.length > 18) name = name.substring(0, 16) + '..';
+    return name;
+}
+
+function renderTeachingSection() {
+    var events = AppState.teachingEvents || [];
+    if (events.length === 0) return '';
+
+    var html = '<div class="teaching-section">' +
+        '<div class="timeline-header">Human Teaching</div>' +
+        '<div class="teaching-event-list">';
+
+    for (var i = events.length - 1; i >= 0; i--) {
+        var evt = events[i];
+        var intent = evt.intent || 'unknown';
+        var badgeClass = 'teaching-badge';
+        var icon = '';
+        if (intent.indexOf('instruction') === 0) {
+            badgeClass += ' instruction';
+            icon = '&#x1F4DD;';
+        } else if (intent === 'correction') {
+            badgeClass += ' correction';
+            icon = '&#x26D4;';
+        } else if (intent === 'reinforcement') {
+            badgeClass += ' reinforcement';
+            icon = '&#x2705;';
+        }
+
+        var preview = escapeHtml((evt.text || '').substring(0, 60));
+        if ((evt.text || '').length > 60) preview += '...';
+
+        html += '<div class="teaching-event-item">' +
+            '<span class="' + badgeClass + '">' +
+                '<span class="teaching-icon">' + icon + '</span>' +
+                '<span class="teaching-label">' + escapeHtml(intent) + '</span>' +
+            '</span>' +
+            '<span class="teaching-event-text">' + preview + '</span>' +
+            '<span class="teaching-event-time">' + formatTime(evt.timestamp) + '</span>' +
+            '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
 }

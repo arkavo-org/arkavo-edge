@@ -2,7 +2,7 @@ use crate::{Error, Result};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llm::{Message, Provider, Role};
+use arkavo_llm::{Message, Provider};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -41,11 +41,7 @@ impl ContextCompressor {
 
         let prompt = self.create_compression_prompt(text, target_words);
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let compressed = self
             .provider
@@ -75,11 +71,7 @@ impl ContextCompressor {
             Keep critical information, preserve technical accuracy, remove redundancy.\n\nText:\n{text}\n\nCompressed:"
         );
 
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
+        let messages = vec![Message::user(prompt)];
 
         let compressed = self
             .provider
@@ -130,8 +122,8 @@ mod tests {
     #[tokio::test]
     async fn test_empty_text() {
         let compressor = ContextCompressor::new(
-            "qwen3-0.6b".to_string(),
-            Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
+            "qwen3.5-0.8b".to_string(),
+            Some("unsloth/Qwen3.5-0.8B-GGUF".to_string()),
         )
         .await;
 
@@ -151,8 +143,8 @@ mod tests {
     fn test_compression_prompt_format() {
         let compressor_result = tokio::runtime::Runtime::new().unwrap().block_on(async {
             ContextCompressor::new(
-                "qwen3-0.6b".to_string(),
-                Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
+                "qwen3.5-0.8b".to_string(),
+                Some("unsloth/Qwen3.5-0.8B-GGUF".to_string()),
             )
             .await
         });

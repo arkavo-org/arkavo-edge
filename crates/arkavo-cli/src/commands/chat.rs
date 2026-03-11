@@ -68,19 +68,13 @@ pub fn parse_command(input: &str) -> Option<ChatCommand> {
     }
 }
 
-// Global runtime to prevent multiple runtime creation issues
-static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
-
-fn get_or_create_runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
-            .thread_name("arkavo-chat-worker")
-            .thread_stack_size(3 * 1024 * 1024)
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime")
-    })
+fn create_runtime() -> std::io::Result<Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_name("arkavo-chat-worker")
+        .thread_stack_size(3 * 1024 * 1024)
+        .enable_all()
+        .build()
 }
 
 /// Execute the chat command
@@ -97,9 +91,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    // Parse --prompt and --agent-id from args
+    // Parse --prompt, --agent-id, and --model from args
     let mut prompt: Option<String> = None;
     let mut agent_id: Option<String> = None;
+    let mut model_name: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -117,6 +112,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     return Err("--agent-id requires an argument".into());
                 }
             }
+            "--model" => {
+                if i + 1 < args.len() {
+                    model_name = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err(
+                        "--model requires a model name (e.g., ministral-3b, qwen3.5-0.8b)".into(),
+                    );
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -128,7 +133,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Default: route through local in-process Router
-    execute_a2a_chat(prompt.as_deref())
+    execute_a2a_chat(prompt.as_deref(), model_name.as_deref())
 }
 
 fn print_usage() {
@@ -141,13 +146,17 @@ fn print_usage() {
     println!("EXAMPLES:");
     println!("    arkavo chat");
     println!("    arkavo chat --prompt \"What is 2+2?\"");
+    println!("    arkavo chat --model ministral-3b --prompt \"What time is it?\"");
     println!("    arkavo chat --agent-id security-auditor-agent --prompt \"Audit this code\"");
     println!("    arkavo chat --agent-id code-analyzer-agent\n");
     println!("OPTIONS:");
-    println!("    --agent-id <ID>       Chat directly with a mesh agent via A2A");
-    println!("    --prompt <TEXT>        One-shot query (exits after response)");
-    println!("    --debug                Show debug output");
-    println!("    -h, --help             Show this help\n");
+    println!(
+        "    --model <NAME>         Override model (e.g., ministral-3b, qwen3.5-0.8b, glm-4.7-flash)"
+    );
+    println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
+    println!("    --prompt <TEXT>         One-shot query (exits after response)");
+    println!("    --debug                 Show debug output");
+    println!("    -h, --help              Show this help\n");
     println!("INTERACTIVE COMMANDS:");
     println!("    /new              Start a new conversation");
     println!("    /clear            Clear conversation context");
@@ -160,9 +169,18 @@ fn print_usage() {
 }
 
 /// Execute A2A chat mode using ChatSession from arkavo-protocol
+///
+/// Uses a local runtime (not `'static`) so that all Rust objects — including
+/// the Router's ModelRegistry and its Metal-backed llama.cpp contexts — are
+/// dropped deterministically before C++ static destructors run at process exit.
+/// A `'static` runtime would keep `Arc<Router>` alive past `main()`, causing
+/// `ggml_metal_device_free` to assert on non-empty residual sets.
 #[allow(clippy::disallowed_methods)]
-fn execute_a2a_chat(prompt: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = get_or_create_runtime();
+fn execute_a2a_chat(
+    prompt: Option<&str>,
+    model_name: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = create_runtime()?;
 
     runtime.block_on(async {
         // Initialize router
@@ -175,7 +193,12 @@ fn execute_a2a_chat(prompt: Option<&str>) -> Result<(), Box<dyn std::error::Erro
         let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
 
         // Create ChatSession (wraps A2aClient)
-        let mut session = ChatSession::new(Arc::new(router), Some(Arc::new(tool_registry))).await?;
+        let mut session = ChatSession::new_with_model(
+            Arc::new(router),
+            Some(Arc::new(tool_registry)),
+            model_name,
+        )
+        .await?;
 
         if std::env::var("ARKAVO_DEBUG").is_ok()
             && let Some(id) = session.session_id()
@@ -281,7 +304,7 @@ fn execute_a2a_direct_chat(
     println!("Connecting to {} ({})...", agent.name, agent.agent_id);
     println!("  Address: {address}");
 
-    let runtime = get_or_create_runtime();
+    let runtime = create_runtime()?;
     runtime.block_on(async {
         let transport_config = TransportConfig {
             timeout_ms: 60000,
@@ -430,7 +453,97 @@ async fn process_stream(
                 eprintln!("\n[Error: {message}]");
                 break;
             }
-            MessageDeltaContent::Metadata { .. } => {}
+            MessageDeltaContent::Metadata { key, value } => {
+                if debug {
+                    match key.as_str() {
+                        "model_selected" => {
+                            let model = value.get("model").and_then(|v| v.as_str()).unwrap_or("?");
+                            let reason = value
+                                .get("reasoning")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            eprintln!("[Model] {model} ({reason})");
+                        }
+                        "quality_feedback" => {
+                            let latency = value
+                                .get("latency_ms")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            let tool_count = value
+                                .get("tool_call_count")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            let resp_len = value
+                                .get("response_len")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            eprint!("[Perf] {latency}ms, {resp_len} chars");
+                            if tool_count > 0 {
+                                let names = value
+                                    .get("tool_names")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    })
+                                    .unwrap_or_default();
+                                eprint!(", {tool_count} tool(s): [{names}]");
+                            }
+                            // Inference timing from local model
+                            if let Some(gen_ms) =
+                                value.get("generation_ms").and_then(|v| v.as_f64())
+                            {
+                                let prompt_ms = value
+                                    .get("prompt_eval_ms")
+                                    .and_then(|v| v.as_f64())
+                                    .unwrap_or(0.0);
+                                let prompt_tok = value
+                                    .get("prompt_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                let gen_tok = value
+                                    .get("generated_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                let tok_s = value
+                                    .get("tokens_per_sec")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
+                                eprint!(
+                                    " | eval: {prompt_ms:.0}ms/{prompt_tok}tok, gen: {gen_ms:.0}ms/{gen_tok}tok ({tok_s} tok/s)"
+                                );
+                            }
+                            eprintln!();
+                        }
+                        "tool_search" => {
+                            let keywords = value
+                                .get("keywords")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?");
+                            let found = value
+                                .get("tools_found")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            let names = value
+                                .get("tool_names")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .unwrap_or_default();
+                            eprintln!("[Tools] searched \"{keywords}\" → {found} found: [{names}]");
+                        }
+                        _ => {
+                            eprintln!("[{key}] {value}");
+                        }
+                    }
+                }
+            }
         }
     }
 }

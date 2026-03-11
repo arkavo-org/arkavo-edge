@@ -205,6 +205,60 @@ impl MetricsCollector {
             let _ = error_code; // Suppress unused warning
         }
     }
+
+    /// Record compute budget state change for telemetry
+    pub fn record_compute_budget_state(
+        &self,
+        status: &str,
+        remaining_inferences: u32,
+        remaining_tokens: u64,
+    ) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            gauge!("a2a_compute_budget_remaining_inferences").set(remaining_inferences as f64);
+            gauge!("a2a_compute_budget_remaining_tokens").set(remaining_tokens as f64);
+            gauge!("a2a_compute_budget_active").set(if status == "active" { 1.0 } else { 0.0 });
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = (status, remaining_inferences, remaining_tokens);
+        }
+    }
+
+    /// Record compute budget passive mode entry
+    pub fn record_compute_budget_passive(&self) {
+        #[cfg(feature = "metrics")]
+        {
+            counter!("a2a_compute_budget_passive_ticks_total").increment(1);
+        }
+    }
+
+    /// Record compute budget refresh (allocation received)
+    pub fn record_compute_budget_refresh(&self) {
+        #[cfg(feature = "metrics")]
+        {
+            counter!("a2a_compute_budget_refreshes_total").increment(1);
+        }
+    }
+
+    /// Record inference consumed from compute budget
+    pub fn record_compute_budget_consumption(&self, tokens: u64) {
+        #[cfg(feature = "metrics")]
+        {
+            counter!("a2a_compute_budget_tokens_consumed_total").increment(tokens);
+            counter!("a2a_compute_budget_inferences_consumed_total").increment(1);
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = tokens;
+        }
+    }
 }
 
 /// Timer for measuring RPC latency

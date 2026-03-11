@@ -6,6 +6,108 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Where a lesson originated — determines decay and override behavior
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LessonSource {
+    /// Learned from accumulated episodes via synthesis pipeline
+    #[default]
+    Machine,
+    /// Provided by a human operator at runtime (immune to decay)
+    Human,
+    /// Loaded from AGENTS.md at startup
+    Configuration,
+}
+
+impl std::fmt::Display for LessonSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Machine => write!(f, "machine"),
+            Self::Human => write!(f, "human"),
+            Self::Configuration => write!(f, "configuration"),
+        }
+    }
+}
+
+impl std::str::FromStr for LessonSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "machine" => Ok(Self::Machine),
+            "human" => Ok(Self::Human),
+            "configuration" => Ok(Self::Configuration),
+            _ => Err(format!("unknown lesson source: {s}")),
+        }
+    }
+}
+
+/// Scope of a lesson's applicability
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LessonScope {
+    /// Applies to all future tasks
+    #[default]
+    Global,
+    /// Applies only when the condition matches
+    Situational,
+    /// Execute once, then expire
+    OneShot,
+}
+
+impl std::fmt::Display for LessonScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Global => write!(f, "global"),
+            Self::Situational => write!(f, "situational"),
+            Self::OneShot => write!(f, "one_shot"),
+        }
+    }
+}
+
+impl std::str::FromStr for LessonScope {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "global" => Ok(Self::Global),
+            "situational" => Ok(Self::Situational),
+            "one_shot" => Ok(Self::OneShot),
+            _ => Err(format!("unknown lesson scope: {s}")),
+        }
+    }
+}
+
+/// Memory tier for lifecycle management
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MemoryTier {
+    /// Recent, unvalidated data (expires after transient_ttl)
+    #[default]
+    Transient,
+    /// Validated by multiple successes, pending promotion
+    Candidate,
+    /// Proven pattern, long-lived
+    Canonical,
+}
+
+impl std::fmt::Display for MemoryTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transient => write!(f, "transient"),
+            Self::Candidate => write!(f, "candidate"),
+            Self::Canonical => write!(f, "canonical"),
+        }
+    }
+}
+
+impl std::str::FromStr for MemoryTier {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "transient" => Ok(Self::Transient),
+            "candidate" => Ok(Self::Candidate),
+            "canonical" => Ok(Self::Canonical),
+            _ => Err(format!("unknown memory tier: {s}")),
+        }
+    }
+}
+
 /// Episodic memory record - individual learning experience
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
@@ -27,6 +129,9 @@ pub struct Episode {
     pub timestamp: DateTime<Utc>,
     /// Hash for deduplication
     pub context_hash: [u8; 32],
+    /// Lifecycle tier
+    #[serde(default)]
+    pub tier: MemoryTier,
 }
 
 impl Episode {
@@ -49,6 +154,7 @@ impl Episode {
             outcome,
             timestamp: Utc::now(),
             context_hash: [0u8; 32],
+            tier: MemoryTier::Transient,
         };
         episode.context_hash = episode.compute_hash();
         episode
@@ -172,6 +278,15 @@ pub struct Lesson {
     pub propagated: bool,
     /// Ed25519 signature for verification
     pub signature: Vec<u8>,
+    /// Lifecycle tier
+    #[serde(default)]
+    pub tier: MemoryTier,
+    /// Where this lesson originated
+    #[serde(default)]
+    pub source: LessonSource,
+    /// How broadly this lesson applies
+    #[serde(default)]
+    pub scope: LessonScope,
 }
 
 impl Lesson {
@@ -197,7 +312,22 @@ impl Lesson {
             updated_at: now,
             propagated: false,
             signature: Vec::new(),
+            tier: MemoryTier::Transient,
+            source: LessonSource::Machine,
+            scope: LessonScope::Global,
         }
+    }
+
+    /// Set the lesson source
+    pub fn with_source(mut self, source: LessonSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Set the lesson scope
+    pub fn with_scope(mut self, scope: LessonScope) -> Self {
+        self.scope = scope;
+        self
     }
 
     /// Compute hash of lesson for gossip

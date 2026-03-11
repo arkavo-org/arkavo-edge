@@ -259,6 +259,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new(
@@ -290,6 +291,7 @@ mod tests {
                 call_id: None,
             }],
             finish_reason: None,
+            inference_timing: None,
         };
 
         let input = VerificationInput::new(

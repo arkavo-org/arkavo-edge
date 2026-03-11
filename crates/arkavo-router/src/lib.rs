@@ -21,14 +21,12 @@ pub mod provider_info;
 pub(crate) mod quality_gate;
 pub mod response;
 pub mod rlm;
-pub(crate) mod routing_deprecated;
 pub mod selector;
 pub mod selector_quality;
 pub mod stream;
 #[cfg(feature = "tdf-encrypt")]
 pub mod tdf_audit;
-#[allow(clippy::redundant_pub_crate)]
-pub(crate) mod tool_extraction;
+pub mod tool_extraction;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
@@ -69,14 +67,19 @@ pub use tdf_audit::{MessageEncryptor, TdfAuditConfig};
 // Re-export response processing types
 pub use response::{sanitize_response, strip_think_blocks, strip_tool_blocks};
 
+/// Extract search keywords from a user message (for tool search telemetry).
+pub fn tool_search_keywords(text: &str) -> String {
+    tool_extraction::extract_keywords(text)
+}
+
 pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
     LearningConfig, LearningModule, QualityMetrics,
 };
 
-use arkavo_llm::Message;
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
+use arkavo_llm::{Message, Role};
 use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
@@ -88,6 +91,10 @@ const MODEL_COOLDOWN_BASE_SECS: u64 = 300;
 
 /// Maximum cooldown duration regardless of consecutive failures (1 hour).
 const MODEL_COOLDOWN_MAX_SECS: u64 = 3600;
+
+/// Short cooldown for quality failures (timeout, no tool calls).
+/// Shorter than availability cooldown to allow faster model rotation.
+const MODEL_QUALITY_COOLDOWN_BASE_SECS: u64 = 30;
 
 /// Intelligent router for cost-optimized model selection
 pub struct Router {
@@ -117,15 +124,26 @@ pub struct Router {
     tdf_encryptor: Option<Arc<tdf_audit::MessageEncryptor>>,
     #[cfg(feature = "tdf-encrypt")]
     tdf_audit_store: Option<Arc<arkavo_memory::TdfAuditStore>>,
-    /// Serializes concurrent LLM inference calls.
+    /// Serializes concurrent LLM inference calls for task/orchestrator work.
     /// Local models (llama-cpp) share a single KV cache and cannot handle
     /// concurrent context allocation. This semaphore queues requests so the
     /// second caller waits instead of failing with an OOM/slot error.
     inference_semaphore: Arc<Semaphore>,
+    /// Separate semaphore for chat inference so chat never blocks game ticks.
+    /// Uses the fastest local model (0.8B/3B) which has its own context pool.
+    chat_semaphore: Arc<Semaphore>,
+    /// Separate semaphore for synthesis/internal tasks (route_fast).
+    /// Prevents synthesis from blocking production inference since they
+    /// use different models (fastest_local_model vs Thompson-selected).
+    synthesis_semaphore: Arc<Semaphore>,
     /// Tracks which model was last selected by route_with_tools().
     /// The conductor reads this after tool execution to attribute
     /// reward-based corrective feedback to the right Thompson Sampling prior.
     last_routed_model: Arc<std::sync::RwLock<Option<String>>>,
+    /// Last routing decision trace for downstream attribution
+    last_decision_trace: Arc<std::sync::RwLock<Option<learning::DecisionTrace>>>,
+    /// Recent decision traces for UI dashboard (ring buffer, max 50)
+    recent_traces: Arc<std::sync::RwLock<std::collections::VecDeque<learning::DecisionTrace>>>,
 }
 
 impl Router {
@@ -159,7 +177,11 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            chat_semaphore: Arc::new(Semaphore::new(1)),
+            synthesis_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
+            last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
+            recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
         })
     }
 
@@ -193,7 +215,11 @@ impl Router {
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
             inference_semaphore: Arc::new(Semaphore::new(1)),
+            chat_semaphore: Arc::new(Semaphore::new(1)),
+            synthesis_semaphore: Arc::new(Semaphore::new(1)),
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
+            last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
+            recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
         })
     }
 
@@ -242,6 +268,8 @@ impl Router {
                         "OutputLoop" => AdvisorIssue::OutputLoop,
                         "WrongExpert" => AdvisorIssue::WrongExpert,
                         "Timeout" => AdvisorIssue::Timeout,
+                        "ToolError" => AdvisorIssue::ToolError,
+                        "NoToolCalls" => AdvisorIssue::NoToolCalls,
                         _ => return None,
                     };
                     Some(prompt_advisor::DynamicSnapshot {
@@ -292,12 +320,60 @@ impl Router {
         &self.model_learning
     }
 
+    /// Set per-agent memory budget on the model selector.
+    ///
+    /// Models whose weight files exceed this limit are excluded from the
+    /// feasible set, preventing Thompson Sampling from loading oversized
+    /// models into the registry.
+    pub fn set_memory_budget(&self, bytes: u64) {
+        self.selector.set_memory_budget(bytes);
+    }
+
     /// Get the model name last selected by `route_with_tools()`.
     ///
     /// Returns `None` if no routing has occurred yet. Used by the conductor
     /// to attribute reward-based corrective feedback to the right model.
     pub fn last_routed_model(&self) -> Option<String> {
         self.last_routed_model.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Get the trace from the last routing decision.
+    /// Used by the conductor to attribute trace IDs to tool call events.
+    pub fn last_decision_trace(&self) -> Option<learning::DecisionTrace> {
+        self.last_decision_trace.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Get recent decision traces for the UI dashboard.
+    pub fn recent_decision_traces(&self, limit: usize) -> Vec<learning::DecisionTrace> {
+        self.recent_traces
+            .read()
+            .ok()
+            .map(|g| g.iter().rev().take(limit).cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Extract model family from a model name (e.g., "glm-4.7-flash" → "glm").
+    ///
+    /// Simple heuristic: take the first segment before any dash-digit pattern.
+    pub fn detect_model_family(model_name: &str) -> String {
+        let lower = model_name.to_lowercase();
+        // Common model family prefixes
+        for family in &[
+            "glm",
+            "qwen",
+            "gemma",
+            "ministral",
+            "mistral",
+            "deepseek",
+            "llama",
+            "phi",
+        ] {
+            if lower.starts_with(family) {
+                return (*family).to_string();
+            }
+        }
+        // Fallback: take first segment before '-'
+        lower.split('-').next().unwrap_or(&lower).to_string()
     }
 
     /// Log the full Thompson Sampling state for all tracked models.
@@ -334,7 +410,7 @@ impl Router {
     /// operational events, not learning events. Cooldown duration doubles on
     /// each consecutive failure (5 → 10 → 20 → 40 → 60 min cap), then resets
     /// after the first successful response from that model.
-    async fn record_model_cooldown(&self, model_name: &str) {
+    pub async fn record_model_cooldown(&self, model_name: &str) {
         let mut cooldowns = self.model_cooldowns.write().await;
         let consecutive = cooldowns
             .get(model_name)
@@ -353,6 +429,38 @@ impl Router {
         );
     }
 
+    /// Record a quality-based cooldown (timeout, no tool calls).
+    ///
+    /// Uses a shorter base (30s) than availability cooldown (5min) to allow
+    /// faster model rotation while still breaking retry loops. Progression:
+    /// 30s → 60s → 120s → 240s → ... → 3600s cap.
+    pub async fn record_quality_cooldown(&self, model_name: &str) {
+        let mut cooldowns = self.model_cooldowns.write().await;
+        let consecutive = cooldowns
+            .get(model_name)
+            .map(|(_, count)| count + 1)
+            .unwrap_or(1);
+        cooldowns.insert(
+            model_name.to_string(),
+            (std::time::Instant::now(), consecutive),
+        );
+        let duration = Self::quality_cooldown_duration_secs(consecutive);
+        tracing::info!(
+            model = model_name,
+            consecutive,
+            "Model cooled down for {duration}s (quality failure)"
+        );
+    }
+
+    /// Quality cooldown duration: shorter base (30s) with exponential backoff.
+    fn quality_cooldown_duration_secs(consecutive: u32) -> u64 {
+        let shift = consecutive.saturating_sub(1).min(10);
+        let multiplier = 1u64 << shift;
+        MODEL_QUALITY_COOLDOWN_BASE_SECS
+            .saturating_mul(multiplier)
+            .min(MODEL_COOLDOWN_MAX_SECS)
+    }
+
     /// Clear cooldown for a model after a successful response.
     ///
     /// Resets the exponential backoff so the next failure starts at the base duration.
@@ -369,8 +477,17 @@ impl Router {
             .min(MODEL_COOLDOWN_MAX_SECS)
     }
 
+    /// Get the consecutive failure count for a model (0 if not on cooldown).
+    pub async fn get_cooldown_consecutive(&self, model_name: &str) -> u32 {
+        let cooldowns = self.model_cooldowns.read().await;
+        cooldowns
+            .get(model_name)
+            .map(|(_, count)| *count)
+            .unwrap_or(0)
+    }
+
     /// Get model names currently on cooldown (expired entries are pruned)
-    async fn get_excluded_models(&self) -> Vec<String> {
+    pub async fn get_excluded_models(&self) -> Vec<String> {
         let mut cooldowns = self.model_cooldowns.write().await;
         cooldowns.retain(|_, (since, consecutive)| {
             let duration =
@@ -460,7 +577,6 @@ impl Router {
     /// // Await full response
     /// let response = router.route(task, messages, None).await?.complete().await?;
     /// ```
-    #[allow(deprecated)] // Uses deprecated route_architect and route_with_quality_gate internally
     pub async fn route(
         &self,
         task_description: &str,
@@ -486,40 +602,45 @@ impl Router {
         let complexity = scorer.analyze(task_description);
 
         if complexity.architect_recommended {
-            // Use architect mode for complex tasks
             tracing::info!(
                 "Architect mode activated: {} estimated subtasks",
                 complexity.estimated_subtasks
             );
 
-            let result = self
-                .route_architect(task_description, messages, tool_registry)
-                .await?;
+            let planner = ArchitectPlanner::new();
+            let plan = planner.create_plan(task_description, complexity).await?;
+
+            let executor =
+                ArchitectExecutor::new(std::sync::Arc::new(self.clone_for_executor().await?));
+            let arch_result = executor.execute(&plan, messages, tool_registry).await?;
 
             let response = RouteResponse {
-                content: result.final_response,
+                content: arch_result.final_response,
                 tool_calls: Vec::new(),
                 model: ModelChoice::ClaudeOpus,
-                cost_usd: result.actual_cost_usd,
+                cost_usd: arch_result.actual_cost_usd,
                 used_architect_mode: true,
-                architect_savings: Some(result.actual_savings_usd),
+                architect_savings: Some(arch_result.actual_savings_usd),
             };
 
             return Ok(RouteStream::from_response(response));
         }
 
-        // Simple task - use quality-gated routing
+        // Simple task - use Thompson Sampling routing
         let provider_response = self
-            .route_with_quality_gate(task_description, messages, tool_registry, 3)
+            .route_with_tools(task_description, messages, tool_registry)
             .await?;
 
-        let decision = self.classify(task_description).await?;
+        let model = self
+            .last_routed_model()
+            .and_then(|name| ModelChoice::from_name(&name))
+            .unwrap_or_else(|| self.selector.fastest_local_model());
 
         let response = RouteResponse {
             content: provider_response.content,
             tool_calls: provider_response.tool_calls,
-            model: decision.recommended_model,
-            cost_usd: decision.estimated_cost_usd,
+            model,
+            cost_usd: 0.0,
             used_architect_mode: false,
             architect_savings: None,
         };
@@ -530,7 +651,7 @@ impl Router {
     /// Route using the fastest available local model, skipping classification.
     ///
     /// Designed for internal ML Brain tasks (episode synthesis, lesson extraction)
-    /// that need speed over quality. Uses qwen3-0.6b or ministral-3b directly.
+    /// that need speed over quality. Uses qwen3.5-0.8b or ministral-3b directly.
     pub async fn route_fast(
         &self,
         task_description: &str,
@@ -538,16 +659,31 @@ impl Router {
     ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
 
-        let model = self.selector.fastest_local_model();
+        let preferred = self.selector.fastest_local_model();
+        // Prefer a model already loaded in the registry to avoid ~1s reload.
+        // Synthesis tasks don't need a specific model — any loaded one will do.
+        #[cfg(feature = "llama-cpp")]
+        let model = if self.model_registry.is_loaded(preferred.name()) {
+            preferred
+        } else {
+            // Use any already-loaded model, sorted by preference (smallest first)
+            crate::ModelChoice::ALL_LOCAL
+                .iter()
+                .find(|m| self.model_registry.is_loaded(m.name()))
+                .cloned()
+                .unwrap_or(preferred)
+        };
+        #[cfg(not(feature = "llama-cpp"))]
+        let model = preferred;
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
 
         let provider = self.instantiate_provider(&model).await?;
 
         let _permit = self
-            .inference_semaphore
+            .synthesis_semaphore
             .acquire()
             .await
-            .map_err(|_| Error::ModelExecution("Inference semaphore closed".to_string()))?;
+            .map_err(|_| Error::ModelExecution("Synthesis semaphore closed".to_string()))?;
 
         let content = provider
             .complete(messages)
@@ -564,6 +700,85 @@ impl Router {
         };
 
         Ok(RouteStream::from_response(response))
+    }
+
+    /// Route a chat message using the fastest local model on a separate semaphore.
+    ///
+    /// Chat inference never blocks task/orchestrator work. Uses the smallest
+    /// available model (0.8B/3B) which avoids <think> tag issues from larger
+    /// reasoning models. Strips think blocks from the response.
+    ///
+    /// When a tool registry is provided, tools are passed to the LLM so it can
+    /// produce structured tool calls (e.g. `get_time`) instead of hallucinating.
+    ///
+    /// `model_override` forces a specific model (for testing/benchmarking).
+    pub async fn route_chat(
+        &self,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model_override: Option<&ModelChoice>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        let model = model_override
+            .cloned()
+            .unwrap_or_else(|| self.selector.fastest_local_model());
+        tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+
+        let provider = self.instantiate_provider(&model).await?;
+
+        let _permit = self
+            .chat_semaphore
+            .acquire()
+            .await
+            .map_err(|_| Error::ModelExecution("Chat semaphore closed".to_string()))?;
+
+        // Build tool JSON from registry (same pattern as quality_gate.rs)
+        let tools_json = match tool_registry {
+            Some(registry) => {
+                let detail_level = tool_extraction::detail_level_for_model(&model);
+                let last_user_msg = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::User)
+                    .map(|m| m.content.as_str())
+                    .unwrap_or("");
+                let keywords = tool_extraction::extract_keywords(last_user_msg);
+                let tool_infos =
+                    tool_extraction::search_tools_hybrid(registry, &keywords, detail_level, None)
+                        .await;
+                if tool_infos.is_empty() {
+                    None
+                } else {
+                    Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
+                        &tool_infos,
+                    ))
+                }
+            }
+            None => None,
+        };
+
+        let mut response = provider
+            .complete_with_tools(messages, tools_json, None)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("chat: {e}")))?;
+
+        // Strip <think> blocks that small models may still emit
+        response.content = crate::response::strip_think_blocks(&response.content);
+
+        // Filter tool calls (remove language-fence false positives)
+        if !response.tool_calls.is_empty() {
+            response.tool_calls =
+                tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
+        }
+
+        // Fall back to text extraction if provider didn't parse tool calls
+        if response.tool_calls.is_empty() && tool_registry.is_some() {
+            let text_calls = tool_extraction::extract_tool_calls_from_text(&response.content);
+            if !text_calls.is_empty() {
+                response.tool_calls = text_calls;
+            }
+        }
+
+        Ok(response)
     }
 
     /// Get the fastest available local model choice (for callers that need to know)
@@ -604,7 +819,7 @@ impl Router {
             tokio::spawn(async move {
                 let to_save: Vec<arkavo_memory::PersistedAdjustment> = snapshots
                     .iter()
-                    .filter(|s| s.feedback_count >= 3 && s.success_rate > 0.5)
+                    .filter(|s| s.feedback_count >= 3 && s.success_rate >= 0.5)
                     .map(|s| arkavo_memory::PersistedAdjustment {
                         label: s.label.clone(),
                         model_family: s.model_family.clone(),
@@ -621,6 +836,41 @@ impl Router {
                 }
             });
         }
+    }
+
+    /// Create a clone of Router for use in executor
+    pub(crate) async fn clone_for_executor(&self) -> Result<Self> {
+        Ok(Self {
+            classifier: self.classifier.clone(),
+            selector: self.selector.clone(),
+            model_learning: self.model_learning.clone(),
+            #[cfg(feature = "llama-cpp")]
+            model_registry: self.model_registry.clone(),
+            model_cooldowns: self.model_cooldowns.clone(),
+            metrics: self.metrics.clone(),
+            connectivity: self.connectivity.clone(),
+            offline_mode: self.offline_mode,
+            preflight: self.preflight.clone(),
+            advisor: self.advisor.clone(),
+            #[cfg(feature = "critic")]
+            critic: self.critic.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_store: self.advisor_store.clone(),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_persist_count: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(feature = "advisor-persistence")]
+            advisor_last_persist: std::sync::Mutex::new(std::time::Instant::now()),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_encryptor: self.tdf_encryptor.clone(),
+            #[cfg(feature = "tdf-encrypt")]
+            tdf_audit_store: self.tdf_audit_store.clone(),
+            inference_semaphore: self.inference_semaphore.clone(),
+            chat_semaphore: self.chat_semaphore.clone(),
+            synthesis_semaphore: self.synthesis_semaphore.clone(),
+            last_routed_model: self.last_routed_model.clone(),
+            last_decision_trace: self.last_decision_trace.clone(),
+            recent_traces: self.recent_traces.clone(),
+        })
     }
 
     pub async fn get_metrics(&self) -> RoutingMetrics {

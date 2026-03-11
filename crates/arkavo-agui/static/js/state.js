@@ -21,8 +21,11 @@ var AppState = {
     routingAnimations: [],
     pathWeights: {},
     qualityTrends: [],
+    lessons: [],
     lessonCount: 0,
-    selectedTaskId: null
+    selectedTaskId: null,
+    teachingEvents: [],
+    agentSystemMetrics: {}
 };
 
 var MAX_TELEMETRY = 200;

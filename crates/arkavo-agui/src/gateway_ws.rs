@@ -284,7 +284,7 @@ async fn dispatch_event(
             gateway_events::handle_request_status(connections, tx).await?;
         }
         AgUiEvent::RequestMeshStatus => {
-            gateway_events::handle_request_mesh_status(agents, tx).await?;
+            gateway_events::handle_request_mesh_status(agents, agent_connections, tx).await?;
         }
         AgUiEvent::ApplyPart { part_id } => {
             gateway_events::handle_apply_part(part_id, session_id, connections, tx).await?;
@@ -312,18 +312,16 @@ async fn dispatch_event(
             .await?;
         }
         AgUiEvent::RequestLearningStatus => {
-            // Count lessons from routing history (records with quality_score <= 0.5 trigger lessons)
-            let lesson_count = {
-                let hist = routing_history.read().await;
-                hist.iter()
-                    .filter(|r| r.quality_score.is_some_and(|s| s <= 0.5))
-                    .count()
-            };
+            let lesson_count = lesson_store.read().await.len();
             gateway_routing::handle_request_learning_status(
                 learning_module,
                 routing_history,
                 lesson_count,
                 agent_connections,
+                connections,
+                lesson_store,
+                agents,
+                task_store,
                 tx,
             )
             .await?;

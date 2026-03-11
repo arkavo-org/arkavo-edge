@@ -186,6 +186,17 @@ impl<S: TaskStore> Conductor<S> {
             .ok_or(Error::TaskNotFound(task_id))
     }
 
+    /// Transition a task from Pending to Running
+    pub async fn start_task(&self, task_id: Uuid) -> Result<()> {
+        let mut task = self.get_task(task_id).await?;
+        if task.status == TaskStatus::Pending {
+            task.status = TaskStatus::Running;
+            task.updated_at = Utc::now();
+            self.store.save(&task).await?;
+        }
+        Ok(())
+    }
+
     /// Add a subtask to a task
     ///
     /// Checks loop detection and subtask limits before adding.
@@ -325,6 +336,7 @@ impl<S: TaskStore> Conductor<S> {
             duration: result.duration,
             steps_taken: result.steps_taken,
             verification_status: crate::schemas::VerificationStatus::Pending,
+            quality_score: None,
         });
 
         // Update task budget
@@ -333,6 +345,10 @@ impl<S: TaskStore> Conductor<S> {
 
         // Update task status based on subtasks
         self.update_task_status(&mut task);
+
+        if task.status.is_terminal() {
+            task.intra_progress = None;
+        }
 
         task.updated_at = Utc::now();
         task.subtasks[subtask_idx].updated_at = Utc::now();
@@ -365,6 +381,14 @@ impl<S: TaskStore> Conductor<S> {
             // Any subtask running OR any work remaining means we're running
             task.status = TaskStatus::Running;
         }
+    }
+
+    /// Update intra-subtask progress for smooth UI reporting
+    pub async fn update_intra_progress(&self, task_id: Uuid, progress: f64) -> Result<()> {
+        let mut task = self.get_task(task_id).await?;
+        task.intra_progress = Some(progress.clamp(0.0, 1.0));
+        task.updated_at = Utc::now();
+        self.store.save(&task).await
     }
 
     /// Cancel a task

@@ -17,6 +17,7 @@
 // Core protocol modules (kept in this crate)
 pub mod a2a;
 pub mod a2a_mcp_bridge;
+pub mod a2a_policy;
 pub mod agent_config;
 pub mod agent_registry;
 pub mod auth;
@@ -46,7 +47,6 @@ pub mod security;
 pub mod security_fixes;
 pub mod session_persistence;
 pub mod task_executor;
-pub mod task_planner;
 pub mod task_store;
 pub mod transport;
 pub mod types;
@@ -55,6 +55,7 @@ pub mod websocket;
 // Re-export commonly used types from core modules
 pub use a2a::{A2aClient, A2aClientError};
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
+pub use a2a_policy::{A2aAccess, A2aPolicy, A2aRule, PolicyMode};
 pub use auth::{AuthBackend, JwtAuthBackend, MultiAuthBackend, SessionAuth};
 pub use chat_commands::{
     ChatSession, CommandResult, ContextMode, PendingContext, execute_command, parse_command,
