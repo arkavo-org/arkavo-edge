@@ -1135,6 +1135,7 @@ dependencies = [
  "anyhow",
  "arkavo-deepseek",
  "arkavo-gemini",
+ "arkavo-gossip",
  "arkavo-kimi",
  "arkavo-kv-cache",
  "arkavo-llama-cpp",
