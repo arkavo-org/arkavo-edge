@@ -239,7 +239,7 @@ async fn test_anti_pattern_in_guidance() {
 async fn test_case_retrieval_empty_index() {
     let bus = make_bus();
     let context = bus
-        .get_case_context("how do I fix food shortage?", None)
+        .get_case_context("how do I fix food shortage?", None, None)
         .await;
     assert!(
         context.is_empty(),

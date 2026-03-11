@@ -183,10 +183,18 @@ pub async fn start_event_processing_loop(
                                     let ep_id = episode.id;
                                     let ep_cat = episode.task_category.clone();
                                     let ep_success = episode.outcome.success;
+                                    let ep_domain = episode.swarm_id.clone();
                                     tokio::spawn(async move {
                                         if let Err(e) = case_index
                                             .index_episode(
-                                                ep_id, &summary, &ep_cat, quality, ep_success,
+                                                ep_id,
+                                                &summary,
+                                                &ep_cat,
+                                                quality,
+                                                ep_success,
+                                                arkavo_memory::IndexMetadata {
+                                                    domain: Some(ep_domain),
+                                                },
                                             )
                                             .await
                                         {

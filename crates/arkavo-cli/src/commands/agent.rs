@@ -318,6 +318,7 @@ fn run_agent_with_options(
             peers: Vec::new(),
             a2a_enabled: true,
             a2a_service_type: None,
+            swarm: None,
         }]
     } else {
         let config_content = fs::read_to_string(&config_path)?;
@@ -362,6 +363,7 @@ fn run_agent_with_options(
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    swarm: None,
                 }]
             }
         }
@@ -436,6 +438,7 @@ fn run_agent_with_options(
                 peers: Vec::new(),
                 a2a_enabled: true,
                 a2a_service_type: None,
+                swarm: None,
             };
 
             if verbose {
@@ -475,6 +478,7 @@ pub struct AgentConfig {
     pub peers: Vec<String>,               // e.g., ["http://localhost:8352"]
     pub a2a_enabled: bool,                // Default: true
     pub a2a_service_type: Option<String>, // Custom mDNS service type
+    pub swarm: Option<String>,            // Domain/swarm identifier for learning isolation
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +519,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             peers: Vec::new(),
             a2a_enabled: true,
             a2a_service_type: None,
+            swarm: None,
         };
         // Known top-level YAML keys that parse_yaml_properties handles
         const KNOWN_SECTIONS: &[&str] = &[
@@ -523,6 +528,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             "model:",
             "listen:",
             "mdns:",
+            "swarm:",
             "a2a:",
             "peers:",
             "mcp_servers:",
@@ -604,6 +610,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    swarm: None,
                 });
                 in_agent_section = true;
                 continue;
@@ -654,6 +661,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         peers: Vec::new(),
                         a2a_enabled: true,
                         a2a_service_type: None,
+                        swarm: None,
                     });
                     in_agent_section = true;
                 }
@@ -773,6 +781,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     peers: Vec::new(),
                     a2a_enabled: true,
                     a2a_service_type: None,
+                    swarm: None,
                 });
                 in_agent_section = true;
                 continue;
@@ -1083,6 +1092,15 @@ fn parse_yaml_properties(
                 .trim()
                 .trim_matches('"')
                 .to_string();
+        } else if trimmed.starts_with("swarm:") {
+            agent.swarm = Some(
+                trimmed
+                    .strip_prefix("swarm:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
         } else if trimmed.starts_with("mdns:") {
             // Only disable if explicitly set to false
             agent.mdns_enabled = !trimmed.contains("false");
@@ -1176,12 +1194,13 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     let learning_bus = {
         let keypair = Arc::new(AgentKeypair::generate());
         let gossip_config = GossipConfig::default();
-        let mut bus = LearningBus::new(
-            config.name.clone(),
-            "default-swarm".to_string(),
-            keypair,
-            gossip_config,
-        );
+        let swarm_id = config.swarm.clone().unwrap_or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "default-swarm".to_string())
+        });
+        let mut bus = LearningBus::new(config.name.clone(), swarm_id, keypair, gossip_config);
         bus.set_pain_sender(pain_tx);
         Arc::new(bus)
     };

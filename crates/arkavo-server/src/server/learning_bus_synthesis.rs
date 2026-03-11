@@ -111,16 +111,21 @@ impl LearningBus {
     ///
     /// Returns formatted text with successful similar cases and failure warnings.
     /// Returns empty string if no relevant cases found or embeddings unavailable.
-    pub async fn get_case_context(&self, task_description: &str, category: Option<&str>) -> String {
+    pub async fn get_case_context(
+        &self,
+        task_description: &str,
+        category: Option<&str>,
+        domain: Option<&str>,
+    ) -> String {
         let case_index = self.case_index.clone();
 
         let successes = case_index
-            .retrieve_similar(task_description, category, 3, 0.5)
+            .retrieve_similar(task_description, category, 3, 0.5, domain)
             .await
             .unwrap_or_default();
 
         let failures = case_index
-            .retrieve_failures(task_description, 2)
+            .retrieve_failures(task_description, 2, domain)
             .await
             .unwrap_or_default();
 

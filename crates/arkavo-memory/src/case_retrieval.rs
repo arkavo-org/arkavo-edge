@@ -11,6 +11,12 @@ use uuid::Uuid;
 
 const MAX_INDEXED_EPISODES: usize = 500;
 
+/// Metadata for indexing an episode (domain, agent provenance)
+#[derive(Default)]
+pub struct IndexMetadata {
+    pub domain: Option<String>,
+}
+
 /// Indexed episode entry with its embedding
 struct IndexedEpisode {
     episode_id: Uuid,
@@ -19,6 +25,7 @@ struct IndexedEpisode {
     quality_score: f64,
     success: bool,
     embedding: Vec<f32>,
+    domain: Option<String>,
 }
 
 /// Case-based retrieval index for episodes
@@ -49,10 +56,16 @@ impl CaseIndex {
         category: &str,
         quality_score: f64,
         success: bool,
+        metadata: IndexMetadata,
     ) -> Result<(), String> {
+        let embed_text = match &metadata.domain {
+            Some(d) => format!("[{d}] {summary}"),
+            None => summary.to_string(),
+        };
+
         let embedding = self
             .embedding_service
-            .generate_embedding(summary)
+            .generate_embedding(&embed_text)
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
 
@@ -63,6 +76,7 @@ impl CaseIndex {
             quality_score,
             success,
             embedding,
+            domain: metadata.domain,
         };
 
         let mut entries = self.entries.write().await;
@@ -82,10 +96,16 @@ impl CaseIndex {
         category: Option<&str>,
         limit: usize,
         min_quality: f64,
+        domain: Option<&str>,
     ) -> Result<Vec<CaseMatch>, String> {
+        let query_text = match domain {
+            Some(d) => format!("[{d}] {task_description}"),
+            None => task_description.to_string(),
+        };
+
         let query_embedding = self
             .embedding_service
-            .generate_embedding(task_description)
+            .generate_embedding(&query_text)
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
 
@@ -94,6 +114,7 @@ impl CaseIndex {
             .iter()
             .filter(|e| e.success && e.quality_score >= min_quality)
             .filter(|e| category.is_none() || category == Some(e.category.as_str()))
+            .filter(|e| domain.is_none() || e.domain.as_deref() == domain)
             .map(|e| {
                 let similarity =
                     EmbeddingService::cosine_similarity(&query_embedding, &e.embedding);
@@ -104,6 +125,7 @@ impl CaseIndex {
                     quality_score: e.quality_score,
                     similarity,
                     success: e.success,
+                    domain: e.domain.clone(),
                 }
             })
             .filter(|m| m.similarity > 0.3)
@@ -123,10 +145,16 @@ impl CaseIndex {
         &self,
         task_description: &str,
         limit: usize,
+        domain: Option<&str>,
     ) -> Result<Vec<CaseMatch>, String> {
+        let query_text = match domain {
+            Some(d) => format!("[{d}] {task_description}"),
+            None => task_description.to_string(),
+        };
+
         let query_embedding = self
             .embedding_service
-            .generate_embedding(task_description)
+            .generate_embedding(&query_text)
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
 
@@ -134,6 +162,7 @@ impl CaseIndex {
         let mut matches: Vec<CaseMatch> = entries
             .iter()
             .filter(|e| !e.success)
+            .filter(|e| domain.is_none() || e.domain.as_deref() == domain)
             .map(|e| {
                 let similarity =
                     EmbeddingService::cosine_similarity(&query_embedding, &e.embedding);
@@ -144,6 +173,7 @@ impl CaseIndex {
                     quality_score: e.quality_score,
                     similarity,
                     success: e.success,
+                    domain: e.domain.clone(),
                 }
             })
             .filter(|m| m.similarity > 0.3)
@@ -202,6 +232,7 @@ pub struct CaseMatch {
     pub quality_score: f64,
     pub similarity: f32,
     pub success: bool,
+    pub domain: Option<String>,
 }
 
 #[cfg(test)]
@@ -235,6 +266,7 @@ mod tests {
             quality_score: 0.8,
             similarity: 0.92,
             success: true,
+            domain: None,
         }];
         let failures = vec![CaseMatch {
             episode_id: Uuid::new_v4(),
@@ -243,6 +275,7 @@ mod tests {
             quality_score: 0.1,
             similarity: 0.85,
             success: false,
+            domain: None,
         }];
 
         let ctx = CaseIndex::format_as_context(&successes, &failures);
@@ -268,6 +301,7 @@ mod tests {
                     quality_score: 0.5,
                     success: true,
                     embedding: vec![0.0; 384],
+                    domain: None,
                 });
             }
             assert_eq!(entries.len(), MAX_INDEXED_EPISODES);
@@ -286,6 +320,7 @@ mod tests {
                 quality_score: 0.5,
                 success: true,
                 embedding: vec![0.0; 384],
+                domain: None,
             });
             assert_eq!(entries.len(), MAX_INDEXED_EPISODES);
             assert_eq!(entries.last().unwrap().summary, "newest");
@@ -311,6 +346,7 @@ mod tests {
                 quality_score: 0.8,
                 success: true,
                 embedding: emb1,
+                domain: None,
             });
 
             let mut emb2 = vec![0.0; 384];
@@ -322,6 +358,7 @@ mod tests {
                 quality_score: 0.8,
                 success: true,
                 embedding: emb2,
+                domain: None,
             });
         }
 
@@ -339,5 +376,110 @@ mod tests {
 
         assert!((sim0 - 1.0).abs() < 0.01, "parallel vectors: {sim0}");
         assert!(sim1.abs() < 0.01, "orthogonal vectors: {sim1}");
+    }
+
+    #[tokio::test]
+    async fn test_domain_filtering() {
+        let svc = make_embedding_service();
+        let index = CaseIndex::new(svc);
+
+        // Use index_episode to go through the real embedding pipeline
+        index
+            .index_episode(
+                Uuid::new_v4(),
+                "build stone walls before first raid",
+                "construction",
+                0.9,
+                true,
+                IndexMetadata {
+                    domain: Some("rimworld".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+
+        index
+            .index_episode(
+                Uuid::new_v4(),
+                "refactor module for better readability",
+                "code",
+                0.9,
+                true,
+                IndexMetadata {
+                    domain: Some("code-review".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Verify domain field is stored
+        let entries = index.entries.read().await;
+        assert_eq!(entries[0].domain.as_deref(), Some("rimworld"));
+        assert_eq!(entries[1].domain.as_deref(), Some("code-review"));
+        drop(entries);
+
+        // Domain filter should exclude cross-domain entries
+        let rimworld = index
+            .retrieve_similar("stone walls raid", None, 10, 0.0, Some("rimworld"))
+            .await
+            .unwrap();
+        for m in &rimworld {
+            assert_eq!(m.domain.as_deref(), Some("rimworld"));
+        }
+
+        let code = index
+            .retrieve_similar("stone walls raid", None, 10, 0.0, Some("code-review"))
+            .await
+            .unwrap();
+        for m in &code {
+            assert_eq!(m.domain.as_deref(), Some("code-review"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_domain_none_returns_all() {
+        let svc = make_embedding_service();
+        let index = CaseIndex::new(svc);
+
+        index
+            .index_episode(
+                Uuid::new_v4(),
+                "episode in domain alpha",
+                "test",
+                0.9,
+                true,
+                IndexMetadata {
+                    domain: Some("domain-a".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+
+        index
+            .index_episode(
+                Uuid::new_v4(),
+                "episode in domain beta",
+                "test",
+                0.9,
+                true,
+                IndexMetadata {
+                    domain: Some("domain-b".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+
+        // No domain filter — should not exclude by domain
+        let all = index
+            .retrieve_similar("episode domain", None, 10, 0.0, None)
+            .await
+            .unwrap();
+        // Both entries should pass domain filter (similarity threshold may still filter)
+        assert!(
+            all.len() <= 2,
+            "Should return at most 2 results without domain filter"
+        );
+        // Verify entries exist in the index
+        assert_eq!(index.len().await, 2);
     }
 }

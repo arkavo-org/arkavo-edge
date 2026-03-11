@@ -303,7 +303,10 @@ pub async fn execute_with_conductor_and_learning(
             .get_few_shot_examples(&tool_names, arkavo_router::learning::ToolCallFormat::Fence)
             .await;
         let behavior_guidance = bus.get_behavior_guidance(None).await;
-        let case_context = bus.get_case_context(&task_content, None).await;
+        let domain = bus.swarm_id();
+        let case_context = bus
+            .get_case_context(&task_content, None, Some(domain))
+            .await;
 
         let mut prefix = String::new();
         if !behavior_guidance.is_empty() {
