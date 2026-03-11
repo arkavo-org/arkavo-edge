@@ -4,6 +4,7 @@
 purpose: Review code quality, patterns, and suggest improvements
 model:   ministral-3b
 listen:  0.0.0.0:8344
+swarm:   code-review
 
 # The code review agent specializes in:
 # - Identifying code smells and anti-patterns

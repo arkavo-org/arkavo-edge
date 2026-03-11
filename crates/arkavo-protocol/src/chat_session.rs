@@ -906,10 +906,12 @@ impl ChatSessionManager {
 
                     // Classify human teaching intent before routing
                     let last_trace = router.last_decision_trace().map(|t| t.trace_id);
-                    let intent = arkavo_router::learning::human_teaching::classify_intent(
+                    let intent = arkavo_router::learning::human_teaching::classify_intent_llm(
                         &user_message.content,
                         last_trace,
-                    );
+                        &router,
+                    )
+                    .await;
 
                     if intent != arkavo_router::learning::TeachingIntent::Question {
                         // Emit intent metadata delta so the UI can display it

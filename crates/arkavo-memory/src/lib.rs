@@ -18,7 +18,7 @@ pub mod tdf_audit_store;
 pub mod workspace_config;
 
 pub use advisor_state::{AdvisorStateStore, PersistedAdjustment};
-pub use case_retrieval::{CaseIndex, CaseMatch};
+pub use case_retrieval::{CaseIndex, CaseMatch, IndexMetadata};
 pub use federated_memory::{
     ContextManifest, FederatedItem, FederatedMemoryService, FederatedQuery, FederatedResult,
     MemoryAttribute, MemoryPolicy, evaluate_entitlements,
