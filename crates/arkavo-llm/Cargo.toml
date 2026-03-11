@@ -66,6 +66,7 @@ arkavo-snpe = { path = "../arkavo-snpe", optional = true }
 tempfile = { workspace = true }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
+arkavo-gossip = { path = "../arkavo-gossip" }
 
 [[bench]]
 name = "concurrent_inference_benchmark"

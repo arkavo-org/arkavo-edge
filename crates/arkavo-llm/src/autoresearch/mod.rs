@@ -13,4 +13,4 @@ mod thompson;
 
 pub use config::{ExperimentConfig, ExperimentResult, SearchSpace};
 pub use evaluator::evaluate_quality;
-pub use thompson::{BetaPrior, ThompsonSampler};
+pub use thompson::{BetaPrior, Rng, ThompsonSampler};
