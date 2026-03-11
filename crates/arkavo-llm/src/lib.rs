@@ -70,7 +70,7 @@ pub use conversation_context::{
     ConversationContext, ConversationContextManager, ConversationContextRef, ConversationId,
 };
 #[cfg(feature = "llama-cpp")]
-pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
+pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, ThinkingMode, is_gpu_accelerated};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use model_registry::{ModelInfo, ModelRegistry};
 #[cfg(all(feature = "llama-cpp", target_env = "musl"))]

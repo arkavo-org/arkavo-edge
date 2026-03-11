@@ -267,6 +267,21 @@ impl ModelChoice {
     ///
     /// Only models with dedicated vision projector support should auto-load
     /// mmproj files. Small routing models skip vision to avoid overhead.
+    /// Autoresearch-discovered optimal inference parameters.
+    /// Returns (temperature, top_p, ThinkingMode) or None for untuned models.
+    pub fn optimal_sampling(&self) -> Option<(f32, f32, arkavo_llm::ThinkingMode)> {
+        use arkavo_llm::ThinkingMode;
+        match self {
+            Self::LocalQwen3 => Some((0.9, 1.0, ThinkingMode::Off)),
+            Self::LocalMinistral3B => Some((0.9, 1.0, ThinkingMode::Off)),
+            Self::LocalMinistral8B => Some((0.3, 0.8, ThinkingMode::Off)),
+            Self::LocalQwen35_9B => Some((0.7, 0.9, ThinkingMode::On)),
+            Self::LocalGlm47Flash => Some((0.9, 1.0, ThinkingMode::On)),
+            Self::LocalQwen35_27B => Some((0.1, 0.8, ThinkingMode::On)),
+            _ => None,
+        }
+    }
+
     pub fn supports_vision(&self) -> bool {
         matches!(
             self,

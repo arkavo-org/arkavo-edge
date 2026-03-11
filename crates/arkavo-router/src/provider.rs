@@ -3,6 +3,19 @@ use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
 
+fn sampling_config_for(model: &ModelChoice) -> arkavo_llm::SamplingConfig {
+    if let Some((temp, top_p, thinking)) = model.optimal_sampling() {
+        arkavo_llm::SamplingConfig {
+            temperature: temp,
+            top_p,
+            thinking_mode: Some(thinking),
+            ..arkavo_llm::SamplingConfig::default()
+        }
+    } else {
+        arkavo_llm::SamplingConfig::default()
+    }
+}
+
 impl super::Router {
     /// Get a provider for the given model choice (local or cloud)
     pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
@@ -107,7 +120,7 @@ impl super::Router {
         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
             self.model_registry.clone(),
             registry_name.to_string(),
-            arkavo_llm::SamplingConfig::default(),
+            sampling_config_for(model),
         )
         .map_err(|e| {
             Error::ModelExecution(format!(

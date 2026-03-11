@@ -188,6 +188,7 @@ async fn test_format_learning_ministral() {
         seed: 42,
         debug: false,
         tool_format: LocalToolFormat::Fence,
+        ..Default::default()
     };
 
     let provider =
@@ -279,6 +280,7 @@ async fn test_format_learning_qwen() {
         seed: 42,
         debug: false,
         tool_format: LocalToolFormat::Fence,
+        ..Default::default()
     };
 
     let provider =
@@ -366,6 +368,7 @@ async fn test_format_learning_comparison() {
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
+            ..Default::default()
         };
 
         if let Ok(provider) =
@@ -388,6 +391,7 @@ async fn test_format_learning_comparison() {
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
+            ..Default::default()
         };
 
         if let Ok(provider) =
