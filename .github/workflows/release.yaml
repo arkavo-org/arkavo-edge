@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

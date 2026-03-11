@@ -11,11 +11,17 @@ function addTaskEvent(taskId, evt) {
     if (task._events.length > MAX_TASK_EVENTS) task._events.pop();
 }
 
+function safeTaskKey(key) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+    return key;
+}
+
 function handleTaskList(event) {
-    AppState.tasks = {};
+    AppState.tasks = Object.create(null);
     if (event.tasks) {
         event.tasks.forEach(function(task) {
-            AppState.tasks[task.id] = task;
+            var key = safeTaskKey(task.id);
+            if (key) AppState.tasks[key] = task;
         });
     }
     renderTasks();
@@ -32,7 +38,7 @@ function handleTaskSubmitted(event) {
         _events: []
     };
     if (task.source === 'ui') _pendingTaskDescription = null;
-    AppState.tasks[task.id] = task;
+    if (safeTaskKey(task.id)) AppState.tasks[task.id] = task;
     AppState.taskCount++;
 
     var evt = {
@@ -50,7 +56,7 @@ function handleTaskSubmitted(event) {
 
 function handleTaskStatusChanged(event) {
     var id = event.taskId || event.task_id;
-    if (AppState.tasks[id]) {
+    if (safeTaskKey(id) && AppState.tasks[id]) {
         AppState.tasks[id].status = event.status;
         if (event.progress !== undefined) {
             AppState.tasks[id].progress = event.progress;

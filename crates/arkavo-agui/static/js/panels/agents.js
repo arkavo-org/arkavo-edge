@@ -60,7 +60,7 @@ function renderAgents() {
 
     container.innerHTML = agents.map(function(agent) {
         var agentId = escapeHtml(agent.id || agent.name);
-        var safeId = agentId.replace(/'/g, "\\'");
+        var safeId = agentId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         var status = escapeHtml(agent.status || 'connected');
         var chat = getAgentChat(agentId);
         var chatActive = chat.isOpen ? ' active' : '';

@@ -65,7 +65,7 @@ async fn handle_websocket(
         }
     });
 
-    println!("AG-UI: New WebSocket connection: {session_id}");
+    println!("AG-UI: New WebSocket connection: {}...", &session_id[..8]);
 
     {
         let conn_info = super::gateway::ConnectionInfo {
@@ -161,7 +161,7 @@ async fn handle_websocket(
         }
     }
     forward_task.abort();
-    println!("AG-UI: WebSocket connection closed: {session_id}");
+    println!("AG-UI: WebSocket connection closed: {}...", &session_id[..8]);
 }
 
 #[allow(clippy::too_many_arguments)]

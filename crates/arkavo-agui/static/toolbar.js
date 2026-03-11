@@ -127,8 +127,8 @@ function handleMessage(message) {
         systemNotification: handleSystemNotification
     };
 
-    const handler = handlers[message.type];
-    if (handler) {
+    if (Object.prototype.hasOwnProperty.call(handlers, message.type)) {
+        const handler = handlers[message.type];
         // For Plan event, data is directly in the message (not nested under data)
         if (message.type === 'plan') {
             handler(message);
@@ -149,11 +149,22 @@ function handlePlan(data) {
         const item = document.createElement('div');
         item.className = 'plan-item';
         item.dataset.partId = part.id;
-        item.innerHTML = `
-            <div class="plan-item-name">${part.name}</div>
-            <div class="plan-item-desc">${part.description}</div>
-            <div class="plan-item-status pending">Pending</div>
-        `;
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'plan-item-name';
+        nameDiv.textContent = part.name;
+
+        const descDiv = document.createElement('div');
+        descDiv.className = 'plan-item-desc';
+        descDiv.textContent = part.description;
+
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'plan-item-status pending';
+        statusDiv.textContent = 'Pending';
+
+        item.appendChild(nameDiv);
+        item.appendChild(descDiv);
+        item.appendChild(statusDiv);
         elements.planItems.appendChild(item);
     });
 
@@ -362,52 +373,59 @@ elements.promptInput.addEventListener('keydown', (e) => {
     }
 });
 
+function escapeHtmlToolbar(text) {
+    var d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+}
+
 function handleStatusUpdate(data) {
     // Health monitoring happens silently in background
     // Only user-facing notifications will be shown via SystemNotification events
 
     if (elements.mcpStatusContent) {
-        elements.mcpStatusContent.innerHTML = `
-            <div class="status-item">
-                <span class="status-label">Browser CDP</span>
-                <span class="status-value ${data.mcpTools.browser_available ? 'good' : 'error'}">
-                    ${data.mcpTools.browser_available ? 'Available' : 'Unavailable'}
-                </span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Tools</span>
-                <span class="status-value">${data.mcpTools.tools_count}</span>
-            </div>
-            ${data.mcpTools.last_used ? `
-            <div class="status-item">
-                <span class="status-label">Last Used</span>
-                <span class="status-value">${data.mcpTools.last_used}</span>
-            </div>
-            ` : ''}
-        `;
+        var mcpHtml =
+            '<div class="status-item">' +
+                '<span class="status-label">Browser CDP</span>' +
+                '<span class="status-value ' + (data.mcpTools.browser_available ? 'good' : 'error') + '">' +
+                    (data.mcpTools.browser_available ? 'Available' : 'Unavailable') +
+                '</span>' +
+            '</div>' +
+            '<div class="status-item">' +
+                '<span class="status-label">Tools</span>' +
+                '<span class="status-value">' + escapeHtmlToolbar(String(data.mcpTools.tools_count)) + '</span>' +
+            '</div>';
+        if (data.mcpTools.last_used) {
+            mcpHtml +=
+                '<div class="status-item">' +
+                    '<span class="status-label">Last Used</span>' +
+                    '<span class="status-value">' + escapeHtmlToolbar(String(data.mcpTools.last_used)) + '</span>' +
+                '</div>';
+        }
+        elements.mcpStatusContent.innerHTML = mcpHtml;
     }
 
     // Display available LLMs
     if (elements.remoteLlmStatusContent && data.llms) {
-        const llmHtml = data.llms.map(llm => `
-            <div class="llm-entry">
-                <div class="llm-name">${llm.name}</div>
-                <div class="status-item">
-                    <span class="status-label">Provider</span>
-                    <span class="status-value">${llm.provider}</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Model</span>
-                    <span class="status-value">${llm.model}</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Status</span>
-                    <span class="status-value ${llm.connected ? 'good' : 'error'}">
-                        ${llm.connected ? 'Ready' : 'Unavailable'}
-                    </span>
-                </div>
-            </div>
-        `).join('');
+        var llmHtml = data.llms.map(function(llm) {
+            return '<div class="llm-entry">' +
+                '<div class="llm-name">' + escapeHtmlToolbar(llm.name) + '</div>' +
+                '<div class="status-item">' +
+                    '<span class="status-label">Provider</span>' +
+                    '<span class="status-value">' + escapeHtmlToolbar(llm.provider) + '</span>' +
+                '</div>' +
+                '<div class="status-item">' +
+                    '<span class="status-label">Model</span>' +
+                    '<span class="status-value">' + escapeHtmlToolbar(llm.model) + '</span>' +
+                '</div>' +
+                '<div class="status-item">' +
+                    '<span class="status-label">Status</span>' +
+                    '<span class="status-value ' + (llm.connected ? 'good' : 'error') + '">' +
+                        (llm.connected ? 'Ready' : 'Unavailable') +
+                    '</span>' +
+                '</div>' +
+            '</div>';
+        }).join('');
         elements.remoteLlmStatusContent.innerHTML = llmHtml;
     }
 

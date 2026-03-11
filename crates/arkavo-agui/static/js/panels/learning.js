@@ -30,9 +30,12 @@ function stopLearningPolling() {
 
 function handleLearningStatusUpdate(event) {
     var agents = event.agents || [];
-    AppState.learningAgents = {};
+    AppState.learningAgents = Object.create(null);
     for (var i = 0; i < agents.length; i++) {
-        AppState.learningAgents[agents[i].agentId] = agents[i];
+        var agentKey = safeAgentKey(agents[i].agentId);
+        if (agentKey) {
+            AppState.learningAgents[agentKey] = agents[i];
+        }
     }
     AppState.routingHistory = event.routingHistory || [];
     AppState.qualityTrends = event.qualityTrends || [];
@@ -46,13 +49,22 @@ function handleLearningStatusUpdate(event) {
     }
 }
 
+function safeAgentKey(key) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+    return key;
+}
+
 function handleRoutingEvaluation(event) {
     // Update agent scores from candidates
     var candidates = event.candidates || [];
     for (var i = 0; i < candidates.length; i++) {
         var c = candidates[i];
-        AppState.learningAgents[c.agentId] = AppState.learningAgents[c.agentId] || {};
-        var a = AppState.learningAgents[c.agentId];
+        var safeId = safeAgentKey(c.agentId);
+        if (!safeId) continue;
+        if (!Object.prototype.hasOwnProperty.call(AppState.learningAgents, safeId)) {
+            AppState.learningAgents[safeId] = {};
+        }
+        var a = AppState.learningAgents[safeId];
         a.agentId = c.agentId;
         a.alpha = c.alpha;
         a.betaParam = c.betaParam;
@@ -66,10 +78,12 @@ function handleRoutingEvaluation(event) {
 
     // Track path weight for selected agent
     var sel = event.selectedAgent;
-    AppState.pathWeights[sel] = (AppState.pathWeights[sel] || 0) + 1;
+    if (safeAgentKey(sel)) {
+        AppState.pathWeights[sel] = (AppState.pathWeights[sel] || 0) + 1;
+    }
 
     // Write selected agent back to task object for detail view
-    if (event.taskId && AppState.tasks[event.taskId]) {
+    if (event.taskId && safeAgentKey(event.taskId) && Object.prototype.hasOwnProperty.call(AppState.tasks, event.taskId)) {
         AppState.tasks[event.taskId].target_agent = sel;
     }
 

@@ -3,7 +3,10 @@
 var agentChats = {};
 
 function getAgentChat(agentId) {
-    if (!agentChats[agentId]) {
+    if (agentId === '__proto__' || agentId === 'constructor' || agentId === 'prototype') {
+        return { messages: [], isOpen: false };
+    }
+    if (!Object.prototype.hasOwnProperty.call(agentChats, agentId)) {
         agentChats[agentId] = { messages: [], isOpen: false };
     }
     return agentChats[agentId];
