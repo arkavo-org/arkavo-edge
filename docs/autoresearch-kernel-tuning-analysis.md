@@ -161,9 +161,19 @@ pub struct BetaPrior { alpha: f64, beta: f64 }  // Beta(2,1) cold start
 
 **Missing:** An `ExperimentCoordinator` (~200 lines) wrapping gossip messages with experiment-specific semantics — configuration vectors instead of code diffs, metric comparison instead of code review.
 
-**Challenge:** Experiment reproducibility across heterogeneous hardware (M4 Max vs. Pi 5). Different hardware produces different absolute tok/s, so the metric must be *relative improvement* (% change from that node's baseline).
+**Challenge:** Experiment reproducibility across heterogeneous hardware (M4 Max vs. Pi 5). Different hardware produces different absolute tok/s, so the metric must account for cross-hardware comparability.
 
-**Feasibility: Medium** — all primitives exist, need a thin coordination layer.
+**Metric design — relative improvement is necessary but insufficient.** A naive relative-improvement metric (% over node-local baseline) introduces a subtle bias: Thompson Sampling will over-explore the Pi 5 because it appears to have more headroom (15% improvement easy on a weak baseline) while under-exploiting the M4 Max (5% improvement on an already-optimized baseline is far more valuable in absolute terms). The quality weight fed to `BetaPrior::apply_fractional_update()` should incorporate absolute performance:
+
+```
+quality = relative_improvement × log(baseline_tok_per_sec)
+```
+
+This biases toward improvements on already-fast nodes. A 5% gain on a 200 tok/s M4 Max baseline (quality = 0.05 × log(200) = 0.265) outweighs a 15% gain on a 10 tok/s Pi 5 baseline (quality = 0.15 × log(10) = 0.150). The log compression prevents extreme nodes from dominating — it's a gentle preference, not a hard cutoff.
+
+This formula slots directly into the existing `BetaPrior` quality-weighted update path, where success with quality 0.9 adds 0.9 to alpha rather than binary +1.
+
+**Feasibility: Medium** — all primitives exist, need a thin coordination layer + the weighted metric.
 
 ---
 
@@ -179,9 +189,9 @@ Preflight moderation at `crates/arkavo-router/benches/preflight.rs` runs at < 5m
 
 **The 139ns evaluation time is already so fast** that speed optimization is pointless — the value would be in *coverage* optimization (catch more bad inputs without more false positives). The metric (F1 × inverse-latency) conflates two dimensions where one is already saturated.
 
-**Recommendation:** Defer until simpler optimizations are validated. If pursued, constrain the search space: vary only feature weights and thresholds within existing circuit topologies, don't add/remove gates.
+**Recommendation:** Defer topology mutation until simpler optimizations are validated. However, there is a sweepable surface within existing circuits: the preflight moderator's pattern-matching confidence thresholds are continuous parameters. These thresholds (PII detection sensitivity, SQL injection confidence cutoffs, base64 entropy thresholds) live within fixed circuit topologies and are amenable to autoresearch-style parameter sweeping without any mutation operators. The evaluation metric is F1 over a held-out adversarial prompt set — a well-defined, fast evaluation. This would be Phase 5+ work, after Phases 1-3 validate the autoresearch loop on simpler surfaces.
 
-**Feasibility: Low-medium**
+**Feasibility: Low-medium** (topology mutation) / **Medium** (threshold sweeping within fixed topology)
 
 ---
 
@@ -222,7 +232,25 @@ Arkavo Edge already implements every component of the autoresearch feedback loop
 5. **Propagation** — Gossip protocol with quorum consensus
 6. **Loop prevention** — `LoopDetector` with thrashing detection
 
-The gap is a ~300-line `AutoResearchRunner` that wires these into the read → hypothesize → modify → run → evaluate → keep/revert cycle.
+The gap is closing the loop — and the right place to close it is inside the Conductor, not as a standalone binary.
+
+### AutoResearch as a Specialized BurstContract
+
+The `Conductor` already manages `BurstContract` instances with `max_wall_time`, `max_steps`, `max_tokens`, and `max_cost_usd` budgets. The `LoopDetector` already prevents thrashing via Jaccard similarity (0.85 threshold) and failure counting (max 3). An autoresearch experiment is a `BurstContract` where the "task" is "improve this metric."
+
+The runner (~300 lines) extends `Conductor` with an `AutoResearchBurst` that implements the seven-step loop:
+
+1. **Read config** — load experiment parameters from TOML (the `program.md` equivalent)
+2. **Mutate** — apply one parameter change from the search space
+3. **Execute** — call into `perf_context()` or Criterion benchmark harness
+4. **Evaluate** — compare against baseline via `PipelineResult` or raw tok/s
+5. **Decide** — keep/revert using a threshold (no quorum needed for single-node Phases 1-3)
+6. **Log + Commit** — append to `results.tsv`, commit winning config to a git branch
+7. **Loop** — repeat until `BurstContract.max_wall_time` exhausted
+
+Step 6 is worth highlighting: borrowing Karpathy's git-branch-per-experiment pattern gives a full audit trail. Each winning configuration gets committed to a branch, enabling `git bisect` if a "winning" config degrades on a different workload. The gossip protocol's `PatchAnnouncement` with SHA-256 deduplication already speaks this language — you create the local git commit, then announce it. Losing configs get reverted, not committed.
+
+This design reuses `BurstContract` for budget enforcement, `LoopDetector` for thrashing prevention, and `TaskStore` for persistence across crashes — all of which already exist and are tested.
 
 ## Priority-Ordered Implementation Plan
 
@@ -236,32 +264,37 @@ Create `crates/arkavo-llm/tests/thinking_gate_sweep.rs`:
 - Report `quality_per_token` as composite metric
 - Keep/revert via writing winning config to a TOML file
 
-### Phase 2: Inference Parameter Sweep (2-3 days)
+### Phase 2: Unified Parameter Sweep — Inference + Kernel (3-5 days)
 
-Extend `deltanet_throughput.rs` into an autoresearch loop:
-- Parameterize: batch chunk size, sampler temperature, top-p, top-k, context window
+Extend `deltanet_throughput.rs` into an `AutoResearchBurst` within the Conductor:
+
+**Inference parameters (zero rebuild):**
+- Batch chunk size, sampler temperature, top-p, top-k, context window
 - Objective: `perf_context().tok_per_sec()`
-- Keep/revert: run baseline, run variant, compare, commit winning config
-- 5-minute wall-clock budget per experiment
+- Keep/revert: run baseline, run variant, compare, commit winning config to branch
+- 5-minute `BurstContract.max_wall_time` per experiment
 
-### Phase 3: Kernel Parameter Tuning (1 week)
-
-Modify `003-deltanet-metal-kernel.patch` programmatically:
+**Kernel parameters (zero rebuild via precompiled variants):**
+- Precompile N kernel variants at build time with distinct MSL function names
 - Sweep threadgroup dimensions: `(32,1,1)`, `(64,1,1)`, `(128,1,1)`
 - Sweep unroll factors: float2 vs float4 vs float8 inner loops
-- Test GDA-only kernel (eliminate runtime `G==1` branch)
-- Each experiment: modify patch → rebuild llama-cpp-sys → run benchmark → compare
-- ~2 min rebuild + ~3 min measurement = fits 5-minute budget
+- Test GDA-only kernel variant (eliminate runtime `G==1` branch)
+- Runtime dispatch selects variant via `kernel_variant` op parameter
+- Same 5-minute budget, same evaluation harness as inference sweeps
 
-### Phase 4: Distributed Experiment Coordination (1-2 weeks)
+**Joint search:** Temperature × thinking_gate × kernel_variant form a combined search space. Thompson Sampling's per-category priors (`HashMap<String, BetaPrior>`) naturally partition this into independent dimensions that can be explored concurrently.
+
+### Phase 3: Distributed Experiment Coordination (1-2 weeks)
 
 Add `ExperimentMessage` to gossip protocol:
 - Configuration vector (not code diff) as payload
-- Metric result as `LessonAnnouncement` response
+- Metric result as `LessonAnnouncement` response with `baseline_tok_per_sec` field
 - Thompson Sampling allocates configs to nodes by hardware capability
-- Relative improvement metric (% over node-local baseline) for cross-hardware comparison
+- Weighted quality metric: `relative_improvement × log(baseline_tok_per_sec)`
+- `BetaPrior::apply_fractional_update(quality)` consumes the weighted score directly
+- Git commit per winning config, announced via `PatchAnnouncement`
 
-### Phase 5: Context Strategy Optimization (2-3 weeks)
+### Phase 4: Context Strategy Optimization (2-3 weeks)
 
 Build conversation evaluation corpus, then:
 - Sweep `min_offload_chars`, context strategy selection
@@ -270,20 +303,41 @@ Build conversation evaluation corpus, then:
 
 ## Key Risk: The Rebuild Bottleneck
 
-Kernel-level tuning (Phase 3) faces a constraint autoresearch doesn't: the mutable file is a C++ patch applied during `cargo build`, not a Python script. Each experiment requires a full rebuild of `arkavo-llama-cpp-sys`. On the M4 Max with ccache, this is ~2 minutes — consuming 40% of the 5-minute budget.
+Kernel-level tuning faces a constraint autoresearch doesn't: the mutable file is a C++ patch applied during `cargo build`, not a Python script. Each experiment requires a full rebuild of `arkavo-llama-cpp-sys`. On the M4 Max with ccache, this is ~2 minutes — consuming 40% of a 5-minute budget.
 
-Mitigation strategies:
-- **Inference-first** (Phase 2): Sweep parameters that don't require rebuild
-- **Precompiled variants**: Generate N kernel variants at build time, select at runtime via function pointers
-- **Extend budget**: Use 10-minute windows for kernel experiments (still ~6 experiments/hour)
-- **Parallel builds**: Build next variant while benchmarking current one (requires two worktrees)
+### The Precompiled Variant Solution (Eliminates the Bottleneck)
+
+The dispatch code already selects between kernel configurations at runtime. In `004-deltanet-metal-dispatch.patch`, `ggml_metal_library_get_pipeline_delta_net()` asserts `C/H == 64 || C/H == 128` and does a pipeline lookup by name string:
+
+```cpp
+const char * name = "kernel_delta_net_f32";
+ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
+if (!res.pipeline) {
+    res = ggml_metal_library_compile_pipeline(lib, name, name, nullptr);
+}
+```
+
+This pattern extends naturally to N precompiled kernel variants. Each variant gets a distinct MSL function name (e.g., `kernel_delta_net_f32_tg32_unroll4`, `kernel_delta_net_f32_tg64_unroll8`) compiled once at build time. The dispatch function selects among them via a configuration parameter — identical to how it already dispatches on head_size.
+
+**This collapses kernel tuning into the same zero-rebuild infrastructure as inference parameter sweeps.** The threadgroup dimensions, unroll factors, and gate branch strategies all become runtime-selectable. The tradeoff is binary size (~2KB per variant × maybe 12 variants = ~24KB) and one-time compile cost — negligible on M4 Max.
+
+The dispatch modification is ~30 lines: a `switch` on a new `kernel_variant` field in `ggml_op_params`, mapping to pre-registered pipeline names. The kernel patch grows by N × (kernel size), but since each variant is a mechanical substitution (different `float4` → `float2` unrolls, different shared memory sizes), it's template-like duplication.
+
+**Result:** Kernel tuning experiments run at the same speed as inference parameter experiments — zero rebuild, immediate measurement. This merges Phase 3 into Phase 2's autoresearch infrastructure.
+
+### Remaining Mitigations (for novel kernel architectures)
+
+For truly novel kernel modifications that can't be precompiled (e.g., adding a new inner loop structure), the rebuild bottleneck remains:
+- **Extend budget**: 10-minute windows for structural experiments (~6 experiments/hour)
+- **Parallel builds**: Build next variant while benchmarking current one (two worktrees)
+- **Inference-first validation**: Confirm the autoresearch loop works on zero-rebuild parameters before investing in structural changes
 
 ## Metrics Summary
 
-| Integration Point | Primary Metric | Secondary Metric | Target |
-|---|---|---|---|
-| Metal kernel tuning | tok/s via `perf_context()` | TTFT (ms) | >15% improvement |
-| Thinking gate | quality_per_token | CriticPipeline pass rate | Find optimal boundary |
-| Context management | task completion rate | time-to-completion | >10% completion improvement |
-| Distributed experiments | experiments/hour × nodes | winning config transfer rate | 12×N experiments/hour |
-| Policy circuits | F1 score | evaluation latency (ns) | Maintain <1μs, improve F1 |
+| Phase | Integration Point | Primary Metric | Secondary Metric | Target |
+|---|---|---|---|---|
+| 1 | Thinking gate | quality_per_token | CriticPipeline pass rate | Find optimal boundary |
+| 2 | Inference + kernel params | tok/s via `perf_context()` | TTFT (ms) | >15% improvement |
+| 3 | Distributed experiments | weighted quality × nodes | winning config transfer rate | 12×N experiments/hour |
+| 4 | Context management | task completion rate | time-to-completion | >10% completion improvement |
+| 5+ | Policy circuit thresholds | F1 score | evaluation latency (ns) | Maintain <1μs, improve F1 |
