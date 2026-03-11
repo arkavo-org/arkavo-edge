@@ -1,3 +1,4 @@
+pub mod autoresearch;
 pub mod chat;
 pub mod client;
 #[cfg(feature = "llm-remote")]

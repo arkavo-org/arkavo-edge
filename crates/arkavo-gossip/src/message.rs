@@ -4,6 +4,7 @@ pub use crate::advisor_message::AdvisorAdjustmentAnnouncement;
 pub use crate::context_message::{
     ContextChunkDelivery, ContextChunkRequest, ContextManifestAnnouncement,
 };
+use crate::experiment_message::{ExperimentAnnouncement, ExperimentVote};
 use crate::learning_message::{
     LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest, LessonVote as LearningVote,
 };
@@ -43,6 +44,10 @@ pub enum GossipMessage {
     ContextChunkDelivery(ContextChunkDelivery),
     /// Announce a proven advisor adjustment to the mesh
     AdvisorAdjustmentAnnounce(AdvisorAdjustmentAnnouncement),
+    /// Announce an autoresearch experiment result
+    ExperimentAnnounce(ExperimentAnnouncement),
+    /// Vote on an experiment result's validity
+    ExperimentVote(ExperimentVote),
 }
 
 /// Announcement of a new patch

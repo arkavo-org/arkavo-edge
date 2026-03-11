@@ -15,6 +15,7 @@ pub mod advisor_message;
 mod consensus;
 pub mod context_message;
 mod error;
+pub mod experiment_message;
 pub mod learning_message;
 mod lesson_consensus;
 mod lesson_handlers;
@@ -26,6 +27,9 @@ pub use consensus::{
     ConsensusState, ConsensusStatus, DEFAULT_QUORUM_THRESHOLD, DEFAULT_VOTE_TIMEOUT, QuorumConfig,
 };
 pub use error::{GossipError, GossipResult};
+pub use experiment_message::{
+    ExperimentAnnouncement, ExperimentMetrics, ExperimentVote, HardwareTier,
+};
 pub use learning_message::{
     LessonAnnouncement, LessonDelivery, LessonDigest, LessonDigestEntry, LessonRequest,
     LessonStatus, LessonVote, LocalEvidence,
