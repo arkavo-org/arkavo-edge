@@ -21,6 +21,9 @@ path = ".."
 path = "../../arkavo-tdf"
 
 
+[patch.crates-io]
+quinn-proto = { version = "=0.11.14" }
+
 [[bin]]
 name = "fuzz_rate_limit"
 path = "fuzz_targets/fuzz_rate_limit.rs"
