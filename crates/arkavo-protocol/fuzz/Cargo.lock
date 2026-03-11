@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -215,8 +215,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-critic"
+version = "0.65.0"
+dependencies = [
+ "arkavo-llm",
+ "arkavo-mcp-tools",
+ "arkavo-torg-circuits",
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "torg-core",
+ "torg-serde",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-crypto"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -229,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -262,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -280,9 +301,8 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
- "bincode",
  "chrono",
  "serde",
  "serde_json",
@@ -304,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "bytes",
  "dashmap",
@@ -323,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -332,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -348,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -369,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -386,29 +406,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-kv-cache"
+version = "0.65.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-llama-cpp"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-llama-cpp-sys",
 ]
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "bindgen",
+ "cc",
  "cmake",
  "which 6.0.3",
 ]
 
 [[package]]
 name = "arkavo-llm"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
  "arkavo-gemini",
  "arkavo-kimi",
+ "arkavo-kv-cache",
  "arkavo-llama-cpp",
  "arkavo-mcp-tools",
  "arkavo-memory",
@@ -434,17 +467,20 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
+ "sha2",
+ "toml",
 ]
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -452,6 +488,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-tdf",
+ "arkavo-validation",
  "async-recursion",
  "async-trait",
  "base64 0.22.1",
@@ -472,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -482,6 +519,7 @@ dependencies = [
  "hnsw_rs",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
@@ -491,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -499,6 +537,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo",
  "tokio",
  "toml",
  "tracing",
@@ -508,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -521,6 +560,8 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-router",
+ "arkavo-test-macros",
+ "arkavo-validation",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -539,7 +580,6 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "rustls",
- "rustls-pemfile",
  "schemars",
  "serde",
  "serde_json",
@@ -556,10 +596,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
+ "arkavo-critic",
  "arkavo-gemini",
  "arkavo-llm",
  "arkavo-mcp",
@@ -593,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -610,12 +651,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-test-macros"
+version = "0.65.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "arkavo-torg-circuits"
-version = "0.58.5"
+version = "0.65.0"
 dependencies = [
  "parking_lot",
  "torg-core",
  "torg-serde",
+]
+
+[[package]]
+name = "arkavo-validation"
+version = "0.65.0"
+dependencies = [
+ "ipnet",
+ "serde_json",
 ]
 
 [[package]]
@@ -696,6 +754,29 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "aws-lc-rs"
+version = "1.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94bffc006df10ac2a68c83692d734a465f8ee6c5b384d8545a636f81d858f4bf"
+dependencies = [
+ "aws-lc-sys",
+ "untrusted 0.7.1",
+ "zeroize",
+]
+
+[[package]]
+name = "aws-lc-sys"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4321e568ed89bb5a7d291a7f37997c2c0df89809d7b6d12062c81ddb54aa782e"
+dependencies = [
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+]
 
 [[package]]
 name = "axum"
@@ -1728,6 +1809,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs_extra"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+
+[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2279,7 +2366,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -2751,19 +2838,13 @@ version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.22.1",
- "ed25519-dalek",
  "getrandom 0.2.17",
- "hmac",
  "js-sys",
- "p256",
- "p384",
  "pem",
- "rand 0.8.5",
- "rsa",
  "serde",
  "serde_json",
- "sha2",
  "signature",
  "simple_asn1",
 ]
@@ -3036,7 +3117,7 @@ dependencies = [
  "sysctl",
  "thiserror 1.0.69",
  "widestring",
- "windows",
+ "windows 0.48.0",
 ]
 
 [[package]]
@@ -3099,6 +3180,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
 dependencies = [
  "bitflags 2.10.0",
+]
+
+[[package]]
+name = "ntapi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -3223,10 +3313,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "octocrab"
-version = "0.48.1"
+name = "objc2-core-foundation"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5930b376c98c438a4f4259a760cda2c198efea3b82de8f8a2aff0c00a8b7c1c"
+checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
+dependencies = [
+ "bitflags 2.10.0",
+]
+
+[[package]]
+name = "octocrab"
+version = "0.49.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89f6f72d7084a80bf261bb6b6f83bd633323d5633d5ec7988c6c95b20448b2b5"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3357,18 +3456,6 @@ name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
-dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
- "sha2",
-]
-
-[[package]]
-name = "p384"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
@@ -3671,9 +3758,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.13"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
+checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
  "bytes",
  "getrandom 0.3.4",
@@ -3973,7 +4060,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.2.17",
  "libc",
- "untrusted",
+ "untrusted 0.9.0",
  "windows-sys 0.52.0",
 ]
 
@@ -4078,15 +4165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
 name = "rustls-pki-types"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4131,7 +4209,7 @@ checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
 dependencies = [
  "ring",
  "rustls-pki-types",
- "untrusted",
+ "untrusted 0.9.0",
 ]
 
 [[package]]
@@ -4802,6 +4880,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysinfo"
+version = "0.34.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4b93974b3d3aeaa036504b8eefd4c039dced109171c1ae973f1dc63b2c7e4b2"
+dependencies = [
+ "libc",
+ "memchr",
+ "ntapi",
+ "objc2-core-foundation",
+ "windows 0.57.0",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5345,6 +5436,12 @@ checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
+
+[[package]]
+name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
@@ -5677,16 +5774,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
+dependencies = [
+ "windows-core 0.57.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
+dependencies = [
+ "windows-implement 0.57.0",
+ "windows-interface 0.57.0",
+ "windows-result 0.1.2",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement",
- "windows-interface",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
  "windows-link",
- "windows-result",
+ "windows-result 0.4.1",
  "windows-strings",
+]
+
+[[package]]
+name = "windows-implement"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9107ddc059d5b6fbfbffdfa7a7fe3e22a226def0b2608f72e9d552763d3e1ad7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -5694,6 +5824,17 @@ name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5724,8 +5865,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
 dependencies = [
  "windows-link",
- "windows-result",
+ "windows-result 0.4.1",
  "windows-strings",
+]
+
+[[package]]
+name = "windows-result"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
+dependencies = [
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
