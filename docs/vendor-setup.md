@@ -16,16 +16,19 @@ git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 
 # Checkout the required version (includes Ministral 3 support)
 cd vendor/llama.cpp
-git checkout ecf74a841  # Ministral 3 + mtmd warmup field
+git checkout d28961d81  # DeltaNet/GDN fused ops + Metal kernel
 ```
 
 ### Required Version
 
-**Recommended commit:** `ecf74a841` (mtmd: add warmup option) - December 1, 2025
+**Recommended commit:** `d28961d81` (llama: enable chunked fused GDN path) - March 11, 2026
 
 This commit includes:
-- `cd3c11890`: Ministral 3 architecture support (3B/8B/14B)
-- `ecf74a841`: mtmd_context_params::warmup field for multimodal
+- Ministral 3 architecture support (3B/8B/14B)
+- Multimodal (mtmd) warmup field
+- `GGML_OP_GATED_DELTA_NET` fused recurrence op (CPU + Metal + CUDA)
+- Metal GPU kernel for DeltaNet-based models (Qwen3.5, etc.) on Apple Silicon
+- Chunked fused GDN path for efficient inference
 
 ### Updating llama.cpp
 
