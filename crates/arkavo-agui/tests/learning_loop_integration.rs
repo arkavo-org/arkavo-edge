@@ -181,6 +181,7 @@ fn test_learning_status_update_serde() {
         }],
         lesson_count: 2,
         lessons: vec![],
+        optimal_configs: vec![],
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
 
