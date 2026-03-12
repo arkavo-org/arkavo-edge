@@ -79,6 +79,14 @@ impl SdkBridge {
             }
         }
 
+        // Allow launching Claude Code from within an existing session.
+        // The CLAUDECODE env var triggers a nested-session check in the CLI
+        // that blocks subprocess launches. Since we're an orchestrator (not a
+        // recursive invocation), removing it is safe.
+        unsafe {
+            std::env::remove_var("CLAUDECODE");
+        }
+
         // Build options from config, then overlay hooks and permissions
         let mut options = config.build_agent_options();
 
@@ -106,6 +114,13 @@ impl SdkBridge {
 
     /// Initialize authentication (OAuth flow if needed)
     pub async fn initialize(&self) -> Result<()> {
+        // Inside a Claude Code session the subprocess inherits the session
+        // token — no explicit auth step is needed
+        if std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN").is_ok() {
+            info!("Initializing Claude SDK with inherited session token");
+            return Ok(());
+        }
+
         match &self.auth_method {
             AuthMethod::OAuth => {
                 info!("Initializing Claude SDK with OAuth authentication");

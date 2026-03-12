@@ -19,6 +19,12 @@ pub fn is_auth_available() -> bool {
         return true;
     }
 
+    // Inside a Claude Code session the CLI inherits the parent's session
+    // token, so no separate API key or OAuth flow is needed
+    if std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN").is_ok() {
+        return true;
+    }
+
     // Check for cached OAuth token
     anthropic_agent_sdk::auth::OAuthClient::new()
         .map(|c| c.is_authenticated())
