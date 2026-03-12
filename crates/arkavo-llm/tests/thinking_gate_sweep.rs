@@ -22,6 +22,7 @@ use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_get_one, batch_get_one_with_logits, create_sampler_chain,
     decode_batch, init_llama_logging, perf_context_reset, token_to_piece, tokenize_with_model,
 };
+use arkavo_llm::autoresearch::evaluate_quality;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -80,59 +81,6 @@ const EVAL_PROMPTS: &[(&str, &str)] = &[
         "List three benefits of exercise. Be concise.",
     ),
 ];
-
-/// Simple quality evaluator (inline Critic checks without full pipeline dependency)
-/// Checks for: non-empty, no truncation, no excessive repetition, no placeholder text
-fn evaluate_quality(response: &str) -> f64 {
-    let trimmed = response.trim();
-
-    // Empty response: total failure
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-
-    let mut score: f64 = 1.0;
-
-    // Truncation: unclosed code blocks
-    let backtick_count = trimmed.matches("```").count();
-    if !backtick_count.is_multiple_of(2) {
-        score -= 0.3;
-    }
-
-    // Repetition: unique word ratio
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() >= 10 {
-        let unique: std::collections::HashSet<&str> = words.iter().copied().collect();
-        let ratio = unique.len() as f64 / words.len() as f64;
-        if ratio < 0.3 {
-            score -= 0.5; // Severe repetition
-        } else if ratio < 0.5 {
-            score -= 0.2; // Moderate repetition
-        }
-    }
-
-    // Placeholder / failure patterns
-    let lower = trimmed.to_lowercase();
-    let failure_patterns = [
-        "as an ai language model",
-        "as a large language model",
-        "[todo",
-        "[placeholder",
-        "lorem ipsum",
-    ];
-    for pattern in failure_patterns {
-        if lower.contains(pattern) {
-            score -= 0.3;
-        }
-    }
-
-    // Very short response for non-trivial prompts
-    if words.len() < 3 {
-        score -= 0.2;
-    }
-
-    score.clamp(0.0, 1.0)
-}
 
 /// Run a single inference experiment and measure metrics
 fn run_experiment(

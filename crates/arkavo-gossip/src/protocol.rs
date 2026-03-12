@@ -710,6 +710,26 @@ impl GossipProtocol {
         &self,
         vote: crate::experiment_message::ExperimentVote,
     ) -> GossipResult<Vec<GossipMessage>> {
+        // Dedup by (experiment_id XOR voter hash) to prevent vote amplification
+        let voter_hash = {
+            let mut h = 0u128;
+            for (i, b) in vote.voter.bytes().enumerate() {
+                h ^= (b as u128) << ((i % 16) * 8);
+            }
+            h
+        };
+        let dedup_key = uuid::Uuid::from_u128(vote.experiment_id.as_u128() ^ voter_hash);
+        {
+            let seen = self.seen_messages.read().await;
+            if seen.contains_key(&dedup_key) {
+                return Err(GossipError::Duplicate(dedup_key));
+            }
+        }
+        self.seen_messages
+            .write()
+            .await
+            .insert(dedup_key, Utc::now());
+
         tracing::debug!(
             experiment_id = %vote.experiment_id,
             voter = %vote.voter,

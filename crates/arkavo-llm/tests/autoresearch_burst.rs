@@ -17,104 +17,12 @@ use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_get_one, batch_get_one_with_logits, create_sampler_chain,
     decode_batch, init_llama_logging, perf_context_reset, token_to_piece, tokenize_with_model,
 };
+use arkavo_llm::autoresearch::{BetaPrior, Rng, evaluate_quality};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-
-/// Beta distribution prior for Thompson Sampling
-#[derive(Debug, Clone)]
-struct BetaPrior {
-    alpha: f64,
-    beta: f64,
-}
-
-impl BetaPrior {
-    fn new() -> Self {
-        Self {
-            alpha: 1.0,
-            beta: 1.0,
-        }
-    }
-
-    /// Sample from Beta(alpha, beta) using the Jöhnk algorithm
-    /// Returns a value in [0, 1] — higher means more promising
-    fn sample(&self, rng: &mut SimpleRng) -> f64 {
-        let x = gamma_sample(self.alpha, rng);
-        let y = gamma_sample(self.beta, rng);
-        if x + y > 0.0 { x / (x + y) } else { 0.5 }
-    }
-
-    /// Update with fractional quality score (0.0 = failure, 1.0 = perfect)
-    fn update(&mut self, quality: f64) {
-        let clamped = quality.clamp(0.0, 1.0);
-        self.alpha += clamped;
-        self.beta += 1.0 - clamped;
-    }
-
-    fn mean(&self) -> f64 {
-        self.alpha / (self.alpha + self.beta)
-    }
-}
-
-/// Minimal xorshift64 RNG (no external dependency)
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self {
-            state: if seed == 0 { 1 } else { seed },
-        }
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.state ^= self.state << 13;
-        self.state ^= self.state >> 7;
-        self.state ^= self.state << 17;
-        self.state
-    }
-
-    fn next_f64(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
-    }
-}
-
-/// Gamma(alpha, 1) sample via Marsaglia-Tsang for alpha >= 1,
-/// with Ahrens-Dieter shift for alpha < 1
-#[allow(clippy::min_ident_chars)]
-fn gamma_sample(alpha: f64, rng: &mut SimpleRng) -> f64 {
-    if alpha < 1.0 {
-        let uniform = rng.next_f64();
-        return gamma_sample(alpha + 1.0, rng) * uniform.powf(1.0 / alpha);
-    }
-    let shift = alpha - 1.0 / 3.0;
-    let scale = 1.0 / (9.0 * shift).sqrt();
-    loop {
-        let normal = normal_sample(rng);
-        let candidate = (1.0 + scale * normal).powi(3);
-        if candidate <= 0.0 {
-            continue;
-        }
-        let uniform = rng.next_f64();
-        if uniform < 0.0331f64.mul_add(-normal.powi(4), 1.0) {
-            return shift * candidate;
-        }
-        if uniform.ln() < (0.5 * normal).mul_add(normal, shift * (1.0 - candidate + candidate.ln()))
-        {
-            return shift * candidate;
-        }
-    }
-}
-
-/// Box-Muller normal sample
-fn normal_sample(rng: &mut SimpleRng) -> f64 {
-    let u1 = rng.next_f64().max(f64::MIN_POSITIVE);
-    let u2 = rng.next_f64();
-    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
-}
 
 /// Experiment parameter space — each dimension is an arm in Thompson Sampling
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -155,50 +63,6 @@ const EVAL_PROMPTS: &[(&str, &str)] = &[
         "List three benefits of exercise. Be concise.",
     ),
 ];
-
-/// Quality evaluator (shared with Phase 1)
-fn evaluate_quality(response: &str) -> f64 {
-    let trimmed = response.trim();
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-    let mut score: f64 = 1.0;
-
-    let backtick_count = trimmed.matches("```").count();
-    if !backtick_count.is_multiple_of(2) {
-        score -= 0.3;
-    }
-
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() >= 10 {
-        let unique: std::collections::HashSet<&str> = words.iter().copied().collect();
-        let ratio = unique.len() as f64 / words.len() as f64;
-        if ratio < 0.3 {
-            score -= 0.5;
-        } else if ratio < 0.5 {
-            score -= 0.2;
-        }
-    }
-
-    let lower = trimmed.to_lowercase();
-    for pattern in [
-        "as an ai language model",
-        "as a large language model",
-        "[todo",
-        "[placeholder",
-        "lorem ipsum",
-    ] {
-        if lower.contains(pattern) {
-            score -= 0.3;
-        }
-    }
-
-    if words.len() < 3 {
-        score -= 0.2;
-    }
-
-    score.clamp(0.0, 1.0)
-}
 
 /// Run inference with given config and seed, respecting per-experiment timeout
 fn run_experiment(
@@ -298,7 +162,7 @@ fn build_all_configs() -> Vec<ParamConfig> {
 fn thompson_select(
     configs: &[ParamConfig],
     priors: &HashMap<usize, BetaPrior>,
-    rng: &mut SimpleRng,
+    rng: &mut Rng,
 ) -> usize {
     configs
         .iter()
@@ -371,7 +235,7 @@ fn autoresearch_burst() {
 
     let configs = build_all_configs();
     let mut priors: HashMap<usize, BetaPrior> = HashMap::new();
-    let mut rng = SimpleRng::new(
+    let mut rng = Rng::new(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -616,7 +480,7 @@ mod thompson_tests {
     fn test_thompson_sampling_selects() {
         let configs = build_all_configs();
         let priors = HashMap::new();
-        let mut rng = SimpleRng::new(42);
+        let mut rng = Rng::new(42);
         let idx = thompson_select(&configs, &priors, &mut rng);
         assert!(idx < configs.len());
     }
@@ -643,7 +507,7 @@ mod thompson_tests {
         priors.insert(5, good);
 
         // Over many selections, arm 5 should dominate
-        let mut rng = SimpleRng::new(42);
+        let mut rng = Rng::new(42);
         let mut count_5 = 0;
         for _ in 0..100 {
             let idx = thompson_select(&configs, &priors, &mut rng);
@@ -673,8 +537,8 @@ mod thompson_tests {
 
     #[test]
     fn test_simple_rng_deterministic() {
-        let mut r1 = SimpleRng::new(42);
-        let mut r2 = SimpleRng::new(42);
+        let mut r1 = Rng::new(42);
+        let mut r2 = Rng::new(42);
         for _ in 0..100 {
             assert_eq!(r1.next_u64(), r2.next_u64());
         }
@@ -682,7 +546,7 @@ mod thompson_tests {
 
     #[test]
     fn test_simple_rng_range() {
-        let mut rng = SimpleRng::new(42);
+        let mut rng = Rng::new(42);
         for _ in 0..1000 {
             let v = rng.next_f64();
             assert!((0.0..1.0).contains(&v), "out of range: {v}");

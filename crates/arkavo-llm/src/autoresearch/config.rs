@@ -133,13 +133,14 @@ impl SearchSpace {
         configs
     }
 
-    /// Resolve a config's actual parameter values
-    pub fn resolve(&self, config: &ExperimentConfig) -> (f32, u32, f32) {
-        (
-            self.temperatures[config.temperature_idx],
-            self.max_tokens[config.max_tokens_idx],
-            self.top_p_values[config.top_p_idx],
-        )
+    /// Resolve a config's actual parameter values.
+    /// Returns `None` if any index is out of bounds (e.g. from deserialized gossip data).
+    pub fn resolve(&self, config: &ExperimentConfig) -> Option<(f32, u32, f32)> {
+        Some((
+            *self.temperatures.get(config.temperature_idx)?,
+            *self.max_tokens.get(config.max_tokens_idx)?,
+            *self.top_p_values.get(config.top_p_idx)?,
+        ))
     }
 }
 
@@ -169,7 +170,7 @@ mod tests {
             top_p_idx: 3,
             kernel_variant: 0,
         };
-        let (temp, max_tok, top_p) = space.resolve(&config);
+        let (temp, max_tok, top_p) = space.resolve(&config).unwrap();
         assert!((temp - 0.5).abs() < f32::EPSILON);
         assert_eq!(max_tok, 64);
         assert!((top_p - 1.0).abs() < f32::EPSILON);

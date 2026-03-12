@@ -106,7 +106,10 @@ pub(super) async fn execute_autoresearch_sweep(
 
         let arm = sampler.select(&mut rng);
         let config = &configs[arm];
-        let (_temperature, _max_tokens, _top_p) = space.resolve(config);
+        let Some((_temperature, _max_tokens, _top_p)) = space.resolve(config) else {
+            warn!(arm, "Config index out of bounds, skipping");
+            continue;
+        };
 
         // Build messages with thinking directive
         let thinking_directive = if config.enable_thinking {
@@ -149,6 +152,8 @@ pub(super) async fn execute_autoresearch_sweep(
 
             let wall_time = experiment_start.elapsed();
             let quality_score = evaluate_quality(&response);
+            // Whitespace split approximates token count (~1.3x underestimate for English).
+            // Acceptable here since it's consistent across arms within a sweep.
             let tokens_generated = response.split_whitespace().count() as u32;
             let quality_per_token = if tokens_generated > 0 {
                 quality_score / tokens_generated as f64
@@ -179,6 +184,8 @@ pub(super) async fn execute_autoresearch_sweep(
         let round_wall = round_start.elapsed();
 
         // Normalize to [0, 1] for Beta update
+        // 0.2 is the empirical ceiling for weighted quality across sweep experiments:
+        // quality_per_token (~0.01-0.03) × ln(1 + tok/s ~175) ≈ 0.05-0.15, rarely exceeds 0.2.
         let normalized = (avg_wq / 0.2).clamp(0.0, 1.0);
         sampler.update(arm, normalized);
 
@@ -315,7 +322,7 @@ fn format_sweep_summary(
 
     if let Some(arm) = best_arm {
         let config = &configs[arm];
-        let (temp, max_tok, top_p) = space.resolve(config);
+        let (temp, max_tok, top_p) = space.resolve(config).unwrap_or((0.7, 128, 0.9));
         let prior = sampler.prior(arm);
         let _ = write!(
             summary,
@@ -347,7 +354,7 @@ fn format_sweep_summary(
     arms.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     for (i, (arm, mean)) in arms.iter().take(5).enumerate() {
         let config = &configs[*arm];
-        let (temp, max_tok, _) = space.resolve(config);
+        let (temp, max_tok, _) = space.resolve(config).unwrap_or((0.7, 128, 0.9));
         let _ = writeln!(
             summary,
             "{}. arm={arm}: thinking={}, temp={temp}, max_tok={max_tok}, mean={mean:.3}",

@@ -30,7 +30,7 @@ fn simulate_experiment(
     // Simulate ~175 tok/s baseline
     let tok_per_sec = 170.0 + (seed % 20) as f64;
     let weighted_quality = ExperimentResult::compute_weighted(quality_per_token, tok_per_sec);
-    let (temperature, _max_tokens, _top_p) = space.resolve(config);
+    let (temperature, _max_tokens, _top_p) = space.resolve(config).unwrap_or((0.7, 128, 0.9));
 
     ExperimentResult {
         config: config.clone(),
