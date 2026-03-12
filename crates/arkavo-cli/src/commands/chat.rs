@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 
@@ -183,22 +182,15 @@ fn execute_a2a_chat(
     let runtime = create_runtime()?;
 
     runtime.block_on(async {
-        // Initialize router
-        let router = arkavo_router::Router::new().await?;
-
-        // Initialize memory storage for tool registry
-        let storage = Arc::new(arkavo_memory::storage::MemoryStorage::new().await?);
-
-        // Create tool registry with built-in tools (time, filesystem, etc.)
-        let tool_registry = arkavo_mcp_tools::ToolRegistry::new(storage);
+        // Initialize engine with Router + full tool registry (including Claude SDK)
+        let engine = arkavo_server::LocalEngine::new()
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
         // Create ChatSession (wraps A2aClient)
-        let mut session = ChatSession::new_with_model(
-            Arc::new(router),
-            Some(Arc::new(tool_registry)),
-            model_name,
-        )
-        .await?;
+        let mut session =
+            ChatSession::new_with_model(engine.router(), Some(engine.tool_registry()), model_name)
+                .await?;
 
         if std::env::var("ARKAVO_DEBUG").is_ok()
             && let Some(id) = session.session_id()

@@ -600,8 +600,6 @@ impl A2aServer {
             Ok(tools) => {
                 info!("Projecting {} tools from MCP servers", tools.len());
                 for tool in tools {
-                    // Tools from MCP servers will be registered via the McpRegistry
-                    // The registry serves as a unified view for the router
                     info!("  - {} (from MCP)", tool.name);
                 }
             }
@@ -610,13 +608,70 @@ impl A2aServer {
             }
         }
 
-        // Also register the list_models tool from the router for model discovery
+        // Register router tools (list_models) for model discovery
         if let Some(router) = self.router.read().await.as_ref() {
             arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
         }
 
+        // Register mesh orchestration tools for agent coordination
+        let mesh_state = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        arkavo_mcp_mesh::register_tools(&mut tool_registry, mesh_state);
+
+        // Register HRM orchestration tools (Conductor API)
+        let hrm_state = Arc::new(tokio::sync::RwLock::new(
+            arkavo_hrm::tools::HrmToolsState::new(),
+        ));
+        arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
+
+        // Register UCP payment tools for AI agent commerce
+        match arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default()).await {
+            Ok(tracker) => {
+                let ucp_budget_tracker = Arc::new(tracker);
+                let ucp_state = Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(
+                    ucp_budget_tracker,
+                )));
+                arkavo_ucp::register_tools(&mut tool_registry, ucp_state);
+            }
+            Err(e) => {
+                warn!("UCP tools disabled: failed to create budget tracker: {e}");
+            }
+        }
+
+        // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
+        #[cfg(feature = "claude-agent")]
+        {
+            use arkavo_mcp_claude::{ClaudeCodeCapability, ClaudeCodeConfig};
+
+            let claude_config = ClaudeCodeConfig::default();
+            if claude_config.enabled && arkavo_mcp_claude::is_auth_available() {
+                let event_writer = Arc::new(EventWriter::new(EventWriterConfig::default()));
+                match ClaudeCodeCapability::new(
+                    claude_config,
+                    "arkavo-server".to_string(),
+                    event_writer,
+                    None,
+                    None,
+                ) {
+                    Ok(capability) => {
+                        let capability = Arc::new(capability);
+                        if let Err(e) = capability.prepare().await {
+                            warn!("Claude MCP tools not ready: {e}");
+                        } else {
+                            arkavo_mcp_claude::register_tools(&mut tool_registry, capability);
+                            info!("Claude MCP tools registered");
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Claude MCP tools disabled: {e}");
+                    }
+                }
+            } else if claude_config.enabled {
+                debug!("Claude MCP tools skipped: no API key or cached OAuth token");
+            }
+        }
+
         *self.tool_registry.write().await = Some(Arc::new(tool_registry));
-        info!("✓ Tool registry built (MCP tools only)");
+        info!("✓ Tool registry built");
     }
 
     pub async fn start_file_watcher(&self) -> Result<()> {
