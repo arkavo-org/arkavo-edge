@@ -230,6 +230,8 @@ impl GossipProtocol {
             GossipMessage::AdvisorAdjustmentAnnounce(ann) => {
                 self.handle_advisor_adjustment_announce(ann).await
             }
+            GossipMessage::ExperimentAnnounce(ann) => self.handle_experiment_announce(ann).await,
+            GossipMessage::ExperimentVote(vote) => self.handle_experiment_vote(vote).await,
         }
     }
 
@@ -669,6 +671,74 @@ impl GossipProtocol {
 
         // Propagate to peers
         Ok(vec![GossipMessage::AdvisorAdjustmentAnnounce(announcement)])
+    }
+
+    /// Handle an experiment result announcement
+    async fn handle_experiment_announce(
+        &self,
+        announcement: crate::experiment_message::ExperimentAnnouncement,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        let exp_id = announcement.experiment_id;
+        let now = Utc::now();
+
+        // Dedup
+        {
+            let seen = self.seen_messages.read().await;
+            if seen.contains_key(&exp_id) {
+                return Err(GossipError::Duplicate(exp_id));
+            }
+        }
+
+        // Mark as seen
+        self.seen_messages.write().await.insert(exp_id, now);
+
+        tracing::info!(
+            experiment_id = %exp_id,
+            originator = %announcement.originator,
+            hardware = ?announcement.hardware_tier,
+            weighted_quality = announcement.weighted_quality,
+            kept = announcement.kept,
+            "Received experiment announcement"
+        );
+
+        // Propagate to peers
+        Ok(vec![GossipMessage::ExperimentAnnounce(announcement)])
+    }
+
+    /// Handle an experiment vote
+    async fn handle_experiment_vote(
+        &self,
+        vote: crate::experiment_message::ExperimentVote,
+    ) -> GossipResult<Vec<GossipMessage>> {
+        // Dedup by (experiment_id XOR voter hash) to prevent vote amplification
+        let voter_hash = {
+            let mut h = 0u128;
+            for (i, b) in vote.voter.bytes().enumerate() {
+                h ^= (b as u128) << ((i % 16) * 8);
+            }
+            h
+        };
+        let dedup_key = uuid::Uuid::from_u128(vote.experiment_id.as_u128() ^ voter_hash);
+        {
+            let seen = self.seen_messages.read().await;
+            if seen.contains_key(&dedup_key) {
+                return Err(GossipError::Duplicate(dedup_key));
+            }
+        }
+        self.seen_messages
+            .write()
+            .await
+            .insert(dedup_key, Utc::now());
+
+        tracing::debug!(
+            experiment_id = %vote.experiment_id,
+            voter = %vote.voter,
+            accept = vote.accept,
+            "Received experiment vote"
+        );
+
+        // Propagate to peers
+        Ok(vec![GossipMessage::ExperimentVote(vote)])
     }
 }
 

@@ -25,7 +25,8 @@ var AppState = {
     lessonCount: 0,
     selectedTaskId: null,
     teachingEvents: [],
-    agentSystemMetrics: {}
+    agentSystemMetrics: {},
+    optimalConfigs: []
 };
 
 var MAX_TELEMETRY = 200;

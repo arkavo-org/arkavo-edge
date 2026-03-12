@@ -2,6 +2,7 @@ mod a2a_server;
 mod anti_pattern;
 mod autolearn_bridge;
 mod conductor;
+mod conductor_autoresearch;
 mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
@@ -865,12 +866,28 @@ impl A2aRpcServer for A2aRpcImpl {
             })
             .collect();
 
+        let optimal_configs: Vec<serde_json::Value> = router
+            .optimal_configs
+            .snapshot()
+            .into_iter()
+            .map(|(name, oc)| {
+                serde_json::json!({
+                    "model": name,
+                    "temperature": oc.temperature,
+                    "topP": oc.top_p,
+                    "thinkingMode": format!("{:?}", oc.thinking_mode),
+                    "confidence": oc.confidence,
+                })
+            })
+            .collect();
+
         timer.success();
         Ok(serde_json::json!({
             "agents": agents,
             "selectedModel": router.last_routed_model(),
             "tickCount": tick,
             "routingHistory": routing_history,
+            "optimalConfigs": optimal_configs,
         }))
     }
 

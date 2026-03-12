@@ -41,6 +41,7 @@ function handleLearningStatusUpdate(event) {
     AppState.qualityTrends = event.qualityTrends || [];
     AppState.lessons = event.lessons || AppState.lessons || [];
     AppState.lessonCount = AppState.lessons.length || event.lessonCount || 0;
+    AppState.optimalConfigs = event.optimalConfigs || [];
     renderLearningPanel();
 
     // Keep polling while on the learning panel
@@ -141,6 +142,7 @@ function renderLearningPanel() {
 
     container.innerHTML =
         renderSummaryBar() +
+        renderOptimalConfigs() +
         renderQualityChart() +
         '<div class="learning-layout">' +
             '<div class="connectome-area">' +
@@ -163,6 +165,36 @@ function renderLearningPanel() {
     renderConnectome(agentIds);
     renderTimeline();
     renderLessonFeed();
+}
+
+function renderOptimalConfigs() {
+    var configs = AppState.optimalConfigs || [];
+    if (configs.length === 0) return '';
+
+    // Sort by model name
+    configs.sort(function(a, b) { return a.model.localeCompare(b.model); });
+
+    var rows = '';
+    for (var i = 0; i < configs.length; i++) {
+        var c = configs[i];
+        var confPct = (c.confidence * 100).toFixed(0);
+        var confClass = c.confidence >= 0.8 ? 'conf-green' : (c.confidence >= 0.5 ? 'conf-yellow' : 'conf-red');
+        var thinkBadge = c.thinkingMode === 'On' ? '<span class="oc-badge oc-on">On</span>' : '<span class="oc-badge oc-off">Off</span>';
+        rows += '<tr>' +
+            '<td>' + escapeHtml(c.model) + '</td>' +
+            '<td>' + c.temperature.toFixed(2) + '</td>' +
+            '<td>' + c.topP.toFixed(2) + '</td>' +
+            '<td>' + thinkBadge + '</td>' +
+            '<td class="' + confClass + '">' + confPct + '%</td>' +
+            '</tr>';
+    }
+
+    return '<div class="optimal-config-section">' +
+        '<div class="timeline-header">Optimal Inference Configs</div>' +
+        '<table class="optimal-config-table">' +
+        '<thead><tr><th>Model</th><th>Temp</th><th>TopP</th><th>Thinking</th><th>Confidence</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '</table></div>';
 }
 
 function renderConnectome(agentIds) {

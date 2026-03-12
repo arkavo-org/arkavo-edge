@@ -18,6 +18,8 @@ use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 use crate::mcp_converter::{LocalToolFormat, McpConverter};
 
+pub use crate::ThinkingMode;
+
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
     pub temperature: f32,
@@ -32,6 +34,8 @@ pub struct SamplingConfig {
     pub grammar: Option<String>,
     /// Trigger patterns for lazy grammar activation (e.g., "```")
     pub grammar_triggers: Option<Vec<String>>,
+    /// Explicit thinking mode override from autoresearch tuning
+    pub thinking_mode: Option<ThinkingMode>,
     /// Tool definitions for native template rendering (passed to Jinja engine)
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub chat_tools: Vec<arkavo_llama_cpp::ChatTool>,
@@ -50,6 +54,7 @@ impl Default for SamplingConfig {
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
+            thinking_mode: None,
             grammar: None,
             grammar_triggers: None,
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -343,7 +348,11 @@ impl LlamaCppProvider {
         let model = self.get_model()?;
 
         // Disable thinking for sub-1B Qwen models (they lack capacity for CoT)
-        let enable_thinking = !(format == ModelFormat::Qwen3 && is_small_model(&self.name));
+        let enable_thinking = match self.config.thinking_mode {
+            Some(ThinkingMode::On) => true,
+            Some(ThinkingMode::Off) => false,
+            None => !(format == ModelFormat::Qwen3 && is_small_model(&self.name)),
+        };
 
         // Try the Jinja template engine first (reads template from GGUF metadata),
         // fall back to legacy pattern-matched templates

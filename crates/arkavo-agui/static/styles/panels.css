@@ -320,6 +320,19 @@
 .conf-high { color: var(--error); }
 .conf-mid { color: var(--warning); }
 
+/* Optimal config table */
+.optimal-config-section { padding: 8px 12px; }
+.optimal-config-table { width: 100%; font-size: 12px; border-collapse: collapse; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); }
+.optimal-config-table th { text-align: left; font-weight: 500; color: var(--text-secondary); padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+.optimal-config-table td { padding: 5px 8px; font-family: monospace; border-bottom: 1px solid var(--border-color); }
+.optimal-config-table tr:last-child td { border-bottom: none; }
+.oc-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+.oc-on { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+.oc-off { background: rgba(107, 114, 128, 0.15); color: var(--text-secondary); }
+.conf-green { color: var(--success); font-weight: 600; }
+.conf-yellow { color: var(--warning); font-weight: 600; }
+.conf-red { color: var(--error); font-weight: 600; }
+
 /* Learning panel - Cortical Routing Map */
 .learning-layout { display: flex; gap: 12px; padding: 12px; min-height: 420px; }
 .connectome-area { flex: 1; min-width: 0; }

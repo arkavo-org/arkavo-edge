@@ -56,6 +56,10 @@ DerivedData/
 # Downloaded model files for arkavo-memory
 crates/arkavo-memory/models/
 
+# Autoresearch sweep/burst result files
+*_sweep_results.*
+*_burst_results.*
+
 # Don't commit large tokenizer/model files
 *.model
 crates/arkavo-llm/assets/gemma_tokenizer.model

@@ -265,6 +265,18 @@ impl Default for SubTaskBudget {
     }
 }
 
+impl SubTaskBudget {
+    /// Budget for autoresearch parameter sweeps (many small experiments)
+    pub fn autoresearch() -> Self {
+        Self {
+            max_steps: 100,
+            max_wall_time: Duration::from_secs(300),
+            max_cost_usd: 0.0, // local models only
+            max_tokens: 500_000,
+        }
+    }
+}
+
 /// Result of subtask execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubTaskResult {

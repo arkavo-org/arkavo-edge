@@ -115,6 +115,19 @@ pub async fn execute_with_conductor_and_learning(
         update_ui_progress(msg, pct);
     };
 
+    // 2a-pre. Check for autoresearch mode (parameter sweep instead of normal execution)
+    if super::conductor_autoresearch::is_autoresearch_task(&task_content) {
+        return super::conductor_autoresearch::execute_autoresearch_sweep(
+            conductor,
+            router,
+            &task_content,
+            learning_bus,
+            compute_budget,
+            model_hint,
+        )
+        .await;
+    }
+
     // 2a. Check if task is complex enough to decompose into multiple subtasks.
     // Only decompose when the agent has MCP tools (external servers) — agents
     // with only mesh/built-in tools are advisors where decomposition loses context.

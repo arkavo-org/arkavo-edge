@@ -1,3 +1,4 @@
+pub mod autoresearch;
 pub mod chat;
 pub mod client;
 #[cfg(feature = "llm-remote")]
@@ -35,6 +36,15 @@ pub use provider::{InferenceTiming, Provider, ProviderResponse};
 pub use stream::StreamResponse;
 pub use tool_executor::{ToolExecutionError, ToolExecutionResult, ToolExecutor};
 pub use tool_parser::{ParsedToolCall, ToolParseError, ToolParser};
+
+/// Explicit thinking mode override from autoresearch tuning.
+/// Always available (no feature gate) so the router can reference it
+/// without requiring llama-cpp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingMode {
+    On,
+    Off,
+}
 
 #[cfg(feature = "kimi")]
 mod kimi_adapter;

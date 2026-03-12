@@ -484,6 +484,63 @@ pub(crate) async fn handle_request_learning_status(
         }
     }
 
+    // Collect optimal configs from connected agents (keep highest confidence per model)
+    let mut optimal_configs_map: std::collections::HashMap<String, OptimalConfigInfo> =
+        std::collections::HashMap::new();
+    {
+        let conns = agent_connections.read().await;
+        for (_id, conn) in conns.iter() {
+            if !conn.is_connected().await {
+                continue;
+            }
+            if let Ok(resp) = conn
+                .send_request("learning/status", serde_json::json!(null), "config-poll")
+                .await
+                && let Some(configs) = resp.get("optimalConfigs").and_then(|v| v.as_array())
+            {
+                for cfg in configs {
+                    let model = cfg
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if model.is_empty() {
+                        continue;
+                    }
+                    let confidence = cfg
+                        .get("confidence")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let dominated = optimal_configs_map
+                        .get(&model)
+                        .is_some_and(|existing| existing.confidence > confidence);
+                    if !dominated {
+                        optimal_configs_map.insert(
+                            model.clone(),
+                            OptimalConfigInfo {
+                                model,
+                                temperature: cfg
+                                    .get("temperature")
+                                    .and_then(|v| v.as_f64())
+                                    .unwrap_or(0.7)
+                                    as f32,
+                                top_p: cfg.get("topP").and_then(|v| v.as_f64()).unwrap_or(0.9)
+                                    as f32,
+                                thinking_mode: cfg
+                                    .get("thinkingMode")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Off")
+                                    .to_string(),
+                                confidence,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let optimal_configs: Vec<OptimalConfigInfo> = optimal_configs_map.into_values().collect();
+
     let history: Vec<RoutingRecord> = routing_history.read().await.iter().cloned().collect();
     let quality_trends = derive_quality_trends(&history);
 
@@ -493,6 +550,7 @@ pub(crate) async fn handle_request_learning_status(
         quality_trends,
         lesson_count,
         lessons,
+        optimal_configs,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
     .await?;
