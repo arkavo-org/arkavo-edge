@@ -5,35 +5,39 @@
 > **Browse**: `cargo xtask capabilities mcp-claude`
 <!-- /ARKAVO-CAPABILITY -->
 
-This example demonstrates Arkavo's native Rust integration with the Claude Agent SDK (`anthropic-agent-sdk`).
+Native Rust integration with the Claude Agent SDK using bidirectional
+`ClaudeSDKClient` sessions, budget tracking, and MCP tool registration.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    arkavo binary                         │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │              ClaudeCodeCapability                    ││
-│  │  ┌─────────────┐    ┌──────────────────────────┐   ││
-│  │  │  SdkBridge  │───▶│  anthropic-agent-sdk     │   ││
-│  │  │  (OAuth)    │    │  (native Rust crate)     │   ││
-│  │  └─────────────┘    └──────────────────────────┘   ││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                       arkavo binary                           │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │              ClaudeCodeCapability                       │  │
+│  │  ┌──────────────┐    ┌────────────────────────────┐   │  │
+│  │  │  SdkBridge   │───▶│  anthropic-agent-sdk       │   │  │
+│  │  │  (bidir/1shot)│    │  (ClaudeSDKClient)        │   │  │
+│  │  └──────┬───────┘    └────────────────────────────┘   │  │
+│  │         │                                              │  │
+│  │  ┌──────▼───────┐    ┌────────────────────────────┐   │  │
+│  │  │ HookHandler  │───▶│  EventMapper (AG-UI)       │   │  │
+│  │  │ Permissions  │    │  Budget · Metrics · Tools   │   │  │
+│  │  └──────────────┘    └────────────────────────────┘   │  │
+│  │                                                        │  │
+│  │  MCP Tools: claude_code_run · plan · session_info ·   │  │
+│  │             interrupt                                  │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 No Node.js required. The SDK is compiled directly into the arkavo binary.
 
 ## Authentication
 
-The SDK supports two authentication methods:
-
 **Option A - OAuth (Claude Max/Pro subscribers):**
 ```bash
-# Authenticate once via Claude CLI
 claude login
-
-# Tokens are cached automatically
 ```
 
 **Option B - API Key:**
@@ -41,68 +45,67 @@ claude login
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-## Usage
-
-### Run the SDK Test
+## Quick Start
 
 ```bash
-# Build arkavo
-cd ../..
-cargo build
+# From repo root
+cargo build -q
 
-# Run the SDK integration test
-cargo test -p arkavo-claude-code sdk_test -- --nocapture
+# Run a coding task with Claude Code tools
+cargo run -p arkavo -- chat --prompt "Explain the Fibonacci function"
+
+# Run with debug logging
+ARKAVO_DEBUG=1 cargo run -p arkavo -- chat --prompt "Write a unit test for email validation"
 ```
 
-### Use in Agent Configuration
+## MCP Tools
 
-Create an `AGENTS.md` with Claude Code capability:
+Four tools are registered when Claude Code auth is available:
 
-```yaml
-name: my-coding-agent
-capabilities:
-  - claude_code
+| Tool | Aliases | Purpose |
+|------|---------|---------|
+| `claude_code_run` | `cc_run` | Execute a coding task with full SDK capabilities |
+| `claude_code_plan` | `cc_plan` | Generate a plan without execution |
+| `claude_code_session_info` | `cc_info` | Get model, tools, budget status |
+| `claude_code_interrupt` | `cc_interrupt` | Interrupt a running task |
 
-claude_code:
-  enabled: true
-  use_oauth: true  # Use OAuth if no API key set
-  workspace_root: ./workspace
-```
+## Budget Tracking
 
-## SDK Bridge
-
-The native integration is in `crates/arkavo-claude-code/src/sdk_bridge.rs`:
-
-```rust
-use anthropic_agent_sdk::{auth::OAuthClient, query, ClaudeAgentOptions};
-
-// OAuth authentication
-let oauth = OAuthClient::new()?;
-if !oauth.is_authenticated() {
-    oauth.authenticate().await?;
-}
-
-// Run a query
-let stream = query(&prompt, Some(options)).await?;
-while let Some(message) = stream.next().await {
-    // Handle streaming response
+`compute_budget_status()` returns AG-UI compatible metrics:
+```json
+{
+  "total_cost_usd": 0.023,
+  "max_budget_usd": 5.0,
+  "remaining_cost_usd": 4.977,
+  "used_input_tokens": 1200,
+  "used_output_tokens": 450,
+  "used_tokens": 1650
 }
 ```
+
+## Configuration
+
+See `AGENTS.md` for the full agent configuration including:
+- Bidirectional session mode (`use_bidirectional: true`)
+- Budget limits (`max_budget_usd`, `budget_tokens`)
+- Tool permissions and filtering (`allowed_tools`, `disallowed_tools`)
+- File access patterns (`allow_globs`, `deny_globs`)
+- Permission mode (`default`, `plan`, `acceptEdits`)
 
 ## Files
 
 ```
-crates/arkavo-claude-code/
+crates/arkavo-mcp-claude/
 ├── src/
-│   ├── sdk_bridge.rs      # Native SDK integration
-│   ├── capability.rs      # Tool capability wrapper
-│   ├── event_mapper.rs    # Event stream handling
-│   └── config.rs          # Configuration
+│   ├── sdk_bridge.rs      # Bidirectional + one-shot SDK integration
+│   ├── capability.rs      # ClaudeCodeCapability with budget tracking
+│   ├── hook_handler.rs    # SDK hooks + permission callbacks
+│   ├── event_mapper.rs    # AG-UI event emission
+│   ├── policy_bridge.rs   # Authorization policy enforcement
+│   ├── config.rs          # Configuration with SDK options builder
+│   └── tools/             # MCP tool implementations
 └── tests/
-    └── sdk_test.rs        # Integration tests
+    ├── basic_test.rs            # Config + capability unit tests
+    ├── bidirectional_test.rs    # SDK session integration tests
+    └── sdk_test.rs              # Raw SDK integration tests
 ```
-
-## Learn More
-
-- [Claude Agent SDK Docs](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
-- [arkavo-claude-code crate](../../crates/arkavo-claude-code/)
