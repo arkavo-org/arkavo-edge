@@ -4,8 +4,18 @@ use crate::model_discovery;
 use arkavo_llm::Provider;
 
 #[cfg(feature = "llama-cpp")]
-fn sampling_config_for(model: &ModelChoice) -> arkavo_llm::SamplingConfig {
-    if let Some((temp, top_p, thinking)) = model.optimal_sampling() {
+fn sampling_config_for(
+    model: &ModelChoice,
+    store: &crate::optimal_config::OptimalConfigStore,
+) -> arkavo_llm::SamplingConfig {
+    if let Some(oc) = store.get(model) {
+        arkavo_llm::SamplingConfig {
+            temperature: oc.temperature,
+            top_p: oc.top_p,
+            thinking_mode: Some(oc.thinking_mode),
+            ..arkavo_llm::SamplingConfig::default()
+        }
+    } else if let Some((temp, top_p, thinking)) = model.optimal_sampling() {
         arkavo_llm::SamplingConfig {
             temperature: temp,
             top_p,
@@ -121,7 +131,7 @@ impl super::Router {
         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
             self.model_registry.clone(),
             registry_name.to_string(),
-            sampling_config_for(model),
+            sampling_config_for(model, &self.optimal_configs),
         )
         .map_err(|e| {
             Error::ModelExecution(format!(

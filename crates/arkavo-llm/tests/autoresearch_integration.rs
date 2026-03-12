@@ -60,6 +60,7 @@ fn result_to_announcement(
         originator.into(),
         tier,
         config_json,
+        "test-model".into(),
         ExperimentMetrics {
             weighted_quality: result.weighted_quality,
             baseline_tok_per_sec: result.tok_per_sec,

@@ -21,6 +21,9 @@ pub struct ExperimentAnnouncement {
     pub hardware_tier: HardwareTier,
     /// Configuration vector that was tested (serialized ExperimentConfig)
     pub config_json: String,
+    /// Which model was tested (e.g. "qwen3.5-0.8b")
+    #[serde(default)]
+    pub model_name: String,
     /// Winning metric value (weighted_quality)
     pub weighted_quality: f64,
     /// Baseline tok/s on this hardware (for normalization)
@@ -57,6 +60,7 @@ impl ExperimentAnnouncement {
         originator: String,
         hardware_tier: HardwareTier,
         config_json: String,
+        model_name: String,
         metrics: ExperimentMetrics,
     ) -> Self {
         Self {
@@ -65,6 +69,7 @@ impl ExperimentAnnouncement {
             originator,
             hardware_tier,
             config_json,
+            model_name,
             weighted_quality: metrics.weighted_quality,
             baseline_tok_per_sec: metrics.baseline_tok_per_sec,
             kept: metrics.kept,
@@ -197,6 +202,7 @@ mod tests {
             "node-1".into(),
             HardwareTier::Desktop,
             r#"{"enable_thinking":false}"#.into(),
+            "qwen3.5-0.8b".into(),
             metrics(0.23, 175.0, true),
         );
         assert!(ann.signature.is_empty());
@@ -212,6 +218,7 @@ mod tests {
             "n".into(),
             HardwareTier::Edge,
             "{}".into(),
+            "test-model".into(),
             metrics(0.1, 50.0, false),
         )
         .with_prior(5.0, 3.0);
@@ -227,6 +234,7 @@ mod tests {
             "n".into(),
             HardwareTier::Desktop,
             "{}".into(),
+            "test-model".into(),
             metrics(0.5, 100.0, true),
         );
         assert_eq!(ann.content_to_sign(), ann.content_to_sign());
@@ -241,6 +249,7 @@ mod tests {
             "n".into(),
             HardwareTier::Desktop,
             "{}".into(),
+            "test-model".into(),
             metrics(0.5, 100.0, true),
         );
         let mut b = ExperimentAnnouncement::new(
@@ -249,6 +258,7 @@ mod tests {
             "n".into(),
             HardwareTier::Desktop,
             "{}".into(),
+            "test-model".into(),
             metrics(0.9, 100.0, true),
         );
         b.timestamp = a.timestamp;

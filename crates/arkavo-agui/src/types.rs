@@ -437,6 +437,12 @@ pub enum AgUiEvent {
         lesson_count: usize,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lessons: Vec<LessonInfo>,
+        #[serde(
+            rename = "optimalConfigs",
+            default,
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        optimal_configs: Vec<OptimalConfigInfo>,
         timestamp: String,
     },
     RoutingEvaluation {
@@ -657,6 +663,17 @@ pub struct RoutingRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptimalConfigInfo {
+    pub model: String,
+    pub temperature: f32,
+    #[serde(rename = "topP")]
+    pub top_p: f32,
+    #[serde(rename = "thinkingMode")]
+    pub thinking_mode: String,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

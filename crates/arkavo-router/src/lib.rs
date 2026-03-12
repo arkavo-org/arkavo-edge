@@ -12,6 +12,7 @@ pub mod judge;
 pub mod learning;
 pub mod metrics;
 pub mod model_discovery;
+pub mod optimal_config;
 pub mod orchestrator;
 pub mod prediction;
 pub mod preflight;
@@ -136,6 +137,9 @@ pub struct Router {
     /// Prevents synthesis from blocking production inference since they
     /// use different models (fastest_local_model vs Thompson-selected).
     synthesis_semaphore: Arc<Semaphore>,
+    /// Runtime-updateable optimal inference configs per model.
+    /// Seeded from compile-time defaults, updated via autoresearch sweeps and gossip.
+    pub optimal_configs: Arc<optimal_config::OptimalConfigStore>,
     /// Tracks which model was last selected by route_with_tools().
     /// The conductor reads this after tool execution to attribute
     /// reward-based corrective feedback to the right Thompson Sampling prior.
@@ -176,6 +180,7 @@ impl Router {
             tdf_encryptor: None,
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
+            optimal_configs: Arc::new(optimal_config::OptimalConfigStore::new()),
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
             synthesis_semaphore: Arc::new(Semaphore::new(1)),
@@ -214,6 +219,7 @@ impl Router {
             tdf_encryptor: None,
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: None,
+            optimal_configs: Arc::new(optimal_config::OptimalConfigStore::new()),
             inference_semaphore: Arc::new(Semaphore::new(1)),
             chat_semaphore: Arc::new(Semaphore::new(1)),
             synthesis_semaphore: Arc::new(Semaphore::new(1)),
@@ -864,6 +870,7 @@ impl Router {
             tdf_encryptor: self.tdf_encryptor.clone(),
             #[cfg(feature = "tdf-encrypt")]
             tdf_audit_store: self.tdf_audit_store.clone(),
+            optimal_configs: self.optimal_configs.clone(),
             inference_semaphore: self.inference_semaphore.clone(),
             chat_semaphore: self.chat_semaphore.clone(),
             synthesis_semaphore: self.synthesis_semaphore.clone(),

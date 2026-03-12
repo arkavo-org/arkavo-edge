@@ -102,8 +102,53 @@ impl LearningBus {
                 originator = %ann.originator,
                 weighted_quality = ann.weighted_quality,
                 kept = ann.kept,
+                model_name = %ann.model_name,
                 "Received autoresearch experiment result via gossip"
             );
+
+            // Update local optimal config store if the experiment was kept
+            if ann.kept
+                && !ann.model_name.is_empty()
+                && let (Ok(config), Some(model)) = (
+                    serde_json::from_str::<arkavo_llm::autoresearch::ExperimentConfig>(
+                        &ann.config_json,
+                    ),
+                    arkavo_router::ModelChoice::from_name(&ann.model_name),
+                )
+            {
+                let thinking = if config.enable_thinking {
+                    arkavo_llm::ThinkingMode::On
+                } else {
+                    arkavo_llm::ThinkingMode::Off
+                };
+                // Compute posterior mean from remote prior
+                let posterior_mean = if ann.prior_alpha + ann.prior_beta > 2.0 {
+                    ann.prior_alpha / (ann.prior_alpha + ann.prior_beta)
+                } else {
+                    0.0 // uniform prior, no real data
+                };
+                // Only update if remote has meaningful observations
+                if posterior_mean > 0.0 {
+                    let space = arkavo_llm::autoresearch::SearchSpace::default();
+                    if let Some((temp, _max_tok, top_p)) = space.resolve(&config) {
+                        let router_guard = self.router.read().await;
+                        if let Some(router) = router_guard.as_ref() {
+                            router.optimal_configs.update_from_sweep(
+                                &model,
+                                temp,
+                                top_p,
+                                thinking,
+                                posterior_mean,
+                            );
+                            tracing::info!(
+                                model = %ann.model_name,
+                                posterior_mean,
+                                "Applied remote autoresearch config via gossip"
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         responses

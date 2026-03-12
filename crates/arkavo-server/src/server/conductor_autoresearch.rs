@@ -232,9 +232,37 @@ pub(super) async fn execute_autoresearch_sweep(
         .await
         .map_err(|e| format!("Failed to record result: {e}"))?;
 
+    // Determine model name for attribution
+    let model_name = model_hint
+        .map(|m| m.name().to_string())
+        .or_else(|| router.last_routed_model())
+        .unwrap_or_default();
+
+    // Update local optimal config store with sweep results
+    if let Some(arm) = best_arm {
+        let config = &configs[arm];
+        if let Some((temp, _max_tok, top_p)) = space.resolve(config) {
+            let thinking = if config.enable_thinking {
+                arkavo_llm::ThinkingMode::On
+            } else {
+                arkavo_llm::ThinkingMode::Off
+            };
+            let posterior_mean = sampler.prior(arm).mean();
+            if let Some(model) = arkavo_router::ModelChoice::from_name(&model_name) {
+                router.optimal_configs.update_from_sweep(
+                    &model,
+                    temp,
+                    top_p,
+                    thinking,
+                    posterior_mean,
+                );
+            }
+        }
+    }
+
     // Announce best result via gossip if learning bus is available
     if let (Some(bus), Some(arm)) = (learning_bus, best_arm) {
-        announce_experiment_result(bus, &configs[arm], &sampler, arm, best_wq).await;
+        announce_experiment_result(bus, &configs[arm], &sampler, arm, best_wq, &model_name).await;
     }
 
     info!(
@@ -254,6 +282,7 @@ async fn announce_experiment_result(
     sampler: &ThompsonSampler,
     arm: usize,
     best_wq: f64,
+    model_name: &str,
 ) {
     use arkavo_gossip::experiment_message::{
         ExperimentAnnouncement, ExperimentMetrics, HardwareTier,
@@ -271,6 +300,7 @@ async fn announce_experiment_result(
         bus.agent_id().to_string(),
         HardwareTier::Desktop, // detect at runtime in future
         config_json,
+        model_name.to_string(),
         ExperimentMetrics {
             weighted_quality: best_wq,
             baseline_tok_per_sec: 0.0,
