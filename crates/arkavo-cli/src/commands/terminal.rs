@@ -1,7 +1,7 @@
-use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message};
 use arkavo_memory::storage::MemoryStorage;
+use arkavo_session::conversation::ConversationManager;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Runtime;

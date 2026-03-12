@@ -95,7 +95,12 @@ arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-autolearn = { path = "../arkavo-autolearn" }
 arkavo-ensemble = { path = "../arkavo-ensemble" }
+arkavo-ucp = { path = "../arkavo-ucp" }
+arkavo-critic = { path = "../arkavo-critic" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
+
+# Claude Agent SDK integration (optional, requires non-musl target for OAuth)
+arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 # Demo dependencies
 clap = { workspace = true, optional = true }
@@ -108,6 +113,7 @@ mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
+claude-agent = ["dep:arkavo-mcp-claude"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

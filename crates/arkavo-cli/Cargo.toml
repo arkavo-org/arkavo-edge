@@ -23,7 +23,7 @@ mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 # macOS-specific MCP integration (auto-enabled on macOS when mcp-tools is enabled)
 mcp-macos = ["dep:arkavo-mcp-macos"]
 # Claude Agent SDK integration (requires non-musl target for OAuth)
-claude-agent = ["dep:arkavo-mcp-claude"]
+claude-agent = ["dep:arkavo-mcp-claude", "arkavo-server/claude-agent"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]

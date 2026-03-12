@@ -14,6 +14,7 @@ mod learning_bus;
 mod learning_bus_gossip;
 mod learning_bus_synthesis;
 mod llm_intent_analyzer;
+mod local_engine;
 mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
@@ -39,6 +40,7 @@ pub use learning_bus::{
     BehaviorAdvice, LearningBus, LearningBusStats, LearningConfig, LearningEvent,
     LearningPipelineReporter,
 };
+pub use local_engine::LocalEngine;
 pub use mcp_bridge::McpBridgeTool;
 pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
