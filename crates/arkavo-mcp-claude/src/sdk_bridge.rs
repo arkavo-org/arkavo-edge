@@ -1,10 +1,17 @@
-use futures::StreamExt;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use futures::StreamExt;
 use tracing::{debug, error, info};
 
-use anthropic_agent_sdk::{ClaudeAgentOptions, Message, auth::OAuthClient, query};
+use anthropic_agent_sdk::types::introspection::ModelUsage;
+use anthropic_agent_sdk::{ClaudeAgentOptions, ClaudeSDKClient, Message, auth::OAuthClient, query};
 
+use crate::config::ClaudeCodeConfig;
 use crate::event_mapper::EventMapper;
+use crate::hook_handler;
+use crate::policy_bridge::PolicyBridge;
 use crate::{ClaudeCodeError, Result};
 
 /// Authentication method for Claude API
@@ -18,7 +25,6 @@ pub enum AuthMethod {
 
 impl Default for AuthMethod {
     fn default() -> Self {
-        // Check for API key first, fall back to OAuth
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
             && !key.is_empty()
         {
@@ -28,18 +34,35 @@ impl Default for AuthMethod {
     }
 }
 
-/// Bridge to the native Rust Claude Agent SDK
+/// Active session mode
+enum SessionMode {
+    /// Bidirectional client for stateful sessions
+    Client(ClaudeSDKClient),
+}
+
+/// Bridge to the native Rust Claude Agent SDK.
+///
+/// Supports both `ClaudeSDKClient` (bidirectional) and `query()` (one-shot).
+/// Budget metrics from `Message::Result` are accumulated for AG-UI reporting.
 pub struct SdkBridge {
     event_mapper: Arc<EventMapper>,
     auth_method: AuthMethod,
     options: ClaudeAgentOptions,
+    session: tokio::sync::RwLock<Option<SessionMode>>,
+    config: ClaudeCodeConfig,
+    /// Accumulated cost in USD (stored as u64 bits of f64)
+    accumulated_cost_bits: AtomicU64,
+    /// Accumulated token counts
+    accumulated_input_tokens: AtomicU64,
+    accumulated_output_tokens: AtomicU64,
 }
 
 impl SdkBridge {
-    /// Create a new SDK bridge
+    /// Create a new SDK bridge with policy enforcement
     pub fn new(
-        config: &crate::config::ClaudeCodeConfig,
+        config: &ClaudeCodeConfig,
         event_mapper: Arc<EventMapper>,
+        policy_bridge: Option<Arc<PolicyBridge>>,
     ) -> Result<Self> {
         let auth_method = if let Some(token) = &config.anthropic_auth_token {
             AuthMethod::ApiKey(token.clone())
@@ -49,24 +72,35 @@ impl SdkBridge {
             AuthMethod::default()
         };
 
-        // Set API key in environment early, before any SDK operations
-        // SAFETY: This is done during single-threaded initialization of the capability.
-        // The env var is set before the SDK is used, ensuring thread-safe access.
+        // Set API key in environment early
         if let AuthMethod::ApiKey(key) = &auth_method {
             unsafe {
                 std::env::set_var("ANTHROPIC_API_KEY", key);
             }
         }
 
-        // Build options for the Claude agent
-        let options = ClaudeAgentOptions::builder()
-            .cwd(config.workspace_root.clone())
-            .build();
+        // Build options from config, then overlay hooks and permissions
+        let mut options = config.build_agent_options();
+
+        // Wire hooks for AG-UI event emission
+        let hooks = hook_handler::build_hooks(event_mapper.clone());
+        options.hooks = Some(hooks);
+
+        // Wire permission callback if policy bridge is provided
+        if let Some(bridge) = policy_bridge {
+            let callback = hook_handler::build_permission_callback(bridge, event_mapper.clone());
+            options.can_use_tool = Some(callback);
+        }
 
         Ok(Self {
             event_mapper,
             auth_method,
             options,
+            session: tokio::sync::RwLock::new(None),
+            config: config.clone(),
+            accumulated_cost_bits: AtomicU64::new(0),
+            accumulated_input_tokens: AtomicU64::new(0),
+            accumulated_output_tokens: AtomicU64::new(0),
         })
     }
 
@@ -75,146 +109,264 @@ impl SdkBridge {
         match &self.auth_method {
             AuthMethod::OAuth => {
                 info!("Initializing Claude SDK with OAuth authentication");
-
-                // Create OAuth client
                 let oauth = OAuthClient::new().map_err(|e| {
                     ClaudeCodeError::Auth(format!("Failed to create OAuth client: {e}"))
                 })?;
 
-                // Check if we already have a valid cached token
                 if oauth.is_authenticated() {
                     info!("OAuth: Using cached authentication token");
                     return Ok(());
                 }
 
-                // No cached token - need to authenticate
-                // In non-interactive contexts, provide instructions
-                info!("OAuth: No cached token found, authentication required");
-
-                // Try to authenticate - this will open browser and prompt for code
-                // In agent contexts, this may fail if stdin is not available
                 match oauth.authenticate().await {
                     Ok(token_info) => {
                         info!("OAuth: Authenticated successfully");
                         debug!("Token expires at: {:?}", token_info.expires_at);
                     }
                     Err(e) => {
-                        // Provide helpful error message for non-interactive contexts
                         return Err(ClaudeCodeError::Auth(format!(
-                            "OAuth authentication required.\n\
-                             \n\
-                             To authenticate, run one of these commands in a terminal:\n\
-                             \n\
-                             Option 1 - Claude CLI (if installed):\n\
-                             $ claude login\n\
-                             \n\
-                             Option 2 - Direct OAuth (opens browser):\n\
-                             The OAuth flow opened a browser. Paste the authorization code when prompted.\n\
-                             \n\
-                             Option 3 - Use API key instead:\n\
-                             $ export ANTHROPIC_API_KEY=\"sk-ant-...\"\n\
-                             \n\
-                             Original error: {e}"
+                            "OAuth authentication required. Run 'claude login' or set ANTHROPIC_API_KEY.\nError: {e}"
                         )));
                     }
                 }
             }
             AuthMethod::ApiKey(_) => {
-                // API key was already set in environment during construction
                 info!("Initializing Claude SDK with API key authentication");
             }
         }
-
-        info!("Claude SDK initialized successfully");
         Ok(())
     }
 
-    /// Check if OAuth is already authenticated (has cached token)
+    /// Start a bidirectional session with `ClaudeSDKClient`
+    pub async fn start_session(&self) -> Result<()> {
+        if !self.config.use_bidirectional {
+            debug!("Bidirectional mode disabled, will use query() fallback");
+            return Ok(());
+        }
+
+        let client = ClaudeSDKClient::new(self.options.clone(), None)
+            .await
+            .map_err(|e| ClaudeCodeError::Sdk(format!("Failed to create client: {e}")))?;
+
+        info!("Bidirectional ClaudeSDKClient session started");
+        *self.session.write().await = Some(SessionMode::Client(client));
+        Ok(())
+    }
+
+    /// Run a query, using bidirectional client if available, else one-shot
+    pub async fn run_query(&self, prompt: String, run_id: String) -> Result<String> {
+        self.event_mapper.emit_run_started(&run_id, &prompt).await;
+
+        let session = self.session.read().await;
+        let result = if session.is_some() {
+            drop(session);
+            self.run_bidirectional(prompt, &run_id).await
+        } else {
+            drop(session);
+            self.run_oneshot(prompt, &run_id).await
+        };
+
+        self.event_mapper.emit_run_completed(&run_id).await;
+        result
+    }
+
+    /// Run via bidirectional `ClaudeSDKClient`
+    #[allow(clippy::significant_drop_tightening)]
+    async fn run_bidirectional(&self, prompt: String, run_id: &str) -> Result<String> {
+        let mut session = self.session.write().await;
+        let client = match session.as_mut() {
+            Some(SessionMode::Client(c)) => c,
+            None => return self.run_oneshot(prompt, run_id).await,
+        };
+
+        client
+            .send_message(&prompt)
+            .await
+            .map_err(|e| ClaudeCodeError::Sdk(format!("Failed to send message: {e}")))?;
+
+        let mut full_response = String::new();
+
+        while let Some(result) = client.next_message().await {
+            match result {
+                Ok(message) => {
+                    let done = matches!(&message, Message::Result { .. });
+                    let text = self.handle_message(run_id, message).await;
+                    full_response.push_str(&text);
+                    if done {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("Stream error: {e}");
+                    self.event_mapper
+                        .emit_error(run_id, &format!("Stream error: {e}"))
+                        .await;
+                    break;
+                }
+            }
+        }
+
+        Ok(full_response)
+    }
+
+    /// Run via one-shot `query()` API
+    async fn run_oneshot(&self, prompt: String, run_id: &str) -> Result<String> {
+        debug!("Using one-shot query() for run: {run_id}");
+        let stream = query(&prompt, Some(self.options.clone()))
+            .await
+            .map_err(|e| ClaudeCodeError::Sdk(format!("Failed to start query: {e}")))?;
+
+        let mut stream = Box::pin(stream);
+        let mut full_response = String::new();
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(message) => {
+                    let text = self.handle_message(run_id, message).await;
+                    full_response.push_str(&text);
+                }
+                Err(e) => {
+                    error!("Stream error: {e}");
+                    self.event_mapper
+                        .emit_error(run_id, &format!("Stream error: {e}"))
+                        .await;
+                }
+            }
+        }
+
+        Ok(full_response)
+    }
+
+    /// Handle a message from the SDK stream, return extracted text
+    async fn handle_message(&self, run_id: &str, message: Message) -> String {
+        match message {
+            Message::Assistant { message, .. } => {
+                let content = Self::extract_assistant_content(&message);
+                self.event_mapper
+                    .emit_assistant_message(run_id, &content)
+                    .await;
+                content
+            }
+            Message::Result {
+                total_cost_usd,
+                model_usage,
+                duration_ms,
+                num_turns,
+                permission_denials,
+                result,
+                ..
+            } => {
+                self.accumulate_usage(total_cost_usd, &model_usage);
+                self.event_mapper
+                    .emit_run_metrics(run_id, duration_ms, num_turns, total_cost_usd)
+                    .await;
+                for denial in &permission_denials {
+                    self.event_mapper
+                        .emit_permission_decision(
+                            run_id,
+                            &denial.tool_name,
+                            false,
+                            "denied by Claude Code",
+                        )
+                        .await;
+                }
+                result.unwrap_or_default()
+            }
+            Message::System { subtype, .. } => {
+                debug!("System message: {subtype}");
+                String::new()
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Accumulate usage metrics from a Result message
+    fn accumulate_usage(
+        &self,
+        total_cost_usd: Option<f64>,
+        model_usage: &HashMap<String, ModelUsage>,
+    ) {
+        if let Some(cost) = total_cost_usd {
+            let prev_bits = self.accumulated_cost_bits.load(Ordering::Relaxed);
+            let prev = f64::from_bits(prev_bits);
+            let new = prev + cost;
+            self.accumulated_cost_bits
+                .store(new.to_bits(), Ordering::Relaxed);
+        }
+        for usage in model_usage.values() {
+            self.accumulated_input_tokens
+                .fetch_add(usage.input_tokens, Ordering::Relaxed);
+            self.accumulated_output_tokens
+                .fetch_add(usage.output_tokens, Ordering::Relaxed);
+        }
+    }
+
+    /// Get accumulated cost in USD
+    pub fn accumulated_cost_usd(&self) -> f64 {
+        f64::from_bits(self.accumulated_cost_bits.load(Ordering::Relaxed))
+    }
+
+    /// Get accumulated input tokens
+    pub fn accumulated_input_tokens(&self) -> u64 {
+        self.accumulated_input_tokens.load(Ordering::Relaxed)
+    }
+
+    /// Get accumulated output tokens
+    pub fn accumulated_output_tokens(&self) -> u64 {
+        self.accumulated_output_tokens.load(Ordering::Relaxed)
+    }
+
+    /// Interrupt the current run (bidirectional only)
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn interrupt(&self) -> Result<()> {
+        let mut session = self.session.write().await;
+        if let Some(SessionMode::Client(client)) = session.as_mut() {
+            client
+                .interrupt()
+                .await
+                .map_err(|e| ClaudeCodeError::Sdk(format!("Interrupt failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Get session info (bidirectional only)
+    pub async fn session_info(&self) -> Result<serde_json::Value> {
+        let session = self.session.read().await;
+        match session.as_ref() {
+            Some(SessionMode::Client(client)) => {
+                let info = client.session_info();
+                serde_json::to_value(info)
+                    .map_err(|e| ClaudeCodeError::Other(format!("Serialize error: {e}")))
+            }
+            None => Ok(serde_json::json!({"status": "no active session"})),
+        }
+    }
+
+    /// Close the session
+    pub async fn close_session(&self) -> Result<()> {
+        let session = self.session.write().await.take();
+        if let Some(SessionMode::Client(mut client)) = session
+            && let Err(e) = client.close().await
+        {
+            tracing::warn!("Error closing session: {e}");
+        }
+        info!("Session resources released");
+        Ok(())
+    }
+
+    /// Check if OAuth is already authenticated
     pub fn is_authenticated(&self) -> bool {
         if matches!(&self.auth_method, AuthMethod::OAuth)
             && let Ok(oauth) = OAuthClient::new()
         {
             return oauth.is_authenticated();
         }
-        // API key auth is always "authenticated" if key is set
         matches!(&self.auth_method, AuthMethod::ApiKey(_))
     }
 
-    /// Run a simple query and stream results
-    pub async fn run_query(&self, prompt: String, run_id: String) -> Result<()> {
-        debug!("Starting query run: {run_id}");
-
-        // Emit start event
-        self.event_mapper.emit_run_started(&run_id, &prompt).await;
-
-        // Use the simple query API for one-shot interactions
-        let stream = query(&prompt, Some(self.options.clone()))
-            .await
-            .map_err(|e| ClaudeCodeError::Sdk(format!("Failed to start query: {e}")))?;
-
-        let mut stream = Box::pin(stream);
-        let event_mapper = self.event_mapper.clone();
-        let run_id_clone = run_id.clone();
-
-        // Process the message stream
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(message) => {
-                    self.handle_message(&run_id_clone, message, &event_mapper)
-                        .await;
-                }
-                Err(e) => {
-                    error!("Stream error: {e}");
-                    event_mapper
-                        .emit_error(&run_id_clone, &format!("Stream error: {e}"))
-                        .await;
-                }
-            }
-        }
-
-        // Emit completion event
-        self.event_mapper.emit_run_completed(&run_id).await;
-
-        debug!("Query run completed: {run_id}");
-        Ok(())
-    }
-
-    /// Close any session resources
-    pub fn close_session(&self) -> Result<()> {
-        info!("Session resources released");
-        Ok(())
-    }
-
-    /// Handle a message from the SDK stream
-    async fn handle_message(&self, run_id: &str, message: Message, event_mapper: &EventMapper) {
-        match message {
-            Message::Assistant { message, .. } => {
-                debug!("Assistant message received");
-                // Extract text content from assistant message
-                let content = Self::extract_assistant_content(&message);
-                event_mapper.emit_assistant_message(run_id, &content).await;
-            }
-            Message::User { message, .. } => {
-                debug!("User message echoed: {message:?}");
-            }
-            Message::Result {
-                subtype,
-                duration_ms,
-                is_error,
-                ..
-            } => {
-                debug!("Result received: subtype={subtype}, duration={duration_ms}ms");
-                let content = if is_error {
-                    format!("Error: {subtype}")
-                } else {
-                    format!("Completed: {subtype} ({duration_ms}ms)")
-                };
-                event_mapper.emit_result(run_id, &content).await;
-            }
-            _ => {
-                debug!("Other message type received");
-            }
-        }
+    /// Get the current authentication method
+    pub fn auth_method(&self) -> &AuthMethod {
+        &self.auth_method
     }
 
     /// Extract text content from an assistant message
@@ -234,10 +386,5 @@ impl SdkBridge {
             }
         }
         parts.join("\n")
-    }
-
-    /// Get the current authentication method
-    pub fn auth_method(&self) -> &AuthMethod {
-        &self.auth_method
     }
 }

@@ -1,6 +1,7 @@
 pub mod capability;
 pub mod config;
 pub mod event_mapper;
+pub mod hook_handler;
 pub mod policy_bridge;
 pub mod sdk_bridge;
 pub mod tools;

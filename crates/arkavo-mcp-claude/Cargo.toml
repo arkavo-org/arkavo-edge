@@ -36,6 +36,10 @@ arkavo-authorization = { path = "../arkavo-authorization" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
 [build-dependencies]
 anyhow = { workspace = true }
 

@@ -362,6 +362,105 @@ impl EventMapper {
         }
     }
 
+    /// Emit a typed tool result event from SDK hooks
+    pub async fn emit_tool_result_typed(
+        &self,
+        run_id: &str,
+        tool_name: &str,
+        success: bool,
+        output: &serde_json::Value,
+        duration_ms: u64,
+    ) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::ToolResult {
+                tool_name: tool_name.to_string(),
+                tool_call_id: None,
+                success,
+                result: output.clone(),
+                duration_ms,
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write tool result event: {}", e);
+        }
+    }
+
+    /// Emit a permission decision event for UI visibility
+    pub async fn emit_permission_decision(
+        &self,
+        run_id: &str,
+        tool_name: &str,
+        allowed: bool,
+        reason: &str,
+    ) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::ReasoningStep {
+                step_type: "permission".to_string(),
+                description: format!(
+                    "Tool '{tool_name}' {}: {reason}",
+                    if allowed { "allowed" } else { "denied" }
+                ),
+                metadata: Some(serde_json::json!({
+                    "tool_name": tool_name,
+                    "allowed": allowed,
+                    "reason": reason,
+                })),
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write permission decision event: {}", e);
+        }
+    }
+
+    /// Emit budget/metrics from SDK `Message::Result`
+    pub async fn emit_run_metrics(
+        &self,
+        run_id: &str,
+        duration_ms: u64,
+        num_turns: u32,
+        total_cost_usd: Option<f64>,
+    ) {
+        let sequence = self
+            .sequence_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let event = Event::new(
+            run_id.to_string(),
+            sequence,
+            self.agent_id.clone(),
+            EventPayload::ModelResponse {
+                model: "claude-code".to_string(),
+                response: format!("Completed in {num_turns} turns"),
+                usage: total_cost_usd.map(|_| UsageInfo {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                }),
+                duration_ms,
+            },
+        );
+
+        if let Err(e) = self.event_writer.write(event).await {
+            tracing::error!("Failed to write run metrics event: {}", e);
+        }
+    }
+
     /// Emit a result event
     pub async fn emit_result(&self, run_id: &str, result: &str) {
         let sequence = self

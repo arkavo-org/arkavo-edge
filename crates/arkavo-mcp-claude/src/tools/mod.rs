@@ -191,14 +191,114 @@ impl Tool for ClaudeCodePlanTool {
     }
 }
 
+/// Tool for querying session info and budget status
+pub struct ClaudeCodeSessionInfoTool {
+    capability: Arc<ClaudeCodeCapability>,
+    schema: ToolSchema,
+}
+
+impl ClaudeCodeSessionInfoTool {
+    pub fn new(capability: Arc<ClaudeCodeCapability>) -> Self {
+        Self {
+            capability,
+            schema: ToolSchema {
+                name: "claude_code_session_info".to_string(),
+                aliases: Some(vec!["cc_info".to_string()]),
+                description: "Get Claude Code session info: model, tools, MCP servers, budget"
+                    .to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                }),
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for ClaudeCodeSessionInfoTool {
+    fn schema(&self) -> &ToolSchema {
+        &self.schema
+    }
+
+    async fn execute(&self, _args: Value) -> arkavo_mcp_tools::Result<Value> {
+        let info = self
+            .capability
+            .session_info()
+            .await
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))?;
+
+        Ok(json!({
+            "success": true,
+            "session_info": info,
+            "budget_status": self.capability.compute_budget_status(),
+        }))
+    }
+}
+
+/// Tool for interrupting a running Claude Code task
+pub struct ClaudeCodeInterruptTool {
+    capability: Arc<ClaudeCodeCapability>,
+    schema: ToolSchema,
+}
+
+impl ClaudeCodeInterruptTool {
+    pub fn new(capability: Arc<ClaudeCodeCapability>) -> Self {
+        Self {
+            capability,
+            schema: ToolSchema {
+                name: "claude_code_interrupt".to_string(),
+                aliases: Some(vec!["cc_interrupt".to_string()]),
+                description: "Interrupt a running Claude Code task".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "run_id": {
+                            "type": "string",
+                            "description": "The run ID to interrupt"
+                        }
+                    },
+                    "required": ["run_id"]
+                }),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InterruptArgs {
+    run_id: String,
+}
+
+#[async_trait]
+impl Tool for ClaudeCodeInterruptTool {
+    fn schema(&self) -> &ToolSchema {
+        &self.schema
+    }
+
+    async fn execute(&self, args: Value) -> arkavo_mcp_tools::Result<Value> {
+        let args: InterruptArgs =
+            serde_json::from_value(args).map_err(arkavo_mcp_tools::ToolError::Json)?;
+
+        self.capability
+            .stop_run(args.run_id.clone())
+            .await
+            .map_err(|e| arkavo_mcp_tools::ToolError::Execution(e.to_string()))?;
+
+        Ok(json!({
+            "success": true,
+            "message": format!("Run {} interrupted", args.run_id)
+        }))
+    }
+}
+
 /// Register Claude Code tools with a ToolRegistry
-///
-/// This function follows the arkavo tool registration pattern where each crate
-/// exports a `register_tools` function to avoid circular dependencies.
 ///
 /// Tools registered:
 /// - `claude_code_run`: Execute tasks with full Claude Code capabilities
 /// - `claude_code_plan`: Generate plans without execution
+/// - `claude_code_session_info`: Get session info and budget status
+/// - `claude_code_interrupt`: Interrupt a running task
 pub fn register_tools(
     registry: &mut arkavo_mcp_tools::ToolRegistry,
     capability: Arc<ClaudeCodeCapability>,
@@ -209,7 +309,15 @@ pub fn register_tools(
     );
     registry.register(
         "claude_code_plan",
-        Box::new(ClaudeCodePlanTool::new(capability)),
+        Box::new(ClaudeCodePlanTool::new(Arc::clone(&capability))),
+    );
+    registry.register(
+        "claude_code_session_info",
+        Box::new(ClaudeCodeSessionInfoTool::new(Arc::clone(&capability))),
+    );
+    registry.register(
+        "claude_code_interrupt",
+        Box::new(ClaudeCodeInterruptTool::new(capability)),
     );
 }
 

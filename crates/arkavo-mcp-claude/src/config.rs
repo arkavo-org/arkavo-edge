@@ -1,7 +1,9 @@
+use anthropic_agent_sdk::ClaudeAgentOptions;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ClaudeCodeConfig {
     /// Enable or disable the capability
     #[serde(default = "default_enabled")]
@@ -58,6 +60,34 @@ pub struct ClaudeCodeConfig {
     /// If false, uses ANTHROPIC_API_KEY environment variable
     #[serde(default = "default_use_oauth")]
     pub use_oauth: bool,
+
+    /// Maximum budget in USD for a single Claude Code session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_budget_usd: Option<f64>,
+
+    /// Maximum tokens for extended thinking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_thinking_tokens: Option<u32>,
+
+    /// Enable sandbox mode for command execution
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_enabled: Option<bool>,
+
+    /// Permission mode: "default", "plan", "acceptEdits"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+
+    /// SDK-level tool allowlist (Claude Code tool names like "Read", "Bash", etc.)
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+
+    /// SDK-level tool denylist
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+
+    /// Use bidirectional ClaudeSDKClient instead of one-shot query()
+    #[serde(default = "default_true")]
+    pub use_bidirectional: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +142,13 @@ impl Default for ClaudeCodeConfig {
             retry: RetryConfig::default(),
             session_ttl_secs: default_session_ttl(),
             use_oauth: default_use_oauth(),
+            max_budget_usd: None,
+            max_thinking_tokens: None,
+            sandbox_enabled: None,
+            permission_mode: None,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            use_bidirectional: true,
         }
     }
 }
@@ -159,7 +196,63 @@ impl ClaudeCodeConfig {
             ));
         }
 
+        if let Some(budget) = self.max_budget_usd
+            && budget <= 0.0
+        {
+            return Err(crate::ClaudeCodeError::Configuration(
+                "max_budget_usd must be positive".to_string(),
+            ));
+        }
+
+        if let Some(mode) = &self.permission_mode
+            && !matches!(mode.as_str(), "default" | "plan" | "acceptEdits")
+        {
+            return Err(crate::ClaudeCodeError::Configuration(format!(
+                "Invalid permission_mode: {mode}. Must be default, plan, or acceptEdits"
+            )));
+        }
+
         Ok(())
+    }
+
+    /// Build `ClaudeAgentOptions` from this config.
+    ///
+    /// Constructs the full SDK options including budget, sandbox, permission mode,
+    /// and tool filtering. Hooks and permission callbacks are added separately
+    /// by the `SdkBridge`.
+    pub fn build_agent_options(&self) -> ClaudeAgentOptions {
+        use anthropic_agent_sdk::ToolName;
+
+        let allowed: Vec<ToolName> = self
+            .allowed_tools
+            .iter()
+            .map(|s| ToolName::from(s.clone()))
+            .collect();
+        let disallowed: Vec<ToolName> = self
+            .disallowed_tools
+            .iter()
+            .map(|s| ToolName::from(s.clone()))
+            .collect();
+
+        ClaudeAgentOptions {
+            cwd: Some(self.workspace_root.clone()),
+            max_budget_usd: self.max_budget_usd,
+            max_thinking_tokens: self.max_thinking_tokens,
+            sandbox: self.sandbox_enabled.map(|enabled| {
+                anthropic_agent_sdk::types::SandboxSettings {
+                    enabled: Some(enabled),
+                    ..Default::default()
+                }
+            }),
+            permission_mode: self.permission_mode.as_deref().map(|mode| match mode {
+                "plan" => anthropic_agent_sdk::PermissionMode::Plan,
+                "acceptEdits" => anthropic_agent_sdk::PermissionMode::AcceptEdits,
+                _ => anthropic_agent_sdk::PermissionMode::Default,
+            }),
+            allowed_tools: allowed,
+            disallowed_tools: disallowed,
+            ..ClaudeAgentOptions::default()
+        }
     }
 
     /// Check if a path is allowed based on glob patterns
