@@ -145,11 +145,10 @@ impl SubprocessTransport {
             return Ok(path);
         }
 
-        // Manual search in common locations
+        // Manual search in user-local locations (system paths covered by which::which above)
         let home = env::var("HOME").unwrap_or_else(|_| String::from("/root"));
         let locations = vec![
             PathBuf::from(home.clone()).join(".npm-global/bin/claude"),
-            PathBuf::from("/usr/local/bin/claude"),
             PathBuf::from(home.clone()).join(".local/bin/claude"),
             PathBuf::from(home.clone()).join("node_modules/.bin/claude"),
             PathBuf::from(home).join(".yarn/bin/claude"),
