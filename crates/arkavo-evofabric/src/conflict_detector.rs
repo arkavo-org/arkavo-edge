@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn same_id_is_identical() {
-        let mut a = bundle_with_ops(vec![]);
+        let a = bundle_with_ops(vec![]);
         let b = a.clone();
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Identical);
     }
