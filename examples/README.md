@@ -83,6 +83,7 @@ Advanced orchestration and learning patterns.
 | `learning-mesh` | Learning | Quality-aware routing with lesson-informed prompting |
 | `hyperforum-council` | Discourse | AI-powered discussion management |
 | `autonomous_refactor` | Ledger | Context tracking for code refactoring |
+| `evofabric` | AST Ops | Typed code evolution with verification |
 | `openclaw-a2a-bridge` | Bridge | A2A protocol bridge with security comparison |
 
 ### 05-production
