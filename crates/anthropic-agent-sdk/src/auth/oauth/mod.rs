@@ -1,11 +1,13 @@
 //! OAuth 2.0 client with PKCE support for Claude authentication
 
+mod pkce;
+mod token_exchange;
+
 use super::token::{TokenError, TokenInfo, TokenStorage};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
 use thiserror::Error;
+
+use pkce::PkceChallenge;
 
 // Claude OAuth configuration (Claude Code's official client_id)
 const DEFAULT_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -86,72 +88,24 @@ impl Default for OAuthConfig {
 
 /// OAuth response from token endpoint
 #[derive(Debug, Deserialize)]
-struct TokenResponse {
-    access_token: String,
+pub(super) struct TokenResponse {
+    pub(super) access_token: String,
     #[serde(default)]
-    refresh_token: Option<String>,
+    pub(super) refresh_token: Option<String>,
+    #[serde(default, rename = "token_type")]
+    pub(super) _token_type: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
-    token_type: Option<String>,
+    pub(super) expires_in: Option<u64>,
     #[serde(default)]
-    expires_in: Option<u64>,
-    #[serde(default)]
-    scope: Option<String>,
+    pub(super) scope: Option<String>,
 }
 
 /// Error response from token endpoint
 #[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: String,
+pub(super) struct ErrorResponse {
+    pub(super) error: String,
     #[serde(default)]
-    error_description: Option<String>,
-}
-
-/// PKCE code challenge data
-#[derive(Debug, Clone)]
-struct PkceChallenge {
-    /// Code verifier (random string)
-    verifier: String,
-    /// Code challenge (SHA-256 hash of verifier, base64url encoded)
-    challenge: String,
-}
-
-impl PkceChallenge {
-    /// Generate a new PKCE challenge using proper crypto
-    fn generate() -> Self {
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        // Generate a random verifier (43-128 characters, using base64url alphabet)
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(std::time::Duration::ZERO)
-            .as_nanos();
-
-        // Use multiple sources of entropy
-        let pid = std::process::id();
-        let thread_id = std::thread::current().id();
-
-        // Create verifier from hashed entropy sources
-        let mut hasher = Sha256::new();
-        hasher.update(timestamp.to_le_bytes());
-        hasher.update(pid.to_le_bytes());
-        hasher.update(format!("{thread_id:?}").as_bytes());
-        let entropy = hasher.finalize();
-
-        // Base64url encode for verifier (gives us 43 chars from 32 bytes)
-        let verifier = URL_SAFE_NO_PAD.encode(entropy);
-
-        // Create code challenge: BASE64URL(SHA256(verifier))
-        let mut hasher = Sha256::new();
-        hasher.update(verifier.as_bytes());
-        let hash = hasher.finalize();
-        let challenge = URL_SAFE_NO_PAD.encode(hash);
-
-        Self {
-            verifier,
-            challenge,
-        }
-    }
+    pub(super) error_description: Option<String>,
 }
 
 /// Builder for [`OAuthClient`]
@@ -209,10 +163,10 @@ impl OAuthClientBuilder {
 /// OAuth client for Claude authentication
 #[derive(Debug)]
 pub struct OAuthClient {
-    config: OAuthConfig,
-    storage: TokenStorage,
-    auto_open_browser: bool,
-    http_client: reqwest::Client,
+    pub(super) config: OAuthConfig,
+    pub(super) storage: TokenStorage,
+    pub(super) auto_open_browser: bool,
+    pub(super) http_client: reqwest::Client,
 }
 
 impl OAuthClient {
@@ -346,191 +300,6 @@ impl OAuthClient {
         Ok(token)
     }
 
-    /// Build the authorization URL with PKCE challenge
-    fn build_auth_url(&self, code_challenge: &str) -> String {
-        // Generate state using proper random bytes
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or(std::time::Duration::ZERO)
-            .as_nanos();
-        let state = Self::generate_state(timestamp);
-
-        // Use proper URL encoding
-        let params = [
-            ("client_id", self.config.client_id.as_str()),
-            ("response_type", "code"),
-            ("redirect_uri", self.config.redirect_uri.as_str()),
-            ("scope", self.config.scopes.as_str()),
-            ("code_challenge", code_challenge),
-            ("code_challenge_method", "S256"),
-            ("state", &state),
-            ("code", "true"),
-        ];
-
-        let query = params
-            .iter()
-            .map(|(k, v)| format!("{k}={}", urlencoding(v)))
-            .collect::<Vec<_>>()
-            .join("&");
-
-        format!("{}?{query}", self.config.auth_url)
-    }
-
-    /// Generate a state parameter (base64url encoded random bytes)
-    fn generate_state(seed: u128) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(seed.to_le_bytes());
-        hasher.update(std::process::id().to_le_bytes());
-        let hash = hasher.finalize();
-        URL_SAFE_NO_PAD.encode(&hash[..24]) // 24 bytes = 32 chars in base64
-    }
-
-    /// Prompt user for authorization code
-    fn prompt_for_code() -> AuthResult<(String, Option<String>)> {
-        print!("Enter authorization code (or 'cancel' to abort): ");
-        std::io::stdout().flush()?;
-
-        let mut input = String::new();
-        std::io::stdin().lock().read_line(&mut input)?;
-
-        let input = input.trim();
-
-        // The callback page displays "code#state" format - extract both parts
-        let (code, state) = if let Some(hash_pos) = input.find('#') {
-            let code = &input[..hash_pos];
-            let state = &input[hash_pos + 1..];
-            (code.to_string(), Some(state.to_string()))
-        } else {
-            (input.to_string(), None)
-        };
-
-        Ok((code, state))
-    }
-
-    /// Exchange authorization code for access token
-    async fn exchange_code(
-        &self,
-        code: &str,
-        state: Option<&str>,
-        code_verifier: &str,
-    ) -> AuthResult<TokenInfo> {
-        // Build JSON body - Anthropic requires JSON, not form-urlencoded
-        let mut body = serde_json::json!({
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": self.config.redirect_uri,
-            "client_id": self.config.client_id,
-            "code_verifier": code_verifier
-        });
-
-        // Include state if provided (from code#state format)
-        if let Some(state_val) = state {
-            body["state"] = serde_json::json!(state_val);
-        }
-
-        let response = self
-            .http_client
-            .post(&self.config.token_url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let response_text = response.text().await?;
-
-        // Try to parse as error first
-        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&response_text) {
-            let msg = error.error_description.unwrap_or(error.error);
-            return Err(OAuthError::TokenExchange(msg));
-        }
-
-        // Parse token response
-        let token_response: TokenResponse = serde_json::from_str(&response_text).map_err(|e| {
-            OAuthError::InvalidResponse(format!(
-                "Failed to parse token response: {e} - Response: {response_text}"
-            ))
-        })?;
-
-        Ok(TokenInfo::new(
-            token_response.access_token,
-            token_response.refresh_token,
-            token_response.expires_in,
-            token_response.scope,
-        ))
-    }
-
-    /// Refresh an expired token
-    async fn refresh_token(&self, refresh_token: &str) -> AuthResult<TokenInfo> {
-        // Anthropic requires JSON, not form-urlencoded
-        let body = serde_json::json!({
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": self.config.client_id
-        });
-
-        let response = self
-            .http_client
-            .post(&self.config.token_url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let response_text = response.text().await?;
-
-        // Parse response
-        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&response_text) {
-            let msg = error.error_description.unwrap_or(error.error);
-            return Err(OAuthError::TokenExchange(msg));
-        }
-
-        let token_response: TokenResponse = serde_json::from_str(&response_text).map_err(|e| {
-            OAuthError::InvalidResponse(format!("Failed to parse refresh response: {e}"))
-        })?;
-
-        let token = TokenInfo::new(
-            token_response.access_token,
-            token_response
-                .refresh_token
-                .or_else(|| Some(refresh_token.to_string())),
-            token_response.expires_in,
-            token_response.scope,
-        );
-
-        self.storage.save(&token)?;
-
-        Ok(token)
-    }
-
-    /// Open URL in default browser
-    fn open_browser(url: &str) -> AuthResult<()> {
-        #[cfg(target_os = "macos")]
-        {
-            std::process::Command::new("open")
-                .arg(url)
-                .spawn()
-                .map_err(|e| OAuthError::BrowserOpen(e.to_string()))?;
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            std::process::Command::new("xdg-open")
-                .arg(url)
-                .spawn()
-                .map_err(|e| OAuthError::BrowserOpen(e.to_string()))?;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "", url])
-                .spawn()
-                .map_err(|e| OAuthError::BrowserOpen(e.to_string()))?;
-        }
-
-        Ok(())
-    }
-
     /// Log out - delete cached token
     ///
     /// # Errors
@@ -555,27 +324,10 @@ impl OAuthClient {
     }
 }
 
-/// URL encode a string for OAuth parameters.
-/// Preserves unreserved characters per RFC 3986.
-fn urlencoding(s: &str) -> String {
-    use std::fmt::Write;
-    let mut result = String::with_capacity(s.len() * 3);
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            _ => {
-                write!(result, "%{byte:02X}").unwrap();
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkce::urlencoding;
 
     #[test]
     fn test_pkce_challenge_generation() {

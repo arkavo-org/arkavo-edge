@@ -72,23 +72,28 @@ impl SdkBridge {
             AuthMethod::default()
         };
 
-        // Set API key in environment early
+        // Build options from config, then overlay hooks and permissions
+        let mut options = config.build_agent_options();
+
+        // Pass API key through options.env so the subprocess inherits it
+        // without mutating the process-wide environment (avoids unsafe set_var)
         if let AuthMethod::ApiKey(key) = &auth_method {
-            unsafe {
-                std::env::set_var("ANTHROPIC_API_KEY", key);
-            }
+            options
+                .env
+                .insert("ANTHROPIC_API_KEY".to_string(), key.clone());
         }
 
         // Allow launching Claude Code from within an existing session.
         // The CLAUDECODE env var triggers a nested-session check in the CLI
         // that blocks subprocess launches. Since we're an orchestrator (not a
         // recursive invocation), removing it is safe.
+        // SAFETY: Called during single-threaded initialization before any
+        // worker threads are spawned. remove_var is needed because the
+        // subprocess inherits all process env vars and the CLI checks for
+        // the presence of CLAUDECODE (empty value still triggers the check).
         unsafe {
             std::env::remove_var("CLAUDECODE");
         }
-
-        // Build options from config, then overlay hooks and permissions
-        let mut options = config.build_agent_options();
 
         // Wire hooks for AG-UI event emission
         let hooks = hook_handler::build_hooks(event_mapper.clone());
@@ -302,11 +307,22 @@ impl SdkBridge {
         model_usage: &HashMap<String, ModelUsage>,
     ) {
         if let Some(cost) = total_cost_usd {
-            let prev_bits = self.accumulated_cost_bits.load(Ordering::Relaxed);
-            let prev = f64::from_bits(prev_bits);
-            let new = prev + cost;
-            self.accumulated_cost_bits
-                .store(new.to_bits(), Ordering::Relaxed);
+            loop {
+                let prev_bits = self.accumulated_cost_bits.load(Ordering::Relaxed);
+                let new_bits = (f64::from_bits(prev_bits) + cost).to_bits();
+                if self
+                    .accumulated_cost_bits
+                    .compare_exchange_weak(
+                        prev_bits,
+                        new_bits,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    break;
+                }
+            }
         }
         for usage in model_usage.values() {
             self.accumulated_input_tokens

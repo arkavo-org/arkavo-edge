@@ -305,15 +305,11 @@ impl ClaudeSDKClient {
     pub(crate) async fn hook_handler_task(
         manager: Arc<Mutex<HookManager>>,
         protocol: Arc<Mutex<ProtocolHandler>>,
+        control_tx: mpsc::UnboundedSender<ControlRequest>,
         mut hook_rx: mpsc::UnboundedReceiver<(String, HookEvent)>,
     ) {
         while let Some((hook_id, event)) = hook_rx.recv().await {
-            // NOTE: This code path handles hook events from the control protocol.
-            // The primary hook flow is through process_message() in message_reader_task,
-            // which properly extracts event data and builds HookContext with session info.
-            // This handler is kept for backwards compatibility with the control protocol.
             let manager_guard = manager.lock().await;
-            // Build context with session info from manager (if set)
             let context = manager_guard.build_context();
 
             match manager_guard
@@ -323,24 +319,16 @@ impl ClaudeSDKClient {
                 Ok(output) => {
                     drop(manager_guard);
 
-                    // Send hook response
                     let protocol_guard = protocol.lock().await;
                     let response = serde_json::to_value(&output).unwrap_or_default();
-                    let _request = protocol_guard.create_hook_response(hook_id, response);
+                    let request = protocol_guard.create_hook_response(hook_id, response);
                     drop(protocol_guard);
 
-                    // Send through control channel would require access to control_tx
-                    // For now, hooks are processed but response sending needs client cooperation
-                    // This is acceptable as hooks are advisory
-                    // In a full implementation, we'd send _request through control_tx
-                    tracing::debug!(event = ?event, "Hook processed");
-                    #[cfg(debug_assertions)]
-                    eprintln!("Hook processed for event {event:?}");
+                    let _ = control_tx.send(request);
+                    tracing::debug!(event = ?event, "Hook processed and response sent");
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Hook processing error");
-                    #[cfg(debug_assertions)]
-                    eprintln!("Hook processing error: {e}");
                 }
             }
         }
@@ -350,6 +338,7 @@ impl ClaudeSDKClient {
     pub(crate) async fn permission_handler_task(
         manager: Arc<Mutex<PermissionManager>>,
         protocol: Arc<Mutex<ProtocolHandler>>,
+        control_tx: mpsc::UnboundedSender<ControlRequest>,
         mut permission_rx: mpsc::UnboundedReceiver<(RequestId, PermissionRequest)>,
     ) {
         while let Some((request_id, request)) = permission_rx.recv().await {
@@ -366,24 +355,16 @@ impl ClaudeSDKClient {
                 Ok(result) => {
                     drop(manager_guard);
 
-                    // Send permission response
                     let protocol_guard = protocol.lock().await;
-                    let _request = protocol_guard
+                    let request = protocol_guard
                         .create_permission_response(request_id.clone(), result.clone());
                     drop(protocol_guard);
 
-                    // Send through control channel would require access to control_tx
-                    // For now, permissions are processed but response sending needs client cooperation
-                    // This is acceptable for the automatic mode
-                    // In a full implementation, we'd send _request through control_tx
-                    tracing::debug!(request_id = %request_id.as_str(), result = ?result, "Permission processed");
-                    #[cfg(debug_assertions)]
-                    eprintln!("Permission {} processed: {:?}", request_id.as_str(), result);
+                    let _ = control_tx.send(request);
+                    tracing::debug!(request_id = %request_id.as_str(), result = ?result, "Permission processed and response sent");
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Permission processing error");
-                    #[cfg(debug_assertions)]
-                    eprintln!("Permission processing error: {e}");
                 }
             }
         }

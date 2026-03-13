@@ -217,12 +217,10 @@ pub struct ClaudeSDKClient {
     hook_rx: Option<mpsc::UnboundedReceiver<(String, HookEvent)>>,
     /// Permission request receiver (if not using automatic handler)
     permission_rx: Option<mpsc::UnboundedReceiver<(RequestId, PermissionRequest)>>,
-    /// Hook manager for automatic hook handling (kept alive for background tasks)
-    #[allow(dead_code)]
+    /// Hook manager for automatic hook handling
     hook_manager: Option<Arc<Mutex<HookManager>>>,
-    /// Permission manager for automatic permission handling (kept alive for background tasks)
-    #[allow(dead_code)]
-    permission_manager: Option<Arc<Mutex<PermissionManager>>>,
+    /// Permission manager kept alive for background permission handler task
+    _permission_manager: Option<Arc<Mutex<PermissionManager>>>,
     /// Captured session ID from messages
     session_id: Arc<std::sync::Mutex<Option<SessionId>>>,
     /// Session info from init message (model, tools, MCP servers)
@@ -344,8 +342,15 @@ impl ClaudeSDKClient {
         if let Some(ref manager) = hook_manager {
             let manager_clone = manager.clone();
             let protocol_clone = protocol.clone();
+            let control_tx_clone = control_tx.clone();
             tokio::spawn(async move {
-                Self::hook_handler_task(manager_clone, protocol_clone, hook_rx_internal).await;
+                Self::hook_handler_task(
+                    manager_clone,
+                    protocol_clone,
+                    control_tx_clone,
+                    hook_rx_internal,
+                )
+                .await;
             });
         }
 
@@ -353,10 +358,12 @@ impl ClaudeSDKClient {
         if let Some(ref manager) = permission_manager {
             let manager_clone = manager.clone();
             let protocol_clone = protocol.clone();
+            let control_tx_clone = control_tx.clone();
             tokio::spawn(async move {
                 Self::permission_handler_task(
                     manager_clone,
                     protocol_clone,
+                    control_tx_clone,
                     permission_rx_internal,
                 )
                 .await;
@@ -371,7 +378,7 @@ impl ClaudeSDKClient {
             hook_rx,
             permission_rx,
             hook_manager,
-            permission_manager,
+            _permission_manager: permission_manager,
             session_id,
             session_info,
             cancellation_token,
@@ -395,10 +402,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_client_creation() {
+    async fn test_client_creation_without_cli() {
+        // When CLI is not found, client creation should fail with a clear error
         let options = ClaudeAgentOptions::default();
-        let result = ClaudeSDKClient::new(options, None).await;
-        assert!(result.is_ok() || result.is_err()); // Will succeed if CLI is available
+        let result = ClaudeSDKClient::new(options, Some("/nonexistent/claude".into())).await;
+        assert!(result.is_err(), "Should fail when CLI path doesn't exist");
     }
 
     #[tokio::test]
