@@ -1,15 +1,17 @@
+mod emitter;
+
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::{debug, info};
 
-use arkavo_events::payload::{FileOp, UsageInfo};
+use arkavo_events::payload::FileOp;
 use arkavo_events::{Event, EventPayload, EventWriter};
 
 /// Maps Claude Code SDK events to Arkavo event types
 pub struct EventMapper {
-    agent_id: String,
-    event_writer: Arc<EventWriter>,
-    sequence_counter: std::sync::atomic::AtomicU64,
+    pub(crate) agent_id: String,
+    pub(crate) event_writer: Arc<EventWriter>,
+    pub(crate) sequence_counter: std::sync::atomic::AtomicU64,
 }
 
 impl EventMapper {
@@ -104,7 +106,6 @@ impl EventMapper {
 
             "token_usage" => {
                 if let Some(usage) = event["data"]["usage"].as_object() {
-                    // We'll emit this as part of ModelResponse
                     info!(
                         "Token usage - prompt: {}, completion: {}, total: {}",
                         usage
@@ -145,14 +146,12 @@ impl EventMapper {
                     })
             }
 
-            "run_completed" => {
-                Some(EventPayload::ModelResponse {
-                    model: "claude-code".to_string(),
-                    response: "Task completed successfully".to_string(),
-                    usage: None,    // Will be filled from token_usage events
-                    duration_ms: 0, // Duration not tracked at event level
-                })
-            }
+            "run_completed" => Some(EventPayload::ModelResponse {
+                model: "claude-code".to_string(),
+                response: "Task completed successfully".to_string(),
+                usage: None,
+                duration_ms: 0,
+            }),
 
             "run_failed" => event["data"]["error"]
                 .as_str()
@@ -163,13 +162,11 @@ impl EventMapper {
                     recoverable: Some(false),
                 }),
 
-            "session_closed" => {
-                Some(EventPayload::SessionEnded {
-                    reason: "normal".to_string(),
-                    duration_ms: 0, // Duration tracked at session level
-                    summary: None,
-                })
-            }
+            "session_closed" => Some(EventPayload::SessionEnded {
+                reason: "normal".to_string(),
+                duration_ms: 0,
+                summary: None,
+            }),
 
             _ => {
                 debug!("Unmapped event type: {}", event_type);
@@ -177,7 +174,6 @@ impl EventMapper {
             }
         };
 
-        // Write the event if we have a payload
         if let Some(payload) = payload {
             let event = Event::new(session_id, sequence, self.agent_id.clone(), payload);
 
@@ -234,8 +230,8 @@ impl EventMapper {
             self.agent_id.clone(),
             EventPayload::ModelResponse {
                 model: "claude-code".to_string(),
-                response: String::new(), // Empty for usage-only events
-                usage: Some(UsageInfo {
+                response: String::new(),
+                usage: Some(arkavo_events::payload::UsageInfo {
                     prompt_tokens,
                     completion_tokens,
                     total_tokens: prompt_tokens + completion_tokens,
@@ -246,142 +242,6 @@ impl EventMapper {
 
         if let Err(e) = self.event_writer.write(event).await {
             tracing::error!("Failed to write token usage event: {}", e);
-        }
-    }
-
-    /// Emit a run started event
-    pub async fn emit_run_started(&self, run_id: &str, prompt: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::PromptSent {
-                prompt: prompt.to_string(),
-                model: "claude-code".to_string(),
-                parameters: None,
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write run started event: {}", e);
-        }
-    }
-
-    /// Emit a run completed event
-    pub async fn emit_run_completed(&self, run_id: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::SessionEnded {
-                reason: "completed".to_string(),
-                duration_ms: 0,
-                summary: None,
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write run completed event: {}", e);
-        }
-    }
-
-    /// Emit an assistant message event
-    pub async fn emit_assistant_message(&self, run_id: &str, content: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::StreamDelta {
-                stream_id: run_id.to_string(),
-                sequence,
-                delta_type: "assistant".to_string(),
-                content: content.to_string(),
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write assistant message event: {}", e);
-        }
-    }
-
-    /// Emit a system message event
-    pub async fn emit_system_message(&self, run_id: &str, content: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::StreamDelta {
-                stream_id: run_id.to_string(),
-                sequence,
-                delta_type: "system".to_string(),
-                content: content.to_string(),
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write system message event: {}", e);
-        }
-    }
-
-    /// Emit an error event
-    pub async fn emit_error(&self, run_id: &str, error: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::Error {
-                error_type: "sdk_error".to_string(),
-                message: error.to_string(),
-                stack_trace: None,
-                recoverable: Some(true),
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write error event: {}", e);
-        }
-    }
-
-    /// Emit a result event
-    pub async fn emit_result(&self, run_id: &str, result: &str) {
-        let sequence = self
-            .sequence_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        let event = Event::new(
-            run_id.to_string(),
-            sequence,
-            self.agent_id.clone(),
-            EventPayload::ModelResponse {
-                model: "claude-code".to_string(),
-                response: result.to_string(),
-                usage: None,
-                duration_ms: 0,
-            },
-        );
-
-        if let Err(e) = self.event_writer.write(event).await {
-            tracing::error!("Failed to write result event: {}", e);
         }
     }
 }

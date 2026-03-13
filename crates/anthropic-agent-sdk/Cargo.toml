@@ -1,0 +1,60 @@
+[package]
+name = "anthropic-agent-sdk"
+version = "0.2.75"
+edition.workspace = true
+authors = ["Angel Bartolli <bartolli@gmail.com>"]
+description = "Rust SDK for Claude Code CLI - streaming queries, hooks, permissions, and MCP integration"
+license = "MIT"
+repository = "https://github.com/bartolli/anthropic-agent-sdk"
+keywords = ["claude", "ai", "sdk", "anthropic", "agent"]
+categories = ["api-bindings", "asynchronous"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Builder pattern
+typed-builder = "0.23.2"
+
+# Async streams
+futures = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+
+# Process utilities
+which = "8.0.0"
+
+# Directory utilities (for config paths)
+dirs = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Crypto
+sha2 = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
+getrandom = "0.2"
+
+# Optional dependencies
+rmcp = { version = "0.12.0", optional = true, features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server", "transport-worker", "macros"] }
+schemars = { version = "1.1.0", optional = true }
+
+[features]
+default = []
+rmcp = ["dep:rmcp", "dep:schemars"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

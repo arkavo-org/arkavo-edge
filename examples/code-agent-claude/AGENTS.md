@@ -1,6 +1,7 @@
 # Claude Code Agent Configuration
 
-Example configuration for an agent using the native Claude Agent SDK.
+Agent using the native Claude Agent SDK with bidirectional sessions,
+budget tracking, and MCP tool integration.
 
 name: claude-code-agent
 type: coding
@@ -10,8 +11,11 @@ type: coding
 claude_code:
   enabled: true
   use_oauth: true
+  use_bidirectional: true
   workspace_root: ./workspace
   budget_tokens: 200000
+  max_budget_usd: 5.0
+  permission_mode: default
 
   tools:
     read: true
@@ -33,6 +37,18 @@ claude_code:
     - "**/secrets/**"
     - "**/node_modules/**"
     - "**/target/**"
+
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - WebFetch
+    - WebSearch
+
+  disallowed_tools:
+    - Bash
 
 ## Authentication
 

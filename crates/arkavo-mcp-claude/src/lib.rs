@@ -1,6 +1,7 @@
 pub mod capability;
 pub mod config;
 pub mod event_mapper;
+pub mod hook_handler;
 pub mod policy_bridge;
 pub mod sdk_bridge;
 pub mod tools;
@@ -15,6 +16,12 @@ pub use tools::register_tools;
 pub fn is_auth_available() -> bool {
     // Check for API key first
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        return true;
+    }
+
+    // Inside a Claude Code session the CLI inherits the parent's session
+    // token, so no separate API key or OAuth flow is needed
+    if std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN").is_ok() {
         return true;
     }
 

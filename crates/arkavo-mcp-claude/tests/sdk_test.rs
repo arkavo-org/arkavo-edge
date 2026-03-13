@@ -12,23 +12,16 @@ use tokio::time::timeout;
 #[tokio::test]
 #[ignore = "Requires interactive browser authentication"]
 async fn test_oauth_authentication() {
-    println!("Testing OAuth authentication...");
-
     let oauth = OAuthClient::new().expect("Failed to create OAuth client");
 
     match oauth.authenticate().await {
         Ok(token) => {
-            println!("OAuth successful!");
-            println!("Token expires at: {:?}", token.expires_at);
             assert!(!token.access_token.is_empty());
         }
         Err(e) => {
             // Check if API key is set as fallback
-            if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-                println!("OAuth failed but API key is set, that's fine.");
-            } else {
-                println!("OAuth needs interactive browser login: {}", e);
-                println!("This is expected in CI environments.");
+            if std::env::var("ANTHROPIC_API_KEY").is_err() {
+                eprintln!("OAuth needs interactive browser login: {e}");
             }
         }
     }

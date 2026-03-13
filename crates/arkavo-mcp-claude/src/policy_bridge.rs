@@ -176,12 +176,17 @@ impl PolicyBridge {
         auth_client: &AuthorizationClient,
         tool_name: &str,
     ) -> Result<Decision> {
-        // Use a dummy token for capability authorization
-        // In production, this would come from the agent's authentication context
-        let token = "capability_token";
+        let token = std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN")
+            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+            .unwrap_or_default();
+
+        if token.is_empty() {
+            warn!("No auth token available for authorization check, denying tool: {tool_name}");
+            return Ok(Decision::Deny);
+        }
 
         let decision = auth_client
-            .authorize_mcp_tool(token, tool_name)
+            .authorize_mcp_tool(&token, tool_name)
             .await
             .map_err(|e| ClaudeCodeError::Other(format!("Authorization check failed: {e}")))?;
 
