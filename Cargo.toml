@@ -20,6 +20,7 @@ members = [
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-mcp-tools",
     "crates/arkavo-dataflow",
+    "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
     "crates/arkavo-observability",
@@ -92,6 +93,7 @@ default-members = [
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-mcp-tools",
     "crates/arkavo-dataflow",
+    "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
     "crates/arkavo-observability",
@@ -166,6 +168,7 @@ keyring = "3.6"
 url = "2.5"
 http = "1.1"
 lru = "0.16"
+anthropic-agent-sdk = { path = "crates/anthropic-agent-sdk" }
 async-stream = "0.3"
 tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }

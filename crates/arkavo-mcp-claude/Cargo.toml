@@ -25,9 +25,8 @@ thiserror = { workspace = true }
 glob = { workspace = true }
 futures = "0.3"
 
-# Claude Agent SDK (native Rust - supports OAuth for Claude Max/Pro subscribers)
-# Using fork with rustls fix until upstream PR is merged: https://github.com/bartolli/anthropic-agent-sdk/pull/2
-anthropic-agent-sdk = { git = "https://github.com/arkavo-org/anthropic-agent-sdk", branch = "rustls-tls" }
+# Claude Agent SDK (vendored - rustls only, no OpenSSL)
+anthropic-agent-sdk = { workspace = true }
 
 # Internal dependencies
 arkavo-mcp = { path = "../arkavo-mcp" }

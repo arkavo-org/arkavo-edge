@@ -259,11 +259,12 @@ impl ClaudeCodeConfig {
     pub fn is_path_allowed(&self, path: &str) -> bool {
         // First check deny patterns (they take precedence)
         for pattern in &self.deny_globs {
-            if glob::Pattern::new(pattern)
-                .ok()
-                .is_some_and(|p| p.matches(path))
-            {
-                return false;
+            match glob::Pattern::new(pattern) {
+                Ok(p) if p.matches(path) => return false,
+                Err(e) => {
+                    tracing::warn!("Invalid deny glob pattern '{pattern}': {e}");
+                }
+                _ => {}
             }
         }
 
@@ -274,11 +275,12 @@ impl ClaudeCodeConfig {
 
         // Check allow patterns
         for pattern in &self.allow_globs {
-            if glob::Pattern::new(pattern)
-                .ok()
-                .is_some_and(|p| p.matches(path))
-            {
-                return true;
+            match glob::Pattern::new(pattern) {
+                Ok(p) if p.matches(path) => return true,
+                Err(e) => {
+                    tracing::warn!("Invalid allow glob pattern '{pattern}': {e}");
+                }
+                _ => {}
             }
         }
 
