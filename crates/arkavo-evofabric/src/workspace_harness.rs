@@ -5,6 +5,40 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tracing::debug;
 
+/// Cross-platform symlink: uses symlinks on Unix, copies on Windows.
+fn portable_link(src: &Path, dest: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dest)
+    }
+    #[cfg(not(unix))]
+    {
+        if src.is_dir() {
+            copy_dir_fallback(src, dest)
+        } else {
+            std::fs::copy(src, dest).map(|_| ())
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn copy_dir_fallback(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dest_path = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            if entry.file_name() == "target" {
+                continue;
+            }
+            copy_dir_fallback(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), dest_path)?;
+        }
+    }
+    Ok(())
+}
+
 /// An isolated temp workspace for compiling and testing modified source.
 ///
 /// Symlinks workspace-level files and sibling crate directories into a temp
@@ -45,7 +79,7 @@ impl TempWorkspace {
         ] {
             let src = project_root.join(name);
             if src.exists() {
-                std::os::unix::fs::symlink(&src, ws.join(name))?;
+                portable_link(&src, &ws.join(name))?;
             }
         }
 
@@ -65,7 +99,7 @@ impl TempWorkspace {
                 if name_str == target_crate {
                     copy_dir_recursive(&entry.path(), &dest)?;
                 } else {
-                    std::os::unix::fs::symlink(entry.path(), &dest)?;
+                    portable_link(&entry.path(), &dest)?;
                 }
             }
         }
@@ -74,7 +108,7 @@ impl TempWorkspace {
         for name in &["tests", "examples"] {
             let src = project_root.join(name);
             if src.exists() {
-                std::os::unix::fs::symlink(&src, ws.join(name))?;
+                portable_link(&src, &ws.join(name))?;
             }
         }
 
