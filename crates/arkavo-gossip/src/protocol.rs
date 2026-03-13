@@ -232,6 +232,27 @@ impl GossipProtocol {
             }
             GossipMessage::ExperimentAnnounce(ann) => self.handle_experiment_announce(ann).await,
             GossipMessage::ExperimentVote(vote) => self.handle_experiment_vote(vote).await,
+            // EvoFabric messages — propagate without local state tracking
+            GossipMessage::EvoFabricPropose(p) => {
+                tracing::debug!(bundle_id = %p.bundle_id, "evofabric proposal received");
+                Ok(vec![GossipMessage::EvoFabricPropose(p)])
+            }
+            GossipMessage::EvoFabricVerify(v) => {
+                tracing::debug!(bundle_id = %v.bundle_id, "evofabric verification received");
+                Ok(vec![GossipMessage::EvoFabricVerify(v)])
+            }
+            GossipMessage::EvoFabricMerge(m) => {
+                tracing::debug!(bundle_id = %m.bundle_id, "evofabric merge decision received");
+                Ok(vec![GossipMessage::EvoFabricMerge(m)])
+            }
+            GossipMessage::EvoFabricConflict(c) => {
+                tracing::debug!(bundle_a = %c.bundle_a, bundle_b = %c.bundle_b, "evofabric conflict notice");
+                Ok(vec![GossipMessage::EvoFabricConflict(c)])
+            }
+            GossipMessage::EvoFabricAnchor(a) => {
+                tracing::debug!(block = a.block_number, "evofabric anchor committed");
+                Ok(vec![GossipMessage::EvoFabricAnchor(a)])
+            }
         }
     }
 

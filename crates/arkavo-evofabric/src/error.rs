@@ -27,4 +27,19 @@ pub enum Error {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("conflict: {0}")]
+    Conflict(String),
+
+    #[error("capability denied: {0}")]
+    CapabilityDenied(String),
+
+    #[error("clock violation: {0}")]
+    ClockViolation(String),
+
+    #[error("anchor failed: {0}")]
+    AnchorFailed(String),
+
+    #[error("version not found: {0}")]
+    VersionNotFound(String),
 }

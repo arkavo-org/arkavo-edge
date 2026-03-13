@@ -15,6 +15,7 @@ pub mod advisor_message;
 mod consensus;
 pub mod context_message;
 mod error;
+pub mod evofabric_message;
 pub mod experiment_message;
 pub mod learning_message;
 mod lesson_consensus;
@@ -27,6 +28,10 @@ pub use consensus::{
     ConsensusState, ConsensusStatus, DEFAULT_QUORUM_THRESHOLD, DEFAULT_VOTE_TIMEOUT, QuorumConfig,
 };
 pub use error::{GossipError, GossipResult};
+pub use evofabric_message::{
+    EvoFabricAnchorCommitted, EvoFabricConflictNotice, EvoFabricMergeDecision, EvoFabricProposal,
+    EvoFabricVerification, MergeDecisionKind,
+};
 pub use experiment_message::{
     ExperimentAnnouncement, ExperimentMetrics, ExperimentVote, HardwareTier,
 };
