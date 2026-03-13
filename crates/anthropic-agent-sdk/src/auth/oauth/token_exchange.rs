@@ -4,6 +4,16 @@ use super::{AuthResult, ErrorResponse, OAuthClient, OAuthError, TokenResponse};
 use crate::auth::token::TokenInfo;
 
 impl OAuthClient {
+    /// Validate that a URL uses HTTPS to prevent cleartext transmission of secrets
+    fn require_https(url: &str) -> AuthResult<()> {
+        if !url.starts_with("https://") {
+            return Err(OAuthError::TokenExchange(format!(
+                "Token endpoint must use HTTPS, got: {url}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Exchange authorization code for access token
     pub(super) async fn exchange_code(
         &self,
@@ -11,6 +21,8 @@ impl OAuthClient {
         state: Option<&str>,
         code_verifier: &str,
     ) -> AuthResult<TokenInfo> {
+        Self::require_https(&self.config.token_url)?;
+
         // Build JSON body - Anthropic requires JSON, not form-urlencoded
         let mut body = serde_json::json!({
             "grant_type": "authorization_code",
@@ -42,16 +54,12 @@ impl OAuthClient {
                 let msg = error.error_description.unwrap_or(error.error);
                 return Err(OAuthError::TokenExchange(msg));
             }
-            return Err(OAuthError::TokenExchange(format!(
-                "HTTP {status}: {response_text}"
-            )));
+            return Err(OAuthError::TokenExchange(format!("HTTP {status}")));
         }
 
         // Parse token response
         let token_response: TokenResponse = serde_json::from_str(&response_text).map_err(|e| {
-            OAuthError::InvalidResponse(format!(
-                "Failed to parse token response: {e} - Response: {response_text}"
-            ))
+            OAuthError::InvalidResponse(format!("Failed to parse token response: {e}"))
         })?;
 
         Ok(TokenInfo::new(
@@ -64,6 +72,8 @@ impl OAuthClient {
 
     /// Refresh an expired token
     pub(super) async fn refresh_token(&self, refresh_token: &str) -> AuthResult<TokenInfo> {
+        Self::require_https(&self.config.token_url)?;
+
         // Anthropic requires JSON, not form-urlencoded
         let body = serde_json::json!({
             "grant_type": "refresh_token",
@@ -88,9 +98,7 @@ impl OAuthClient {
                 let msg = error.error_description.unwrap_or(error.error);
                 return Err(OAuthError::TokenExchange(msg));
             }
-            return Err(OAuthError::TokenExchange(format!(
-                "HTTP {status}: {response_text}"
-            )));
+            return Err(OAuthError::TokenExchange(format!("HTTP {status}")));
         }
 
         let token_response: TokenResponse = serde_json::from_str(&response_text).map_err(|e| {
