@@ -252,32 +252,35 @@ impl OAuthClient {
         // Build authorization URL
         let auth_url = self.build_auth_url(&pkce.challenge);
 
-        println!("\n🔐 Claude OAuth Authentication");
-        println!(
+        // User-facing prompts use stderr to separate from structured output
+        eprintln!("\n🔐 Claude OAuth Authentication");
+        eprintln!(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         );
-        println!();
-        println!("To authenticate, please:");
-        println!("  1. Open the following URL in your browser");
-        println!("  2. Log in with your Anthropic account");
-        println!("  3. Copy the authorization code shown after approval");
-        println!("  4. Paste the code below");
-        println!();
-        println!("Authorization URL:");
-        println!("  {auth_url}");
-        println!();
+        eprintln!();
+        eprintln!("To authenticate, please:");
+        eprintln!("  1. Open the following URL in your browser");
+        eprintln!("  2. Log in with your Anthropic account");
+        eprintln!("  3. Copy the authorization code shown after approval");
+        eprintln!("  4. Paste the code below");
+        eprintln!();
+        // auth_url contains only public OAuth parameters (client_id, redirect_uri,
+        // scope, code_challenge) — no secrets. User must see it to authenticate.
+        eprintln!("Authorization URL:");
+        eprintln!("  {auth_url}");
+        eprintln!();
 
         // Try to open browser automatically
         if self.auto_open_browser {
             if let Err(e) = Self::open_browser(&auth_url) {
                 tracing::debug!("Could not open browser: {e}");
-                println!("(Could not open browser automatically - please open the URL manually)");
+                eprintln!("(Could not open browser automatically - please open the URL manually)");
             } else {
-                println!("(Opening browser...)");
+                eprintln!("(Opening browser...)");
             }
         }
 
-        println!();
+        eprintln!();
 
         // Read authorization code from user
         let (code, state) = Self::prompt_for_code()?;
@@ -293,9 +296,9 @@ impl OAuthClient {
 
         // Save token
         self.storage.save(&token)?;
-        println!();
-        println!("✓ Authentication successful! Token cached at:");
-        println!("  {}", self.storage.path().display());
+        eprintln!();
+        eprintln!("✓ Authentication successful! Token cached at:");
+        eprintln!("  {}", self.storage.path().display());
 
         Ok(token)
     }
@@ -307,7 +310,7 @@ impl OAuthClient {
     /// Returns an error if token deletion fails.
     pub fn logout(&self) -> AuthResult<()> {
         self.storage.delete()?;
-        println!("✓ Logged out successfully");
+        eprintln!("✓ Logged out successfully");
         Ok(())
     }
 
