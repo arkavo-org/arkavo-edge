@@ -7,7 +7,6 @@ Autonomous code modification through typed AST operations.
 - How EvoFabric proposes code changes as structured OpBundles
 - The Critic verification pipeline (parse, apply, compile, test)
 - Atomic git commits for recoverability
-- Offline mode for testing without a local LLM
 
 ## Prerequisites
 
@@ -18,17 +17,17 @@ cargo build
 
 ## Quick Start
 
-### Offline Mode (No LLM Required)
+### Test the AST Pipeline
 
-Test the full AST pipeline without a running model:
+Run all unit and integration tests to verify the pipeline:
 
 ```bash
-./run_offline.sh
+./run_test.sh
 ```
 
-This applies a pre-built OpBundle to a sample source file, verifies it compiles, and shows the diff.
+This applies pre-built OpBundles to sample source files, verifies they parse correctly, and exercises all operation types.
 
-### Live Mode (Requires Local LLM)
+### Run the Agent
 
 Run the full agent pipeline with a local model:
 
@@ -36,20 +35,20 @@ Run the full agent pipeline with a local model:
 ./run.sh
 ```
 
-The agent reads the target file, asks the LLM to propose an OpBundle, applies it to the AST, verifies compilation in an isolated workspace, and commits on success.
+The agent reads the target file, asks the model to propose an OpBundle, applies it to the AST, verifies compilation in an isolated workspace, and commits on success.
 
 ## What's Happening
 
-### Offline Pipeline
+### Test Pipeline
 
 ```
-sample.rs ──► parse (syn) ──► apply OpBundle ──► render (prettyplease) ──► verify ──► diff
+sample.rs ──► parse (syn) ──► apply OpBundle ──► render (prettyplease) ──► verify
 ```
 
-### Live Pipeline
+### Agent Pipeline
 
 ```
-[evofabric] task ──► read source ──► LLM proposes OpBundle ──► parse + apply
+[evofabric] task ──► read source ──► model proposes OpBundle ──► parse + apply
     ──► temp workspace ──► cargo check ──► cargo test ──► git commit
 ```
 
@@ -57,18 +56,18 @@ sample.rs ──► parse (syn) ──► apply OpBundle ──► render (prett
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Agent configuration for live mode |
-| `run_offline.sh` | AST pipeline without LLM |
-| `run.sh` | Full pipeline with local LLM |
-| `sample.rs` | Target source file for offline testing |
-| `bundle.json` | Pre-built OpBundle for offline testing |
-| `tasks.json` | Demo tasks for live mode |
+| `AGENTS.md` | Agent configuration |
+| `run_test.sh` | AST pipeline verification (51 tests) |
+| `run.sh` | Full agent pipeline with local model |
+| `sample.rs` | Target source file for testing |
+| `bundle.json` | Pre-built OpBundle for testing |
+| `tasks.json` | Demo tasks for agent mode |
 
 ## Architecture
 
 ```
                     ┌──────────────┐
-                    │  LLM Agent   │  (proposes OpBundle)
+                    │  Local Model │  (proposes OpBundle)
                     └──────┬───────┘
                            │ JSON
                     ┌──────▼───────┐

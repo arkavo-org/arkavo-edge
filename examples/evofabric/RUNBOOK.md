@@ -17,9 +17,7 @@ Step-by-step guide to testing EvoFabric code evolution.
    cargo build
    ```
 
-2. For live mode only: a local LLM must be running (ministral-3b or similar)
-
-## Offline Mode (No LLM Required)
+## Test the AST Pipeline
 
 ### Step 1: Navigate to Example
 
@@ -27,22 +25,22 @@ Step-by-step guide to testing EvoFabric code evolution.
 cd examples/evofabric
 ```
 
-### Step 2: Run the Offline Pipeline
+### Step 2: Run the Tests
 
 ```bash
-./run_offline.sh
+./run_test.sh
 ```
 
 **What to watch for:**
 - The pipeline reads `sample.rs` and applies `bundle.json`
 - Three operations: add `#[inline]`, replace method body, add `#[must_use]`
-- The rendered output is valid Rust (verified by re-parsing)
+- All 51 tests pass (43 unit + 8 integration)
 
 ### Step 3: Observe Output
 
 ```
-EvoFabric Offline Pipeline
-==========================
+EvoFabric AST Pipeline
+======================
 
 Source file: sample.rs
 OpBundle:    bundle.json
@@ -50,11 +48,19 @@ OpBundle:    bundle.json
 Operations: 3
 Rationale:  Add inline hint, harden validation, mark pure function
 
---- Running AST Pipeline ---
+--- Original Source ---
+[source code displayed]
 
-[output showing the transformed source or test results]
+--- Running AST Pipeline (integration tests) ---
+test result: ok. 8 passed
 
-Pipeline succeeded.
+--- Running Unit Tests ---
+test result: ok. 43 passed
+
+Summary
+=======
+  Total tests:      51
+  Pipeline status:  OK
 ```
 
 ### Step 4: Run Integration Tests Directly
@@ -65,15 +71,13 @@ cargo test -p arkavo-evofabric --test end_to_end -- --nocapture
 
 Expected: 8 tests pass covering all OpBundle operations.
 
-## Live Mode (Requires Local LLM)
+## Run the Agent
 
-### Step 1: Verify Model is Running
+### Step 1: Verify a Local Model is Available
 
-```bash
-curl -s http://localhost:8080/health | head -1
-```
+The agent uses whatever local model is configured. Ensure one is downloaded.
 
-### Step 2: Run the Live Pipeline
+### Step 2: Run the Agent Pipeline
 
 ```bash
 ./run.sh
@@ -87,7 +91,7 @@ Or with a custom instruction:
 
 **What to watch for:**
 - The agent reads the target source file
-- LLM generates a JSON OpBundle
+- The model generates a JSON OpBundle
 - OpBundle is parsed and applied to the AST
 - Modified source is compiled in an isolated temp workspace
 - If compilation and tests pass, a git commit is created
@@ -114,16 +118,16 @@ git revert HEAD
 
 ## Troubleshooting
 
-### Offline Pipeline Fails
+### Tests Fail
 
 ```bash
-# Run the integration tests directly
+# Run with verbose output
 cargo test -p arkavo-evofabric --test end_to_end -v
 ```
 
-### LLM Returns Invalid JSON
+### Model Returns Invalid JSON
 
-The `from_json()` parser handles common LLM output issues:
+The `from_json()` parser handles common model output issues:
 - Strips markdown code fences
 - Removes trailing commas
 - Clear error messages on parse failure

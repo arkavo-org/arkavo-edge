@@ -1,11 +1,11 @@
 #!/bin/bash
-# EvoFabric Offline Test - Full AST pipeline without LLM
+# EvoFabric Test - Full AST pipeline verification
 #
 # Demonstrates: parse → apply OpBundle → render → verify
-# No model download or inference required.
+# Runs all unit and integration tests for the evofabric crate.
 #
 # Usage:
-#   ./run_offline.sh
+#   ./run_test.sh
 
 set -e
 
@@ -23,8 +23,8 @@ NC='\033[0m'
 BUNDLE="${SCRIPT_DIR}/bundle.json"
 SOURCE="${SCRIPT_DIR}/sample.rs"
 
-echo -e "${BOLD}EvoFabric Offline Pipeline${NC}"
-echo "=========================="
+echo -e "${BOLD}EvoFabric AST Pipeline${NC}"
+echo "======================"
 echo ""
 
 # Check prerequisites
@@ -55,7 +55,7 @@ cat "$SOURCE"
 echo ""
 
 # Run integration tests to prove the pipeline works
-echo -e "${BOLD}--- Running AST Pipeline (via integration tests) ---${NC}"
+echo -e "${BOLD}--- Running AST Pipeline (integration tests) ---${NC}"
 echo ""
 cd "$REPO_ROOT"
 cargo test -p arkavo-evofabric --test end_to_end -- --nocapture 2>&1
@@ -79,4 +79,4 @@ echo -e "  Total tests:      ${GREEN}${TOTAL_TESTS}${NC}"
 echo -e "  Pipeline status:  ${GREEN}OK${NC}"
 echo ""
 echo "The EvoFabric AST pipeline is fully functional."
-echo "For live testing with a local LLM, run: ./run.sh"
+echo "To run with a local model, use: ./run.sh"

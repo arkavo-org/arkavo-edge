@@ -1,8 +1,7 @@
 #!/bin/bash
-# EvoFabric Live Test - Full pipeline with local LLM
+# EvoFabric - Full agent pipeline with local model
 #
-# Requires a running local model (ministral-3b or similar).
-# The agent reads the target file, asks the LLM to propose an OpBundle,
+# The agent reads the target file, asks the local model to propose an OpBundle,
 # applies it to the AST, verifies in an isolated workspace, and commits.
 #
 # Usage:
@@ -27,8 +26,8 @@ INSTRUCTION="${1:-add #[inline] to is_small_model}"
 TARGET="crates/arkavo-llm/src/llamacpp_provider.rs"
 TASK="[evofabric] ${TARGET} ${INSTRUCTION}"
 
-echo -e "${BOLD}EvoFabric Live Pipeline${NC}"
-echo "======================="
+echo -e "${BOLD}EvoFabric Agent Pipeline${NC}"
+echo "========================"
 echo ""
 
 # Check prerequisites
@@ -65,7 +64,7 @@ if echo "$LAST_COMMIT" | grep -q "evofabric:"; then
 else
     echo -e "${CYAN}No evofabric commit was created.${NC}"
     echo "This could mean:"
-    echo "  - The LLM proposed an invalid OpBundle (check output above)"
+    echo "  - The model proposed an invalid OpBundle (check output above)"
     echo "  - Compilation failed in the temp workspace"
     echo "  - Tests failed after applying the change"
 fi
