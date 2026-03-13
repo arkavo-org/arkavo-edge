@@ -128,6 +128,19 @@ pub async fn execute_with_conductor_and_learning(
         .await;
     }
 
+    // 2a-pre. Check for evofabric mode (AST-level code evolution)
+    if super::conductor_evofabric::is_evofabric_task(&task_content) {
+        return super::conductor_evofabric::execute_evofabric(
+            conductor,
+            router,
+            &task_content,
+            learning_bus,
+            compute_budget,
+            model_hint,
+        )
+        .await;
+    }
+
     // 2a. Check if task is complex enough to decompose into multiple subtasks.
     // Only decompose when the agent has MCP tools (external servers) — agents
     // with only mesh/built-in tools are advisors where decomposition loses context.

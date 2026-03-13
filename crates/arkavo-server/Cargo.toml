@@ -90,6 +90,7 @@ arkavo-router = { path = "../arkavo-router", features = ["advisor-persistence", 
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-evofabric = { path = "../arkavo-evofabric" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh" }
 arkavo-gossip = { path = "../arkavo-gossip" }

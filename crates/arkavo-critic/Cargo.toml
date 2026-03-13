@@ -24,6 +24,7 @@ torg-core = { workspace = true }
 torg-serde = { workspace = true }
 
 # Internal dependencies
+arkavo-evofabric = { path = "../arkavo-evofabric" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }

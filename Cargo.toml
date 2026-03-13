@@ -71,6 +71,7 @@ members = [
     "crates/arkavo-session",
     "crates/arkavo-kv-cache",
     "crates/arkavo-openclaw",
+    "crates/arkavo-evofabric",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -124,6 +125,7 @@ default-members = [
     "crates/arkavo-torg-circuits",
     "crates/arkavo-session",
     "crates/arkavo-openclaw",
+    "crates/arkavo-evofabric",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -236,6 +238,7 @@ tiktoken-rs = "0.6"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", default-features = false }
+prettyplease = "0.2"
 
 # Dev dependencies
 criterion = { version = "0.5", features = ["async_tokio"] }

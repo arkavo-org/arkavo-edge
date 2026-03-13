@@ -275,6 +275,16 @@ impl SubTaskBudget {
             max_tokens: 500_000,
         }
     }
+
+    /// Budget for EvoFabric code evolution (parse → apply → compile → test)
+    pub fn evofabric() -> Self {
+        Self {
+            max_steps: 10,
+            max_wall_time: Duration::from_secs(300), // cold build in temp workspace
+            max_cost_usd: 0.0,                       // local models only
+            max_tokens: 50_000,
+        }
+    }
 }
 
 /// Result of subtask execution
