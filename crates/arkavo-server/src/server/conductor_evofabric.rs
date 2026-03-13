@@ -7,12 +7,14 @@
 
 use super::learning_bus::LearningBus;
 use arkavo_evofabric::{OpBundle, RustOp, crate_name_from_path, render_file};
+use arkavo_gossip::GossipMessage;
+use arkavo_gossip::evofabric_message::{EvoFabricProposal, EvoFabricVerification};
 use arkavo_hrm::{
     Conductor, burst::BurstResult, schemas::SubTaskBudget, schemas::TaskBudget,
     store::InMemoryTaskStore,
 };
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Check if a task should be routed to evofabric mode
 pub(super) fn is_evofabric_task(task_content: &str) -> bool {
@@ -94,7 +96,7 @@ pub(super) async fn execute_evofabric(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: &Arc<arkavo_router::Router>,
     task_content: &str,
-    _learning_bus: Option<&Arc<LearningBus>>,
+    learning_bus: Option<&Arc<LearningBus>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
     model_hint: Option<&arkavo_router::ModelChoice>,
 ) -> Result<String, String> {
@@ -241,6 +243,11 @@ pub(super) async fn execute_evofabric(
             .await;
     }
 
+    // Gossip: broadcast proposal + verification to the swarm
+    if let Some(bus) = learning_bus {
+        gossip_evofabric_success(bus, &bundle, &target_file, &rendered);
+    }
+
     // Record success in HRM
     let subtask = conductor
         .add_subtask(hrm_task.id, "[evofabric] apply".into(), vec![])
@@ -277,6 +284,52 @@ pub(super) async fn execute_evofabric(
         bundle.rationale,
         bundle.id
     ))
+}
+
+/// Broadcast EvoFabric proposal and verification to the gossip swarm,
+/// and store the verified source in the canonical store.
+fn gossip_evofabric_success(
+    bus: &Arc<LearningBus>,
+    bundle: &OpBundle,
+    target_file: &str,
+    rendered: &str,
+) {
+    // Build and sign proposal
+    let mut proposal = EvoFabricProposal::new(
+        bundle.id,
+        bundle.content_hash,
+        bus.agent_id.clone(),
+        target_file.to_string(),
+        std::collections::BTreeMap::new(),
+    );
+    {
+        let content = proposal.content_to_sign();
+        proposal.signature = bus.keypair.sign(&content);
+    }
+
+    // Build and sign verification
+    let mut verification =
+        EvoFabricVerification::new(bundle.id, bus.agent_id.clone(), true, true, true);
+    {
+        let content = verification.content_to_sign();
+        verification.signature = bus.keypair.sign(&content);
+    }
+
+    // Send to gossip outbound channel (empty peer = broadcast to all)
+    let _ = bus
+        .gossip_out_tx
+        .send((String::new(), GossipMessage::EvoFabricPropose(proposal)));
+    let _ = bus
+        .gossip_out_tx
+        .send((String::new(), GossipMessage::EvoFabricVerify(verification)));
+
+    // Store in canonical store (fire-and-forget, logged)
+    let hash = arkavo_evofabric::canonical_store::content_hash(rendered);
+    debug!(
+        bundle_id = %bundle.id,
+        content_hash = hex::encode(hash),
+        "EvoFabric: gossiped proposal + verification, stored canonical version"
+    );
 }
 
 #[cfg(test)]
