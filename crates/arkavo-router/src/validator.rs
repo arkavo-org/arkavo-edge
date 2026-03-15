@@ -231,6 +231,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         assert!(validator.quick_validate(&response).is_ok());
@@ -251,6 +252,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         let result = validator.quick_validate(&response);
@@ -278,6 +280,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         let result = validator.quick_validate(&response);
@@ -306,6 +309,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         let result = validator.quick_validate(&response);
@@ -372,6 +376,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         assert!(validator.quick_validate(&response).is_ok());

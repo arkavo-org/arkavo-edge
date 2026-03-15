@@ -406,12 +406,68 @@ impl LlamaCppProvider {
                         )
                     }
                     Err(e) => {
-                        tracing::warn!("Jinja template apply failed: {e}, falling back to legacy");
-                        let bytes = apply_chat_template_with_format(&llama_messages, true, format)
-                            .map_err(|e| {
-                                Error::Config(format!("Failed to apply chat template: {e}"))
-                            })?;
-                        (bytes, None, None, false, Vec::new())
+                        let err_str = e.to_string();
+                        // Some templates (e.g. Ministral) reject system role entirely.
+                        // Retry with system messages converted to user messages.
+                        if err_str.contains("system") || err_str.contains("System") {
+                            tracing::info!(
+                                "Template rejects system role, converting to user prefix"
+                            );
+                            let fixed: Vec<Message> = messages
+                                .iter()
+                                .map(|m| {
+                                    if m.role == Role::System {
+                                        Message::user(format!(
+                                            "[System Instructions] {}",
+                                            m.content
+                                        ))
+                                    } else {
+                                        m.clone()
+                                    }
+                                })
+                                .collect();
+                            let (fixed_llama, _fixed_cstrings) =
+                                Self::messages_to_llama_chat_static(&fixed)?;
+                            let fixed_meta: Vec<ChatMessageMeta> = fixed
+                                .iter()
+                                .map(|m| ChatMessageMeta {
+                                    tool_call_id: m.tool_call_id.clone(),
+                                    tool_name: m.tool_name.clone(),
+                                })
+                                .collect();
+                            match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
+                                Ok(result) => (
+                                    result.prompt,
+                                    None,
+                                    None,
+                                    result.thinking_forced_open,
+                                    result.additional_stops,
+                                ),
+                                Err(e2) => {
+                                    tracing::warn!(
+                                        "Jinja retry also failed: {e2}, falling back to legacy"
+                                    );
+                                    let bytes =
+                                        apply_chat_template_with_format(&fixed_llama, true, format)
+                                            .map_err(|e| {
+                                                Error::Config(format!(
+                                                    "Failed to apply chat template: {e}"
+                                                ))
+                                            })?;
+                                    (bytes, None, None, false, Vec::new())
+                                }
+                            }
+                        } else {
+                            tracing::warn!(
+                                "Jinja template apply failed: {e}, falling back to legacy"
+                            );
+                            let bytes =
+                                apply_chat_template_with_format(&llama_messages, true, format)
+                                    .map_err(|e| {
+                                        Error::Config(format!("Failed to apply chat template: {e}"))
+                                    })?;
+                            (bytes, None, None, false, Vec::new())
+                        }
                     }
                 }
             }
@@ -456,6 +512,28 @@ impl LlamaCppProvider {
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
         };
+
+        // Try pooled context first (avoids context allocation contention).
+        // Falls back to fresh context if pool unavailable or exhausted.
+        if let Some(ref registry) = self.registry {
+            let model_name = self.name.clone();
+            if let Ok(pooled) = registry.acquire_fresh_context(&model_name) {
+                let pooled_ctx = pooled.context.clone();
+                let registry_clone = registry.clone();
+                tokio::spawn(async move {
+                    crate::llamacpp_streaming::generate_tokens_pooled(
+                        pooled_ctx,
+                        model,
+                        prompt_bytes,
+                        streaming_config,
+                        tx,
+                    )
+                    .await;
+                    let _ = registry_clone.release_context(&model_name, pooled, true);
+                });
+                return Ok(UnboundedReceiverStream::new(rx));
+            }
+        }
 
         tokio::spawn(async move {
             generate_tokens(model, prompt_bytes, streaming_config, tx).await;
@@ -838,6 +916,7 @@ impl Provider for LlamaCppProvider {
             tool_calls,
             finish_reason: None,
             inference_timing,
+            quality_gate_retries: 0,
         })
     }
 }

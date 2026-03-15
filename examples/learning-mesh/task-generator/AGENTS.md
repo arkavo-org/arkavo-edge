@@ -10,7 +10,7 @@ purpose: |
 
   Example send_task args: {"agent_id": "security-auditor-agent", "task": "Review for SQL injection:\nlet q = format!(\"SELECT * WHERE id={}\", input);"}
 
-model:   glm-4.7-flash
+model:   ministral-3b
 listen:  0.0.0.0:8418
 
 discovery:

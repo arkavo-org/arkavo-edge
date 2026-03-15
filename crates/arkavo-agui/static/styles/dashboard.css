@@ -277,3 +277,166 @@
 .decision-model { font-weight: 600; }
 .decision-reason { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 .decision-cost { font-family: monospace; color: var(--warning); font-size: 11px; }
+
+/* Showcase Mode */
+#showcase-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    background: linear-gradient(90deg, #1a1a2e, #16213e, #0f3460);
+    color: #4a9eff; text-align: center; padding: 6px 0;
+    font-size: 13px; font-weight: 700; letter-spacing: 3px;
+    border-bottom: 2px solid #4a9eff;
+}
+#showcase-banner .showcase-dot {
+    display: inline-block; width: 8px; height: 8px;
+    background: #ff4444; border-radius: 50%; margin-right: 8px;
+    animation: showcase-pulse 2s infinite;
+}
+#showcase-banner .showcase-hint {
+    color: #555; font-weight: 400; font-size: 11px;
+    letter-spacing: 0; margin-left: 16px;
+}
+@keyframes showcase-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+#showcase-overlay {
+    position: fixed; bottom: 24px; right: 24px; z-index: 999;
+    background: rgba(20, 20, 30, 0.85); border: 1px solid #4a9eff;
+    border-radius: 8px; padding: 12px 20px; min-width: 200px;
+    backdrop-filter: blur(8px);
+}
+#showcase-overlay .showcase-view-label {
+    font-size: 18px; font-weight: 700; color: #e0e0e0;
+}
+#showcase-overlay .showcase-reason {
+    font-size: 12px; color: #4a9eff; margin-top: 4px;
+    max-height: 0; overflow: hidden; transition: max-height 0.3s;
+}
+#showcase-overlay .showcase-reason.active {
+    max-height: 40px;
+}
+#showcase-overlay.transition {
+    animation: showcase-slide 0.4s ease-out;
+}
+@keyframes showcase-slide {
+    0% { transform: translateX(20px); opacity: 0; }
+    100% { transform: translateX(0); opacity: 1; }
+}
+
+.showcase-mode header { margin-top: 28px; }
+.showcase-mode .nav-sidebar { padding-top: 28px; }
+
+/* Telemetry dashboard */
+.subsystem-bar {
+    height: 28px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    margin-bottom: 8px;
+}
+
+.subsystem-bar-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: #000;
+    transition: width 0.3s;
+}
+
+.subsystem-bar-segment.router { background: var(--accent); }
+.subsystem-bar-segment.conductor { background: var(--warning); }
+.subsystem-bar-segment.mcp { background: var(--success); }
+.subsystem-bar-segment.inference { background: var(--error); }
+
+.subsystem-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.subsystem-legend-item::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.subsystem-legend-item.router::before { background: var(--accent); }
+.subsystem-legend-item.conductor::before { background: var(--warning); }
+.subsystem-legend-item.mcp::before { background: var(--success); }
+.subsystem-legend-item.inference::before { background: var(--error); }
+
+.subsystem-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 16px;
+}
+
+.subsystem-table th {
+    text-align: left;
+    padding: 6px 10px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+
+.subsystem-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.subsystem-table td.mono { font-family: monospace; }
+
+.sparkline-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.sparkline-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.sparkline-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+}
+
+.sparkline-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: monospace;
+    margin-top: 4px;
+}
+
+.telemetry-sparkline { width: 100%; height: 32px; }
+
+.recent-events { max-height: 300px; overflow-y: auto; }
+
+/* Performance section in health panel */
+.perf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+}

@@ -77,26 +77,36 @@ pub(super) async fn run_tool_loop(
             }
         }
 
+        // Execution iterations (1+) use a stripped inference profile:
+        // temp 0.1, thinking off, max 200 tokens, 10s timeout.
+        // Planning iterations (0) use full reasoning with model defaults.
+        let is_execution = iteration > 0;
+
         // Context-aware timeout scaled by model generation speed.
         // Benchmarked TG speeds: 0.8B=170t/s, 3B=136t/s, 9B=50t/s, 27B=14t/s.
         // Formula: base covers ~500 token response + prompt eval overhead.
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
-        let (base_timeout, max_timeout) = match model_hint {
-            Some(h) if h.size_bytes() >= 5_000_000_000 => (180u64, 300u64), // 8B+ (~50 t/s), allow GPU sharing
-            _ => (90u64, 180u64),
-        };
-        let timeout_secs = if context_tokens <= 2000 {
-            base_timeout
+        let timeout_secs = if is_execution {
+            30 // Execution tool call: stripped profile, allows for memory bandwidth contention
         } else {
-            let extra = ((context_tokens - 2000) / 500) as u64;
-            (base_timeout + extra).min(max_timeout)
+            let (base_timeout, max_timeout) = match model_hint {
+                Some(h) if h.size_bytes() >= 5_000_000_000 => (180u64, 300u64),
+                _ => (90u64, 180u64),
+            };
+            if context_tokens <= 2000 {
+                base_timeout
+            } else {
+                let extra = ((context_tokens - 2000) / 500) as u64;
+                (base_timeout + extra).min(max_timeout)
+            }
         };
 
         let msg_count = messages.len();
         let largest_msg = messages.iter().map(|m| m.content.len()).max().unwrap_or(0);
         info!(
             iteration = iteration + 1,
+            is_execution,
             msg_count,
             context_chars,
             context_tokens,
@@ -107,22 +117,40 @@ pub(super) async fn run_tool_loop(
         );
 
         let inference_start = std::time::Instant::now();
-        let response = match tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            router.route_with_tools_hinted(
-                task_content,
-                messages.clone(),
-                Some(registry_arc),
-                model_hint,
-            ),
-        )
-        .await
-        {
+        let timeout_dur = std::time::Duration::from_secs(timeout_secs);
+        let response = if is_execution {
+            tokio::time::timeout(
+                timeout_dur,
+                router.route_with_tools_execution(
+                    task_content,
+                    messages.clone(),
+                    Some(registry_arc),
+                    model_hint,
+                ),
+            )
+            .await
+        } else {
+            tokio::time::timeout(
+                timeout_dur,
+                router.route_with_tools_hinted(
+                    task_content,
+                    messages.clone(),
+                    Some(registry_arc),
+                    model_hint,
+                ),
+            )
+            .await
+        };
+        let response = match response {
             Ok(inner) => {
                 let inference_ms = inference_start.elapsed().as_millis();
                 info!(
                     iteration = iteration + 1,
-                    inference_ms, context_tokens, timeout_secs, "Tool loop: inference completed"
+                    is_execution,
+                    inference_ms,
+                    context_tokens,
+                    timeout_secs,
+                    "Tool loop: inference completed"
                 );
                 // Consume one inference from compute budget so specialists
                 // respect their per-window allocation and don't saturate the GPU.
@@ -130,7 +158,26 @@ pub(super) async fn run_tool_loop(
                     let mut b = budget.write().await;
                     b.consume_inference(context_tokens as u64, 0.0);
                 }
-                inner.map_err(|e| format!("Router failed: {e}"))?
+                match inner {
+                    Ok(resp) => {
+                        if resp.quality_gate_retries > 0 {
+                            info!(
+                                iteration = iteration + 1,
+                                retries = resp.quality_gate_retries,
+                                "Quality gate retries before success"
+                            );
+                        }
+                        resp
+                    }
+                    Err(e) => {
+                        warn!(
+                            iteration = iteration + 1,
+                            error = %e,
+                            "Tool loop inference error — breaking loop"
+                        );
+                        break;
+                    }
+                }
             }
             Err(_elapsed) => {
                 warn!(
@@ -260,7 +307,13 @@ pub(super) async fn run_tool_loop(
 
         // Large tool results (status dumps, state queries) get distilled by a
         // small fast model so the main model receives only noteworthy items.
-        let result_to_append = if tool_results_text.len() > SMALL_MODEL_SUMMARIZE_THRESHOLD {
+        // Skip distillation when the result fits comfortably in the context
+        // budget — the 10s timeout adds unacceptable latency to game loops.
+        let current_context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        let projected_with_result = current_context_chars + tool_results_text.len();
+        let needs_distillation = tool_results_text.len() > SMALL_MODEL_SUMMARIZE_THRESHOLD
+            && projected_with_result > char_budget * 40 / 100;
+        let result_to_append = if needs_distillation {
             match distill_with_small_model(router, &tool_results_text).await {
                 Some(summary) => {
                     info!(
@@ -272,12 +325,9 @@ pub(super) async fn run_tool_loop(
                 }
                 None => {
                     // Fallback to structural summarization
-                    let current_context_chars: usize =
-                        messages.iter().map(|m| m.content.len()).sum();
-                    let projected = current_context_chars + tool_results_text.len();
-                    let summarized = if projected > char_budget * 80 / 100 {
+                    let summarized = if projected_with_result > char_budget * 80 / 100 {
                         summarize_tool_results(&tool_result_parts, 500)
-                    } else if projected > char_budget * 60 / 100 {
+                    } else if projected_with_result > char_budget * 60 / 100 {
                         summarize_tool_results(&tool_result_parts, 1500)
                     } else {
                         tool_results_text
@@ -285,7 +335,7 @@ pub(super) async fn run_tool_loop(
                     info!(
                         raw_chars = raw_result_chars,
                         summarized_chars = summarized.len(),
-                        projected_context = projected,
+                        projected_context = projected_with_result,
                         char_budget,
                         "Tool results: distillation failed, structural fallback"
                     );
@@ -516,13 +566,13 @@ const SMALL_MODEL_SUMMARIZE_THRESHOLD: usize = 1500;
 /// Use the smallest available local model to distill large tool results into
 /// a brief summary of noteworthy items. Returns `None` if no small model is
 /// available, letting the caller fall back to structural summarization.
+///
+/// Uses `router.route_fast()` which acquires the synthesis semaphore,
+/// serializing with other inference calls to avoid GPU/KV-cache contention.
 pub(super) async fn distill_with_small_model(
     router: &Arc<arkavo_router::Router>,
     raw_results: &str,
 ) -> Option<String> {
-    let small_model = arkavo_router::ModelChoice::LocalQwen3;
-    let provider = router.get_provider(&small_model).await.ok()?;
-
     // Cap input to the small model — it has a limited context window
     let truncated: String = raw_results.chars().take(3000).collect();
 
@@ -537,18 +587,28 @@ pub(super) async fn distill_with_small_model(
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        provider.complete(messages),
+        router.route_fast("distill tool results", messages),
     )
     .await
     {
-        Ok(Ok(summary)) if !summary.is_empty() => {
-            info!(
-                raw_len = raw_results.len(),
-                summary_len = summary.len(),
-                "Small model distilled tool results"
-            );
-            Some(summary)
-        }
+        Ok(Ok(stream)) => match stream.complete().await {
+            Ok(response) if !response.content.is_empty() => {
+                info!(
+                    raw_len = raw_results.len(),
+                    summary_len = response.content.len(),
+                    "Small model distilled tool results"
+                );
+                Some(response.content)
+            }
+            Ok(_) => {
+                debug!("Small model distillation returned empty");
+                None
+            }
+            Err(e) => {
+                debug!("Small model distillation stream failed: {e}");
+                None
+            }
+        },
         Ok(Err(e)) => {
             debug!("Small model distillation failed: {e}");
             None
@@ -663,6 +723,15 @@ async fn apply_reward_correction(router: &Arc<arkavo_router::Router>, reward_sig
         .model_learning()
         .immediate_update(&model_name, &feedback)
         .await;
+
+    // Track sustained negative rewards separately from cooldowns so the
+    // model hint can be released after HINT_OVERRIDE_THRESHOLD consecutive
+    // negative-reward ticks (availability cooldowns are cleared on success).
+    if avg_reward < -0.3 {
+        router.record_reward_failure(&model_name).await;
+    } else if avg_reward > 0.0 {
+        router.clear_reward_failure(&model_name).await;
+    }
 }
 
 /// Detect semantic failures in tool results that arrive as successful RPC

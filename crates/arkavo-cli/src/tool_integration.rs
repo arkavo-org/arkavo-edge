@@ -319,6 +319,7 @@ pub async fn process_with_tools(
                 tool_calls: result.tool_calls,
                 finish_reason: None,
                 inference_timing: None,
+                quality_gate_retries: 0,
             }
         } else {
             // Subsequent iterations - use Thompson Sampling routing

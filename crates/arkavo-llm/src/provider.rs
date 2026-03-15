@@ -16,6 +16,8 @@ pub struct ProviderResponse {
     pub finish_reason: Option<String>,
     /// LLM inference timing from provider (prompt_eval_ms, generation_ms, n_p_eval, n_eval)
     pub inference_timing: Option<InferenceTiming>,
+    /// Number of quality gate retry attempts (0 = first attempt succeeded)
+    pub quality_gate_retries: u8,
 }
 
 /// Timing data from the LLM inference engine.
@@ -71,6 +73,7 @@ pub trait Provider: Send + Sync {
             tool_calls: Vec::new(),
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         })
     }
 
