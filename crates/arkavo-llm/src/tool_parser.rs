@@ -49,9 +49,9 @@ impl ToolParser {
     pub fn strip_fence_blocks(text: &str) -> String {
         // Match all three fence patterns used by parse_fence
         let patterns = [
-            r"```[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```tool\ncontent```
-            r"```\s*\n[a-z][a-z0-9_\-:]*\s*\n[\s\S]*?```", // ```\ntool\ncontent```
-            r"```[a-z][a-z0-9_\-:]*```",              // ```tool```
+            r"```[a-zA-Z][a-zA-Z0-9_\-:]*\s*\n[\s\S]*?```", // ```tool\ncontent```
+            r"```\s*\n[a-zA-Z][a-zA-Z0-9_\-:]*\s*\n[\s\S]*?```", // ```\ntool\ncontent```
+            r"```[a-zA-Z][a-zA-Z0-9_\-:]*```",              // ```tool```
         ];
         let combined = patterns.join("|");
 
@@ -276,7 +276,7 @@ impl ToolParser {
     /// and the key=value variant: `<function=tool_name>\n<parameter>{"key":"val"}</parameter>\n</function>`
     /// and named-parameter variant: `<function=tool_name>\n<parameter=key>value</parameter>\n</function>`
     fn parse_function_eq_format(xml: &str) -> Result<ParsedToolCall, ToolParseError> {
-        let re = Regex::new(r"<function=([a-zA-Z][a-zA-Z0-9_-]*)>")
+        let re = Regex::new(r"<function=([a-zA-Z][a-zA-Z0-9_\-:]*)>")
             .map_err(|e| ToolParseError::InvalidFormat(e.to_string()))?;
         let caps = re
             .captures(xml)
@@ -389,7 +389,7 @@ impl ToolParser {
 
         // Primary pattern: ```tool_name\n...content...\n```
         // Tool names allow lowercase letters, numbers, underscores, hyphens, and colons (for namespacing)
-        let primary_pattern = Regex::new(r"```([a-z][a-z0-9_\-:]*)\s*\n([\s\S]*?)```")
+        let primary_pattern = Regex::new(r"```([a-zA-Z][a-zA-Z0-9_\-:]*)\s*\n([\s\S]*?)```")
             .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
 
         for cap in primary_pattern.captures_iter(text) {
@@ -406,8 +406,9 @@ impl ToolParser {
         // Fallback pattern: ```\ntool_name\nkey: value\n```
         // Some models put empty fence then tool name on next line
         if calls.is_empty() {
-            let fallback_pattern = Regex::new(r"```\s*\n([a-z][a-z0-9_\-:]*)\s*\n([\s\S]*?)```")
-                .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
+            let fallback_pattern =
+                Regex::new(r"```\s*\n([a-zA-Z][a-zA-Z0-9_\-:]*)\s*\n([\s\S]*?)```")
+                    .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
 
             for cap in fallback_pattern.captures_iter(text) {
                 if let (Some(name), Some(content)) = (cap.get(1), cap.get(2)) {
@@ -424,7 +425,7 @@ impl ToolParser {
         // No-argument pattern: ```tool_name``` (no newline, no content)
         // Some models output just the tool name for tools with no required parameters
         if calls.is_empty() {
-            let no_arg_pattern = Regex::new(r"```([a-z][a-z0-9_\-:]*)```")
+            let no_arg_pattern = Regex::new(r"```([a-zA-Z][a-zA-Z0-9_\-:]*)```")
                 .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
 
             for cap in no_arg_pattern.captures_iter(text) {
@@ -919,6 +920,32 @@ Goodbye"#;
         assert!(result.contains("Goodbye"));
         assert!(!result.contains("tool1"));
         assert!(!result.contains("tool2"));
+    }
+
+    #[test]
+    fn test_parse_fence_camel_case_mcp_tool() {
+        let text = r#"<think>
+I should register as a controller first.
+</think>
+
+```game-rl:registerAgent
+AgentId: player1
+AgentType: Controller
+```
+"#;
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "game-rl:registerAgent");
+        assert_eq!(calls[0].arguments["AgentId"], "player1");
+        assert_eq!(calls[0].arguments["AgentType"], "Controller");
+    }
+
+    #[test]
+    fn test_parse_fence_camel_case_no_args() {
+        let text = "```episodeSummary```";
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "episodeSummary");
     }
 
     #[test]

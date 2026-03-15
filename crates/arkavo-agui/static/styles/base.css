@@ -103,6 +103,12 @@ header h1 { font-size: 18px; font-weight: 600; }
     line-height: 1;
 }
 
+.showcase-btn {
+    margin-top: auto;
+    border-top: 1px solid var(--border-color);
+}
+.showcase-mode .showcase-btn { color: #ff4444; }
+
 /* Layout */
 .main-container {
     flex: 1;

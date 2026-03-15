@@ -1290,6 +1290,7 @@ impl A2aServer {
                 let memory_guard = agent_memory.read().await;
                 let recent_actions = memory_guard.format_for_prompt();
                 let variety_warning = memory_guard.action_variety_warning();
+                let error_corrections = memory_guard.format_errors_for_prompt();
                 drop(memory_guard);
 
                 // Pre-fetch completed specialist responses so the commander
@@ -1370,7 +1371,7 @@ impl A2aServer {
                     "Begin your startup workflow now.".to_string()
                 } else {
                     format!(
-                        "{recent_actions}{variety_warning}{specialist_context}{dead_man_warning}\n\n\
+                        "{recent_actions}{variety_warning}{error_corrections}{specialist_context}{dead_man_warning}\n\n\
                          Tick {tick}. Follow your WORKFLOW.",
                     )
                 };

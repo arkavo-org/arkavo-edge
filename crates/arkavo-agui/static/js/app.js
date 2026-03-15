@@ -1,6 +1,9 @@
 "use strict";
 
 function routeEvent(event) {
+    // Notify showcase mode of incoming events for intelligent view switching
+    if (typeof showcaseOnEvent === 'function') showcaseOnEvent(event);
+
     switch (event.type) {
         case 'meshStatus':
             handleMeshStatus(event);
@@ -152,6 +155,11 @@ function showToast(message, severity) {
 // Bind event listeners (CSP blocks inline onclick)
 document.querySelectorAll('.nav-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { switchView(btn.dataset.view); });
+});
+
+var showcaseBtn = document.getElementById('showcase-toggle');
+if (showcaseBtn) showcaseBtn.addEventListener('click', function() {
+    if (typeof showcaseToggle === 'function') showcaseToggle();
 });
 
 var addTaskBtn = document.getElementById('add-task-btn');
