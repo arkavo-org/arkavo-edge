@@ -116,8 +116,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # DeltaNet fused kernel patches (PR #20091) target this commit
-          git checkout 244641955
+          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
+          git checkout d23355afc
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -230,8 +230,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # DeltaNet fused kernel patches (PR #20091) target this commit
-          git checkout 244641955
+          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
+          git checkout d23355afc
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -298,8 +298,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # DeltaNet fused kernel patches (PR #20091) target this commit
-          git checkout 244641955
+          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
+          git checkout d23355afc
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
@@ -418,8 +418,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # DeltaNet fused kernel patches (PR #20091) target this commit
-          git checkout 244641955
+          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
+          git checkout d23355afc
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -772,8 +772,8 @@ jobs:
           echo "Cloning llama.cpp for local inference support"
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          # DeltaNet fused kernel patches (PR #20091) target this commit
-          git checkout 244641955
+          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
+          git checkout d23355afc
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
