@@ -149,6 +149,7 @@ impl MeshTaskStrategy {
             }
         }
 
+        mdns.shutdown().ok();
         tracing::info!("Discovered {} agents via mDNS", agents.len());
         Ok(agents)
     }
