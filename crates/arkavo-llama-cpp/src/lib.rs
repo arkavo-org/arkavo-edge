@@ -22,6 +22,7 @@ mod stubs {
     pub fn gpu_status() -> GpuStatus {
         GpuStatus::Unavailable
     }
+    pub fn reset_gpu_status() {}
 }
 
 #[cfg(target_env = "musl")]
@@ -102,6 +103,13 @@ pub fn gpu_status() -> GpuStatus {
         1 => GpuStatus::Available,
         _ => GpuStatus::Unavailable,
     }
+}
+
+/// Reset GPU status to Unknown, allowing the next model/context creation
+/// to re-attempt GPU acceleration. Call this after a GPU fault recovery.
+#[cfg(not(target_env = "musl"))]
+pub fn reset_gpu_status() {
+    GPU_STATUS.store(0, Ordering::Relaxed);
 }
 
 // Custom log callback that filters based on log level and our debug flag
@@ -1874,5 +1882,17 @@ mod tests {
         let glm_config = DrySamplingConfig::for_glm();
         assert_eq!(glm_config.multiplier, 1.1); // GLM requires 1.1
         assert!(glm_config.is_enabled());
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn test_reset_gpu_status() {
+        // Set to failed
+        GPU_STATUS.store(2, Ordering::Relaxed);
+        assert_eq!(gpu_status(), GpuStatus::Unavailable);
+
+        // Reset should restore to Unknown (allowing retry)
+        reset_gpu_status();
+        assert_eq!(gpu_status(), GpuStatus::Unknown);
     }
 }

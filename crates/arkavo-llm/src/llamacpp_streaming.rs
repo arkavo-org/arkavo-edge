@@ -1,5 +1,6 @@
 #![allow(clippy::redundant_pub_crate)]
 
+use crate::gpu_fault::classify_gpu_fault;
 use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::ModelFormat;
@@ -261,24 +262,23 @@ pub(crate) async fn generate_tokens_pooled(
                 detection_buffer.push_str(s);
             }
 
-            if !config.additional_stops.is_empty() {
-                if config
+            if !config.additional_stops.is_empty()
+                && config
                     .additional_stops
                     .iter()
                     .any(|stop| detection_buffer.contains(stop))
-                {
-                    tracing::info!("Generation stopped at stop sequence");
-                    if !utf8_buffer.is_empty() {
-                        let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
-                        let _ = tx.send(Ok(StreamResponse {
-                            content: piece,
-                            reasoning_content: None,
-                            done: false,
-                            inference_timing: None,
-                        }));
-                    }
-                    break;
+            {
+                tracing::info!("Generation stopped at stop sequence");
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                        inference_timing: None,
+                    }));
                 }
+                break;
             }
 
             let token_bytes = token_to_bytes(vocab, token, false)
@@ -291,8 +291,8 @@ pub(crate) async fn generate_tokens_pooled(
             }
             tokens_generated += 1;
 
-            if !piece.is_empty() {
-                if tx
+            if !piece.is_empty()
+                && tx
                     .send(Ok(StreamResponse {
                         content: piece,
                         reasoning_content: None,
@@ -300,15 +300,14 @@ pub(crate) async fn generate_tokens_pooled(
                         inference_timing: None,
                     }))
                     .is_err()
-                {
-                    break;
-                }
+            {
+                break;
             }
 
             sampler.accept(token);
             let mut batch = batch_init_with_tokens(&[token], pos, true);
             decode_batch(&ctx, batch)
-                .map_err(|e| Error::Config(format!("Failed to decode token at pos {pos}: {e}")))?;
+                .map_err(|e| classify_decode_error(&format!("token at pos {pos}"), &e))?;
             batch_free(&mut batch);
             pos += 1;
 
@@ -332,6 +331,7 @@ pub(crate) async fn generate_tokens_pooled(
         }
 
         let perf = perf_context(&ctx);
+        drop(ctx);
         let timing = InferenceTiming {
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
@@ -602,7 +602,7 @@ pub(crate) async fn generate_tokens_with_context(
                 batch_init_with_tokens(&[token], pos, true)
             };
             decode_batch(&ctx, batch)
-                .map_err(|e| Error::Config(format!("Failed to decode token at pos {pos}: {e}")))?;
+                .map_err(|e| classify_decode_error(&format!("token at pos {pos}"), &e))?;
             batch_free(&mut batch);
 
             pos += 1;
@@ -655,6 +655,19 @@ pub(crate) async fn generate_tokens_with_context(
     }
 }
 
+/// Classify a decode_batch error as either a GPU fault or a generic config error.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn classify_decode_error(context: &str, raw: &str) -> Error {
+    if let Some(kind) = classify_gpu_fault(raw) {
+        Error::GpuFault {
+            kind: format!("{kind}"),
+            message: format!("{context}: {raw}"),
+        }
+    } else {
+        Error::Config(format!("{context}: {raw}"))
+    }
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> {
     if is_debug() {
@@ -679,13 +692,12 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
             let is_last_chunk = (i + 1) * chunk_size >= input_tokens.len();
             let batch = batch_get_one_with_offset(chunk, pos_offset, is_last_chunk);
             decode_batch(ctx, batch)
-                .map_err(|e| Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e)))?;
+                .map_err(|e| classify_decode_error(&format!("chunk {}", i + 1), &e))?;
             pos_offset += i32::try_from(chunk.len()).unwrap_or(i32::MAX);
         }
     } else {
         let batch = batch_get_one_with_logits(input_tokens, true);
-        decode_batch(ctx, batch)
-            .map_err(|e| Error::Config(format!("Failed to decode input: {e}")))?;
+        decode_batch(ctx, batch).map_err(|e| classify_decode_error("input batch", &e))?;
     }
 
     if is_debug() {
@@ -890,5 +902,21 @@ mod tests {
         let text = "Good response<|im_start|>user\nBad self-prompt";
         let pos = detect_self_prompting(text, ModelFormat::Qwen3).unwrap();
         assert_eq!(pos, "Good response".len());
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_error_gpu_fault() {
+        let err =
+            super::classify_decode_error("token at pos 42", "llama_decode failed with code: -3");
+        assert!(matches!(err, crate::Error::GpuFault { .. }));
+        assert!(err.to_string().contains("MetalKill"));
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_error_generic() {
+        let err = super::classify_decode_error("token at pos 42", "some other error");
+        assert!(matches!(err, crate::Error::Config(_)));
     }
 }

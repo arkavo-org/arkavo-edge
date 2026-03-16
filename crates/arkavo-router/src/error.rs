@@ -56,4 +56,39 @@ pub enum Error {
     CriticRejected { failures: Vec<String> },
 }
 
+impl Error {
+    /// Whether the underlying cause is a GPU fault (Metal InnocentVictim, etc.)
+    pub fn is_gpu_fault(&self) -> bool {
+        matches!(self, Error::Provider(e) if e.is_gpu_fault())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gpu_fault_propagates_through_provider() {
+        let llm_err = arkavo_llm::Error::GpuFault {
+            kind: "MetalKill".to_string(),
+            message: "code: -3".to_string(),
+        };
+        let router_err = Error::Provider(llm_err);
+        assert!(router_err.is_gpu_fault());
+    }
+
+    #[test]
+    fn test_non_gpu_provider_error() {
+        let llm_err = arkavo_llm::Error::Config("test".to_string());
+        let router_err = Error::Provider(llm_err);
+        assert!(!router_err.is_gpu_fault());
+    }
+
+    #[test]
+    fn test_non_provider_error_not_gpu_fault() {
+        let err = Error::Config("test".to_string());
+        assert!(!err.is_gpu_fault());
+    }
+}

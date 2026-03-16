@@ -170,11 +170,35 @@ pub(super) async fn run_tool_loop(
                         resp
                     }
                     Err(e) => {
-                        warn!(
-                            iteration = iteration + 1,
-                            error = %e,
-                            "Tool loop inference error — breaking loop"
-                        );
+                        if e.is_gpu_fault() {
+                            warn!(
+                                iteration = iteration + 1,
+                                error = %e,
+                                "GPU fault during inference — recording negative feedback"
+                            );
+                            let faulted_model = router
+                                .last_routed_model()
+                                .or_else(|| model_hint.map(|h| h.name().to_string()));
+                            if let Some(model_name) = faulted_model {
+                                let feedback = BurstFeedback::failure(
+                                    uuid::Uuid::new_v4(),
+                                    "gpu_fault".to_string(),
+                                    0,
+                                )
+                                .with_quality(0.0);
+                                router
+                                    .model_learning()
+                                    .immediate_update(&model_name, &feedback)
+                                    .await;
+                                router.record_quality_cooldown(&model_name).await;
+                            }
+                        } else {
+                            warn!(
+                                iteration = iteration + 1,
+                                error = %e,
+                                "Tool loop inference error — breaking loop"
+                            );
+                        }
                         break;
                     }
                 }

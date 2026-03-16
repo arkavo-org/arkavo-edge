@@ -1064,6 +1064,39 @@ impl A2aServer {
             });
         }
 
+        // Create shared task context for chat — updated from ToolMemory (recent actions + last observed state)
+        let task_context: Arc<tokio::sync::RwLock<String>> =
+            Arc::new(tokio::sync::RwLock::new(String::new()));
+        {
+            let tc = task_context.clone();
+            let agent_memory = self.agent_memory.clone();
+            tokio::spawn(async move {
+                loop {
+                    let memory = agent_memory.read().await;
+                    let mut ctx = String::new();
+
+                    // Include last observed state (colony/environment state)
+                    if let Some(state) = memory.last_observe_full() {
+                        use std::fmt::Write;
+                        let _ = write!(ctx, "## Current Observed State\n{state}\n");
+                    }
+
+                    // Include recent tool actions
+                    let actions = memory.format_for_prompt();
+                    if !actions.is_empty() {
+                        ctx.push_str(&actions);
+                    }
+
+                    drop(memory);
+
+                    // Cap to avoid exceeding context limits
+                    ctx.truncate(4096);
+                    *tc.write().await = ctx;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            });
+        }
+
         let chat_sessions = if let Some(router_instance) = router.clone() {
             info!(
                 "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
@@ -1076,6 +1109,7 @@ impl A2aServer {
                 self.buffer_config.clone(),
             );
             mgr.set_learning_context(learning_context.clone());
+            mgr.set_task_context(task_context.clone());
 
             // Inject agent purpose from AGENTS.md as system prompt for chat context
             {
@@ -1254,6 +1288,8 @@ impl A2aServer {
             let mut consecutive_no_action_ticks: u32 = 0;
             let mut last_broadcast_tick: u64 = 0;
             let mut consecutive_timeouts: u32 = 0;
+            let mut last_tick_prompt_hash: u64 = 0;
+            let mut consecutive_duplicate_prompts: u32 = 0;
             loop {
                 tick += 1;
                 orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
@@ -1376,6 +1412,44 @@ impl A2aServer {
                     )
                 };
 
+                // Task-level deduplication: skip tick when the context hasn't
+                // changed AND the agent hasn't taken action. Hash the content
+                // components (actions, specialist responses, warnings) but NOT
+                // the tick counter, which changes every cycle.
+                let prompt_hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    recent_actions.hash(&mut hasher);
+                    specialist_context.hash(&mut hasher);
+                    error_corrections.hash(&mut hasher);
+                    // Hash dead-man warning category (not exact text with tick count)
+                    consecutive_no_action_ticks.min(5).hash(&mut hasher);
+                    hasher.finish()
+                };
+                if prompt_hash == last_tick_prompt_hash && consecutive_no_action_ticks >= 2 {
+                    consecutive_duplicate_prompts += 1;
+                    // Allow through every 5th duplicate to give the agent a chance
+                    // to retry with the same context (model may produce different output)
+                    if !consecutive_duplicate_prompts.is_multiple_of(5) {
+                        info!(
+                            "Orchestrator tick {tick}: skipping duplicate prompt \
+                             ({consecutive_duplicate_prompts} consecutive, \
+                             no action for {consecutive_no_action_ticks} ticks)"
+                        );
+                        let tick_interval = match consecutive_timeouts {
+                            0 => 5,
+                            1 => 15,
+                            2 => 30,
+                            _ => 60,
+                        };
+                        tokio::time::sleep(std::time::Duration::from_secs(tick_interval)).await;
+                        continue;
+                    }
+                } else {
+                    consecutive_duplicate_prompts = 0;
+                }
+                last_tick_prompt_hash = prompt_hash;
+
                 info!("Orchestrator tick {tick}: executing cycle");
                 let start = std::time::Instant::now();
 
@@ -1469,6 +1543,7 @@ impl A2aServer {
 
                         if had_action {
                             consecutive_no_action_ticks = 0;
+                            consecutive_duplicate_prompts = 0;
                         } else {
                             consecutive_no_action_ticks += 1;
                             if consecutive_no_action_ticks >= 3 {
@@ -1942,6 +2017,119 @@ mod broadcast_tests {
         let per_agent = compute_per_agent_bytes_static(total_ram, "glm-4.7-flash", 10);
         // Should hit the 512MB floor
         assert_eq!(per_agent, 512 * 1024 * 1024);
+    }
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    /// Hash context components the same way the orchestrator does:
+    /// actions + specialist context + errors + dead-man category (not tick number)
+    fn context_hash(actions: &str, specialist: &str, errors: &str, no_action_ticks: u32) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        actions.hash(&mut hasher);
+        specialist.hash(&mut hasher);
+        errors.hash(&mut hasher);
+        no_action_ticks.min(5).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn test_same_context_different_ticks_same_hash() {
+        let h1 = context_hash("action-a: OK", "", "", 3);
+        let h2 = context_hash("action-a: OK", "", "", 3);
+        assert_eq!(h1, h2, "identical context must produce identical hash");
+    }
+
+    #[test]
+    fn test_different_actions_different_hash() {
+        let h1 = context_hash("action-a: OK", "", "", 3);
+        let h2 = context_hash("action-b: started", "", "", 3);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_specialist_response_changes_hash() {
+        let h1 = context_hash("action-a: OK", "", "", 5);
+        let h2 = context_hash("action-a: OK", "peer-1: new recommendation", "", 5);
+        assert_ne!(h1, h2, "new specialist advice must change hash");
+    }
+
+    #[test]
+    fn test_dead_man_category_caps_at_5() {
+        // Ticks 5, 6, 7... all hash the same (capped at 5)
+        let h5 = context_hash("", "", "", 5);
+        let h6 = context_hash("", "", "", 6);
+        let h99 = context_hash("", "", "", 99);
+        assert_eq!(h5, h6);
+        assert_eq!(h5, h99);
+    }
+
+    #[test]
+    fn test_dedup_logic_skips_when_stuck() {
+        let mut last_hash: u64 = 0;
+        let mut consecutive_dupes: u32 = 0;
+        let consecutive_no_action: u32 = 3;
+        let mut executed = Vec::new();
+
+        for tick in 1..=10 {
+            let hash = context_hash("action-a: status OK", "", "", consecutive_no_action);
+
+            if hash == last_hash && consecutive_no_action >= 2 {
+                consecutive_dupes += 1;
+                if consecutive_dupes % 5 != 0 {
+                    continue;
+                }
+            } else {
+                consecutive_dupes = 0;
+            }
+            last_hash = hash;
+            executed.push(tick);
+        }
+
+        // Tick 1 executes (first, no previous hash)
+        // Ticks 2-5 skipped (duplicate context, no action)
+        // Tick 6 executes (every 5th allowed through)
+        assert_eq!(executed, vec![1, 6]);
+    }
+
+    #[test]
+    fn test_dedup_resets_on_new_specialist_advice() {
+        let mut last_hash: u64 = 0;
+        let mut consecutive_dupes: u32 = 0;
+        let consecutive_no_action: u32 = 5;
+        let mut executed = Vec::new();
+
+        let contexts: Vec<(&str, &str)> = vec![
+            ("action-a: OK", ""),
+            ("action-a: OK", ""),
+            ("action-a: OK", ""),
+            ("action-a: OK", "peer-1: new recommendation"), // new specialist advice
+            ("action-a: OK", "peer-1: new recommendation"),
+            ("action-a: OK", "peer-1: new recommendation"),
+        ];
+
+        for (i, (actions, specialist)) in contexts.iter().enumerate() {
+            let hash = context_hash(actions, specialist, "", consecutive_no_action);
+            if hash == last_hash && consecutive_no_action >= 2 {
+                consecutive_dupes += 1;
+                if consecutive_dupes % 5 != 0 {
+                    continue;
+                }
+            } else {
+                consecutive_dupes = 0;
+            }
+            last_hash = hash;
+            executed.push(i);
+        }
+
+        // tick 0: first context — executes
+        // tick 1-2: duplicate — skipped
+        // tick 3: new specialist advice — executes (reset)
+        // tick 4-5: duplicate — skipped
+        assert_eq!(executed, vec![0, 3]);
     }
 }
 

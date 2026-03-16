@@ -189,7 +189,7 @@ pub async fn handle_request_mesh_status(
             let _ = tx.send(event).await;
         }
 
-        // Poll per-agent process metrics (RSS, CPU)
+        // Poll per-agent process metrics (RSS, CPU, subsystem timing)
         if let Ok(metrics_data) = conn.get_system_metrics().await {
             let event = AgUiEvent::AgentSystemMetrics {
                 agent_id: agent_id.clone(),
@@ -200,6 +200,34 @@ pub async fn handle_request_mesh_status(
                 available_ram_mb: metrics_data["available_ram_mb"].as_f64(),
             };
             let _ = tx.send(event).await;
+
+            // Forward agent subsystem timing into the gateway's global registry
+            // so the MetricsSampler includes it in telemetry broadcasts.
+            if let Some(timing) = metrics_data.get("subsystem_timing") {
+                let registry = arkavo_observability::subsystem_timing::global_timing();
+                if let Some(ms) = timing.get("routerDecisionAvgMs").and_then(|v| v.as_f64())
+                    && ms > 0.0
+                {
+                    registry.router_decisions.record(ms as u64);
+                }
+                if let Some(ms) = timing
+                    .get("conductorOrchestrationAvgMs")
+                    .and_then(|v| v.as_f64())
+                    && ms > 0.0
+                {
+                    registry.conductor_orchestration.record(ms as u64);
+                }
+                if let Some(ms) = timing.get("mcpToolAvgMs").and_then(|v| v.as_f64())
+                    && ms > 0.0
+                {
+                    registry.mcp_tools.record(ms as u64);
+                }
+                if let Some(ms) = timing.get("inferenceAvgMs").and_then(|v| v.as_f64())
+                    && ms > 0.0
+                {
+                    registry.inference.record(ms as u64);
+                }
+            }
         }
     }
 
