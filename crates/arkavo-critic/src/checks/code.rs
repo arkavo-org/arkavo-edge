@@ -196,6 +196,7 @@ mod tests {
                 tool_calls: vec![],
                 finish_reason: None,
                 inference_timing: None,
+                quality_gate_retries: 0,
             },
             vec![],
         )

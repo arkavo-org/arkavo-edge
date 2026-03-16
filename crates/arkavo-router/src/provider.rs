@@ -124,6 +124,7 @@ impl super::Router {
                 })?;
 
             // Pre-warm the context pool so the first inference avoids allocation latency
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             if let Ok(ctx) = self.model_registry.acquire_fresh_context(registry_name) {
                 let _ = self
                     .model_registry

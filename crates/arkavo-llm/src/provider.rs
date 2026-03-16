@@ -7,7 +7,7 @@ use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Result, StreamResponse};
 
 /// Response from a provider that may include tool calls
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProviderResponse {
     pub content: String,
     /// Reasoning/thinking content from models with thinking mode (e.g., DeepSeek V3.2-Speciale)

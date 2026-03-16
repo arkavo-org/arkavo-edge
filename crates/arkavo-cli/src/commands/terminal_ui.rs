@@ -182,8 +182,6 @@ impl TaskUI for TerminalUI {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_orchestrator::ModelCapability;
-    use std::path::PathBuf;
 
     #[test]
     fn test_terminal_ui_creation() {
