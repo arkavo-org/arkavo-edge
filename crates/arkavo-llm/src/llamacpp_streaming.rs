@@ -1,5 +1,6 @@
 #![allow(clippy::redundant_pub_crate)]
 
+use crate::gpu_fault::classify_gpu_fault;
 use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::ModelFormat;
@@ -164,6 +165,201 @@ pub(crate) async fn generate_tokens(
         ContextReuseOptions::default(),
     )
     .await;
+}
+
+/// Generate tokens using a pre-allocated pooled context.
+/// Avoids context allocation contention by reusing an existing KV cache.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub(crate) async fn generate_tokens_pooled(
+    pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
+    model: Arc<LlamaModel>,
+    prompt_bytes: Vec<u8>,
+    config: StreamingConfig,
+    tx: UnboundedSender<Result<StreamResponse>>,
+) {
+    let start_time = Instant::now();
+    let mut first_token_time: Option<Instant> = None;
+    let mut tokens_generated = 0u32;
+
+    let result = async {
+        let ctx = pooled_ctx
+            .lock()
+            .map_err(|_| Error::Config("Context mutex poisoned".to_string()))?;
+        // Reset KV cache and position tracking for fresh inference.
+        // clear_kv_cache() is a no-op; use the memory API to actually reset.
+        ctx.get_memory().clear(true);
+
+        let vocab = model.get_vocab();
+        let input_tokens = tokenize_with_model(vocab, &prompt_bytes)
+            .map_err(|e| Error::Config(format!("Failed to tokenize: {e}")))?;
+
+        tracing::info!("Input tokenized to {} tokens (pooled)", input_tokens.len());
+
+        let sampler = if config.use_dry_sampling {
+            let dry_config = DrySamplingConfig::for_glm();
+            let vocab = model.get_vocab();
+            #[allow(clippy::cast_possible_wrap)]
+            let n_ctx_train = model.get_trained_context_size() as i32;
+            unsafe {
+                create_sampler_chain_with_dry(
+                    config.temperature,
+                    config.top_p,
+                    config.top_k,
+                    config.seed,
+                    dry_config,
+                    vocab,
+                    n_ctx_train,
+                )
+            }
+            .map_err(|e| Error::Config(format!("Failed to create sampler with dry: {e}")))?
+        } else {
+            create_sampler_chain(config.temperature, config.top_p, config.top_k, config.seed)
+                .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
+        };
+
+        if let Some(ref grammar_str) = config.grammar {
+            let vocab = model.get_vocab();
+            if let Some(ref triggers) = config.grammar_triggers {
+                let trigger_refs: Vec<&str> = triggers.iter().map(|s| s.as_str()).collect();
+                unsafe {
+                    sampler.add_grammar_lazy(vocab, grammar_str, "root", &trigger_refs);
+                }
+            } else {
+                unsafe {
+                    sampler.add_grammar(vocab, grammar_str, "root");
+                }
+            }
+        }
+
+        let eos_token = model.get_eos_token();
+        process_input_tokens(&ctx, &input_tokens)?;
+        let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0);
+        let max_generation = std::cmp::min(config.max_tokens, 30000);
+        let mut utf8_buffer: Vec<u8> = Vec::new();
+        let mut detection_buffer = String::new();
+
+        for _ in 0..max_generation {
+            validate_logits(&ctx)?;
+            let token = sampler.sample(&ctx, -1);
+
+            if token == eos_token {
+                tracing::info!("Generation stopped at EOS token");
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                        inference_timing: None,
+                    }));
+                }
+                break;
+            }
+
+            let special_bytes = token_to_bytes(vocab, token, true)
+                .map_err(|e| Error::Config(format!("Failed to decode token (special): {e}")))?;
+            if let Ok(s) = std::str::from_utf8(&special_bytes) {
+                detection_buffer.push_str(s);
+            }
+
+            if !config.additional_stops.is_empty()
+                && config
+                    .additional_stops
+                    .iter()
+                    .any(|stop| detection_buffer.contains(stop))
+            {
+                tracing::info!("Generation stopped at stop sequence");
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                        inference_timing: None,
+                    }));
+                }
+                break;
+            }
+
+            let token_bytes = token_to_bytes(vocab, token, false)
+                .map_err(|e| Error::Config(format!("Failed to decode token: {e}")))?;
+            utf8_buffer.extend_from_slice(&token_bytes);
+            let piece = extract_valid_utf8(&mut utf8_buffer);
+
+            if first_token_time.is_none() && !piece.is_empty() {
+                first_token_time = Some(Instant::now());
+            }
+            tokens_generated += 1;
+
+            if !piece.is_empty()
+                && tx
+                    .send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                        inference_timing: None,
+                    }))
+                    .is_err()
+            {
+                break;
+            }
+
+            sampler.accept(token);
+            let mut batch = batch_init_with_tokens(&[token], pos, true);
+            decode_batch(&ctx, batch)
+                .map_err(|e| classify_decode_error(&format!("token at pos {pos}"), &e))?;
+            batch_free(&mut batch);
+            pos += 1;
+
+            let total_tokens = input_tokens.len() + tokens_generated as usize;
+            if total_tokens >= 32000 {
+                tracing::info!(
+                    "Generation stopped at context limit: {} tokens",
+                    total_tokens
+                );
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                        inference_timing: None,
+                    }));
+                }
+                break;
+            }
+        }
+
+        let perf = perf_context(&ctx);
+        drop(ctx);
+        let timing = InferenceTiming {
+            prompt_eval_ms: perf.t_p_eval_ms,
+            generation_ms: perf.t_eval_ms,
+            n_prompt_eval: perf.n_p_eval.max(0) as u32,
+            n_eval: perf.n_eval.max(0) as u32,
+        };
+        Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
+            tokens_generated,
+            first_token_time,
+            timing,
+        ))
+    }
+    .await;
+
+    match result {
+        Ok((tokens_generated, first_token_time, timing)) => {
+            send_metrics(start_time, first_token_time, tokens_generated, &tx);
+            let _ = tx.send(Ok(StreamResponse {
+                content: String::new(),
+                reasoning_content: None,
+                done: true,
+                inference_timing: Some(timing),
+            }));
+        }
+        Err(e) => {
+            let _ = tx.send(Err(e));
+        }
+    }
 }
 
 /// Generate tokens with optional context reuse for multi-turn conversations
@@ -406,7 +602,7 @@ pub(crate) async fn generate_tokens_with_context(
                 batch_init_with_tokens(&[token], pos, true)
             };
             decode_batch(&ctx, batch)
-                .map_err(|e| Error::Config(format!("Failed to decode token at pos {pos}: {e}")))?;
+                .map_err(|e| classify_decode_error(&format!("token at pos {pos}"), &e))?;
             batch_free(&mut batch);
 
             pos += 1;
@@ -459,6 +655,19 @@ pub(crate) async fn generate_tokens_with_context(
     }
 }
 
+/// Classify a decode_batch error as either a GPU fault or a generic config error.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn classify_decode_error(context: &str, raw: &str) -> Error {
+    if let Some(kind) = classify_gpu_fault(raw) {
+        Error::GpuFault {
+            kind: format!("{kind}"),
+            message: format!("{context}: {raw}"),
+        }
+    } else {
+        Error::Config(format!("{context}: {raw}"))
+    }
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> {
     if is_debug() {
@@ -483,13 +692,12 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
             let is_last_chunk = (i + 1) * chunk_size >= input_tokens.len();
             let batch = batch_get_one_with_offset(chunk, pos_offset, is_last_chunk);
             decode_batch(ctx, batch)
-                .map_err(|e| Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e)))?;
+                .map_err(|e| classify_decode_error(&format!("chunk {}", i + 1), &e))?;
             pos_offset += i32::try_from(chunk.len()).unwrap_or(i32::MAX);
         }
     } else {
         let batch = batch_get_one_with_logits(input_tokens, true);
-        decode_batch(ctx, batch)
-            .map_err(|e| Error::Config(format!("Failed to decode input: {e}")))?;
+        decode_batch(ctx, batch).map_err(|e| classify_decode_error("input batch", &e))?;
     }
 
     if is_debug() {
@@ -694,5 +902,21 @@ mod tests {
         let text = "Good response<|im_start|>user\nBad self-prompt";
         let pos = detect_self_prompting(text, ModelFormat::Qwen3).unwrap();
         assert_eq!(pos, "Good response".len());
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_error_gpu_fault() {
+        let err =
+            super::classify_decode_error("token at pos 42", "llama_decode failed with code: -3");
+        assert!(matches!(err, crate::Error::GpuFault { .. }));
+        assert!(err.to_string().contains("MetalKill"));
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_error_generic() {
+        let err = super::classify_decode_error("token at pos 42", "some other error");
+        assert!(matches!(err, crate::Error::Config(_)));
     }
 }

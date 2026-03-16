@@ -1,0 +1,14 @@
+{
+    "tasks": [
+        {
+            "id": "evofabric-inline",
+            "category": "evofabric",
+            "prompt": "[evofabric] crates/arkavo-llm/src/llamacpp_provider.rs add #[inline] to is_small_model"
+        },
+        {
+            "id": "evofabric-must-use",
+            "category": "evofabric",
+            "prompt": "[evofabric] crates/arkavo-llm/src/llamacpp_provider.rs add #[must_use] to is_gpu_accelerated"
+        }
+    ]
+}

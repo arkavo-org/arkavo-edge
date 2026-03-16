@@ -726,6 +726,7 @@ impl Provider for AnthropicProvider {
             tool_calls,
             finish_reason: message.stop_reason,
             inference_timing: None,
+            quality_gate_retries: 0,
         })
     }
 }

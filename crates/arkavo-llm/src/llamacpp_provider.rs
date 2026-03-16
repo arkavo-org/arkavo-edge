@@ -1,3 +1,4 @@
+use crate::gpu_fault::GpuCircuitBreaker;
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -94,6 +95,8 @@ pub struct LlamaCppProvider {
     mtmd_ctx: Option<Arc<MtmdContext>>,
     /// Optional conversation ID for context reuse
     conversation_id: Option<ConversationId>,
+    /// GPU fault circuit breaker for retry/fallback logic
+    gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -159,6 +162,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx,
             conversation_id: None,
+            gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
         })
     }
 
@@ -187,6 +191,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx: None,
             conversation_id: None,
+            gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
         })
     }
 
@@ -213,6 +218,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx: None,
             conversation_id: Some(conversation_id),
+            gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
         })
     }
 
@@ -406,12 +412,68 @@ impl LlamaCppProvider {
                         )
                     }
                     Err(e) => {
-                        tracing::warn!("Jinja template apply failed: {e}, falling back to legacy");
-                        let bytes = apply_chat_template_with_format(&llama_messages, true, format)
-                            .map_err(|e| {
-                                Error::Config(format!("Failed to apply chat template: {e}"))
-                            })?;
-                        (bytes, None, None, false, Vec::new())
+                        let err_str = e.clone();
+                        // Some templates (e.g. Ministral) reject system role entirely.
+                        // Retry with system messages converted to user messages.
+                        if err_str.contains("system") || err_str.contains("System") {
+                            tracing::info!(
+                                "Template rejects system role, converting to user prefix"
+                            );
+                            let fixed: Vec<Message> = messages
+                                .iter()
+                                .map(|m| {
+                                    if m.role == Role::System {
+                                        Message::user(format!(
+                                            "[System Instructions] {}",
+                                            m.content
+                                        ))
+                                    } else {
+                                        m.clone()
+                                    }
+                                })
+                                .collect();
+                            let (fixed_llama, _fixed_cstrings) =
+                                Self::messages_to_llama_chat_static(&fixed)?;
+                            let fixed_meta: Vec<ChatMessageMeta> = fixed
+                                .iter()
+                                .map(|m| ChatMessageMeta {
+                                    tool_call_id: m.tool_call_id.clone(),
+                                    tool_name: m.tool_name.clone(),
+                                })
+                                .collect();
+                            match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
+                                Ok(result) => (
+                                    result.prompt,
+                                    None,
+                                    None,
+                                    result.thinking_forced_open,
+                                    result.additional_stops,
+                                ),
+                                Err(e2) => {
+                                    tracing::warn!(
+                                        "Jinja retry also failed: {e2}, falling back to legacy"
+                                    );
+                                    let bytes =
+                                        apply_chat_template_with_format(&fixed_llama, true, format)
+                                            .map_err(|e| {
+                                                Error::Config(format!(
+                                                    "Failed to apply chat template: {e}"
+                                                ))
+                                            })?;
+                                    (bytes, None, None, false, Vec::new())
+                                }
+                            }
+                        } else {
+                            tracing::warn!(
+                                "Jinja template apply failed: {e}, falling back to legacy"
+                            );
+                            let bytes =
+                                apply_chat_template_with_format(&llama_messages, true, format)
+                                    .map_err(|e| {
+                                        Error::Config(format!("Failed to apply chat template: {e}"))
+                                    })?;
+                            (bytes, None, None, false, Vec::new())
+                        }
                     }
                 }
             }
@@ -456,6 +518,28 @@ impl LlamaCppProvider {
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
         };
+
+        // Try pooled context first (avoids context allocation contention).
+        // Falls back to fresh context if pool unavailable or exhausted.
+        if let Some(ref registry) = self.registry {
+            let model_name = self.name.clone();
+            if let Ok(pooled) = registry.acquire_fresh_context(&model_name) {
+                let pooled_ctx = pooled.context.clone();
+                let registry_clone = registry.clone();
+                tokio::spawn(async move {
+                    crate::llamacpp_streaming::generate_tokens_pooled(
+                        pooled_ctx,
+                        model,
+                        prompt_bytes,
+                        streaming_config,
+                        tx,
+                    )
+                    .await;
+                    let _ = registry_clone.release_context(&model_name, pooled, true);
+                });
+                return Ok(UnboundedReceiverStream::new(rx));
+            }
+        }
 
         tokio::spawn(async move {
             generate_tokens(model, prompt_bytes, streaming_config, tx).await;
@@ -517,30 +601,69 @@ impl LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             };
             &custom_provider
         } else {
             self
         };
 
-        let mut stream = provider.generate_streaming(messages)?;
-        let mut full_response = String::new();
-        let mut timing = None;
+        let mut attempt = 0u32;
+        loop {
+            let mut stream = provider.generate_streaming(messages.clone())?;
+            let mut full_response = String::new();
+            let mut timing = None;
+            let mut gpu_fault_err = None;
 
-        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
-            match chunk {
-                Ok(response) => {
-                    full_response.push_str(&response.content);
-                    if response.done {
-                        timing = response.inference_timing;
+            while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+                match chunk {
+                    Ok(response) => {
+                        full_response.push_str(&response.content);
+                        if response.done {
+                            timing = response.inference_timing;
+                            break;
+                        }
+                    }
+                    Err(e) if e.is_gpu_fault() => {
+                        gpu_fault_err = Some(e);
                         break;
                     }
+                    Err(e) => return Err(e),
                 }
-                Err(e) => return Err(e),
             }
-        }
 
-        Ok((full_response, timing))
+            if let Some(e) = gpu_fault_err {
+                let should_retry = {
+                    let mut breaker = self.gpu_breaker.lock().unwrap_or_else(|p| p.into_inner());
+                    breaker.record_fault();
+                    let retry = breaker.should_retry(attempt);
+                    if retry {
+                        Some(breaker.backoff_duration(attempt))
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(backoff) = should_retry {
+                    attempt += 1;
+                    tracing::warn!(
+                        attempt,
+                        error = %e,
+                        "GPU fault during inference, resetting GPU and retrying"
+                    );
+                    arkavo_llama_cpp::reset_gpu_status();
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                return Err(e);
+            }
+
+            if attempt > 0 {
+                let mut breaker = self.gpu_breaker.lock().unwrap_or_else(|p| p.into_inner());
+                breaker.reset();
+            }
+            return Ok((full_response, timing));
+        }
     }
 
     fn messages_to_llama_chat_static(
@@ -598,28 +721,68 @@ impl Provider for LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             };
             &custom_provider
         } else {
             self
         };
 
-        let mut stream = provider.generate_streaming(messages)?;
-        let mut full_response = String::new();
+        let mut attempt = 0u32;
+        loop {
+            let mut stream = provider.generate_streaming(messages.clone())?;
+            let mut full_response = String::new();
+            let mut gpu_fault_err = None;
 
-        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
-            match chunk {
-                Ok(response) => {
-                    full_response.push_str(&response.content);
-                    if response.done {
+            while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+                match chunk {
+                    Ok(response) => {
+                        full_response.push_str(&response.content);
+                        if response.done {
+                            break;
+                        }
+                    }
+                    Err(e) if e.is_gpu_fault() => {
+                        gpu_fault_err = Some(e);
                         break;
                     }
+                    Err(e) => return Err(e),
                 }
-                Err(e) => return Err(e),
             }
-        }
 
-        Ok(full_response)
+            if let Some(e) = gpu_fault_err {
+                let should_retry = {
+                    let mut breaker = self.gpu_breaker.lock().unwrap_or_else(|p| p.into_inner());
+                    breaker.record_fault();
+                    let retry = breaker.should_retry(attempt);
+                    if retry {
+                        Some(breaker.backoff_duration(attempt))
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(backoff) = should_retry {
+                    attempt += 1;
+                    tracing::warn!(
+                        attempt,
+                        error = %e,
+                        "GPU fault during inference, resetting GPU and retrying"
+                    );
+                    arkavo_llama_cpp::reset_gpu_status();
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                return Err(e);
+            }
+
+            // Successful — reset circuit breaker
+            if attempt > 0 {
+                let mut breaker = self.gpu_breaker.lock().unwrap_or_else(|p| p.into_inner());
+                breaker.reset();
+            }
+            return Ok(full_response);
+        }
     }
 
     async fn stream(
@@ -773,6 +936,7 @@ impl Provider for LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             };
             custom_provider
                 .complete_with_timing(modified_messages, max_tokens)
@@ -838,6 +1002,7 @@ impl Provider for LlamaCppProvider {
             tool_calls,
             finish_reason: None,
             inference_timing,
+            quality_gate_retries: 0,
         })
     }
 }

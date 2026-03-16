@@ -38,6 +38,21 @@ pub enum Error {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("GPU fault ({kind}): {message}")]
+    GpuFault { kind: String, message: String },
+}
+
+impl Error {
+    /// Whether this error represents a GPU fault that may be recoverable via retry.
+    pub fn is_gpu_fault(&self) -> bool {
+        matches!(self, Error::GpuFault { .. })
+    }
+
+    /// Whether this error is retryable (currently only GPU faults).
+    pub fn is_retryable(&self) -> bool {
+        self.is_gpu_fault()
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -99,5 +114,34 @@ mod tests {
 
         assert!(returns_result().is_ok());
         assert!(returns_error().is_err());
+    }
+
+    #[test]
+    fn test_gpu_fault_display() {
+        let err = Error::GpuFault {
+            kind: "MetalKill".to_string(),
+            message: "code: -3".to_string(),
+        };
+        assert_eq!(err.to_string(), "GPU fault (MetalKill): code: -3");
+    }
+
+    #[test]
+    fn test_gpu_fault_is_retryable() {
+        let gpu = Error::GpuFault {
+            kind: "MetalKill".to_string(),
+            message: "test".to_string(),
+        };
+        assert!(gpu.is_gpu_fault());
+        assert!(gpu.is_retryable());
+    }
+
+    #[test]
+    fn test_non_gpu_not_retryable() {
+        let config = Error::Config("test".to_string());
+        assert!(!config.is_gpu_fault());
+        assert!(!config.is_retryable());
+
+        let inference = Error::Inference("test".to_string());
+        assert!(!inference.is_retryable());
     }
 }

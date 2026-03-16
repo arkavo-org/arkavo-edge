@@ -148,6 +148,10 @@ pub struct Router {
     last_decision_trace: Arc<std::sync::RwLock<Option<learning::DecisionTrace>>>,
     /// Recent decision traces for UI dashboard (ring buffer, max 50)
     recent_traces: Arc<std::sync::RwLock<std::collections::VecDeque<learning::DecisionTrace>>>,
+    /// Consecutive negative-reward tick count per model. Unlike cooldown_consecutive
+    /// (reset on successful inference), this is only reset when rewards turn positive.
+    /// Used to trigger model hint release after sustained poor task quality.
+    reward_failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
 }
 
 impl Router {
@@ -187,6 +191,9 @@ impl Router {
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
             recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
+            reward_failure_counts: Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
 
@@ -226,6 +233,9 @@ impl Router {
             last_routed_model: Arc::new(std::sync::RwLock::new(None)),
             last_decision_trace: Arc::new(std::sync::RwLock::new(None)),
             recent_traces: Arc::new(std::sync::RwLock::new(std::collections::VecDeque::new())),
+            reward_failure_counts: Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
 
@@ -490,6 +500,33 @@ impl Router {
             .get(model_name)
             .map(|(_, count)| *count)
             .unwrap_or(0)
+    }
+
+    /// Record a negative-reward tick for a model. Unlike cooldown_consecutive,
+    /// this counter is only reset when rewards turn positive — not on successful inference.
+    pub async fn record_reward_failure(&self, model_name: &str) {
+        let mut counts = self.reward_failure_counts.write().await;
+        let count = counts.entry(model_name.to_string()).or_insert(0);
+        *count += 1;
+        tracing::info!(
+            model = model_name,
+            consecutive = *count,
+            "Reward failure recorded"
+        );
+    }
+
+    /// Clear the reward failure counter when rewards turn positive.
+    pub async fn clear_reward_failure(&self, model_name: &str) {
+        let mut counts = self.reward_failure_counts.write().await;
+        if counts.remove(model_name).is_some() {
+            tracing::info!(model = model_name, "Reward failure counter cleared");
+        }
+    }
+
+    /// Get the consecutive negative-reward tick count for a model.
+    pub async fn get_reward_failure_count(&self, model_name: &str) -> u32 {
+        let counts = self.reward_failure_counts.read().await;
+        counts.get(model_name).copied().unwrap_or(0)
     }
 
     /// Get model names currently on cooldown (expired entries are pruned)
@@ -877,6 +914,7 @@ impl Router {
             last_routed_model: self.last_routed_model.clone(),
             last_decision_trace: self.last_decision_trace.clone(),
             recent_traces: self.recent_traces.clone(),
+            reward_failure_counts: self.reward_failure_counts.clone(),
         })
     }
 

@@ -218,26 +218,66 @@ pub fn extract_tool_calls_from_text(content: &str) -> Vec<ParsedToolCall> {
 }
 
 /// Extract `tool_name{json}` or `tool_name{}` format (Ministral/Mistral models)
+///
+/// Handles nested JSON by counting brace depth, and supports namespaced tool
+/// names with colons (e.g. `game-rl:step{...}`).
 fn extract_curly_brace_tool_calls(content: &str) -> Option<Vec<ParsedToolCall>> {
-    let re = regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9_-]*)\{([^}]*)\}").ok()?;
+    let re = regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9_\-:]*)\{").ok()?;
     let mut calls = Vec::new();
 
-    for cap in re.captures_iter(content) {
-        let name = cap.get(1)?.as_str();
-        let body = cap.get(2)?.as_str().trim();
+    for mat in re.find_iter(content) {
+        let full = mat.as_str();
+        let name = &full[..full.len() - 1]; // strip trailing '{'
 
         // Skip common non-tool patterns
         if name.len() <= 2 || ["if", "for", "while", "match", "fn", "let", "var"].contains(&name) {
             continue;
         }
 
-        let args = if body.is_empty() {
-            serde_json::Value::Object(serde_json::Map::new())
-        } else {
-            // Try parsing as JSON object content: tool_name{"key": "val"}
-            serde_json::from_str(&format!("{{{body}}}"))
-                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
-        };
+        // Extract balanced JSON starting from the '{' at mat.end()-1
+        let brace_start = mat.end() - 1;
+        let bytes = content.as_bytes();
+        let mut depth = 0i32;
+        let mut end = brace_start;
+        let mut in_string = false;
+        let mut escape = false;
+
+        for (i, &b) in bytes.iter().enumerate().skip(brace_start) {
+            if escape {
+                escape = false;
+                continue;
+            }
+            if b == b'\\' && in_string {
+                escape = true;
+                continue;
+            }
+            if b == b'"' {
+                in_string = !in_string;
+                continue;
+            }
+            if in_string {
+                continue;
+            }
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if depth != 0 {
+            continue;
+        }
+
+        let json_str = &content[brace_start..=end];
+        let args: serde_json::Value = serde_json::from_str(json_str)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
 
         calls.push(ParsedToolCall {
             tool_name: name.to_string(),
@@ -635,6 +675,17 @@ echo "hello"
     fn test_curly_brace_skips_keywords() {
         assert!(extract_curly_brace_tool_calls("if{}").is_none());
         assert!(extract_curly_brace_tool_calls("fn{}").is_none());
+    }
+
+    #[test]
+    fn test_curly_brace_namespaced_nested_json() {
+        let input = r#"game-rl:step{"AgentId": "player1", "Action": {"Type": "SetWorkPriority", "ColonistId": "Sugar", "WorkType": "Doctor", "Priority": 1}}"#;
+        let calls = extract_curly_brace_tool_calls(input).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "game-rl:step");
+        assert_eq!(calls[0].arguments["AgentId"], "player1");
+        assert_eq!(calls[0].arguments["Action"]["Type"], "SetWorkPriority");
+        assert_eq!(calls[0].arguments["Action"]["Priority"], 1);
     }
 
     #[test]

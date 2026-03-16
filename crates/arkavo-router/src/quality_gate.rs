@@ -18,6 +18,22 @@ impl super::Router {
             .await
     }
 
+    /// Route for execution iterations — stripped profile for fast tool calls.
+    ///
+    /// Uses near-greedy temperature (0.1), thinking disabled, max 200 tokens,
+    /// and skips Judge validation. For iterations where the model just needs
+    /// to emit the next tool call, not reason about it.
+    pub async fn route_with_tools_execution(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&crate::ModelChoice>,
+    ) -> Result<ProviderResponse> {
+        self.route_with_tools_internal(task_description, messages, tool_registry, model_hint, true)
+            .await
+    }
+
     /// Route with a model hint from AGENTS.md configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
@@ -29,21 +45,51 @@ impl super::Router {
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
     ) -> Result<ProviderResponse> {
+        self.route_with_tools_internal(task_description, messages, tool_registry, model_hint, false)
+            .await
+    }
+
+    async fn route_with_tools_internal(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&crate::ModelChoice>,
+        execution_mode: bool,
+    ) -> Result<ProviderResponse> {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
 
-        if let Some(hint) = model_hint {
+        // Execution iterations use the fastest local model for mechanical tool calls.
+        // This ensures a fast model is always available even when the planning model
+        // is cooled down, and avoids wasting large-model capacity on send_task calls.
+        let fast_model = self.selector.fastest_local_model();
+        let effective_hint = if execution_mode && self.is_model_available(&fast_model) {
+            tracing::debug!(
+                fast_model = fast_model.name(),
+                "Execution mode: using fastest local model"
+            );
+            current_decision.recommended_model = fast_model;
+            None // Skip hint override logic below — model already set
+        } else {
+            model_hint
+        };
+
+        if let Some(hint) = effective_hint {
             let consecutive = self.get_cooldown_consecutive(hint.name()).await;
+            let reward_failures = self.get_reward_failure_count(hint.name()).await;
             // Hinted models get 3 chances to learn from feedback before
-            // Thompson Sampling takes over. A quick cooldown means a
-            // systemic issue, not a model issue.
+            // Thompson Sampling takes over. Tracks both availability failures
+            // (timeouts, crashes) and quality failures (sustained negative rewards).
             const HINT_OVERRIDE_THRESHOLD: u32 = 3;
-            if consecutive >= HINT_OVERRIDE_THRESHOLD {
+            if consecutive >= HINT_OVERRIDE_THRESHOLD || reward_failures >= HINT_OVERRIDE_THRESHOLD
+            {
                 tracing::info!(
                     hint = hint.name(),
                     consecutive,
+                    reward_failures,
                     selected = current_decision.recommended_model.name(),
-                    "Model hint failed {consecutive}x, letting Thompson Sampling select"
+                    "Model hint overridden (cooldown={consecutive}, reward_fail={reward_failures}), Thompson Sampling selecting"
                 );
             } else if self.is_model_available(hint) {
                 tracing::info!(
@@ -104,8 +150,19 @@ impl super::Router {
                     advice.applied_labels.len(),
                     current_decision.recommended_model.family()
                 );
-                let mut msgs = vec![Message::system(advice.system_text)];
-                msgs.extend(messages.clone());
+                let mut msgs = messages.clone();
+                // Merge advisor system text into existing system message to
+                // avoid duplicate system messages (Qwen Jinja enforces single
+                // system message at position 0).
+                if let Some(first) = msgs.first_mut() {
+                    if first.role == arkavo_llm::Role::System {
+                        first.content = format!("{}\n\n{}", advice.system_text, first.content);
+                    } else {
+                        msgs.insert(0, Message::system(advice.system_text));
+                    }
+                } else {
+                    msgs.push(Message::system(advice.system_text));
+                }
                 msgs.extend(feedback_messages.clone());
                 (msgs, Some(advice.applied_labels))
             } else {
@@ -159,21 +216,34 @@ impl super::Router {
                 }
             }
 
-            let provider = self
-                .instantiate_provider(&current_decision.recommended_model)
-                .await?;
+            let provider = if execution_mode {
+                self.instantiate_provider_execution(&current_decision.recommended_model)
+                    .await?
+            } else {
+                self.instantiate_provider(&current_decision.recommended_model)
+                    .await?
+            };
 
-            // Acquire inference semaphore — serializes concurrent LLM calls
-            // so the second request waits instead of failing with a KV cache OOM.
-            let _permit = self
-                .inference_semaphore
+            // Execution iterations use the chat semaphore — they're fast, sub-second
+            // inferences that shouldn't queue behind heavy planning work.
+            let semaphore = if execution_mode {
+                &self.chat_semaphore
+            } else {
+                &self.inference_semaphore
+            };
+            let _permit = semaphore
                 .acquire()
                 .await
-                .map_err(|_| Error::ModelExecution("Inference semaphore closed".to_string()))?;
-            tracing::debug!("Inference semaphore acquired");
+                .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
+            tracing::debug!(
+                execution_mode,
+                semaphore = if execution_mode { "chat" } else { "inference" },
+                "Semaphore acquired"
+            );
 
+            let max_tokens = if execution_mode { Some(200usize) } else { None };
             let mut response = match provider
-                .complete_with_tools(advised_messages, tools_json, None)
+                .complete_with_tools(advised_messages, tools_json, max_tokens)
                 .await
             {
                 Ok(r) => r,
@@ -201,6 +271,18 @@ impl super::Router {
                     return Err(Error::ModelExecution(format!("Provider error: {e}")));
                 }
             };
+
+            // Record per-attempt inference latency so retries are individually visible
+            let attempt_ms = inference_start.elapsed().as_millis() as u64;
+            if attempt > 0 {
+                tracing::info!(
+                    attempt = attempt + 1,
+                    attempt_ms,
+                    execution_mode,
+                    model = %current_decision.recommended_model.name(),
+                    "Quality gate retry inference completed"
+                );
+            }
 
             self.advisor.observe(
                 current_decision.recommended_model.family(),
@@ -288,8 +370,10 @@ impl super::Router {
                     return Ok(response);
                 }
 
+                // Skip Judge validation in execution mode — fast syntax check is sufficient
+                // for mechanical tool calls (send_task, list_agents, get_task_status).
                 #[cfg(feature = "llama-cpp")]
-                {
+                if !execution_mode {
                     use crate::judge::IssueType;
 
                     match judge::ResponseJudge::new_local().await {
@@ -432,6 +516,7 @@ impl super::Router {
                 }
             }
 
+            response.quality_gate_retries = attempt;
             return Ok(response);
         }
 
@@ -442,6 +527,7 @@ impl super::Router {
             tool_calls: Vec::new(),
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: MAX_RETRIES,
         })
     }
 }

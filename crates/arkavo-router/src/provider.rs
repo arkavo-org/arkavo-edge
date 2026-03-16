@@ -123,6 +123,14 @@ impl super::Router {
                     Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
                 })?;
 
+            // Pre-warm the context pool so the first inference avoids allocation latency
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            if let Ok(ctx) = self.model_registry.acquire_fresh_context(registry_name) {
+                let _ = self
+                    .model_registry
+                    .release_context(registry_name, ctx, true);
+                tracing::info!(model = registry_name, "Context pool pre-warmed");
+            }
             tracing::info!(model = registry_name, "Model loaded and cached in registry");
         } else {
             tracing::debug!(model = registry_name, "Using cached model from registry");
@@ -164,6 +172,60 @@ impl super::Router {
         };
 
         Ok(Box::new(provider))
+    }
+
+    /// Create a provider with execution-mode overrides: temp 0.1, thinking off.
+    /// Used for tool-loop iterations that emit mechanical tool calls.
+    #[cfg(feature = "llama-cpp")]
+    pub(crate) async fn instantiate_provider_execution(
+        &self,
+        model: &ModelChoice,
+    ) -> Result<Box<dyn Provider>> {
+        if !model.is_local() {
+            return self.instantiate_provider(model).await;
+        }
+        let repo = model
+            .repo_id()
+            .ok_or_else(|| Error::ModelExecution(format!("No repo_id for {model:?}")))?;
+        let file = model
+            .gguf_filename()
+            .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {model:?}")))?;
+        let registry_name = model.name();
+        let model_path = model_discovery::find_gguf_model(repo, file)
+            .await
+            .map_err(Error::ModelExecution)?;
+        if !self.model_registry.is_loaded(registry_name) {
+            self.model_registry
+                .load(registry_name, &model_path.to_string_lossy())
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
+                })?;
+        }
+        let execution_config = arkavo_llm::SamplingConfig {
+            temperature: 0.1,
+            top_p: 0.9,
+            thinking_mode: Some(arkavo_llm::ThinkingMode::Off),
+            ..arkavo_llm::SamplingConfig::default()
+        };
+        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
+            self.model_registry.clone(),
+            registry_name.to_string(),
+            execution_config,
+        )
+        .map_err(|e| {
+            Error::ModelExecution(format!(
+                "Failed to create execution provider for {registry_name}: {e}"
+            ))
+        })?;
+        Ok(Box::new(provider))
+    }
+
+    #[cfg(not(feature = "llama-cpp"))]
+    pub(crate) async fn instantiate_provider_execution(
+        &self,
+        model: &ModelChoice,
+    ) -> Result<Box<dyn Provider>> {
+        self.instantiate_provider(model).await
     }
 
     pub(crate) async fn instantiate_provider(

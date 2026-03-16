@@ -313,6 +313,7 @@ impl Provider for DeepSeekProvider {
             tool_calls: parsed_tool_calls,
             finish_reason,
             inference_timing: None,
+            quality_gate_retries: 0,
         })
     }
 }

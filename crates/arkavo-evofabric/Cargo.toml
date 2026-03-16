@@ -1,0 +1,33 @@
+[package]
+name = "arkavo-evofabric"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AST-level code evolution via typed OpBundles"
+
+[dependencies]
+syn = { workspace = true, features = ["full", "parsing", "printing", "visit-mut", "extra-traits"] }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+prettyplease = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+arkavo-crypto = { path = "../arkavo-crypto" }
+hex = { workspace = true }
+tempfile = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

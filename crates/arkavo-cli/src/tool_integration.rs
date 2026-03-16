@@ -319,6 +319,7 @@ pub async fn process_with_tools(
                 tool_calls: result.tool_calls,
                 finish_reason: None,
                 inference_timing: None,
+                quality_gate_retries: 0,
             }
         } else {
             // Subsequent iterations - use Thompson Sampling routing
@@ -880,6 +881,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
 
         let result =
@@ -896,6 +898,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

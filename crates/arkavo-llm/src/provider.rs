@@ -7,7 +7,7 @@ use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Result, StreamResponse};
 
 /// Response from a provider that may include tool calls
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProviderResponse {
     pub content: String,
     /// Reasoning/thinking content from models with thinking mode (e.g., DeepSeek V3.2-Speciale)
@@ -16,6 +16,8 @@ pub struct ProviderResponse {
     pub finish_reason: Option<String>,
     /// LLM inference timing from provider (prompt_eval_ms, generation_ms, n_p_eval, n_eval)
     pub inference_timing: Option<InferenceTiming>,
+    /// Number of quality gate retry attempts (0 = first attempt succeeded)
+    pub quality_gate_retries: u8,
 }
 
 /// Timing data from the LLM inference engine.
@@ -71,6 +73,7 @@ pub trait Provider: Send + Sync {
             tool_calls: Vec::new(),
             finish_reason: None,
             inference_timing: None,
+            quality_gate_retries: 0,
         })
     }
 

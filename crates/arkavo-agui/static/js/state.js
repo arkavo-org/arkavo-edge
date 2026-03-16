@@ -26,10 +26,13 @@ var AppState = {
     selectedTaskId: null,
     teachingEvents: [],
     agentSystemMetrics: {},
-    optimalConfigs: []
+    optimalConfigs: [],
+    metricsHistory: [],
+    lastMetricsSnapshot: null
 };
 
 var MAX_TELEMETRY = 200;
+var MAX_METRICS_HISTORY = 60;
 var MAX_DECISIONS = 100;
 var MAX_AUDIT_LOG = 200;
 var MAX_ROUTING_HISTORY = 50;

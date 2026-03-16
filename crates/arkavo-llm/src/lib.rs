@@ -8,6 +8,7 @@ pub mod context_pool;
 pub mod conversation_context;
 pub mod error;
 pub mod example_generator;
+pub mod gpu_fault;
 pub mod image;
 pub mod mcp_converter;
 pub mod message;

@@ -77,6 +77,25 @@ function renderHealth() {
         html += '</div>';
     }
 
+    // Performance (subsystem timing from metrics)
+    var snap = AppState.lastMetricsSnapshot;
+    var timing = snap && (snap.subsystem_timing || snap.subsystemTiming);
+    if (timing) {
+        html += '<div class="section-title">Performance</div>';
+        html += '<div class="perf-grid">';
+        var routerAvg = timing.router_decision_avg_ms || timing.routerDecisionAvgMs || 0;
+        var conductorAvg = timing.conductor_orchestration_avg_ms || timing.conductorOrchestrationAvgMs || 0;
+        var mcpAvg = timing.mcp_tool_avg_ms || timing.mcpToolAvgMs || 0;
+        var mcpP95 = timing.mcp_tool_p95_ms || timing.mcpToolP95Ms || 0;
+        var inferenceAvg = timing.inference_avg_ms || timing.inferenceAvgMs || 0;
+        html += '<div class="stat-card"><div class="stat-card-label">Router Avg</div><div class="stat-card-value">' + routerAvg.toFixed(1) + '<span class="stat-card-sub"> ms</span></div></div>';
+        html += '<div class="stat-card"><div class="stat-card-label">Conductor Avg</div><div class="stat-card-value">' + conductorAvg.toFixed(1) + '<span class="stat-card-sub"> ms</span></div></div>';
+        html += '<div class="stat-card"><div class="stat-card-label">MCP Avg</div><div class="stat-card-value">' + mcpAvg.toFixed(1) + '<span class="stat-card-sub"> ms</span></div></div>';
+        html += '<div class="stat-card"><div class="stat-card-label">MCP P95</div><div class="stat-card-value">' + mcpP95.toFixed(1) + '<span class="stat-card-sub"> ms</span></div></div>';
+        html += '<div class="stat-card"><div class="stat-card-label">Inference Avg</div><div class="stat-card-value">' + inferenceAvg.toFixed(1) + '<span class="stat-card-sub"> ms</span></div></div>';
+        html += '</div>';
+    }
+
     // MCP Tools
     if (su.mcpTools) {
         html += '<div class="section-title">MCP Tools</div>';

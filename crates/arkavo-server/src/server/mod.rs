@@ -3,6 +3,7 @@ mod anti_pattern;
 mod autolearn_bridge;
 mod conductor;
 mod conductor_autoresearch;
+mod conductor_evofabric;
 mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
@@ -1037,6 +1038,13 @@ impl A2aRpcServer for A2aRpcImpl {
         let agent_id = agent_meta.name.clone();
         drop(agent_meta);
 
+        let timing = arkavo_observability::subsystem_timing::global_timing().snapshot();
+        let subsystem_timing = if timing.is_empty() {
+            None
+        } else {
+            Some(timing)
+        };
+
         Ok(serde_json::json!({
             "agent_id": agent_id,
             "rss_mb": rss_mb,
@@ -1044,6 +1052,7 @@ impl A2aRpcServer for A2aRpcImpl {
             "pid": pid,
             "total_ram_mb": total_ram_mb,
             "available_ram_mb": available_ram_mb,
+            "subsystem_timing": subsystem_timing,
         }))
     }
 }

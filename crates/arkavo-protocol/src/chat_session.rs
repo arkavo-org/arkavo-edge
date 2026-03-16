@@ -60,6 +60,10 @@ pub struct ChatSessionManager {
     system_prompt: Option<String>,
     /// Override the default model selection (for testing/benchmarking)
     model_override: Option<arkavo_router::ModelChoice>,
+    /// Shared task context string with recent task history and last observed state.
+    /// Updated by the server from ToolMemory + conductor task store.
+    /// Injected as a system message so chat can reference what the agent has been doing.
+    task_context: Option<Arc<RwLock<String>>>,
 }
 
 struct ChatSessionState {
@@ -162,6 +166,7 @@ impl ChatSessionManager {
             teaching_tx: None,
             system_prompt: None,
             model_override: None,
+            task_context: None,
         }
     }
 
@@ -187,6 +192,13 @@ impl ChatSessionManager {
     /// Override the default model selection for chat inference.
     pub fn set_model_override(&mut self, model: arkavo_router::ModelChoice) {
         self.model_override = Some(model);
+    }
+
+    /// Set a shared task context that will be injected into chat sessions.
+    /// Contains recent task history and last observed state so chat can reference
+    /// what the agent has been working on.
+    pub fn set_task_context(&mut self, context: Arc<RwLock<String>>) {
+        self.task_context = Some(context);
     }
 
     /// Create a new chat session with optional authentication
@@ -272,6 +284,7 @@ impl ChatSessionManager {
             let teaching_tx = self.teaching_tx.clone();
             let system_prompt = self.system_prompt.clone();
             let model_override = self.model_override.clone();
+            let task_context = self.task_context.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -288,6 +301,7 @@ impl ChatSessionManager {
                         teaching_tx,
                         system_prompt,
                         model_override,
+                        task_context,
                     )
                     .await;
                 });
@@ -818,7 +832,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override, task_context), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -833,6 +847,7 @@ impl ChatSessionManager {
         teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
         system_prompt: Option<String>,
         model_override: Option<arkavo_router::ModelChoice>,
+        task_context: Option<Arc<RwLock<String>>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -865,6 +880,14 @@ impl ChatSessionManager {
                     } else {
                         conversation_context.clone()
                     };
+
+                    // Prepend task context as system message (recent tasks + last observed state)
+                    if let Some(ref tc) = task_context {
+                        let ctx = tc.read().await;
+                        if !ctx.is_empty() {
+                            windowed_context.insert(0, Message::system(ctx.clone()));
+                        }
+                    }
 
                     // Prepend learning context as system message (lessons, quality trends)
                     if let Some(ref lc) = learning_context {

@@ -21,7 +21,7 @@ purpose: |
   - Edge cases (empty input, overflow, None values)
   - Both positive and negative test cases
 
-model:   glm-4.7-flash
+model:   ministral-3b
 listen:  0.0.0.0:8414
 
 discovery:

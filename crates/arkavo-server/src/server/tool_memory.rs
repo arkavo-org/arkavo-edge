@@ -75,7 +75,10 @@ impl ToolMemory {
             .chars()
             .take(100)
             .collect();
-        let result_summary: String = result.chars().take(200).collect();
+        // Error results get more space so actionable corrections aren't truncated
+        // (e.g. "Unknown building 'X'. Examples: Bed, SimpleResearchBench, ...")
+        let result_limit = if is_error { 400 } else { 200 };
+        let result_summary: String = result.chars().take(result_limit).collect();
 
         if self.entries.len() >= self.max_entries {
             self.entries.pop_front();
@@ -162,6 +165,36 @@ impl ToolMemory {
         } else {
             String::new()
         }
+    }
+
+    /// Format recent error entries as correction instructions for the next prompt.
+    /// Returns up to 5 deduplicated errors so the model can learn from mistakes.
+    pub fn format_errors_for_prompt(&self) -> String {
+        let mut seen = std::collections::HashSet::new();
+        let errors: Vec<_> = self
+            .entries
+            .iter()
+            .rev()
+            .filter(|e| e.is_error)
+            .filter(|e| seen.insert(e.action_key.clone()))
+            .take(5)
+            .collect();
+
+        if errors.is_empty() {
+            return String::new();
+        }
+
+        let mut output = String::from("\n\n## Error Corrections (fix these on next step)\n");
+        for entry in &errors {
+            let label = if !entry.action_type.is_empty() {
+                &entry.action_type
+            } else {
+                &entry.tool_name
+            };
+            use std::fmt::Write;
+            let _ = writeln!(output, "- {label}: {}", entry.result_summary);
+        }
+        output
     }
 
     /// Build a dedup key from Action object fields.

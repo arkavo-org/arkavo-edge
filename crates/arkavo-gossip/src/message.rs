@@ -4,6 +4,10 @@ pub use crate::advisor_message::AdvisorAdjustmentAnnouncement;
 pub use crate::context_message::{
     ContextChunkDelivery, ContextChunkRequest, ContextManifestAnnouncement,
 };
+use crate::evofabric_message::{
+    EvoFabricAnchorCommitted, EvoFabricConflictNotice, EvoFabricMergeDecision, EvoFabricProposal,
+    EvoFabricVerification,
+};
 use crate::experiment_message::{ExperimentAnnouncement, ExperimentVote};
 use crate::learning_message::{
     LessonAnnouncement, LessonDelivery, LessonDigest, LessonRequest, LessonVote as LearningVote,
@@ -48,6 +52,16 @@ pub enum GossipMessage {
     ExperimentAnnounce(ExperimentAnnouncement),
     /// Vote on an experiment result's validity
     ExperimentVote(ExperimentVote),
+    /// Propose an EvoFabric OpBundle for AST mutation
+    EvoFabricPropose(EvoFabricProposal),
+    /// Verification result for an EvoFabric OpBundle
+    EvoFabricVerify(EvoFabricVerification),
+    /// Merge decision for an EvoFabric OpBundle
+    EvoFabricMerge(EvoFabricMergeDecision),
+    /// Conflict notice between two EvoFabric OpBundles
+    EvoFabricConflict(EvoFabricConflictNotice),
+    /// Merkle root anchored on-chain for EvoFabric
+    EvoFabricAnchor(EvoFabricAnchorCommitted),
 }
 
 /// Announcement of a new patch

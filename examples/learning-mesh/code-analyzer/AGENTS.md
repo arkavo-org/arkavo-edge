@@ -21,7 +21,7 @@ purpose: |
   - Severity classification (critical, warning, info)
   - Concrete fix suggestions with code examples
 
-model:   glm-4.7-flash
+model:   ministral-3b
 listen:  0.0.0.0:8412
 
 discovery:
