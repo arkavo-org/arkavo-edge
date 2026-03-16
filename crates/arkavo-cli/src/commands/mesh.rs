@@ -95,6 +95,7 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
         }
     }
 
+    mdns.shutdown().ok();
     info!("Discovered {} agents via mDNS", agents.len());
     Ok(agents)
 }

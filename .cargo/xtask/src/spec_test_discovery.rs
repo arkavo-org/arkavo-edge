@@ -8,6 +8,7 @@ use crate::spec_test::Test;
 pub struct TestDiscovery {
     spec_attr_pattern: Regex,
     legacy_pattern: Regex,
+    doc_pattern: Regex,
     test_pattern: Regex,
 }
 
@@ -16,6 +17,8 @@ impl TestDiscovery {
         Ok(Self {
             spec_attr_pattern: Regex::new(r#"#\[spec\("([A-Z]+-\d+)"\)"#)?,
             legacy_pattern: Regex::new(r"Covers\s+([A-Z]+-\d+)")?,
+            // Also match doc comment patterns like "Spec: SESS-001" or "SESS-001: description"
+            doc_pattern: Regex::new(r"(?:Spec:\s+)?([A-Z]+-\d+):")?,
             test_pattern: Regex::new(r"(async\s+)?fn\s+(test_\w+)")?,
         })
     }
@@ -43,6 +46,9 @@ impl TestDiscovery {
                 current_scenarios.push(cap[1].to_string());
             }
             for cap in self.legacy_pattern.captures_iter(line) {
+                current_scenarios.push(cap[1].to_string());
+            }
+            for cap in self.doc_pattern.captures_iter(line) {
                 current_scenarios.push(cap[1].to_string());
             }
             if let Some(cap) = self.test_pattern.captures(line) {

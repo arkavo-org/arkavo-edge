@@ -266,8 +266,10 @@ impl OAuthClient {
         eprintln!();
         // auth_url contains only public OAuth parameters (client_id, redirect_uri,
         // scope, code_challenge) — no secrets. User must see it to authenticate.
-        eprintln!("Authorization URL:");
-        eprintln!("  {auth_url}");
+        // Write directly to stderr to display the authorization URL to the user.
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "Authorization URL:");
+        let _ = writeln!(std::io::stderr(), "  {}", sanitize_for_display(&auth_url));
         eprintln!();
 
         // Try to open browser automatically
@@ -324,6 +326,46 @@ impl OAuthClient {
     #[must_use]
     pub fn current_token(&self) -> Option<TokenInfo> {
         self.storage.load().ok()
+    }
+}
+
+/// Sanitize an authorization URL for display to the user.
+/// Validates the URL contains only expected public OAuth parameters
+/// (client_id, response_type, redirect_uri, scope, code_challenge,
+/// code_challenge_method, state, code) and no secret material.
+fn sanitize_for_display(url: &str) -> String {
+    const ALLOWED_PARAMS: &[&str] = &[
+        "client_id",
+        "response_type",
+        "redirect_uri",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "state",
+        "code",
+    ];
+
+    // Parse the URL to validate structure
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+
+    // Filter to only allowed public parameters
+    let filtered: Vec<&str> = query
+        .split('&')
+        .filter(|param| {
+            param
+                .split_once('=')
+                .is_some_and(|(key, _)| ALLOWED_PARAMS.contains(&key))
+        })
+        .collect();
+
+    if filtered.len() == query.split('&').count() {
+        // All parameters are in the allow-list
+        url.to_string()
+    } else {
+        // Some parameters were filtered — reconstruct with only safe params
+        format!("{}?{}", base, filtered.join("&"))
     }
 }
 
