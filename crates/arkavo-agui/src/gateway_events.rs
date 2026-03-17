@@ -140,6 +140,7 @@ async fn send_status_update(
 pub async fn handle_request_mesh_status(
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
+    security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let agents_list = agents.read().await;
@@ -229,6 +230,24 @@ pub async fn handle_request_mesh_status(
                 }
             }
         }
+
+        // Poll KAS public key to detect KAS-enabled agents
+        let sec = security_handler.read().await;
+        match conn.get_kas_public_key().await {
+            Ok(kas_data) => {
+                let info = crate::security_handler::AgentKasInfo {
+                    enabled: true,
+                    public_key: kas_data["public_key"].as_str().unwrap_or("").to_string(),
+                    key_id: kas_data["key_id"].as_str().unwrap_or("").to_string(),
+                    algorithm: kas_data["algorithm"].as_str().unwrap_or("").to_string(),
+                };
+                sec.update_agent_kas(agent_id, info).await;
+            }
+            Err(_) => {
+                sec.mark_agent_no_kas(agent_id).await;
+            }
+        }
+        drop(sec);
     }
 
     Ok(())
