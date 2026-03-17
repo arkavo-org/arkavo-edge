@@ -107,7 +107,7 @@ arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 clap = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["kas"]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["if-addrs"]
