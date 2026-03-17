@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Maximum plausible prior value (10,000 observations is an extremely strong prior)
-const MAX_PRIOR: f64 = 10_000.0;
+pub const MAX_PRIOR: f64 = 10_000.0;
 
 /// Validate that alpha and beta values are safe for use as Beta priors.
 /// Rejects non-finite, negative, and implausibly large values.

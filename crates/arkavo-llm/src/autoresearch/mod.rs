@@ -15,4 +15,4 @@ mod thompson;
 pub use config::{ExperimentConfig, ExperimentResult, SearchSpace};
 pub use context_sweep::{ContextConfig, ContextMetrics, ContextSearchSpace, ContextVariant};
 pub use evaluator::evaluate_quality;
-pub use thompson::{BetaPrior, Rng, ThompsonSampler};
+pub use thompson::{BetaPrior, Rng, ThompsonSampler, MAX_PRIOR};

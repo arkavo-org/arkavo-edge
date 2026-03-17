@@ -107,12 +107,13 @@ impl LearningBus {
             );
 
             // Validate remote priors before processing
+            let max_prior = arkavo_llm::autoresearch::MAX_PRIOR;
             if !ann.prior_alpha.is_finite()
                 || !ann.prior_beta.is_finite()
                 || ann.prior_alpha < 1.0
                 || ann.prior_beta < 1.0
-                || ann.prior_alpha > 10_000.0
-                || ann.prior_beta > 10_000.0
+                || ann.prior_alpha > max_prior
+                || ann.prior_beta > max_prior
             {
                 tracing::warn!(
                     experiment_id = %ann.experiment_id,
