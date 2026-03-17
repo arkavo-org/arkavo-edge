@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Full defaults with all providers (cross-platform)
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent", "kas"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent", "kas", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)

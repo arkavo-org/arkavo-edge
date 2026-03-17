@@ -328,6 +328,9 @@ pub struct A2aRpcImpl {
     /// TDF share offer store for pending P2P offers
     #[cfg(feature = "kas")]
     pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
+    /// Shared Iroh P2P node for TDF blob transport
+    #[cfg(feature = "iroh")]
+    pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
 
 #[async_trait]

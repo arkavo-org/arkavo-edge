@@ -70,6 +70,9 @@ pub struct A2aServer {
     total_ram_bytes: u64,
     /// Mesh state for A2A peer delegation (shared between orchestrator and RPC)
     mesh_state: Arc<arkavo_mcp_mesh::MeshToolsState>,
+    /// Shared Iroh P2P node for TDF blob transport (one per agent)
+    #[cfg(feature = "iroh")]
+    iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
 }
 
 impl A2aServer {
@@ -114,6 +117,8 @@ impl A2aServer {
                 sys.total_memory()
             },
             mesh_state: Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
+            #[cfg(feature = "iroh")]
+            iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -129,6 +134,12 @@ impl A2aServer {
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
         self.mcp_registry.clone()
+    }
+
+    /// Get the shared Iroh P2P node (if started).
+    #[cfg(feature = "iroh")]
+    pub async fn iroh_node(&self) -> Option<Arc<arkavo_tdf_iroh::IrohNode>> {
+        self.iroh_node.read().await.clone()
     }
 
     /// Set the learning bus for gossip-based learning
@@ -1186,6 +1197,20 @@ impl A2aServer {
             .start()
             .map_err(|e| A2aError::Internal(format!("Failed to start task executor: {e}")))?;
 
+        // Start shared Iroh P2P node for TDF blob transport
+        #[cfg(feature = "iroh")]
+        {
+            match arkavo_tdf_iroh::IrohNode::memory().await {
+                Ok(node) => {
+                    info!("Iroh P2P node started for TDF blob transport");
+                    *self.iroh_node.write().await = Some(node);
+                }
+                Err(e) => {
+                    warn!("Failed to start Iroh P2P node: {e}");
+                }
+            }
+        }
+
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1225,6 +1250,8 @@ impl A2aServer {
             },
             #[cfg(feature = "kas")]
             tdf_offer_store: Arc::new(super::handlers::tdf_share::TdfOfferStore::new()),
+            #[cfg(feature = "iroh")]
+            iroh_node: self.iroh_node.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -1637,6 +1664,28 @@ impl A2aServer {
         }
 
         info!("GPU resources released");
+
+        // Stop Iroh P2P node
+        #[cfg(feature = "iroh")]
+        {
+            match timeout(timeout_duration, self.iroh_node.write()).await {
+                Ok(mut guard) => {
+                    if let Some(node) = guard.take() {
+                        if let Err(e) = node.stop().await {
+                            warn!("Failed to stop Iroh node: {e}");
+                        } else {
+                            info!("Iroh P2P node stopped");
+                        }
+                    }
+                }
+                Err(_) => {
+                    warn!(
+                        "Timeout acquiring Iroh node write lock during cleanup (lock held > {}ms)",
+                        TIMEOUT_MS
+                    );
+                }
+            }
+        }
     }
 }
 
