@@ -73,7 +73,12 @@ impl GossipNetworkBridge {
         let mut key_registry = KeyRegistry::new();
         key_registry.register(agent_id.clone(), keypair.public_key().clone());
 
-        let protocol = GossipProtocol::new(agent_id.clone(), config.gossip.clone(), key_registry);
+        let protocol = GossipProtocol::new(
+            agent_id.clone(),
+            String::new(),
+            config.gossip.clone(),
+            key_registry,
+        );
 
         let (outbox_tx, outbox_rx) = mpsc::channel(config.outbox_buffer);
         let (patch_tx, patch_rx) = mpsc::channel(config.inbox_buffer);

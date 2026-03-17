@@ -148,7 +148,12 @@ impl DemoAgent {
         // Create gossip protocol
         let mut key_registry = KeyRegistry::new();
         key_registry.register(name.to_string(), keypair.public_key().clone());
-        let gossip = GossipProtocol::new(name.to_string(), GossipConfig::default(), key_registry);
+        let gossip = GossipProtocol::new(
+            name.to_string(),
+            String::new(),
+            GossipConfig::default(),
+            key_registry,
+        );
 
         Self {
             name: name.to_string(),

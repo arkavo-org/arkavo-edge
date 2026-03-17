@@ -7,5 +7,5 @@
 pub mod context_manager;
 pub mod manifest;
 
-pub use context_manager::{ContextManager, ContextSlot};
+pub use context_manager::{ContextManager, ContextSlot, TrustTier};
 pub use manifest::{ContextEntry, ContextManifest};

@@ -7,6 +7,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Maximum plausible prior value (10,000 observations is an extremely strong prior)
+pub const MAX_PRIOR: f64 = 10_000.0;
+
+/// Validate that alpha and beta values are safe for use as Beta priors.
+/// Rejects non-finite, negative, and implausibly large values.
+fn validate_prior(alpha: f64, beta: f64) -> bool {
+    alpha.is_finite()
+        && beta.is_finite()
+        && alpha >= 1.0
+        && beta >= 1.0
+        && alpha <= MAX_PRIOR
+        && beta <= MAX_PRIOR
+}
+
 /// Beta distribution prior for a single arm
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BetaPrior {
@@ -45,6 +59,11 @@ impl BetaPrior {
     /// Number of observations: alpha + beta - 2 (subtracting the prior)
     pub fn observations(&self) -> f64 {
         self.alpha + self.beta - 2.0
+    }
+
+    /// Check whether this prior has plausible values (finite, bounded, non-negative)
+    pub fn is_valid(&self) -> bool {
+        validate_prior(self.alpha, self.beta)
     }
 }
 
@@ -106,13 +125,21 @@ impl ThompsonSampler {
             .map(|(k, _)| *k)
     }
 
-    /// Merge remote priors (from gossip) into local state
+    /// Merge remote priors (from gossip) into local state.
+    /// Rejects invalid priors (non-finite, negative, or implausibly large)
+    /// and clamps merged values to prevent accumulation beyond bounds.
     pub fn merge_remote(&mut self, remote: &HashMap<usize, BetaPrior>) {
         for (arm, remote_prior) in remote {
+            if !remote_prior.is_valid() {
+                continue;
+            }
             let local = self.priors.entry(*arm).or_default();
             // Additive merge: combine observations
             local.alpha += remote_prior.alpha - 1.0; // subtract uniform prior
             local.beta += remote_prior.beta - 1.0;
+            // Clamp to prevent unbounded accumulation across many merges
+            local.alpha = local.alpha.clamp(1.0, MAX_PRIOR);
+            local.beta = local.beta.clamp(1.0, MAX_PRIOR);
         }
     }
 }
@@ -277,6 +304,170 @@ mod tests {
         let after = local.prior(0).mean();
         // After merging 10 high-quality observations, mean should increase
         assert!(after > before, "before={before}, after={after}");
+    }
+
+    #[test]
+    fn test_is_valid_boundary_cases() {
+        assert!(
+            BetaPrior {
+                alpha: 1.0,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            BetaPrior {
+                alpha: 10_000.0,
+                beta: 10_000.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: 0.5,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: 1.0,
+                beta: 0.5
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: 10_001.0,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: f64::NAN,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: f64::INFINITY,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: f64::NEG_INFINITY,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+        assert!(
+            !BetaPrior {
+                alpha: -1.0,
+                beta: 1.0
+            }
+            .is_valid()
+        );
+    }
+
+    #[test]
+    fn test_merge_remote_rejects_nan() {
+        let mut sampler = ThompsonSampler::new(5);
+        sampler.update(0, 0.7);
+        let before = sampler.prior(0).mean();
+
+        let mut remote = HashMap::new();
+        remote.insert(
+            0,
+            BetaPrior {
+                alpha: f64::NAN,
+                beta: 1.0,
+            },
+        );
+        sampler.merge_remote(&remote);
+
+        let after = sampler.prior(0).mean();
+        assert!(
+            (after - before).abs() < f64::EPSILON,
+            "NaN prior should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_merge_remote_rejects_infinity() {
+        let mut sampler = ThompsonSampler::new(5);
+        sampler.update(0, 0.7);
+        let before = sampler.prior(0).mean();
+
+        let mut remote = HashMap::new();
+        remote.insert(
+            0,
+            BetaPrior {
+                alpha: f64::INFINITY,
+                beta: 1.0,
+            },
+        );
+        sampler.merge_remote(&remote);
+
+        let after = sampler.prior(0).mean();
+        assert!(
+            (after - before).abs() < f64::EPSILON,
+            "infinite prior should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_merge_remote_rejects_negative() {
+        let mut sampler = ThompsonSampler::new(5);
+        sampler.update(0, 0.7);
+        let before = sampler.prior(0).mean();
+
+        let mut remote = HashMap::new();
+        remote.insert(
+            0,
+            BetaPrior {
+                alpha: -5.0,
+                beta: 1.0,
+            },
+        );
+        sampler.merge_remote(&remote);
+
+        let after = sampler.prior(0).mean();
+        assert!(
+            (after - before).abs() < f64::EPSILON,
+            "negative prior should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_merge_remote_clamps_accumulated() {
+        let mut sampler = ThompsonSampler::new(5);
+        // Merge many valid large priors to test accumulation clamping
+        for _ in 0..20 {
+            let mut remote = HashMap::new();
+            remote.insert(
+                0,
+                BetaPrior {
+                    alpha: 9000.0,
+                    beta: 1.0,
+                },
+            );
+            sampler.merge_remote(&remote);
+        }
+        let prior = sampler.prior(0);
+        assert!(
+            prior.alpha <= 10_000.0,
+            "alpha={} should be clamped",
+            prior.alpha
+        );
+        assert!(
+            prior.beta >= 1.0,
+            "beta={} should be at least 1.0",
+            prior.beta
+        );
     }
 
     #[test]

@@ -106,8 +106,33 @@ impl LearningBus {
                 "Received autoresearch experiment result via gossip"
             );
 
+            // Validate remote priors before processing
+            let max_prior = arkavo_llm::autoresearch::MAX_PRIOR;
+            if !ann.prior_alpha.is_finite()
+                || !ann.prior_beta.is_finite()
+                || ann.prior_alpha < 1.0
+                || ann.prior_beta < 1.0
+                || ann.prior_alpha > max_prior
+                || ann.prior_beta > max_prior
+            {
+                tracing::warn!(
+                    experiment_id = %ann.experiment_id,
+                    originator = %ann.originator,
+                    prior_alpha = ann.prior_alpha,
+                    prior_beta = ann.prior_beta,
+                    "Rejected experiment with invalid Thompson priors"
+                );
+            } else if !ann.weighted_quality.is_finite()
+                || !(0.0..=1.0).contains(&ann.weighted_quality)
+            {
+                tracing::warn!(
+                    experiment_id = %ann.experiment_id,
+                    weighted_quality = ann.weighted_quality,
+                    "Rejected experiment with invalid weighted_quality"
+                );
+            }
             // Update local optimal config store if the experiment was kept
-            if ann.kept
+            else if ann.kept
                 && !ann.model_name.is_empty()
                 && let (Ok(config), Some(model)) = (
                     serde_json::from_str::<arkavo_llm::autoresearch::ExperimentConfig>(

@@ -19,6 +19,17 @@ pub enum ContextError {
     SaveFailed(String, String),
 }
 
+/// Provenance tier for context slot content
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustTier {
+    /// Built locally from source text
+    Local,
+    /// Received from a verified peer (signature-checked)
+    Verified,
+    /// Received from an unverified source
+    Untrusted,
+}
+
 /// A named region of pre-encoded KV cache on the learning sequence
 #[derive(Debug, Clone)]
 pub struct ContextSlot {
@@ -30,6 +41,8 @@ pub struct ContextSlot {
     pub token_count: usize,
     /// SHA-256 of the source `.bin` file
     pub source_hash: [u8; 32],
+    /// Provenance of this slot's content
+    pub trust: TrustTier,
 }
 
 impl ContextSlot {
@@ -40,6 +53,11 @@ impl ContextSlot {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Whether this slot's content is from a trusted source
+    pub fn is_trusted(&self) -> bool {
+        matches!(self.trust, TrustTier::Local | TrustTier::Verified)
     }
 }
 
@@ -83,6 +101,7 @@ impl ContextManager {
         ctx: &arkavo_llama_cpp::LlamaContext,
         name: &str,
         path: &str,
+        trust: TrustTier,
     ) -> Result<&ContextSlot, ContextError> {
         if self.slots.iter().any(|s| s.name == name) {
             return Err(ContextError::SlotAlreadyLoaded(name.to_string()));
@@ -128,6 +147,7 @@ impl ContextManager {
             pos_end: self.write_head + n,
             token_count,
             source_hash,
+            trust,
         };
 
         self.write_head += n;
@@ -211,6 +231,13 @@ impl ContextManager {
         &self.slots
     }
 
+    /// Slots with untrusted provenance.
+    pub fn untrusted_slots(&self) -> impl Iterator<Item = &ContextSlot> {
+        self.slots
+            .iter()
+            .filter(|s| s.trust == TrustTier::Untrusted)
+    }
+
     /// Remove all slots and reset the write head.
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn clear_all(&mut self, ctx: &arkavo_llama_cpp::LlamaContext) -> Result<(), ContextError> {
@@ -262,6 +289,7 @@ mod tests {
             pos_end: 50,
             token_count: 40,
             source_hash: [0u8; 32],
+            trust: TrustTier::Local,
         };
         assert_eq!(slot.len(), 40);
         assert!(!slot.is_empty());
@@ -275,6 +303,7 @@ mod tests {
             pos_end: 0,
             token_count: 0,
             source_hash: [0u8; 32],
+            trust: TrustTier::Local,
         };
         assert!(slot.is_empty());
         assert_eq!(slot.len(), 0);
@@ -316,5 +345,44 @@ mod tests {
         let cm = ContextManager::new(0, 1);
         assert_eq!(cm.seq_learning(), 0);
         assert_eq!(cm.seq_conversation(), 1);
+    }
+
+    #[test]
+    fn test_is_trusted_tiers() {
+        let make = |trust| ContextSlot {
+            name: "x".to_string(),
+            pos_start: 0,
+            pos_end: 1,
+            token_count: 1,
+            source_hash: [0u8; 32],
+            trust,
+        };
+        assert!(make(TrustTier::Local).is_trusted());
+        assert!(make(TrustTier::Verified).is_trusted());
+        assert!(!make(TrustTier::Untrusted).is_trusted());
+    }
+
+    #[test]
+    fn test_untrusted_slots_filtering() {
+        let mut cm = ContextManager::new(0, 1);
+        cm.slots.push(ContextSlot {
+            name: "local".to_string(),
+            pos_start: 0,
+            pos_end: 10,
+            token_count: 10,
+            source_hash: [0u8; 32],
+            trust: TrustTier::Local,
+        });
+        cm.slots.push(ContextSlot {
+            name: "remote".to_string(),
+            pos_start: 10,
+            pos_end: 20,
+            token_count: 10,
+            source_hash: [0u8; 32],
+            trust: TrustTier::Untrusted,
+        });
+        let untrusted: Vec<_> = cm.untrusted_slots().collect();
+        assert_eq!(untrusted.len(), 1);
+        assert_eq!(untrusted[0].name, "remote");
     }
 }
