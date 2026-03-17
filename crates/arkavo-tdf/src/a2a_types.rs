@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "a2a")]
+use schemars::JsonSchema;
+
 use crate::types::PolicyBinding;
 
 /// Request to rewrap a TDF encryption key for a specific client.
@@ -64,6 +67,7 @@ pub struct KasPublicKeyResponse {
 /// Sent from the encrypting agent to the target agent via `tdf.share` RPC.
 /// The target agent stores this as a pending offer and can later fetch + decrypt.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
 pub struct TdfShareRequest {
     /// Iroh blob ticket for fetching the encrypted data
     pub ticket: String,
@@ -86,6 +90,7 @@ pub struct TdfShareRequest {
 
 /// Response to a `tdf.share` request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
 pub struct TdfShareResponse {
     /// Whether the agent accepted the share offer
     pub accepted: bool,
@@ -96,10 +101,12 @@ pub struct TdfShareResponse {
 
 /// Request to list pending TDF share offers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
 pub struct TdfOffersRequest {}
 
 /// A pending TDF share offer from another agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
 pub struct TdfOffer {
     /// Unique offer identifier
     pub offer_id: String,
@@ -128,6 +135,7 @@ pub struct TdfOffer {
 
 /// Response containing pending TDF share offers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
 pub struct TdfOffersResponse {
     /// List of pending offers
     pub offers: Vec<TdfOffer>,

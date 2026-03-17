@@ -8,13 +8,23 @@ use arkavo_protocol::types::{
 use chrono::Utc;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// In-memory store for pending TDF share offers.
-#[derive(Debug, Default)]
+const MAX_OFFERS: usize = 1000;
+const OFFER_TTL: Duration = Duration::from_secs(3600); // 1 hour
+
+/// In-memory store for pending TDF share offers with capacity and TTL limits.
+#[derive(Debug)]
 pub struct TdfOfferStore {
-    offers: RwLock<Vec<TdfOffer>>,
+    offers: RwLock<Vec<(Instant, TdfOffer)>>,
+}
+
+impl Default for TdfOfferStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TdfOfferStore {
@@ -25,11 +35,22 @@ impl TdfOfferStore {
     }
 
     pub async fn add(&self, offer: TdfOffer) {
-        self.offers.write().await.push(offer);
+        let mut offers = self.offers.write().await;
+        // Evict expired offers
+        let now = Instant::now();
+        offers.retain(|(created, _)| now.duration_since(*created) < OFFER_TTL);
+        // Evict oldest if at capacity
+        if offers.len() >= MAX_OFFERS {
+            offers.remove(0);
+        }
+        offers.push((now, offer));
     }
 
     pub async fn list(&self) -> Vec<TdfOffer> {
-        self.offers.read().await.clone()
+        let mut offers = self.offers.write().await;
+        let now = Instant::now();
+        offers.retain(|(created, _)| now.duration_since(*created) < OFFER_TTL);
+        offers.iter().map(|(_, o)| o.clone()).collect()
     }
 }
 

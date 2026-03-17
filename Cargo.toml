@@ -370,3 +370,10 @@ too_many_lines = "allow"
 [workspace.metadata.clippy]
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
+
+[patch.crates-io]
+# n0-snafu enables backtraces-impl-backtrace-crate on snafu, which replaces
+# std::backtrace::Backtrace with backtrace::Backtrace (missing capture() method).
+# This breaks octocrab which calls snafu::Backtrace::capture().
+# Patch removes that feature so snafu uses std::backtrace::Backtrace everywhere.
+n0-snafu = { path = "patches/n0-snafu" }

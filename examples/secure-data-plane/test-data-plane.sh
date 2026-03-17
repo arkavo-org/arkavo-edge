@@ -55,21 +55,21 @@ echo ""
 echo -e "${YELLOW}Test 3: Send tdf.share offer to receiver${NC}"
 RESPONSE=$(curl -s -X POST "http://${RECEIVER_RPC}" \
   -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":3,
-    "method":"tdf.share",
-    "params":{
-      "request":{
-        "ticket":"blobaaaa-test-ticket-placeholder",
-        "content_hash":"abc123def456",
-        "size_bytes":4096,
-        "policy_attributes":["https://arkavo.net/attr/sensitivity"],
-        "kas_url":"http://'"${SENDER_RPC}"'",
-        "sender_agent_id":"data-sender"
+  -d "{
+    \"jsonrpc\":\"2.0\",
+    \"id\":3,
+    \"method\":\"tdf.share\",
+    \"params\":{
+      \"request\":{
+        \"ticket\":\"blobaaaa-test-ticket-placeholder\",
+        \"content_hash\":\"abc123def456\",
+        \"size_bytes\":4096,
+        \"policy_attributes\":[\"https://arkavo.net/attr/sensitivity\"],
+        \"kas_url\":\"http://${SENDER_RPC}\",
+        \"sender_agent_id\":\"data-sender\"
       }
     }
-  }')
+  }")
 echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
 
 if echo "$RESPONSE" | jq -e '.result.accepted' > /dev/null 2>&1; then
