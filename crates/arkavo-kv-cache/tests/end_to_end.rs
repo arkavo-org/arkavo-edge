@@ -111,10 +111,20 @@ fn end_to_end_context_slots() {
     // --- Stage 2: Load and compose via ContextManager ---
 
     let mut cm = ContextManager::new(LEARNING_SEQ, CONVERSATION_SEQ);
-    cm.load(&ctx, "name", path_a.to_str().unwrap())
-        .expect("load slot A failed");
-    cm.load(&ctx, "occupation", path_b.to_str().unwrap())
-        .expect("load slot B failed");
+    cm.load(
+        &ctx,
+        "name",
+        path_a.to_str().unwrap(),
+        arkavo_kv_cache::TrustTier::Local,
+    )
+    .expect("load slot A failed");
+    cm.load(
+        &ctx,
+        "occupation",
+        path_b.to_str().unwrap(),
+        arkavo_kv_cache::TrustTier::Local,
+    )
+    .expect("load slot B failed");
 
     // Verify slots are contiguous, not overlapping
     assert_eq!(cm.slots().len(), 2);

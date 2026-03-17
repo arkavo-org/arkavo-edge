@@ -4,14 +4,18 @@ use super::{AuthResult, ErrorResponse, OAuthClient, OAuthError, TokenResponse};
 use crate::auth::token::TokenInfo;
 
 impl OAuthClient {
-    /// Validate that a URL uses HTTPS to prevent cleartext transmission of secrets
-    fn require_https(url: &str) -> AuthResult<()> {
-        if !url.starts_with("https://") {
+    /// Parse and validate that a URL uses HTTPS to prevent cleartext transmission.
+    /// Returns a parsed URL that is guaranteed to use the HTTPS scheme.
+    fn parse_https_url(url: &str) -> AuthResult<reqwest::Url> {
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|e| OAuthError::TokenExchange(format!("Invalid token URL: {e}")))?;
+        if parsed.scheme() != "https" {
             return Err(OAuthError::TokenExchange(format!(
-                "Token endpoint must use HTTPS, got: {url}"
+                "Token endpoint must use HTTPS, got scheme: {}",
+                parsed.scheme()
             )));
         }
-        Ok(())
+        Ok(parsed)
     }
 
     /// Exchange authorization code for access token
@@ -21,7 +25,7 @@ impl OAuthClient {
         state: Option<&str>,
         code_verifier: &str,
     ) -> AuthResult<TokenInfo> {
-        Self::require_https(&self.config.token_url)?;
+        let token_url = Self::parse_https_url(&self.config.token_url)?;
 
         // Build JSON body - Anthropic requires JSON, not form-urlencoded
         let mut body = serde_json::json!({
@@ -39,7 +43,7 @@ impl OAuthClient {
 
         let response = self
             .http_client
-            .post(&self.config.token_url)
+            .post(token_url)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -72,7 +76,7 @@ impl OAuthClient {
 
     /// Refresh an expired token
     pub(super) async fn refresh_token(&self, refresh_token: &str) -> AuthResult<TokenInfo> {
-        Self::require_https(&self.config.token_url)?;
+        let token_url = Self::parse_https_url(&self.config.token_url)?;
 
         // Anthropic requires JSON, not form-urlencoded
         let body = serde_json::json!({
@@ -83,7 +87,7 @@ impl OAuthClient {
 
         let response = self
             .http_client
-            .post(&self.config.token_url)
+            .post(token_url)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()

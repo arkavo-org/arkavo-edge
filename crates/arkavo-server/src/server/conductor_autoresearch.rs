@@ -307,6 +307,7 @@ async fn announce_experiment_result(
             kept: true,
         },
     )
+    .with_swarm(bus.swarm_id().to_string())
     .with_prior(prior.alpha, prior.beta);
 
     let gossip = bus.gossip().read().await;

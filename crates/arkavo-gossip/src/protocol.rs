@@ -94,6 +94,8 @@ const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 pub struct GossipProtocol {
     /// Our agent ID
     pub(crate) agent_id: String,
+    /// Swarm ID for message isolation
+    pub(crate) swarm_id: String,
     /// Protocol configuration
     pub(crate) config: GossipConfig,
     /// Known peers (peer_id -> ())
@@ -120,9 +122,15 @@ pub struct GossipProtocol {
 
 impl GossipProtocol {
     /// Create a new gossip protocol handler
-    pub fn new(agent_id: String, config: GossipConfig, key_registry: KeyRegistry) -> Self {
+    pub fn new(
+        agent_id: String,
+        swarm_id: String,
+        config: GossipConfig,
+        key_registry: KeyRegistry,
+    ) -> Self {
         Self {
             agent_id,
+            swarm_id,
             config,
             peers: Arc::new(RwLock::new(HashMap::new())),
             patches: Arc::new(RwLock::new(HashMap::new())),
@@ -702,6 +710,20 @@ impl GossipProtocol {
         let exp_id = announcement.experiment_id;
         let now = Utc::now();
 
+        // Swarm isolation: reject messages from other swarms
+        if !self.swarm_id.is_empty()
+            && !announcement.swarm_id.is_empty()
+            && announcement.swarm_id != self.swarm_id
+        {
+            tracing::warn!(
+                experiment_id = %exp_id,
+                expected_swarm = %self.swarm_id,
+                received_swarm = %announcement.swarm_id,
+                "Rejected experiment from foreign swarm"
+            );
+            return Err(GossipError::SwarmMismatch(announcement.swarm_id.clone()));
+        }
+
         // Dedup
         {
             let seen = self.seen_messages.read().await;
@@ -783,7 +805,12 @@ mod tests {
     fn create_test_protocol(agent_id: &str) -> GossipProtocol {
         let config = GossipConfig::default();
         let registry = KeyRegistry::new();
-        GossipProtocol::new(agent_id.to_string(), config, registry)
+        GossipProtocol::new(
+            agent_id.to_string(),
+            "test-swarm".to_string(),
+            config,
+            registry,
+        )
     }
 
     #[tokio::test]
@@ -1039,7 +1066,7 @@ mod tests {
     async fn test_rate_limiting_blocks_flood() {
         let config = GossipConfig::default();
         let registry = KeyRegistry::new();
-        let protocol = GossipProtocol::new("agent-1".into(), config, registry);
+        let protocol = GossipProtocol::new("agent-1".into(), "test-swarm".into(), config, registry);
 
         let keypair = AgentKeypair::generate();
         protocol

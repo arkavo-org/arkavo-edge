@@ -36,6 +36,9 @@ pub struct ExperimentAnnouncement {
     pub prior_beta: f64,
     /// When the experiment completed
     pub timestamp: DateTime<Utc>,
+    /// Swarm ID for message isolation
+    #[serde(default)]
+    pub swarm_id: String,
     /// Ed25519 signature over the announcement
     pub signature: Vec<u8>,
 }
@@ -76,15 +79,25 @@ impl ExperimentAnnouncement {
             prior_alpha: 1.0,
             prior_beta: 1.0,
             timestamp: Utc::now(),
+            swarm_id: String::new(),
             signature: Vec::new(),
         }
     }
 
-    /// Attach Thompson Sampling prior state
+    /// Set the swarm ID for message isolation
+    #[must_use]
+    pub fn with_swarm(mut self, swarm_id: String) -> Self {
+        self.swarm_id = swarm_id;
+        self
+    }
+
+    /// Attach Thompson Sampling prior state (sanitized: non-finite values default to 1.0, then clamped)
     #[must_use]
     pub fn with_prior(mut self, alpha: f64, beta: f64) -> Self {
-        self.prior_alpha = alpha;
-        self.prior_beta = beta;
+        let safe_alpha = if alpha.is_finite() { alpha } else { 1.0 };
+        let safe_beta = if beta.is_finite() { beta } else { 1.0 };
+        self.prior_alpha = safe_alpha.clamp(1.0, 10_000.0);
+        self.prior_beta = safe_beta.clamp(1.0, 10_000.0);
         self
     }
 
@@ -99,6 +112,8 @@ impl ExperimentAnnouncement {
         content.extend(self.weighted_quality.to_le_bytes());
         content.extend(self.baseline_tok_per_sec.to_le_bytes());
         content.push(u8::from(self.kept));
+        content.extend((self.swarm_id.len() as u32).to_le_bytes());
+        content.extend(self.swarm_id.as_bytes());
         content.extend(self.timestamp.timestamp().to_le_bytes());
         content
     }
@@ -288,6 +303,57 @@ mod tests {
         reject.voted_at = accept.voted_at;
         accept.voted_at = reject.voted_at;
         assert_ne!(accept.content_to_sign(), reject.content_to_sign());
+    }
+
+    #[test]
+    fn test_with_prior_clamps_extreme_values() {
+        let ann = ExperimentAnnouncement::new(
+            Uuid::new_v4(),
+            [0u8; 32],
+            "n".into(),
+            HardwareTier::Edge,
+            "{}".into(),
+            "test-model".into(),
+            metrics(0.1, 50.0, false),
+        )
+        .with_prior(f64::INFINITY, -5.0);
+        // Infinity is non-finite, defaults to 1.0; -5.0 clamps to 1.0
+        assert!((ann.prior_alpha - 1.0).abs() < f64::EPSILON);
+        assert!((ann.prior_beta - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_with_prior_clamps_large_finite_values() {
+        let ann = ExperimentAnnouncement::new(
+            Uuid::new_v4(),
+            [0u8; 32],
+            "n".into(),
+            HardwareTier::Edge,
+            "{}".into(),
+            "test-model".into(),
+            metrics(0.1, 50.0, false),
+        )
+        .with_prior(50_000.0, 0.5);
+        // Large finite value clamps to 10_000; 0.5 clamps to 1.0
+        assert!((ann.prior_alpha - 10_000.0).abs() < f64::EPSILON);
+        assert!((ann.prior_beta - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_with_prior_clamps_nan() {
+        let ann = ExperimentAnnouncement::new(
+            Uuid::new_v4(),
+            [0u8; 32],
+            "n".into(),
+            HardwareTier::Edge,
+            "{}".into(),
+            "test-model".into(),
+            metrics(0.1, 50.0, false),
+        )
+        .with_prior(f64::NAN, f64::NAN);
+        // NaN is replaced with 1.0 (safe default) before clamping
+        assert!((ann.prior_alpha - 1.0).abs() < f64::EPSILON);
+        assert!((ann.prior_beta - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

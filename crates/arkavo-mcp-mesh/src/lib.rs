@@ -907,6 +907,7 @@ async fn discover_and_register_agents(
         }
     }
 
+    mdns.shutdown().ok();
     Ok(())
 }
 
