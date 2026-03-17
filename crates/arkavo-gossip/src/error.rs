@@ -49,6 +49,10 @@ pub enum GossipError {
     /// Peer rate limited
     #[error("Rate limited: peer {0} exceeded message limit")]
     RateLimited(String),
+
+    /// Message from a different swarm
+    #[error("swarm mismatch: message from '{0}' rejected")]
+    SwarmMismatch(String),
 }
 
 /// Result type alias for gossip operations

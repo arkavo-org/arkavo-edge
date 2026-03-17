@@ -213,8 +213,12 @@ impl LearningBus {
         #[allow(clippy::redundant_clone)]
         key_registry.register(agent_id.clone(), keypair.public_key().clone());
 
-        let mut gossip_protocol =
-            GossipProtocol::new(agent_id.clone(), gossip_config, key_registry);
+        let mut gossip_protocol = GossipProtocol::new(
+            agent_id.clone(),
+            swarm_id.clone(),
+            gossip_config,
+            key_registry,
+        );
 
         // Set up lesson approval callback
         gossip_protocol.set_lesson_approved_callback(lesson_approved_tx);

@@ -46,6 +46,20 @@ impl GossipProtocol {
             verifier.verify_lesson_announcement(&announcement)?;
         }
 
+        // Swarm isolation: reject lessons from other swarms
+        if !self.swarm_id.is_empty()
+            && !announcement.swarm_id.is_empty()
+            && announcement.swarm_id != self.swarm_id
+        {
+            tracing::warn!(
+                lesson_id = %lesson_id,
+                expected_swarm = %self.swarm_id,
+                received_swarm = %announcement.swarm_id,
+                "Rejected lesson from foreign swarm"
+            );
+            return Err(GossipError::SwarmMismatch(announcement.swarm_id.clone()));
+        }
+
         // Mark as seen with timestamp
         self.seen_lesson_ids.write().await.insert(lesson_id, now);
 

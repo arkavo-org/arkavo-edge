@@ -29,6 +29,9 @@ pub struct ContextEntry {
     pub model_hash: String,
     pub built_at: String,
     pub token_count: usize,
+    /// Provenance tier: "local", "verified", or "untrusted" (defaults to "local")
+    #[serde(default)]
+    pub trust_tier: String,
 }
 
 /// Registry mapping context names to `.bin` file metadata.
@@ -121,6 +124,7 @@ mod tests {
             model_hash: "model_hash_v1".to_string(),
             built_at: "2026-02-22T00:00:00Z".to_string(),
             token_count: 512,
+            trust_tier: String::new(),
         }
     }
 
@@ -237,5 +241,21 @@ mod tests {
         let entry = sample_entry("test");
         let cloned = entry.clone();
         assert_eq!(entry, cloned);
+    }
+
+    #[test]
+    fn test_context_entry_trust_tier_missing_defaults_empty() {
+        // Simulate deserializing an entry without trust_tier (backward compat)
+        let json = r#"{
+            "name": "test",
+            "bin_path": "/tmp/test.bin",
+            "bin_hash": "abc",
+            "model_id": "m",
+            "model_hash": "mh",
+            "built_at": "2026-01-01T00:00:00Z",
+            "token_count": 100
+        }"#;
+        let entry: ContextEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.trust_tier.is_empty());
     }
 }
