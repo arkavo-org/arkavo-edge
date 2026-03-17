@@ -1223,6 +1223,8 @@ impl A2aServer {
                 handler.set_keypair(arkavo_tdf::KasKeypair::generate());
                 Some(Arc::new(handler))
             },
+            #[cfg(feature = "kas")]
+            tdf_offer_store: Arc::new(super::handlers::tdf_share::TdfOfferStore::new()),
         };
 
         if let Err(e) = self.start_file_watcher().await {

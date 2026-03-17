@@ -79,7 +79,8 @@ pub use kas_client::{
 pub use a2a_handler::{KasA2aConfig, KasA2aHandler, KasError, KasKeypair};
 #[cfg(feature = "a2a")]
 pub use a2a_types::{
-    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
+    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse, TdfOffer,
+    TdfOffersRequest, TdfOffersResponse, TdfShareRequest, TdfShareResponse,
 };
 #[cfg(feature = "a2a")]
 pub use abac::{AbacError, AbacEvaluator, Decision};

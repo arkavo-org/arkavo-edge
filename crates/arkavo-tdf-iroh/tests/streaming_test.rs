@@ -4,13 +4,13 @@
 //! to ensure streaming works correctly without OOM issues.
 
 use arkavo_tdf::BlobTransport;
-use arkavo_tdf_iroh::IrohTransport;
+use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 use std::io::Cursor;
 
 /// Test streaming with 1MB data (baseline).
 #[tokio::test]
 async fn streaming_1mb() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Generate 1MB of test data
     let data: Vec<u8> = (0..1024 * 1024).map(|i| (i % 256) as u8).collect();
@@ -34,7 +34,7 @@ async fn streaming_1mb() {
 /// Test streaming with 10MB data.
 #[tokio::test]
 async fn streaming_10mb() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Generate 10MB of test data
     let data: Vec<u8> = (0..10 * 1024 * 1024).map(|i| (i % 256) as u8).collect();
@@ -56,7 +56,7 @@ async fn streaming_10mb() {
 #[tokio::test]
 #[ignore] // Run with: cargo test --test streaming_test -- --ignored
 async fn streaming_100mb() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Generate 100MB of test data
     let data: Vec<u8> = (0..100 * 1024 * 1024).map(|i| (i % 256) as u8).collect();
@@ -76,7 +76,7 @@ async fn streaming_100mb() {
 /// Test concurrent staging of multiple blobs.
 #[tokio::test]
 async fn concurrent_staging() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Stage multiple blobs concurrently
     let handles: Vec<_> = (0..5)
@@ -106,7 +106,7 @@ async fn concurrent_staging() {
 /// Test that health check works during active transfers.
 #[tokio::test]
 async fn health_check_during_transfer() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Start a staging operation
     let data = vec![0u8; 1024 * 1024];
@@ -121,7 +121,7 @@ async fn health_check_during_transfer() {
 /// Test binary data integrity (non-text data).
 #[tokio::test]
 async fn binary_data_integrity() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Generate random-ish binary data with all byte values
     let mut data = Vec::with_capacity(256 * 100);

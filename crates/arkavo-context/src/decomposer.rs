@@ -128,7 +128,8 @@ pub struct IrohChunkStorage {
 #[cfg(feature = "iroh-storage")]
 impl IrohChunkStorage {
     pub async fn new() -> std::result::Result<Self, arkavo_tdf_iroh::IrohError> {
-        let transport = arkavo_tdf_iroh::IrohTransport::new().await?;
+        let node = arkavo_tdf_iroh::IrohNode::memory().await?;
+        let transport = arkavo_tdf_iroh::IrohTransport::new(node);
         Ok(Self { transport })
     }
 

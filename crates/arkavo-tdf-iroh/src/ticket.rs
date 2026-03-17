@@ -38,6 +38,12 @@ impl IrohTicket {
         self.inner
     }
 
+    /// Get the BLAKE3 content hash of the blob.
+    #[must_use]
+    pub fn hash(&self) -> iroh_blobs::Hash {
+        self.inner.hash()
+    }
+
     /// Parse from a string received over control plane.
     pub fn from_string(s: &str) -> Result<Self, IrohError> {
         let ticket = BlobTicket::from_str(s)

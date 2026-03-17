@@ -237,7 +237,7 @@ async fn dispatch_event(
         | AgUiEvent::GetCostPrediction { .. } => {
             cost_handler.read().await.handle_event(&event, tx).await?;
         }
-        AgUiEvent::GetSecurityStatus => {
+        AgUiEvent::GetSecurityStatus | AgUiEvent::GetDataPlaneStatus => {
             security_handler
                 .read()
                 .await

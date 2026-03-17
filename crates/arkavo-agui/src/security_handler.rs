@@ -1,15 +1,16 @@
-//! Security and TDF audit handler for AG-UI.
+//! Security, TDF audit, and data plane handler for AG-UI.
 //!
-//! Provides security status, TDF encryption audit events, and policy
-//! information to the web UI. Each agent is its own KAS -- this handler
-//! reports on the local agent's encryption posture.
+//! Provides security status, TDF encryption audit events, data plane
+//! activity, and policy information to the web UI. Each agent is its
+//! own KAS -- this handler reports on the local agent's encryption
+//! posture and Iroh P2P transport activity.
 
 use crate::types::AgUiEvent;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
-/// Tracks TDF audit state and serves security status to the UI.
+/// Tracks TDF audit state and data plane activity for the UI.
 pub struct SecurityHandler {
     kas_enabled: bool,
     kas_url: String,
@@ -18,6 +19,13 @@ pub struct SecurityHandler {
     preflight_enabled: bool,
     preflight_policy_count: u32,
     audit_count: Arc<AtomicU64>,
+    // Data plane tracking
+    iroh_active: bool,
+    shares_sent: Arc<AtomicU64>,
+    shares_received: Arc<AtomicU64>,
+    bytes_staged: Arc<AtomicU64>,
+    bytes_fetched: Arc<AtomicU64>,
+    pending_offers: Arc<AtomicU32>,
 }
 
 impl Default for SecurityHandler {
@@ -36,6 +44,12 @@ impl SecurityHandler {
             preflight_enabled: false,
             preflight_policy_count: 0,
             audit_count: Arc::new(AtomicU64::new(0)),
+            iroh_active: false,
+            shares_sent: Arc::new(AtomicU64::new(0)),
+            shares_received: Arc::new(AtomicU64::new(0)),
+            bytes_staged: Arc::new(AtomicU64::new(0)),
+            bytes_fetched: Arc::new(AtomicU64::new(0)),
+            pending_offers: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -77,6 +91,28 @@ impl SecurityHandler {
         self.audit_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Set whether the Iroh P2P node is active.
+    pub fn set_iroh_active(&mut self, active: bool) {
+        self.iroh_active = active;
+    }
+
+    /// Record a TDF share sent via Iroh.
+    pub fn record_share_sent(&self, bytes: u64) {
+        self.shares_sent.fetch_add(1, Ordering::Relaxed);
+        self.bytes_staged.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Record a TDF share received via Iroh.
+    pub fn record_share_received(&self, bytes: u64) {
+        self.shares_received.fetch_add(1, Ordering::Relaxed);
+        self.bytes_fetched.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Update the pending offer count.
+    pub fn set_pending_offers(&self, count: u32) {
+        self.pending_offers.store(count, Ordering::Relaxed);
+    }
+
     /// Redact a sensitive string value for UI display.
     fn redact_sensitive(value: &str) -> String {
         if value.is_empty() {
@@ -85,7 +121,7 @@ impl SecurityHandler {
         arkavo_validation::sanitize::REDACTED_SENTINEL.to_string()
     }
 
-    /// Handle security-related UI events.
+    /// Handle security and data plane UI events.
     ///
     /// Redacts sensitive values (KAS URL, agent ID, key ID) before
     /// sending to the UI to prevent exposure via browser DevTools or
@@ -95,19 +131,34 @@ impl SecurityHandler {
         event: &AgUiEvent,
         tx: &mpsc::Sender<AgUiEvent>,
     ) -> anyhow::Result<()> {
-        if let AgUiEvent::GetSecurityStatus = event {
-            let response = AgUiEvent::SecurityStatusUpdate {
-                kas_enabled: self.kas_enabled,
-                kas_url: Self::redact_sensitive(&self.kas_url),
-                agent_id: Self::redact_sensitive(&self.agent_id),
-                key_id: Self::redact_sensitive(&self.key_id),
-                encryption_algorithm: "AES-256-GCM".to_string(),
-                audit_count: self.audit_count.load(Ordering::Relaxed),
-                preflight_enabled: self.preflight_enabled,
-                preflight_policies: self.preflight_policy_count,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            };
-            tx.send(response).await?;
+        match event {
+            AgUiEvent::GetSecurityStatus => {
+                let response = AgUiEvent::SecurityStatusUpdate {
+                    kas_enabled: self.kas_enabled,
+                    kas_url: Self::redact_sensitive(&self.kas_url),
+                    agent_id: Self::redact_sensitive(&self.agent_id),
+                    key_id: Self::redact_sensitive(&self.key_id),
+                    encryption_algorithm: "AES-256-GCM".to_string(),
+                    audit_count: self.audit_count.load(Ordering::Relaxed),
+                    preflight_enabled: self.preflight_enabled,
+                    preflight_policies: self.preflight_policy_count,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                tx.send(response).await?;
+            }
+            AgUiEvent::GetDataPlaneStatus => {
+                let response = AgUiEvent::DataPlaneStatusUpdate {
+                    iroh_active: self.iroh_active,
+                    total_shares_sent: self.shares_sent.load(Ordering::Relaxed),
+                    total_shares_received: self.shares_received.load(Ordering::Relaxed),
+                    total_bytes_staged: self.bytes_staged.load(Ordering::Relaxed),
+                    total_bytes_fetched: self.bytes_fetched.load(Ordering::Relaxed),
+                    pending_offers: self.pending_offers.load(Ordering::Relaxed),
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                tx.send(response).await?;
+            }
+            _ => {}
         }
 
         Ok(())
@@ -148,6 +199,27 @@ mod tests {
         assert_eq!(handler.kas_url, "http://localhost:8360");
     }
 
+    #[test]
+    fn data_plane_tracking() {
+        let handler = SecurityHandler::new();
+
+        handler.record_share_sent(4096);
+        handler.record_share_sent(8192);
+        handler.record_share_received(2048);
+
+        assert_eq!(handler.shares_sent.load(Ordering::Relaxed), 2);
+        assert_eq!(handler.bytes_staged.load(Ordering::Relaxed), 12288);
+        assert_eq!(handler.shares_received.load(Ordering::Relaxed), 1);
+        assert_eq!(handler.bytes_fetched.load(Ordering::Relaxed), 2048);
+    }
+
+    #[test]
+    fn pending_offers_tracking() {
+        let handler = SecurityHandler::new();
+        handler.set_pending_offers(3);
+        assert_eq!(handler.pending_offers.load(Ordering::Relaxed), 3);
+    }
+
     #[tokio::test]
     async fn handle_get_security_status() {
         let mut handler = SecurityHandler::new();
@@ -169,12 +241,46 @@ mod tests {
         } = response
         {
             assert!(!kas_enabled);
-            // KAS URL is now redacted for UI display
             assert_eq!(kas_url, arkavo_validation::sanitize::REDACTED_SENTINEL);
             assert_eq!(audit_count, 1);
             assert_eq!(encryption_algorithm, "AES-256-GCM");
         } else {
             panic!("Expected SecurityStatusUpdate");
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_get_data_plane_status() {
+        let mut handler = SecurityHandler::new();
+        handler.set_iroh_active(true);
+        handler.record_share_sent(1024);
+        handler.record_share_received(512);
+        handler.set_pending_offers(2);
+
+        let (tx, mut rx) = mpsc::channel(10);
+        let event = AgUiEvent::GetDataPlaneStatus;
+
+        handler.handle_event(&event, &tx).await.unwrap();
+
+        let response = rx.recv().await.unwrap();
+        if let AgUiEvent::DataPlaneStatusUpdate {
+            iroh_active,
+            total_shares_sent,
+            total_shares_received,
+            total_bytes_staged,
+            total_bytes_fetched,
+            pending_offers,
+            ..
+        } = response
+        {
+            assert!(iroh_active);
+            assert_eq!(total_shares_sent, 1);
+            assert_eq!(total_shares_received, 1);
+            assert_eq!(total_bytes_staged, 1024);
+            assert_eq!(total_bytes_fetched, 512);
+            assert_eq!(pending_offers, 2);
+        } else {
+            panic!("Expected DataPlaneStatusUpdate");
         }
     }
 }

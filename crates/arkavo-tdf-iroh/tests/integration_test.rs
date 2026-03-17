@@ -4,13 +4,13 @@
 
 use arkavo_tdf::testing::{MockBlobTransport, MockTdfService};
 use arkavo_tdf::{BlobTransport, TdfDecryptor, TdfEncryptor};
-use arkavo_tdf_iroh::IrohTransport;
+use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 use std::io::Cursor;
 
 /// Verify IrohTransport implements BlobTransport trait correctly.
 #[tokio::test]
 async fn iroh_implements_blob_transport() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Verify trait methods work
     let data = b"Trait implementation test";
@@ -27,7 +27,7 @@ async fn iroh_implements_blob_transport() {
 #[tokio::test]
 async fn composed_encrypt_stage_fetch_decrypt() {
     let tdf_service = MockTdfService::default();
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Original data
     let plaintext = b"Secret message for TDF workflow";
@@ -59,7 +59,7 @@ async fn composed_encrypt_stage_fetch_decrypt() {
 #[tokio::test]
 async fn mock_and_real_transport_same_interface() {
     let mock_transport = MockBlobTransport::new();
-    let real_transport = IrohTransport::new().await.unwrap();
+    let real_transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     let data = b"Same data, different transports";
 
@@ -84,7 +84,7 @@ async fn mock_and_real_transport_same_interface() {
 #[tokio::test]
 async fn streaming_encrypted_workflow() {
     let tdf_service = MockTdfService::default();
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Larger data for streaming
     let plaintext: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
@@ -114,16 +114,12 @@ async fn streaming_encrypted_workflow() {
 /// Test multiple transports sharing an Iroh node.
 #[tokio::test]
 async fn shared_node_multiple_transports() {
-    use arkavo_tdf_iroh::IrohNode;
-    use std::sync::Arc;
-
     // Create shared node
-    let node = Arc::new(IrohNode::with_defaults());
-    node.start().await.unwrap();
+    let node = IrohNode::memory().await.unwrap();
 
     // Create multiple transports from same node
-    let transport1 = IrohTransport::from_node(node.clone());
-    let transport2 = IrohTransport::from_node(node.clone());
+    let transport1 = IrohTransport::new(node.clone());
+    let transport2 = IrohTransport::new(node.clone());
 
     // Stage from transport1
     let data = b"Shared node data";
@@ -140,7 +136,7 @@ async fn shared_node_multiple_transports() {
 /// Test health check consistency.
 #[tokio::test]
 async fn health_check_lifecycle() {
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Should be healthy after creation
     assert!(transport.health_check().await.unwrap());
@@ -162,7 +158,7 @@ async fn health_check_lifecycle() {
 #[tokio::test]
 async fn full_encrypt_transport_decrypt_workflow() {
     let tdf_service = MockTdfService::new(0xAB); // Use specific key
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     let plaintext = b"Confidential: Project roadmap for Q4";
     let policy = arkavo_tdf::PolicyBuilder::new()

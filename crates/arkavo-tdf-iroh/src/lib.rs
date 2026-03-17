@@ -19,11 +19,12 @@
 //! # Example
 //!
 //! ```ignore
-//! use arkavo_tdf_iroh::IrohTransport;
+//! use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 //! use arkavo_tdf::BlobTransport;
 //!
-//! // Create transport (spawns embedded Iroh node)
-//! let transport = IrohTransport::new().await?;
+//! // Create node and transport
+//! let node = IrohNode::memory().await?;
+//! let transport = IrohTransport::new(node);
 //!
 //! // Stage some data
 //! let ticket = transport.stage(b"Hello, World!").await?;

@@ -1464,3 +1464,61 @@ pub struct KasPublicKeyResponse {
     /// Algorithm this key supports
     pub algorithm: String,
 }
+
+/// Request to share TDF-encrypted data with another agent via Iroh P2P
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TdfShareRequest {
+    /// Iroh blob ticket for fetching the encrypted data
+    pub ticket: String,
+    /// BLAKE3 content hash of the encrypted blob
+    pub content_hash: String,
+    /// Size of the encrypted blob in bytes
+    pub size_bytes: u64,
+    /// Policy attribute namespaces applied to the TDF
+    pub policy_attributes: Vec<String>,
+    /// KAS URL that can rewrap the encryption key
+    pub kas_url: String,
+    /// Agent ID of the sender
+    pub sender_agent_id: String,
+}
+
+/// Response to a tdf.share request
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TdfShareResponse {
+    /// Whether the agent accepted the share offer
+    pub accepted: bool,
+    /// Unique identifier for this offer
+    pub offer_id: String,
+}
+
+/// Request to list pending TDF share offers
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct TdfOffersRequest {}
+
+/// A pending TDF share offer from another agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TdfOffer {
+    /// Unique offer identifier
+    pub offer_id: String,
+    /// Iroh blob ticket for fetching the encrypted data
+    pub ticket: String,
+    /// BLAKE3 content hash of the encrypted blob
+    pub content_hash: String,
+    /// Size of the encrypted blob in bytes
+    pub size_bytes: u64,
+    /// Policy attribute namespaces applied to the TDF
+    pub policy_attributes: Vec<String>,
+    /// KAS URL that can rewrap the encryption key
+    pub kas_url: String,
+    /// Agent ID of the sender
+    pub sender_agent_id: String,
+    /// ISO 8601 timestamp when the offer was received
+    pub received_at: String,
+}
+
+/// Response containing pending TDF share offers
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TdfOffersResponse {
+    /// List of pending offers
+    pub offers: Vec<TdfOffer>,
+}

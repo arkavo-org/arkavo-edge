@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info, instrument};
 
 use crate::error::IrohError;
-use crate::node::{IrohNode, IrohNodeConfig};
+use crate::node::IrohNode;
 use crate::ticket::IrohTicket;
 
 /// Iroh-based blob transport implementing the `BlobTransport` trait.
@@ -24,22 +24,14 @@ pub struct IrohTransport {
 }
 
 impl IrohTransport {
-    /// Create a new transport with default configuration.
+    /// Create a new transport wrapping an existing Iroh node.
     ///
-    /// Automatically starts the Iroh node.
-    pub async fn new() -> Result<Self, IrohError> {
-        Self::with_config(IrohNodeConfig::default()).await
-    }
-
-    /// Create a new transport with custom configuration.
-    pub async fn with_config(config: IrohNodeConfig) -> Result<Self, IrohError> {
-        let node = Arc::new(IrohNode::new(config));
-        node.start().await?;
-        Ok(Self { node })
-    }
-
-    /// Create from an existing node (for sharing across components).
-    pub fn from_node(node: Arc<IrohNode>) -> Self {
+    /// The node should already be started. Use `IrohNode::memory()` to create one:
+    /// ```ignore
+    /// let node = IrohNode::memory().await?;
+    /// let transport = IrohTransport::new(node);
+    /// ```
+    pub fn new(node: Arc<IrohNode>) -> Self {
         Self { node }
     }
 
@@ -169,7 +161,8 @@ mod tests {
 
     #[tokio::test]
     async fn transport_stage_fetch_roundtrip() {
-        let transport = IrohTransport::new().await.unwrap();
+        let node = IrohNode::memory().await.unwrap();
+        let transport = IrohTransport::new(node.clone());
 
         let data = b"Hello, Iroh!";
         let ticket = transport.stage(data).await.unwrap();
@@ -186,7 +179,8 @@ mod tests {
 
     #[tokio::test]
     async fn transport_streaming() {
-        let transport = IrohTransport::new().await.unwrap();
+        let node = IrohNode::memory().await.unwrap();
+        let transport = IrohTransport::new(node);
 
         let data = b"Streaming data test";
         let reader = Cursor::new(data.to_vec());
@@ -204,7 +198,8 @@ mod tests {
 
     #[tokio::test]
     async fn transport_health_check() {
-        let transport = IrohTransport::new().await.unwrap();
+        let node = IrohNode::memory().await.unwrap();
+        let transport = IrohTransport::new(node);
 
         assert!(transport.health_check().await.unwrap());
 
@@ -216,7 +211,8 @@ mod tests {
 
     #[tokio::test]
     async fn transport_invalid_ticket() {
-        let transport = IrohTransport::new().await.unwrap();
+        let node = IrohNode::memory().await.unwrap();
+        let transport = IrohTransport::new(node);
 
         let result = transport.fetch("invalid-ticket").await;
         assert!(result.is_err());
@@ -225,11 +221,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_from_node() {
-        let node = Arc::new(IrohNode::with_defaults());
-        node.start().await.unwrap();
-
-        let transport = IrohTransport::from_node(node.clone());
+    async fn transport_shared_node() {
+        let node = IrohNode::memory().await.unwrap();
+        let transport = IrohTransport::new(node.clone());
 
         let data = b"Shared node test";
         let ticket = transport.stage(data).await.unwrap();

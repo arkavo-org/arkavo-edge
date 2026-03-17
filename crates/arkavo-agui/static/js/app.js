@@ -68,6 +68,12 @@ function routeEvent(event) {
         case 'policyApplied':
             handlePolicyApplied(event);
             break;
+        case 'dataPlaneStatusUpdate':
+            handleDataPlaneStatusUpdate(event);
+            break;
+        case 'dataPlaneTransfer':
+            handleDataPlaneTransfer(event);
+            break;
         case 'modelSelected':
             handleModelSelected(event);
             break;
@@ -126,6 +132,7 @@ function switchView(viewId) {
         requestBudgetData();
     } else if (viewId === 'security') {
         requestSecurityData();
+        requestDataPlaneData();
     } else if (viewId === 'learning' || viewId === 'router') {
         wsSend({ type: 'requestLearningStatus' });
         startLearningPolling();

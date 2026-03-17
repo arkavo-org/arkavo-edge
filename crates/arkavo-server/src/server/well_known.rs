@@ -68,6 +68,26 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
             input_modes: vec!["application/json".to_string()],
             output_modes: vec!["application/json".to_string()],
         });
+        skills.push(AgentSkill {
+            id: "tdf.share".to_string(),
+            name: "TDF P2P Share".to_string(),
+            description: Some(
+                "Accept TDF-encrypted data shares via Iroh P2P transport".to_string(),
+            ),
+            tags: vec!["tdf".to_string(), "p2p".to_string(), "iroh".to_string()],
+            examples: vec![],
+            input_modes: vec!["application/json".to_string()],
+            output_modes: vec!["application/json".to_string()],
+        });
+        skills.push(AgentSkill {
+            id: "tdf.offers".to_string(),
+            name: "TDF Pending Offers".to_string(),
+            description: Some("List pending TDF share offers from other agents".to_string()),
+            tags: vec!["tdf".to_string(), "p2p".to_string()],
+            examples: vec![],
+            input_modes: vec!["application/json".to_string()],
+            output_modes: vec!["application/json".to_string()],
+        });
     }
 
     // Build capabilities from agent features

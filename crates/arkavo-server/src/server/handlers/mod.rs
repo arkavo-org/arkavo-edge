@@ -11,3 +11,5 @@ pub(super) mod registration;
 pub(super) mod specialization;
 pub(super) mod streaming;
 pub(super) mod tasks;
+#[cfg(feature = "kas")]
+pub(super) mod tdf_share;
