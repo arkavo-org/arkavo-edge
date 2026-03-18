@@ -552,7 +552,7 @@ jobs:
         with:
           path: |
             vendor/llama.cpp/build
-            target/aarch64-apple-darwin/ci/build/arkavo-llama-cpp-sys-*/out
+            target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
           key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
           restore-keys: |
             llama-cpp-${{ runner.os }}-
@@ -622,7 +622,7 @@ jobs:
       - name: Prepare release artifact with ONNX Runtime
         run: |
           mkdir -p release-package
-          cp target/aarch64-apple-darwin/ci/arkavo release-package/
+          cp target/aarch64-apple-darwin/release/arkavo release-package/
           # Download ONNX Runtime for macOS ARM64
           curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
           mkdir -p ort-temp
@@ -688,7 +688,7 @@ jobs:
         with:
           path: |
             vendor/llama.cpp/build
-            target/x86_64-pc-windows-msvc/ci/build/arkavo-llama-cpp-sys-*/out
+            target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
           key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
           restore-keys: |
             llama-cpp-${{ runner.os }}-
@@ -714,7 +714,7 @@ jobs:
       - name: Prepare release artifact
         run: |
           New-Item -ItemType Directory -Force -Path release-package
-          Copy-Item target\x86_64-pc-windows-msvc\ci\arkavo.exe release-package\
+          Copy-Item target\x86_64-pc-windows-msvc\release\arkavo.exe release-package\
           Write-Output "Windows build with memory and remote LLM support" > release-package\features.txt
 
       - name: Upload Windows artifact
