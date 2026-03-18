@@ -1,8 +1,9 @@
 [package]
 name = "arkavo-trust"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "MCP-T trust scoring protocol for AI agent authorization"
+license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
