@@ -166,7 +166,7 @@ fn validate_request(request: &Value) -> Result<(), String> {
     if validator.validate(request).is_err() {
         let error_messages: Vec<String> = validator
             .iter_errors(request)
-            .map(|e| format!("{}: {}", e.instance_path, e))
+            .map(|e| format!("{}: {}", e.instance_path(), e))
             .collect();
         return Err(format!(
             "Request validation failed: {}",
@@ -183,7 +183,7 @@ fn validate_response(response: &Value) -> Result<(), String> {
     if validator.validate(response).is_err() {
         let error_messages: Vec<String> = validator
             .iter_errors(response)
-            .map(|e| format!("{}: {}", e.instance_path, e))
+            .map(|e| format!("{}: {}", e.instance_path(), e))
             .collect();
         return Err(format!(
             "Response validation failed: {}",
