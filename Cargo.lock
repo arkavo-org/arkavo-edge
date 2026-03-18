@@ -864,7 +864,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
- "dashmap",
+ "dashmap 6.1.0",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -904,7 +904,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
- "dashmap",
+ "dashmap 6.1.0",
  "flate2",
  "futures",
  "jsonschema",
@@ -1032,7 +1032,7 @@ version = "0.67.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "dashmap",
+ "dashmap 6.1.0",
  "futures",
  "reqwest 0.12.28",
  "serde",
@@ -1396,7 +1396,7 @@ dependencies = [
  "arkavo-protocol",
  "async-trait",
  "base64 0.22.1",
- "dashmap",
+ "dashmap 6.1.0",
  "dirs 6.0.0",
  "ed25519-dalek 2.2.0",
  "futures",
@@ -1479,7 +1479,7 @@ dependencies = [
  "clap",
  "criterion",
  "crossbeam-queue",
- "dashmap",
+ "dashmap 6.1.0",
  "futures",
  "governor",
  "hex",
@@ -1578,7 +1578,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
- "dashmap",
+ "dashmap 6.1.0",
  "dirs 6.0.0",
  "futures",
  "glob",
@@ -1643,7 +1643,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "crossbeam-queue",
- "dashmap",
+ "dashmap 6.1.0",
  "governor",
  "jsonwebtoken",
  "lru",
@@ -1697,7 +1697,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam-queue",
- "dashmap",
+ "dashmap 6.1.0",
  "futures",
  "governor",
  "hex",
@@ -1744,7 +1744,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
- "dashmap",
+ "dashmap 6.1.0",
  "futures",
  "http",
  "indicatif 0.18.4",
@@ -2951,7 +2951,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3496,6 +3496,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
 dependencies = [
  "cfg-if",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
  "hashbrown 0.14.5",
  "lock_api",
  "once_cell",
@@ -4734,7 +4748,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68a7f542ee6b35af73b06abc0dad1c1bae89964e4e253bc4b587b91c9637867b"
 dependencies = [
  "cfg-if",
- "dashmap",
+ "dashmap 5.5.3",
  "futures",
  "futures-timer",
  "no-std-compat",
@@ -5212,7 +5226,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -9851,7 +9865,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -12001,7 +12015,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

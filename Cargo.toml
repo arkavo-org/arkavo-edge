@@ -163,7 +163,7 @@ tempfile = "3.20"
 reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.41", default-features = false, features = ["serde", "clock", "std"] }
 keyring = "3.6"
 
 # Common utilities
@@ -193,6 +193,9 @@ hex = "0.4"
 # UI generation dependencies
 handlebars = "6.2"
 
+# Force single hashbrown version to reduce binary bloat
+hashbrown = "0.15.5"
+
 # Terminal and UI
 ratatui = "0.30.0"
 crossterm = { version = "0.29", features = ["event-stream"] }
@@ -213,7 +216,7 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false }
 webpki-roots = "0.26"
 governor = "0.6"
-dashmap = "5.5"
+dashmap = "6.1"
 crossbeam-queue = "0.3"
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
@@ -255,6 +258,11 @@ codegen-units = 1
 strip = true
 opt-level = 2
 panic = "abort"
+debug = false
+
+# Disable Debug trait codegen for all dependencies in release builds
+# This reduces binary size by ~1-2MB by removing fmt::Debug implementations
+[profile.release.package."*"]
 debug = false
 
 [profile.dev]
