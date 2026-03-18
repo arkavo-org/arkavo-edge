@@ -1,0 +1,304 @@
+{
+  "arp_spec": "0.1.0",
+  "adl_ref": {
+    "uri": "file://./rover-alpha.adl.json",
+    "document_hash": "sha256:pending"
+  },
+
+  "adaptation": {
+    "method": "thompson_sampling",
+    "parameters": {
+      "exploration_floor": 0.05
+    },
+    "cold_start": {
+      "strategy": "optimistic",
+      "initial_prior": { "alpha": 2.0, "beta": 1.0 },
+      "warmup_period": 3,
+      "warmup_behavior": "explore_with_guard"
+    },
+    "prior_management": {
+      "version_binding": "entity_hash",
+      "reset_on_version_change": true,
+      "reset_state": { "alpha": 2.0, "beta": 1.0 }
+    },
+    "signal_separation": {
+      "availability_failures_update_priors": false,
+      "availability_cooldown_sec": 60,
+      "availability_failure_types": ["timeout", "connection_refused"]
+    }
+  },
+
+  "feedback_loops": {
+    "immediate": {
+      "quality_gate": {
+        "threshold_default": 0.6,
+        "metric": "composite",
+        "on_failure": "update_prior_and_log",
+        "threshold_overrides": [
+          {
+            "task_class": "hazard_detection",
+            "threshold": 0.8
+          },
+          {
+            "task_class": "lesson_synthesis",
+            "threshold": 0.7
+          }
+        ]
+      }
+    },
+    "short_term": {
+      "policy_cache": {
+        "default_ttl_sec": 600,
+        "decay_strategy": "exponential",
+        "decay_half_life_sec": 300,
+        "human_source_exempt_from_decay": true,
+        "incident_source_quarantine_sec": 1800
+      }
+    },
+    "gossip": {
+      "propagation_interval_sec": 5,
+      "peer_discount_factor": 0.8,
+      "require_did_signature": true,
+      "quorum": {
+        "min_trusted_peers": 2,
+        "trusted_registry": "did:web:arkavo.example:fleet:registry",
+        "untrusted_did_weight": 0.0,
+        "new_did_probation_period_sec": 60
+      }
+    },
+    "resilience": {
+      "retry": {
+        "max_retries_default": 2,
+        "backoff_strategy": "exponential",
+        "initial_delay_ms": 500,
+        "max_delay_ms": 5000,
+        "retry_budget_per_minute": 10
+      },
+      "circuit_breaker": {
+        "failure_threshold": 3,
+        "recovery_timeout_sec": 30,
+        "success_threshold": 2,
+        "report_to_gossip": true
+      }
+    }
+  },
+
+  "cognitive": {
+    "context_inspection": {
+      "pattern_registry": [
+        {
+          "name": "sector_id_range",
+          "regex": "sector[_\\s]*(\\d+)",
+          "sensitivity": "public",
+          "action": "log"
+        },
+        {
+          "name": "traction_value",
+          "regex": "traction[:\\s]*(0\\.\\d+)",
+          "sensitivity": "internal",
+          "action": "log"
+        }
+      ],
+      "runtime_teachable": true,
+      "max_input_chars": 4096,
+      "max_output_chars": 2048
+    },
+    "drift_detection": {
+      "metric": "cosine_distance",
+      "threshold": 0.4,
+      "sample_interval_tokens": 256,
+      "on_drift_exceeded": "halt_and_report"
+    }
+  },
+
+  "execution": {
+    "sandbox": {
+      "default_limits": {
+        "memory_limit_mb": 512,
+        "cpu_limit_percent": 25,
+        "timeout_sec": 10
+      }
+    },
+    "tool_risk": {
+      "risk_levels": [
+        { "level": "low",      "ordinal": 0, "description": "Read-only sector queries" },
+        { "level": "medium",   "ordinal": 1, "description": "Lesson synthesis and voting" },
+        { "level": "high",     "ordinal": 2, "description": "Hazard injection (test-only)" },
+        { "level": "critical", "ordinal": 3, "description": "System modification" }
+      ],
+      "classifications": [
+        { "tool_pattern": "get_sector",    "risk": "low",    "requires_hitl": false },
+        { "tool_pattern": "inject_hazard", "risk": "high",   "requires_hitl": false }
+      ],
+      "runtime_promotion": {
+        "sandbox_violation_promotes_to": "critical",
+        "consecutive_failure_threshold": 3,
+        "promotes_by": 1
+      }
+    },
+    "allowed_path": {
+      "path_removal_on_violation": true,
+      "path_addition_requires": "constitutional_only"
+    }
+  },
+
+  "data_sovereignty": {
+    "authorization_cache": {
+      "default_ttl_sec": 120,
+      "sensitivity_multipliers": {
+        "public": 1.0,
+        "internal": 0.5,
+        "confidential": 0.25,
+        "restricted": 0.1
+      },
+      "max_cache_entries": 100,
+      "invalidation_triggers": ["escalation_event", "quarantine_event"]
+    },
+    "reclassification": {
+      "reclassification_scope": "per_task_class"
+    }
+  },
+
+  "network": {
+    "egress": {
+      "dynamic_deny": {
+        "on_connection_failure_count": 3,
+        "on_tls_error": true,
+        "on_suspicious_response": true
+      },
+      "deny_takes_precedence": true,
+      "dynamic_deny_ttl_sec": 600
+    },
+    "peer_routing": {
+      "peer_adaptation_method": "thompson_sampling",
+      "delegation_roi_tracking": true,
+      "delegation_roi_window_sec": 120,
+      "prefer_local_threshold": 0.6
+    }
+  },
+
+  "budget": {
+    "task_ceiling_usd": 0.10,
+    "on_exhaustion": "halt_and_report",
+    "degradation_chain": [
+      "degrade_to_cheapest_model",
+      "disable_optional_tools",
+      "halt_and_report"
+    ],
+    "alert_threshold_pct": 80,
+    "velocity": {
+      "max_spend_per_minute_usd": 0.05,
+      "max_tool_calls_per_minute": 30,
+      "max_tokens_per_minute": 4096
+    },
+    "rate_limiting": {
+      "global": {
+        "requests_per_second": 10.0,
+        "burst_size": 5
+      },
+      "max_tracking_entries": 100,
+      "tracking_entry_ttl_sec": 300,
+      "cleanup_interval_sec": 60
+    }
+  },
+
+  "escalation": {
+    "cross_layer_rules": [
+      {
+        "trigger": { "layer": "cognitive", "event": "drift_threshold_exceeded" },
+        "actions": [
+          { "target_layer": "execution", "action": "suspend_tools" }
+        ],
+        "confidence_threshold": 0.8
+      },
+      {
+        "trigger": { "layer": "execution", "event": "sandbox_violation" },
+        "actions": [
+          { "target_layer": "network", "action": "deny_egress" },
+          { "target_layer": "cognitive", "action": "tighten_drift_threshold", "parameters": { "new_threshold": 0.2 } }
+        ],
+        "confidence_threshold": 0.9
+      },
+      {
+        "trigger": { "layer": "network", "event": "peer_returns_manipulative_content" },
+        "actions": [
+          { "target_layer": "data_sovereignty", "action": "quarantine_peer" }
+        ],
+        "confidence_threshold": 0.7
+      }
+    ],
+    "ratchet_direction": "tighten_only",
+    "relaxation_requires": "human_approval"
+  },
+
+  "quarantine": {
+    "default_ttl_sec": 300,
+    "confidence_threshold_for_sticky": 0.7,
+    "ttl_formula": "default_ttl * (1 - confidence)",
+    "sticky_requires": "human_review",
+    "scopes": ["tool", "model", "peer"]
+  },
+
+  "hitl": {
+    "relaxation": {
+      "relaxation_conditions": [
+        {
+          "scope": "quarantine",
+          "required_role": "fleet_operator"
+        },
+        {
+          "scope": "risk_level",
+          "required_role": "safety_officer"
+        }
+      ],
+      "approval_mechanism": "signed_command",
+      "audit_requirement": "always_logged"
+    },
+    "teaching": {
+      "enabled": true,
+      "intent_classification": ["instruction", "correction", "reinforcement", "pattern"]
+    }
+  },
+
+  "session": {
+    "timeout_bounds": {
+      "absolute_timeout_min_sec": 60,
+      "absolute_timeout_max_sec": 3600,
+      "idle_timeout_max_sec": 300
+    },
+    "defaults": {
+      "absolute_timeout_sec": 600,
+      "idle_timeout_sec": 120
+    },
+    "sensitivity_proportional": {
+      "enabled": true,
+      "idle_timeout_multipliers": {
+        "public": 1.0,
+        "internal": 0.5,
+        "confidential": 0.25,
+        "restricted": 0.1
+      }
+    }
+  },
+
+  "state_storage": {
+    "policy_cache": {
+      "backend": "local_encrypted",
+      "integrity": "hash_chain",
+      "encryption_at_rest": true
+    }
+  },
+
+  "observability": {
+    "decision_trace": {
+      "enabled": true,
+      "storage": "append_only",
+      "retention_days": 30,
+      "cryptographic_signing": {
+        "signing_required_above_sensitivity": "internal",
+        "algorithm": "Ed25519",
+        "signed_by": "did:web:arkavo.example:fleet:rover-alpha"
+      }
+    }
+  }
+}

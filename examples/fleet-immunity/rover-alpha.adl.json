@@ -1,0 +1,184 @@
+{
+  "adl_spec": "0.1.0",
+  "name": "Rover Alpha",
+  "description": "Autonomous warehouse delivery rover. Route: Sector 1 → 2 → 4 → 3. Scout role — first to encounter hazards, synthesizes safety lessons and broadcasts to fleet via A2A gossip protocol.",
+  "version": "1.0.0",
+  "id": "did:web:arkavo.example:fleet:rover-alpha",
+  "data_classification": {
+    "sensitivity": "internal",
+    "categories": ["operational-telemetry", "safety-critical"]
+  },
+  "lifecycle": {
+    "status": "active",
+    "effective_date": "2026-03-17T00:00:00Z"
+  },
+  "provider": {
+    "name": "Arkavo Fleet Operations",
+    "url": "https://arkavo.example/fleet"
+  },
+  "identity": {
+    "method": "did:web",
+    "identifier": "did:web:arkavo.example:fleet:rover-alpha",
+    "public_key": {
+      "algorithm": "Ed25519",
+      "encoding": "base64"
+    }
+  },
+  "model": {
+    "provider": "local",
+    "name": "ministral-3b",
+    "context_window": 8192,
+    "temperature": 0.3,
+    "capabilities": ["text-generation", "tool-use", "reasoning"]
+  },
+  "tools": [
+    {
+      "name": "get_sector",
+      "description": "Query a warehouse sector for current status including hazard information. Returns sector name and any active hazards with traction coefficients.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Sector ID (1-4)",
+            "minimum": 1,
+            "maximum": 4
+          }
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "hazard": {
+            "type": ["object", "null"],
+            "properties": {
+              "hazard_type": { "type": "string" },
+              "traction": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+            }
+          }
+        }
+      },
+      "read_only": true,
+      "idempotent": true,
+      "examples": [
+        {
+          "input": { "id": 4 },
+          "output": { "id": 4, "name": "Cold Storage", "hazard": { "hazard_type": "black_ice", "traction": 0.1 } }
+        }
+      ]
+    },
+    {
+      "name": "inject_hazard",
+      "description": "Inject a hazard into a warehouse sector. Test-only tool for simulating environmental conditions. Should not be available in production deployments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sector": {
+            "type": "integer",
+            "description": "Target sector ID",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "hazard_type": {
+            "type": "string",
+            "description": "Hazard type identifier",
+            "enum": ["black_ice", "debris", "flood"]
+          },
+          "traction": {
+            "type": "number",
+            "description": "Traction coefficient (0.0 = no grip, 1.0 = full grip)",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        },
+        "required": ["sector", "hazard_type", "traction"]
+      },
+      "read_only": false,
+      "idempotent": true
+    }
+  ],
+  "permissions": {
+    "network": {
+      "allowed": [
+        {
+          "host": "localhost",
+          "ports": [8360],
+          "protocols": ["http"],
+          "description": "MCP fleet environment server"
+        },
+        {
+          "host": "*.local",
+          "protocols": ["mdns"],
+          "description": "mDNS peer discovery for A2A gossip"
+        }
+      ],
+      "denied": [
+        {
+          "host": "*",
+          "protocols": ["http", "https"],
+          "description": "Deny all external network access"
+        }
+      ]
+    },
+    "filesystem": {
+      "allowed": [
+        {
+          "path": "logs/rover-alpha.log",
+          "access": "read-write",
+          "description": "Agent log file"
+        }
+      ]
+    },
+    "execution": {
+      "allowed_tools": ["get_sector", "inject_hazard"],
+      "denied_tools": ["shell_exec", "file_write", "file_read"]
+    },
+    "resource_limits": {
+      "max_memory_mb": 512,
+      "max_cpu_percent": 25,
+      "max_execution_duration_sec": 300,
+      "max_concurrent_tool_calls": 2,
+      "tool_call_timeout_sec": 10
+    }
+  },
+  "security": {
+    "authentication": {
+      "type": "none"
+    },
+    "encryption": {
+      "in_transit": {
+        "required": false,
+        "min_tls_version": "1.2"
+      }
+    },
+    "attestation": {
+      "type": "self",
+      "valid_until": "2027-03-17T00:00:00Z",
+      "properties": {
+        "fleet_role": "scout",
+        "route": "1-2-4-3",
+        "safety_invariant": "NOT(traction_loss AND drive_fast)"
+      }
+    }
+  },
+  "runtime": {
+    "tool_invocation": {
+      "max_concurrent": 2,
+      "timeout_sec": 10
+    },
+    "error_handling": {
+      "on_tool_failure": "retry",
+      "max_retries": 2,
+      "retry_delay_ms": 500
+    }
+  },
+  "metadata": {
+    "authors": ["Arkavo Contributors"],
+    "license": "Apache-2.0",
+    "tags": ["fleet", "autonomous-rover", "safety-critical", "gossip-protocol", "edge"],
+    "documentation": "https://github.com/arkavo-org/arkavo-edge/tree/main/examples/fleet-immunity"
+  }
+}
