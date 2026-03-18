@@ -215,7 +215,7 @@ tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false }
 webpki-roots = "0.26"
-governor = "0.6"
+governor = "0.10"
 dashmap = "6.1"
 crossbeam-queue = "0.3"
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
