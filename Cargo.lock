@@ -1460,6 +1460,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-policy-cache"
+version = "0.66.3"
+dependencies = [
+ "arkavo-arp",
+ "dashmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arkavo-protocol"
 version = "0.68.0"
 dependencies = [
