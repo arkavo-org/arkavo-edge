@@ -5,54 +5,54 @@ use fast_qr::QRBuilder;
 fn render_qr_unicode(qr: &fast_qr::QRCode) -> String {
     let size = qr.size;
     let mut result = String::new();
-    
+
     // Process two rows at a time for 1x2 density
     for row in (0..size).step_by(2) {
         for col in 0..size {
             let top_idx = row * size + col;
             let top = qr.data.get(top_idx).map(|m| *m == true).unwrap_or(false);
-            
+
             let bottom = if row + 1 < size {
                 let bottom_idx = (row + 1) * size + col;
                 qr.data.get(bottom_idx).map(|m| *m == true).unwrap_or(false)
             } else {
                 false
             };
-            
+
             // Use Unicode block characters for density
             let ch = match (top, bottom) {
-                (false, false) => ' ',    // Empty
-                (false, true) => '▄',     // Bottom half
-                (true, false) => '▀',     // Top half  
-                (true, true) => '█',      // Full block
+                (false, false) => ' ', // Empty
+                (false, true) => '▄',  // Bottom half
+                (true, false) => '▀',  // Top half
+                (true, true) => '█',   // Full block
             };
             result.push(ch);
         }
         result.push('\n');
     }
-    
+
     result
 }
 
 pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
     let url = descriptor.to_url();
-    
+
     let qr = QRBuilder::new(url)
         .build()
         .map_err(|e| RegistrationError::QrCodeGeneration(format!("{:?}", e)))?;
-    
+
     let mut image = render_qr_unicode(&qr);
-    
+
     // Remove trailing newline for processing
     image = image.trim_end().to_string();
-    
+
     let short_sha = &descriptor.agent_id_short_sha;
     let overlay = if short_sha.len() <= 7 {
         short_sha.clone()
     } else {
         short_sha[..7].to_string()
     };
-    
+
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
     let width_chars = if height > 0 {
@@ -60,30 +60,30 @@ pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, Regist
     } else {
         0
     };
-    
+
     if height < 5 || width_chars < overlay.len() {
         return Ok(image);
     }
-    
+
     let center_row = height / 2;
     let center_col = (width_chars - overlay.len()) / 2;
-    
+
     let mut modified_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-    
+
     if center_row < modified_lines.len() {
         let line = &mut modified_lines[center_row];
         let mut chars: Vec<char> = line.chars().collect();
-        
+
         for (i, ch) in overlay.chars().enumerate() {
             let pos = center_col + i;
             if pos < chars.len() {
                 chars[pos] = ch;
             }
         }
-        
+
         modified_lines[center_row] = chars.into_iter().collect();
     }
-    
+
     Ok(modified_lines.join("\n"))
 }
 
@@ -106,23 +106,23 @@ pub fn generate_authorization_qr_string(
     descriptor: &AgentDescriptor,
 ) -> Result<String, RegistrationError> {
     let url = descriptor.to_authorization_url();
-    
+
     let qr = QRBuilder::new(url)
         .build()
         .map_err(|e| RegistrationError::QrCodeGeneration(format!("{:?}", e)))?;
-    
+
     let mut image = render_qr_unicode(&qr);
-    
+
     // Remove trailing newline for processing
     image = image.trim_end().to_string();
-    
+
     let short_sha = &descriptor.agent_id_short_sha;
     let overlay = if short_sha.len() <= 7 {
         short_sha.clone()
     } else {
         short_sha[..7].to_string()
     };
-    
+
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
     let width_chars = if height > 0 {
@@ -130,30 +130,30 @@ pub fn generate_authorization_qr_string(
     } else {
         0
     };
-    
+
     if height < 5 || width_chars < overlay.len() {
         return Ok(image);
     }
-    
+
     let center_row = height / 2;
     let center_col = (width_chars - overlay.len()) / 2;
-    
+
     let mut modified_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-    
+
     if center_row < modified_lines.len() {
         let line = &mut modified_lines[center_row];
         let mut chars: Vec<char> = line.chars().collect();
-        
+
         for (i, ch) in overlay.chars().enumerate() {
             let pos = center_col + i;
             if pos < chars.len() {
                 chars[pos] = ch;
             }
         }
-        
+
         modified_lines[center_row] = chars.into_iter().collect();
     }
-    
+
     Ok(modified_lines.join("\n"))
 }
 
@@ -163,7 +163,7 @@ pub fn generate_authorization_qr_string(
 pub fn display_authorization_qr(descriptor: &AgentDescriptor) -> Result<(), RegistrationError> {
     let qr_string = generate_authorization_qr_string(descriptor)?;
     println!("\n{}\n", qr_string);
-    
+
     if let Some(did) = &descriptor.did_key {
         println!("DID: {}", did);
     }
