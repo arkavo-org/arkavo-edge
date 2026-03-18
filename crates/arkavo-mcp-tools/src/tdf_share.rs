@@ -72,6 +72,17 @@ impl Tool for TdfShareTool {
             .as_str()
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing input_path".to_string()))?;
 
+        // Reject path traversal attempts
+        let path = std::path::Path::new(input_path);
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err(crate::ToolError::InvalidParams(
+                "Path traversal (.. components) not allowed".to_string(),
+            ));
+        }
+
         let namespace = args["namespace"]
             .as_str()
             .unwrap_or("https://arkavo.net/attr/sensitivity");
@@ -186,6 +197,17 @@ impl Tool for TdfReceiveTool {
             .as_str()
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing output_path".to_string()))?;
 
+        // Reject path traversal attempts
+        let path = std::path::Path::new(output_path);
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err(crate::ToolError::InvalidParams(
+                "Path traversal (.. components) not allowed".to_string(),
+            ));
+        }
+
         // Fetch from Iroh
         let node = match &self.iroh_node {
             Some(n) => n.clone(),
@@ -269,6 +291,28 @@ mod tests {
         let tool = TdfReceiveTool::new(None);
         let result = tool.execute(json!({})).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_share_rejects_path_traversal() {
+        let tool = TdfShareTool::new(None);
+        let result = tool
+            .execute(json!({"input_path": "../../../etc/passwd"}))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Path traversal"), "Got: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_receive_rejects_path_traversal() {
+        let tool = TdfReceiveTool::new(None);
+        let result = tool
+            .execute(json!({"ticket": "blobaaaa1234", "output_path": "../../tmp/evil.json"}))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Path traversal"), "Got: {err}");
     }
 
     #[tokio::test]

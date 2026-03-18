@@ -232,8 +232,10 @@ pub async fn handle_request_mesh_status(
         }
 
         // Poll KAS public key to detect KAS-enabled agents
+        // Perform network I/O before acquiring lock to avoid holding it during RPC
+        let kas_result = conn.get_kas_public_key().await;
         let sec = security_handler.read().await;
-        match conn.get_kas_public_key().await {
+        match kas_result {
             Ok(kas_data) => {
                 let info = crate::security_handler::AgentKasInfo {
                     enabled: true,

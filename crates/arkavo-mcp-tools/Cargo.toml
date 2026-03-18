@@ -50,7 +50,7 @@ tempfile = { workspace = true }
 criterion = { workspace = true }
 
 [features]
-default = []
+default = ["iroh"]
 ntp-server = []
 iroh = ["dep:arkavo-tdf-iroh"]
 

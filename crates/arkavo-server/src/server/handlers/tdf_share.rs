@@ -71,12 +71,53 @@ pub async fn handle_tdf_share(
         return Err(e);
     }
 
+    // Validate field lengths to prevent memory exhaustion and injection
     if request.ticket.is_empty() {
         timer.error();
         return Err(ErrorObjectOwned::owned(
             -32602,
             "Invalid params",
             Some("ticket must not be empty".to_string()),
+        ));
+    }
+    if request.content_hash.len() > 256 {
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32602,
+            "Invalid params",
+            Some("content_hash exceeds 256 chars".to_string()),
+        ));
+    }
+    if request.sender_agent_id.len() > 256 {
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32602,
+            "Invalid params",
+            Some("sender_agent_id exceeds 256 chars".to_string()),
+        ));
+    }
+    if request.kas_url.len() > 2048 {
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32602,
+            "Invalid params",
+            Some("kas_url exceeds 2048 chars".to_string()),
+        ));
+    }
+    if request.policy_attributes.len() > 50 {
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32602,
+            "Invalid params",
+            Some("policy_attributes exceeds 50 entries".to_string()),
+        ));
+    }
+    if request.size_bytes > 10_737_418_240 {
+        timer.error();
+        return Err(ErrorObjectOwned::owned(
+            -32602,
+            "Invalid params",
+            Some("size_bytes exceeds 10 GB limit".to_string()),
         ));
     }
 
@@ -193,6 +234,72 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(result.unwrap().offers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_tdf_share_rejects_oversized_content_hash() {
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let store = Arc::new(TdfOfferStore::new());
+
+        let mut request = create_test_request();
+        request.content_hash = "x".repeat(257);
+
+        let result = handle_tdf_share(&metrics, &rate_limiter, &store, request).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), -32602);
+    }
+
+    #[tokio::test]
+    async fn test_tdf_share_rejects_oversized_sender_id() {
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let store = Arc::new(TdfOfferStore::new());
+
+        let mut request = create_test_request();
+        request.sender_agent_id = "x".repeat(257);
+
+        let result = handle_tdf_share(&metrics, &rate_limiter, &store, request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tdf_share_rejects_oversized_kas_url() {
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let store = Arc::new(TdfOfferStore::new());
+
+        let mut request = create_test_request();
+        request.kas_url = "x".repeat(2049);
+
+        let result = handle_tdf_share(&metrics, &rate_limiter, &store, request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tdf_share_rejects_too_many_policy_attributes() {
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let store = Arc::new(TdfOfferStore::new());
+
+        let mut request = create_test_request();
+        request.policy_attributes = (0..51).map(|i| format!("attr-{i}")).collect();
+
+        let result = handle_tdf_share(&metrics, &rate_limiter, &store, request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tdf_share_rejects_oversized_bytes() {
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let store = Arc::new(TdfOfferStore::new());
+
+        let mut request = create_test_request();
+        request.size_bytes = 10_737_418_241;
+
+        let result = handle_tdf_share(&metrics, &rate_limiter, &store, request).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
