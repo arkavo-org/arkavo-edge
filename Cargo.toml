@@ -72,6 +72,7 @@ members = [
     "crates/arkavo-kv-cache",
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
+    "crates/arkavo-arp",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -126,6 +127,7 @@ default-members = [
     "crates/arkavo-session",
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
+    "crates/arkavo-arp",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]

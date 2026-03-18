@@ -580,6 +580,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-arp"
+version = "0.66.3"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arkavo-attestation"
 version = "0.68.0"
 dependencies = [
