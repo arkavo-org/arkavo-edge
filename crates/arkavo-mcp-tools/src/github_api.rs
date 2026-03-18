@@ -1,16 +1,17 @@
-//! GitHub MCP tools using direct API calls via octocrab
+//! GitHub MCP tools using direct API calls via reqwest
 //!
-//! This module replaces the gh CLI-based tools with direct API calls.
+//! This module uses the GitHub REST API directly instead of a third-party client.
 
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_pr_body;
 use async_trait::async_trait;
-use octocrab::Octocrab;
-use octocrab::params::State;
+use serde::Deserialize;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use tokio::sync::OnceCell;
+
+const GITHUB_API_BASE: &str = "https://api.github.com";
+const USER_AGENT: &str = "Arkavo-MCP-Tools/0.1";
 
 /// Merge method for pull requests
 #[derive(Debug, Clone, Copy)]
@@ -20,24 +21,85 @@ pub enum MergeMethod {
     Rebase,
 }
 
+/// Minimal PR response
+#[derive(Debug, Deserialize)]
+struct GhPullRequest {
+    number: u64,
+    title: Option<String>,
+    html_url: Option<String>,
+    state: Option<String>,
+    user: Option<GhUser>,
+}
+
+/// Minimal issue response
+#[derive(Debug, Deserialize)]
+struct GhIssue {
+    number: u64,
+    title: String,
+    html_url: String,
+    state: String,
+    user: GhUser,
+}
+
+/// Minimal release response
+#[derive(Debug, Deserialize)]
+struct GhRelease {
+    html_url: String,
+}
+
+/// Minimal user response
+#[derive(Debug, Deserialize)]
+struct GhUser {
+    login: String,
+}
+
+struct GitHubClient {
+    client: reqwest::Client,
+    token: String,
+}
+
 /// Global GitHub client (lazily initialized from GITHUB_TOKEN)
-static GITHUB_CLIENT: OnceCell<Arc<Octocrab>> = OnceCell::const_new();
+static GITHUB_CLIENT: OnceCell<GitHubClient> = OnceCell::const_new();
 
 /// Get or initialize the GitHub client
-async fn get_github_client() -> Result<&'static Arc<Octocrab>> {
+async fn get_github_client() -> Result<&'static GitHubClient> {
     GITHUB_CLIENT
         .get_or_try_init(|| async {
             let token = std::env::var("GITHUB_TOKEN")
                 .map_err(|_| ToolError::Mcp("GITHUB_TOKEN environment variable not set".into()))?;
 
-            let client = Octocrab::builder()
-                .personal_token(token)
+            let client = reqwest::Client::builder()
+                .user_agent(USER_AGENT)
                 .build()
-                .map_err(|e| ToolError::Mcp(format!("Failed to create GitHub client: {e}")))?;
+                .map_err(|e| ToolError::Mcp(format!("Failed to create HTTP client: {e}")))?;
 
-            Ok(Arc::new(client))
+            Ok(GitHubClient { client, token })
         })
         .await
+}
+
+/// Send a GitHub API request and check for errors
+async fn github_request(
+    gh: &GitHubClient,
+    request: reqwest::RequestBuilder,
+    action: &str,
+) -> Result<reqwest::Response> {
+    let resp = request
+        .header("Authorization", format!("Bearer {}", gh.token))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| ToolError::Mcp(format!("Failed to {action}: {e}")))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(ToolError::Mcp(format!(
+            "Failed to {action} ({status}): {text}"
+        )));
+    }
+
+    Ok(resp)
 }
 
 /// Extract owner and repo from a "owner/repo" format string
@@ -160,7 +222,7 @@ impl Default for GitHubPrCreateTool {
 #[async_trait]
 impl Tool for GitHubPrCreateTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
+        let gh = get_github_client().await?;
 
         let title = params["title"]
             .as_str()
@@ -183,17 +245,26 @@ impl Tool for GitHubPrCreateTool {
         let body = params["body"].as_str().unwrap_or("");
         let formatted_body = format_pr_body(body);
 
-        let pr = client
-            .pulls(&owner, &repo)
-            .create(title, &head, base)
-            .body(&formatted_body)
-            .send()
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls");
+        let resp = github_request(
+            gh,
+            gh.client.post(&url).json(&json!({
+                "title": title,
+                "body": formatted_body,
+                "head": head,
+                "base": base
+            })),
+            "create PR",
+        )
+        .await?;
+
+        let pr: GhPullRequest = resp
+            .json()
             .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to create PR: {e}")))?;
+            .map_err(|e| ToolError::Mcp(format!("Failed to parse PR response: {e}")))?;
 
         let pr_url = pr
             .html_url
-            .map(|u| u.to_string())
             .unwrap_or_else(|| format!("https://github.com/{}/{}/pull/{}", owner, repo, pr.number));
 
         Ok(json!({
@@ -252,6 +323,8 @@ impl Default for GitHubPrListTool {
 #[async_trait]
 impl Tool for GitHubPrListTool {
     async fn execute(&self, params: Value) -> Result<Value> {
+        let gh = get_github_client().await?;
+
         let (owner, repo) = if let Some(repo_str) = params["repository"].as_str() {
             let (o, r) = parse_repo(repo_str)?;
             (o.to_string(), r.to_string())
@@ -260,29 +333,27 @@ impl Tool for GitHubPrListTool {
         };
 
         let state = match params["state"].as_str() {
-            Some("closed") => State::Closed,
-            Some("all") => State::All,
-            _ => State::Open,
+            Some("closed") => "closed",
+            Some("all") => "all",
+            _ => "open",
         };
 
-        let page = get_github_client()
-            .await?
-            .pulls(&owner, &repo)
-            .list()
-            .state(state)
-            .send()
-            .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to list PRs: {e}")))?;
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls?state={state}");
+        let resp = github_request(gh, gh.client.get(&url), "list PRs").await?;
 
-        let pr_list: Vec<Value> = page
-            .items
+        let prs: Vec<GhPullRequest> = resp
+            .json()
+            .await
+            .map_err(|e| ToolError::Mcp(format!("Failed to parse PR list: {e}")))?;
+
+        let pr_list: Vec<Value> = prs
             .iter()
             .map(|pr| {
                 json!({
                     "number": pr.number,
                     "title": pr.title.as_deref().unwrap_or(""),
-                    "state": format!("{:?}", pr.state.as_ref().unwrap_or(&octocrab::models::IssueState::Open)),
-                    "url": pr.html_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+                    "state": pr.state.as_deref().unwrap_or("unknown"),
+                    "url": pr.html_url.as_deref().unwrap_or(""),
                     "user": pr.user.as_ref().map(|u| u.login.clone()).unwrap_or_default()
                 })
             })
@@ -347,7 +418,7 @@ impl Default for GitHubPrMergeTool {
 #[async_trait]
 impl Tool for GitHubPrMergeTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
+        let gh = get_github_client().await?;
 
         let number = params["number"]
             .as_u64()
@@ -361,18 +432,20 @@ impl Tool for GitHubPrMergeTool {
         };
 
         let merge_method = match params["method"].as_str() {
-            Some("squash") => octocrab::params::pulls::MergeMethod::Squash,
-            Some("rebase") => octocrab::params::pulls::MergeMethod::Rebase,
-            _ => octocrab::params::pulls::MergeMethod::Merge,
+            Some("squash") => "squash",
+            Some("rebase") => "rebase",
+            _ => "merge",
         };
 
-        client
-            .pulls(&owner, &repo)
-            .merge(number)
-            .method(merge_method)
-            .send()
-            .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to merge PR: {e}")))?;
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/merge");
+        github_request(
+            gh,
+            gh.client
+                .put(&url)
+                .json(&json!({ "merge_method": merge_method })),
+            "merge PR",
+        )
+        .await?;
 
         Ok(json!({
             "success": true,
@@ -433,7 +506,7 @@ impl Default for GitHubIssueCreateTool {
 #[async_trait]
 impl Tool for GitHubIssueCreateTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
+        let gh = get_github_client().await?;
 
         let title = params["title"]
             .as_str()
@@ -449,17 +522,25 @@ impl Tool for GitHubIssueCreateTool {
         let body = params["body"].as_str().unwrap_or("");
         let formatted_body = format_pr_body(body);
 
-        let issue = client
-            .issues(&owner, &repo)
-            .create(title)
-            .body(&formatted_body)
-            .send()
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues");
+        let resp = github_request(
+            gh,
+            gh.client.post(&url).json(&json!({
+                "title": title,
+                "body": formatted_body
+            })),
+            "create issue",
+        )
+        .await?;
+
+        let issue: GhIssue = resp
+            .json()
             .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to create issue: {e}")))?;
+            .map_err(|e| ToolError::Mcp(format!("Failed to parse issue response: {e}")))?;
 
         Ok(json!({
             "success": true,
-            "issue_url": issue.html_url.to_string(),
+            "issue_url": issue.html_url,
             "issue_number": issue.number,
             "message": format!("Issue #{} created: {}", issue.number, issue.html_url)
         }))
@@ -513,6 +594,8 @@ impl Default for GitHubIssueListTool {
 #[async_trait]
 impl Tool for GitHubIssueListTool {
     async fn execute(&self, params: Value) -> Result<Value> {
+        let gh = get_github_client().await?;
+
         let (owner, repo) = if let Some(repo_str) = params["repository"].as_str() {
             let (o, r) = parse_repo(repo_str)?;
             (o.to_string(), r.to_string())
@@ -521,29 +604,27 @@ impl Tool for GitHubIssueListTool {
         };
 
         let state = match params["state"].as_str() {
-            Some("closed") => State::Closed,
-            Some("all") => State::All,
-            _ => State::Open,
+            Some("closed") => "closed",
+            Some("all") => "all",
+            _ => "open",
         };
 
-        let page = get_github_client()
-            .await?
-            .issues(&owner, &repo)
-            .list()
-            .state(state)
-            .send()
-            .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to list issues: {e}")))?;
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues?state={state}");
+        let resp = github_request(gh, gh.client.get(&url), "list issues").await?;
 
-        let issue_list: Vec<Value> = page
-            .items
+        let issues: Vec<GhIssue> = resp
+            .json()
+            .await
+            .map_err(|e| ToolError::Mcp(format!("Failed to parse issue list: {e}")))?;
+
+        let issue_list: Vec<Value> = issues
             .iter()
             .map(|issue| {
                 json!({
                     "number": issue.number,
                     "title": &issue.title,
-                    "state": format!("{:?}", issue.state),
-                    "url": issue.html_url.to_string(),
+                    "state": &issue.state,
+                    "url": &issue.html_url,
                     "user": issue.user.login.clone()
                 })
             })
@@ -611,7 +692,7 @@ impl Default for GitHubReleaseCreateTool {
 #[async_trait]
 impl Tool for GitHubReleaseCreateTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let client = get_github_client().await?;
+        let gh = get_github_client().await?;
 
         let tag = params["tag"]
             .as_str()
@@ -627,19 +708,26 @@ impl Tool for GitHubReleaseCreateTool {
         let title = params["title"].as_str().unwrap_or(tag);
         let notes = params["notes"].as_str().unwrap_or("");
 
-        let release = client
-            .repos(&owner, &repo)
-            .releases()
-            .create(tag)
-            .name(title)
-            .body(notes)
-            .send()
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/releases");
+        let resp = github_request(
+            gh,
+            gh.client.post(&url).json(&json!({
+                "tag_name": tag,
+                "name": title,
+                "body": notes
+            })),
+            "create release",
+        )
+        .await?;
+
+        let release: GhRelease = resp
+            .json()
             .await
-            .map_err(|e| ToolError::Mcp(format!("Failed to create release: {e}")))?;
+            .map_err(|e| ToolError::Mcp(format!("Failed to parse release response: {e}")))?;
 
         Ok(json!({
             "success": true,
-            "release_url": release.html_url.to_string(),
+            "release_url": release.html_url,
             "tag": tag,
             "message": format!("Release {} created: {}", tag, release.html_url)
         }))

@@ -1,6 +1,6 @@
 use crate::error::{GitHubError, Result};
 use chrono::{DateTime, Duration, Utc};
-use octocrab::Octocrab;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,7 +8,21 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 const DEFAULT_CACHE_TTL_MINUTES: i64 = 5;
-const GITHUB_PER_PAGE: u8 = 100;
+const GITHUB_PER_PAGE: u32 = 100;
+const GITHUB_API_BASE: &str = "https://api.github.com";
+const USER_AGENT: &str = concat!("Arkavo-GitHub/", env!("CARGO_PKG_VERSION"));
+
+/// Minimal repo response from GitHub API (only fields we use)
+#[derive(Debug, Clone, Deserialize)]
+struct GhRepo {
+    full_name: Option<String>,
+    name: String,
+    archived: Option<bool>,
+    private: Option<bool>,
+    default_branch: Option<String>,
+    language: Option<String>,
+    size: Option<u64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoInfo {
@@ -29,24 +43,22 @@ struct CachedRepoList {
 }
 
 pub struct OrgDiscovery {
-    github_client: Arc<Octocrab>,
+    client: Client,
+    token: Option<String>,
     cache: Arc<RwLock<HashMap<String, CachedRepoList>>>,
     cache_ttl: Duration,
 }
 
 impl OrgDiscovery {
     pub fn new(token: Option<String>) -> Result<Self> {
-        let github_client = if let Some(token) = token {
-            Octocrab::builder()
-                .personal_token(token)
-                .build()
-                .map_err(|e| GitHubError::Octocrab(Box::new(e)))?
-        } else {
-            Octocrab::default()
-        };
+        let client = Client::builder()
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to create HTTP client: {e}")))?;
 
         Ok(Self {
-            github_client: Arc::new(github_client),
+            client,
+            token,
             cache: Arc::new(RwLock::new(HashMap::new())),
             cache_ttl: Duration::minutes(DEFAULT_CACHE_TTL_MINUTES),
         })
@@ -115,6 +127,15 @@ impl OrgDiscovery {
         );
     }
 
+    fn auth_headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let req = request.header("Accept", "application/vnd.github+json");
+        if let Some(ref token) = self.token {
+            req.header("Authorization", format!("Bearer {token}"))
+        } else {
+            req
+        }
+    }
+
     async fn fetch_all_repos(&self, org: &str) -> Result<Vec<RepoInfo>> {
         let mut all_repos = Vec::new();
         let mut page = 1u32;
@@ -122,30 +143,40 @@ impl OrgDiscovery {
         loop {
             debug!("Fetching page {page} for organization: {org}");
 
-            let page_repos = self
-                .github_client
-                .orgs(org)
-                .list_repos()
-                .per_page(GITHUB_PER_PAGE)
-                .page(page)
+            let url = format!(
+                "{GITHUB_API_BASE}/orgs/{org}/repos?per_page={GITHUB_PER_PAGE}&page={page}"
+            );
+
+            let resp = self
+                .auth_headers(self.client.get(&url))
                 .send()
                 .await
-                .map_err(|e| {
-                    if e.to_string().contains("404") {
-                        GitHubError::OrgNotFound(org.to_string())
-                    } else if e.to_string().contains("rate limit") {
-                        GitHubError::RateLimitExceeded(60)
-                    } else {
-                        GitHubError::Octocrab(Box::new(e))
-                    }
-                })?;
+                .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
 
-            if page_repos.items.is_empty() {
+            let status = resp.status();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(GitHubError::OrgNotFound(org.to_string()));
+            }
+            if status == reqwest::StatusCode::FORBIDDEN {
+                return Err(GitHubError::RateLimitExceeded(60));
+            }
+            if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
+                return Err(GitHubError::GitHubApi(format!(
+                    "List repos failed ({status}): {text}"
+                )));
+            }
+
+            let page_repos: Vec<GhRepo> = resp
+                .json()
+                .await
+                .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))?;
+
+            if page_repos.is_empty() {
                 break;
             }
 
             let converted_repos: Vec<RepoInfo> = page_repos
-                .items
                 .into_iter()
                 .map(|repo| RepoInfo {
                     full_name: repo
@@ -156,14 +187,15 @@ impl OrgDiscovery {
                     is_archived: repo.archived.unwrap_or(false),
                     is_private: repo.private.unwrap_or(false),
                     default_branch: repo.default_branch.unwrap_or_else(|| "main".to_string()),
-                    language: repo.language.and_then(|l| l.as_str().map(String::from)),
-                    size_kb: repo.size.unwrap_or(0) as u64,
+                    language: repo.language,
+                    size_kb: repo.size.unwrap_or(0),
                 })
                 .collect();
 
+            let got_fewer_than_page = converted_repos.len() < GITHUB_PER_PAGE as usize;
             all_repos.extend(converted_repos);
 
-            if page_repos.next.is_none() {
+            if got_fewer_than_page {
                 break;
             }
 

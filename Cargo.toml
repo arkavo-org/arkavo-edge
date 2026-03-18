@@ -253,7 +253,7 @@ arbitrary = { version = "1", features = ["derive"] }
 lto = "fat"
 codegen-units = 1
 strip = true
-opt-level = 3
+opt-level = 2
 panic = "abort"
 debug = false
 
@@ -283,22 +283,6 @@ codegen-units = 256    # Maximum parallelism during compilation
 incremental = true     # Enable incremental compilation for local dev
 debug-assertions = true  # Keep safety checks enabled for tests
 overflow-checks = true   # Keep safety checks enabled for tests
-
-# CI profile - optimized builds for PR validation
-# Use with: cargo build --profile ci
-[profile.ci]
-inherits = "release"
-lto = "fat"               # Maximum dead-code elimination for size
-codegen-units = 1          # Single codegen unit = best optimization
-opt-level = "z"            # Optimize for size
-strip = true
-panic = "abort"
-debug = false
-incremental = false
-
-[profile.ci.build-override]
-opt-level = 2
-codegen-units = 16
 
 [workspace.lints.rust]
 unreachable_pub = "warn"

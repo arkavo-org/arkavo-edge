@@ -1,16 +1,49 @@
 //! GitHub API operations for PRs, Issues, and Releases
 //!
-//! Provides direct API access via octocrab, replacing the gh CLI dependency.
+//! Provides direct API access via reqwest, using the GitHub REST API.
 
 use crate::error::{GitHubError, Result};
-use octocrab::Octocrab;
-use octocrab::models::issues::Issue;
-use octocrab::models::pulls::PullRequest;
-use octocrab::models::repos::Release;
-use octocrab::params::State;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tracing::{debug, info};
+
+const GITHUB_API_BASE: &str = "https://api.github.com";
+const USER_AGENT: &str = concat!("Arkavo-GitHub/", env!("CARGO_PKG_VERSION"));
+
+/// Minimal pull request response from GitHub API
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhPullRequest {
+    pub number: u64,
+    pub title: Option<String>,
+    pub html_url: Option<String>,
+    pub state: Option<String>,
+    pub user: Option<GhUser>,
+}
+
+/// Minimal issue response from GitHub API
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhIssue {
+    pub number: u64,
+    pub title: String,
+    pub html_url: String,
+    pub state: String,
+    pub user: GhUser,
+}
+
+/// Minimal release response from GitHub API
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhRelease {
+    pub id: u64,
+    pub tag_name: String,
+    pub name: Option<String>,
+    pub html_url: String,
+}
+
+/// Minimal user response
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhUser {
+    pub login: String,
+}
 
 /// Merge method for pull requests
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -21,21 +54,23 @@ pub enum MergeMethod {
     Rebase,
 }
 
-/// GitHub operations client using octocrab
+/// GitHub operations client using reqwest
 pub struct GitHubOperations {
-    client: Arc<Octocrab>,
+    client: Client,
+    token: String,
 }
 
 impl GitHubOperations {
     /// Create a new GitHubOperations client with a personal access token
     pub fn new(token: &str) -> Result<Self> {
-        let client = Octocrab::builder()
-            .personal_token(token.to_string())
+        let client = Client::builder()
+            .user_agent(USER_AGENT)
             .build()
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to create HTTP client: {e}")))?;
 
         Ok(Self {
-            client: Arc::new(client),
+            client,
+            token: token.to_string(),
         })
     }
 
@@ -47,6 +82,12 @@ impl GitHubOperations {
         Self::new(&token)
     }
 
+    fn auth_headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        request
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+    }
+
     /// Create a pull request
     pub async fn create_pr(
         &self,
@@ -56,22 +97,39 @@ impl GitHubOperations {
         body: &str,
         head: &str,
         base: &str,
-    ) -> Result<PullRequest> {
+    ) -> Result<GhPullRequest> {
         info!("Creating PR: {} -> {} in {}/{}", head, base, owner, repo);
 
-        let pr = self
-            .client
-            .pulls(owner, repo)
-            .create(title, head, base)
-            .body(body)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({
+                "title": title,
+                "body": body,
+                "head": head,
+                "base": base
+            }))
             .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Create PR failed ({status}): {text}"
+            )));
+        }
+
+        let pr: GhPullRequest = resp
+            .json()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))?;
 
         info!(
             "Created PR #{}: {}",
             pr.number,
-            pr.html_url.as_ref().map(|u| u.as_str()).unwrap_or("")
+            pr.html_url.as_deref().unwrap_or("")
         );
         Ok(pr)
     }
@@ -81,18 +139,29 @@ impl GitHubOperations {
         &self,
         owner: &str,
         repo: &str,
-        state: Option<State>,
-    ) -> Result<Vec<PullRequest>> {
+        state: Option<&str>,
+    ) -> Result<Vec<GhPullRequest>> {
         debug!("Listing PRs for {}/{}", owner, repo);
 
-        let pulls_handler = self.client.pulls(owner, repo);
-        let page = match state {
-            Some(s) => pulls_handler.list().state(s).send().await,
-            None => pulls_handler.list().send().await,
-        }
-        .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+        let state_str = state.unwrap_or("open");
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls?state={state_str}");
+        let resp = self
+            .auth_headers(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
 
-        Ok(page.items)
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "List PRs failed ({status}): {text}"
+            )));
+        }
+
+        resp.json()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))
     }
 
     /// Merge a pull request
@@ -108,19 +177,27 @@ impl GitHubOperations {
             number, owner, repo, method
         );
 
-        let merge_method = match method {
-            MergeMethod::Merge => octocrab::params::pulls::MergeMethod::Merge,
-            MergeMethod::Squash => octocrab::params::pulls::MergeMethod::Squash,
-            MergeMethod::Rebase => octocrab::params::pulls::MergeMethod::Rebase,
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/merge");
+        let method_str = match method {
+            MergeMethod::Merge => "merge",
+            MergeMethod::Squash => "squash",
+            MergeMethod::Rebase => "rebase",
         };
 
-        self.client
-            .pulls(owner, repo)
-            .merge(number)
-            .method(merge_method)
+        let resp = self
+            .auth_headers(self.client.put(&url))
+            .json(&serde_json::json!({ "merge_method": method_str }))
             .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Merge PR failed ({status}): {text}"
+            )));
+        }
 
         info!("Merged PR #{}", number);
         Ok(())
@@ -133,17 +210,32 @@ impl GitHubOperations {
         repo: &str,
         title: &str,
         body: &str,
-    ) -> Result<Issue> {
+    ) -> Result<GhIssue> {
         info!("Creating issue in {}/{}: {}", owner, repo, title);
 
-        let issue = self
-            .client
-            .issues(owner, repo)
-            .create(title)
-            .body(body)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({
+                "title": title,
+                "body": body
+            }))
             .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Create issue failed ({status}): {text}"
+            )));
+        }
+
+        let issue: GhIssue = resp
+            .json()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))?;
 
         info!("Created issue #{}: {}", issue.number, issue.html_url);
         Ok(issue)
@@ -154,18 +246,29 @@ impl GitHubOperations {
         &self,
         owner: &str,
         repo: &str,
-        state: Option<State>,
-    ) -> Result<Vec<Issue>> {
+        state: Option<&str>,
+    ) -> Result<Vec<GhIssue>> {
         debug!("Listing issues for {}/{}", owner, repo);
 
-        let issues_handler = self.client.issues(owner, repo);
-        let page = match state {
-            Some(s) => issues_handler.list().state(s).send().await,
-            None => issues_handler.list().send().await,
-        }
-        .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+        let state_str = state.unwrap_or("open");
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues?state={state_str}");
+        let resp = self
+            .auth_headers(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
 
-        Ok(page.items)
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "List issues failed ({status}): {text}"
+            )));
+        }
+
+        resp.json()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))
     }
 
     /// Create a release
@@ -176,19 +279,33 @@ impl GitHubOperations {
         tag: &str,
         name: &str,
         body: &str,
-    ) -> Result<Release> {
+    ) -> Result<GhRelease> {
         info!("Creating release {} in {}/{}", tag, owner, repo);
 
-        let release = self
-            .client
-            .repos(owner, repo)
-            .releases()
-            .create(tag)
-            .name(name)
-            .body(body)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/releases");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({
+                "tag_name": tag,
+                "name": name,
+                "body": body
+            }))
             .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Create release failed ({status}): {text}"
+            )));
+        }
+
+        let release: GhRelease = resp
+            .json()
+            .await
+            .map_err(|e| GitHubError::GitHubApi(format!("Failed to parse response: {e}")))?;
 
         info!("Created release: {}", release.html_url);
         Ok(release)
@@ -204,11 +321,21 @@ impl GitHubOperations {
     ) -> Result<()> {
         debug!("Adding comment to {}/{}#{}", owner, repo, number);
 
-        self.client
-            .issues(owner, repo)
-            .create_comment(number, body)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/comments");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({ "body": body }))
+            .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Add comment failed ({status}): {text}"
+            )));
+        }
 
         Ok(())
     }
@@ -226,11 +353,21 @@ impl GitHubOperations {
             owner, repo, number, labels
         );
 
-        self.client
-            .issues(owner, repo)
-            .add_labels(number, labels)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/labels");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({ "labels": labels }))
+            .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Add labels failed ({status}): {text}"
+            )));
+        }
 
         Ok(())
     }
@@ -248,12 +385,21 @@ impl GitHubOperations {
             owner, repo, number, assignees
         );
 
-        let assignees_refs: Vec<&str> = assignees.iter().map(|s| s.as_str()).collect();
-        self.client
-            .issues(owner, repo)
-            .add_assignees(number, &assignees_refs)
+        let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/assignees");
+        let resp = self
+            .auth_headers(self.client.post(&url))
+            .json(&serde_json::json!({ "assignees": assignees }))
+            .send()
             .await
-            .map_err(|e| GitHubError::Octocrab(Box::new(e)))?;
+            .map_err(|e| GitHubError::GitHubApi(format!("Request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::GitHubApi(format!(
+                "Add assignees failed ({status}): {text}"
+            )));
+        }
 
         Ok(())
     }

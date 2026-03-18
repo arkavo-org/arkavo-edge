@@ -8,9 +8,6 @@ pub enum GitHubError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
-    #[error("Octocrab error: {0}")]
-    Octocrab(#[from] Box<octocrab::Error>),
-
     #[error("Invalid regex pattern: {0}")]
     InvalidRegex(#[from] regex::Error),
 

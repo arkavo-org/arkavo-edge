@@ -607,11 +607,11 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
-        run: cargo build --profile ci --target aarch64-apple-darwin --features mcp-macos -p arkavo
+        run: cargo build --release --target aarch64-apple-darwin --features mcp-macos -p arkavo
 
       - name: Check binary size
         run: |
-          SIZE=$(stat -f%z target/aarch64-apple-darwin/ci/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/ci/arkavo)
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
           if [ $SIZE_MB -gt 60 ]; then
@@ -698,12 +698,12 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          cargo build --profile ci --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
+          cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
 
       - name: Check binary
         run: |
-          Get-ChildItem target\x86_64-pc-windows-msvc\ci\arkavo.exe | Select-Object Name, Length
-          $size = (Get-Item target\x86_64-pc-windows-msvc\ci\arkavo.exe).Length / 1MB
+          Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
+          $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
           Write-Host "Binary size: $([math]::Round($size, 2))MB"
           if ($size -gt 60) {
             Write-Error "Binary size exceeds 60MB limit"
