@@ -236,6 +236,35 @@ impl TaskPolicyManager {
     }
 }
 
+impl TaskPolicyManager {
+    /// Create a policy manager configured from an ARP execution section (§10.2).
+    /// Maps ARP tool risk classifications to existing `ToolRisk` levels.
+    pub fn from_arp(arp: &arkavo_arp::layers::Execution, budget_limit: f64) -> Self {
+        let mut pm = Self::new().with_budget_limit(budget_limit);
+
+        if let Some(tool_risk) = &arp.tool_risk {
+            if let Some(classifications) = &tool_risk.classifications {
+                for classification in classifications {
+                    let risk = match classification.risk.as_str() {
+                        "low" => ToolRisk::Low,
+                        "medium" => ToolRisk::Medium,
+                        "high" => ToolRisk::High,
+                        "critical" => ToolRisk::Critical,
+                        _ => ToolRisk::Medium,
+                    };
+                    pm.register_tool_requirement(ToolEntitlement {
+                        tool_name: classification.tool_pattern.clone(),
+                        required_entitlements: Vec::new(),
+                        risk,
+                    });
+                }
+            }
+        }
+
+        pm
+    }
+}
+
 impl Default for TaskPolicyManager {
     fn default() -> Self {
         Self::new()
@@ -410,6 +439,57 @@ mod tests {
             obs.iter()
                 .any(|o| matches!(o, Obligation::NotifyOrchestrator))
         );
+    }
+
+    #[test]
+    fn test_from_arp_tool_risk_classifications() {
+        let arp_exec = arkavo_arp::layers::Execution {
+            sandbox: None,
+            tool_risk: Some(arkavo_arp::layers::ToolRiskConfig {
+                risk_levels: None,
+                classifications: Some(vec![
+                    arkavo_arp::layers::ToolClassification {
+                        tool_pattern: "ls".into(),
+                        risk: "low".into(),
+                        requires_hitl: None,
+                        version_binding: None,
+                    },
+                    arkavo_arp::layers::ToolClassification {
+                        tool_pattern: "shell_exec".into(),
+                        risk: "high".into(),
+                        requires_hitl: Some(true),
+                        version_binding: None,
+                    },
+                ]),
+                obligations: None,
+                runtime_promotion: None,
+            }),
+            allowed_path: None,
+        };
+        let pm = TaskPolicyManager::from_arp(&arp_exec, 10.0);
+        let mut ctx = test_context("ls");
+        ctx.estimated_cost_dollars = 0.0;
+        let decision = pm.evaluate(&ctx);
+        assert!(matches!(decision, PolicyDecision::Permit));
+
+        let ctx_high = test_context("shell_exec");
+        let decision_high = pm.evaluate(&ctx_high);
+        assert!(decision_high.is_permitted());
+        let obs = decision_high.obligations();
+        assert!(obs.iter().any(|o| matches!(o, Obligation::Sandbox(_))));
+    }
+
+    #[test]
+    fn test_from_arp_empty_execution() {
+        let arp_exec = arkavo_arp::layers::Execution {
+            sandbox: None,
+            tool_risk: None,
+            allowed_path: None,
+        };
+        let pm = TaskPolicyManager::from_arp(&arp_exec, 5.0);
+        let ctx = test_context("any_tool");
+        let decision = pm.evaluate(&ctx);
+        assert!(decision.is_permitted());
     }
 
     #[test]

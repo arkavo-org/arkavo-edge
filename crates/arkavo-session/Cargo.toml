@@ -27,6 +27,7 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
+arkavo-arp = { path = "../arkavo-arp" }
 
 # Serialization
 serde = { workspace = true }
