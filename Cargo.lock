@@ -1690,6 +1690,7 @@ dependencies = [
  "arkavo-tasks",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
+ "arkavo-trust",
  "arkavo-ucp",
  "async-trait",
  "axum",
@@ -1903,6 +1904,20 @@ dependencies = [
  "parking_lot",
  "torg-core",
  "torg-serde",
+]
+
+[[package]]
+name = "arkavo-trust"
+version = "0.1.0"
+dependencies = [
+ "arkavo-crypto",
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

@@ -1237,6 +1237,12 @@ impl A2aServer {
             mesh_state: Some(self.mesh_state.clone()),
             agent_memory: self.agent_memory.clone(),
             model_hint: self.resolve_model_hint().await,
+            trust_service: {
+                let keypair = arkavo_crypto::AgentKeypair::generate();
+                Some(std::sync::Arc::new(arkavo_trust::TrustService::new(
+                    keypair, 3600,
+                )))
+            },
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;

@@ -72,6 +72,7 @@ members = [
     "crates/arkavo-kv-cache",
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
+    "crates/arkavo-trust",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]

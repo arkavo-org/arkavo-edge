@@ -13,3 +13,4 @@ pub(super) mod streaming;
 pub(super) mod tasks;
 #[cfg(feature = "kas")]
 pub(super) mod tdf_share;
+pub(super) mod trust;

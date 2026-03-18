@@ -1,0 +1,18 @@
+[package]
+name = "arkavo-trust"
+version = "0.1.0"
+edition = "2021"
+description = "MCP-T trust scoring protocol for AI agent authorization"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+arkavo-crypto = { path = "../arkavo-crypto" }
+base64 = "0.22"
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
