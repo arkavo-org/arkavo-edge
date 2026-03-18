@@ -4,6 +4,7 @@ use tracing_subscriber::{Layer, filter::EnvFilter, layer::SubscriberExt};
 
 pub mod agent_detection;
 pub mod config;
+pub mod decision_trace;
 pub mod gpu_scheduler;
 pub mod health_reporter;
 pub mod metrics;

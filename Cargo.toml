@@ -74,6 +74,7 @@ members = [
     "crates/arkavo-evofabric",
     "crates/arkavo-arp",
     "crates/arkavo-policy-cache",
+    "crates/arkavo-adaptation",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -130,6 +131,7 @@ default-members = [
     "crates/arkavo-evofabric",
     "crates/arkavo-arp",
     "crates/arkavo-policy-cache",
+    "crates/arkavo-adaptation",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]

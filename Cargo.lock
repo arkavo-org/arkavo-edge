@@ -480,6 +480,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-adaptation"
+version = "0.66.3"
+dependencies = [
+ "arkavo-arp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arkavo-agent"
 version = "0.68.0"
 dependencies = [
@@ -1380,6 +1389,8 @@ name = "arkavo-observability"
 version = "0.68.0"
 dependencies = [
  "anyhow",
+ "arkavo-arp",
+ "arkavo-crypto",
  "async-trait",
  "chrono",
  "regex",
