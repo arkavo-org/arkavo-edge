@@ -284,13 +284,13 @@ incremental = true     # Enable incremental compilation for local dev
 debug-assertions = true  # Keep safety checks enabled for tests
 overflow-checks = true   # Keep safety checks enabled for tests
 
-# CI profile - fast builds for PR validation
+# CI profile - optimized builds for PR validation
 # Use with: cargo build --profile ci
 [profile.ci]
 inherits = "release"
-lto = "thin"              # ~70% of fat LTO benefit at ~30% link time
-codegen-units = 2         # Fewer units = better dead-code elimination
-opt-level = 2             # Slightly faster compile than opt-level=3
+lto = "fat"               # Maximum dead-code elimination for size
+codegen-units = 1          # Single codegen unit = best optimization
+opt-level = "z"            # Optimize for size
 strip = true
 panic = "abort"
 debug = false
