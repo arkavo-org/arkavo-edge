@@ -73,7 +73,8 @@ use arkavo_protocol::types::{
     DiscoverFeaturesQuery, DiscoveredAgent, KasPublicKeyRequest, KasPublicKeyResponse,
     KasRewrapRequest, KasRewrapResponse, MessageSendRequest, MessageSendResponse,
     TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
-    TaskGetResponse, TaskListRequest, TaskListResponse, TaskResponse, UserMessage,
+    TaskGetResponse, TaskListRequest, TaskListResponse, TaskResponse, TdfOffersRequest,
+    TdfOffersResponse, TdfShareRequest, TdfShareResponse, UserMessage,
 };
 use arkavo_tasks::task_executor::TaskExecutor;
 use arkavo_tasks::task_store::TaskStore;
@@ -262,6 +263,14 @@ pub trait A2aRpc {
     async fn kas_public_key(&self, request: KasPublicKeyRequest)
     -> RpcResult<KasPublicKeyResponse>;
 
+    /// Share TDF-encrypted data with this agent via Iroh P2P
+    #[method(name = "tdf.share")]
+    async fn tdf_share(&self, request: TdfShareRequest) -> RpcResult<TdfShareResponse>;
+
+    /// List pending TDF share offers
+    #[method(name = "tdf.offers")]
+    async fn tdf_offers(&self, request: TdfOffersRequest) -> RpcResult<TdfOffersResponse>;
+
     /// Get agent card (proxied from GET /.well-known/agent.json)
     #[method(name = "agent_card")]
     async fn agent_card(&self) -> RpcResult<serde_json::Value>;
@@ -316,6 +325,12 @@ pub struct A2aRpcImpl {
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
+    /// TDF share offer store for pending P2P offers
+    #[cfg(feature = "kas")]
+    pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
+    /// Shared Iroh P2P node for TDF blob transport
+    #[cfg(feature = "iroh")]
+    pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
 
 #[async_trait]
@@ -969,6 +984,52 @@ impl A2aRpcServer for A2aRpcImpl {
                 -32603,
                 "KAS capability not available",
                 Some("Build with --features kas to enable KAS capability".to_string()),
+            ))
+        }
+    }
+
+    async fn tdf_share(&self, request: TdfShareRequest) -> RpcResult<TdfShareResponse> {
+        #[cfg(feature = "kas")]
+        {
+            handlers::tdf_share::handle_tdf_share(
+                &self.metrics,
+                &self.rate_limiter,
+                &self.tdf_offer_store,
+                request,
+            )
+            .await
+        }
+
+        #[cfg(not(feature = "kas"))]
+        {
+            let _ = request;
+            Err(ErrorObjectOwned::owned(
+                -32603,
+                "TDF share not available",
+                Some("Build with --features kas to enable TDF sharing".to_string()),
+            ))
+        }
+    }
+
+    async fn tdf_offers(&self, request: TdfOffersRequest) -> RpcResult<TdfOffersResponse> {
+        #[cfg(feature = "kas")]
+        {
+            handlers::tdf_share::handle_tdf_offers(
+                &self.metrics,
+                &self.rate_limiter,
+                &self.tdf_offer_store,
+                request,
+            )
+            .await
+        }
+
+        #[cfg(not(feature = "kas"))]
+        {
+            let _ = request;
+            Err(ErrorObjectOwned::owned(
+                -32603,
+                "TDF offers not available",
+                Some("Build with --features kas to enable TDF sharing".to_string()),
             ))
         }
     }

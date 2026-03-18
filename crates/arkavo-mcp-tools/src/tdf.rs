@@ -300,7 +300,7 @@ impl Tool for TdfHelpTool {
 mod iroh_tools {
     use crate::server::Tool;
     use arkavo_mcp::ToolSchema;
-    use arkavo_tdf_iroh::{IrohTicket, IrohTransport};
+    use arkavo_tdf_iroh::{IrohNode, IrohTicket, IrohTransport};
     use async_trait::async_trait;
     use serde_json::{Value, json};
 
@@ -356,9 +356,10 @@ mod iroh_tools {
                 .map_err(crate::ToolError::Io)?;
 
             // Create Iroh transport and stage
-            let transport = IrohTransport::new().await.map_err(|e| {
-                crate::ToolError::Execution(format!("Failed to create transport: {e}"))
-            })?;
+            let node = IrohNode::memory()
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to create node: {e}")))?;
+            let transport = IrohTransport::new(node);
 
             let ticket = transport
                 .stage_bytes(&data)
@@ -438,9 +439,10 @@ mod iroh_tools {
                 .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid ticket: {e}")))?;
 
             // Create Iroh transport and fetch
-            let transport = IrohTransport::new().await.map_err(|e| {
-                crate::ToolError::Execution(format!("Failed to create transport: {e}"))
-            })?;
+            let node = IrohNode::memory()
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to create node: {e}")))?;
+            let transport = IrohTransport::new(node);
 
             let data = transport
                 .fetch_bytes(&ticket)

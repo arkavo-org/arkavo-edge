@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "a2a")]
+use schemars::JsonSchema;
+
 use crate::types::PolicyBinding;
 
 /// Request to rewrap a TDF encryption key for a specific client.
@@ -55,6 +58,87 @@ pub struct KasPublicKeyResponse {
 
     /// Algorithm this key supports (e.g., "RSA-OAEP")
     pub algorithm: String,
+}
+
+// --- TDF P2P Share types ---
+
+/// Request to share TDF-encrypted data with another agent via Iroh P2P.
+///
+/// Sent from the encrypting agent to the target agent via `tdf.share` RPC.
+/// The target agent stores this as a pending offer and can later fetch + decrypt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
+pub struct TdfShareRequest {
+    /// Iroh blob ticket for fetching the encrypted data
+    pub ticket: String,
+
+    /// BLAKE3 content hash of the encrypted blob
+    pub content_hash: String,
+
+    /// Size of the encrypted blob in bytes
+    pub size_bytes: u64,
+
+    /// Policy attribute namespaces applied to the TDF
+    pub policy_attributes: Vec<String>,
+
+    /// KAS URL that can rewrap the encryption key
+    pub kas_url: String,
+
+    /// Agent ID of the sender
+    pub sender_agent_id: String,
+}
+
+/// Response to a `tdf.share` request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
+pub struct TdfShareResponse {
+    /// Whether the agent accepted the share offer
+    pub accepted: bool,
+
+    /// Unique identifier for this offer (for later retrieval)
+    pub offer_id: String,
+}
+
+/// Request to list pending TDF share offers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
+pub struct TdfOffersRequest {}
+
+/// A pending TDF share offer from another agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
+pub struct TdfOffer {
+    /// Unique offer identifier
+    pub offer_id: String,
+
+    /// Iroh blob ticket for fetching the encrypted data
+    pub ticket: String,
+
+    /// BLAKE3 content hash of the encrypted blob
+    pub content_hash: String,
+
+    /// Size of the encrypted blob in bytes
+    pub size_bytes: u64,
+
+    /// Policy attribute namespaces applied to the TDF
+    pub policy_attributes: Vec<String>,
+
+    /// KAS URL that can rewrap the encryption key
+    pub kas_url: String,
+
+    /// Agent ID of the sender
+    pub sender_agent_id: String,
+
+    /// ISO 8601 timestamp when the offer was received
+    pub received_at: String,
+}
+
+/// Response containing pending TDF share offers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "a2a", derive(JsonSchema))]
+pub struct TdfOffersResponse {
+    /// List of pending offers
+    pub offers: Vec<TdfOffer>,
 }
 
 #[cfg(test)]
@@ -112,5 +196,61 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
         let parsed: KasPublicKeyResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, response);
+    }
+
+    #[test]
+    fn tdf_share_request_serialization() {
+        let request = TdfShareRequest {
+            ticket: "blobaaaa...".to_string(),
+            content_hash: "abc123".to_string(),
+            size_bytes: 1024,
+            policy_attributes: vec!["https://arkavo.net/attr/sensitivity".to_string()],
+            kas_url: "https://kas.arkavo.net".to_string(),
+            sender_agent_id: "agent-001".to_string(),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let parsed: TdfShareRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, request);
+    }
+
+    #[test]
+    fn tdf_share_response_serialization() {
+        let response = TdfShareResponse {
+            accepted: true,
+            offer_id: "offer-123".to_string(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        let parsed: TdfShareResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, response);
+    }
+
+    #[test]
+    fn tdf_offers_response_serialization() {
+        let response = TdfOffersResponse {
+            offers: vec![TdfOffer {
+                offer_id: "offer-123".to_string(),
+                ticket: "blobaaaa...".to_string(),
+                content_hash: "abc123".to_string(),
+                size_bytes: 2048,
+                policy_attributes: vec!["https://arkavo.net/attr/role".to_string()],
+                kas_url: "https://kas.arkavo.net".to_string(),
+                sender_agent_id: "agent-002".to_string(),
+                received_at: "2026-03-16T12:00:00Z".to_string(),
+            }],
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        let parsed: TdfOffersResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, response);
+        assert_eq!(parsed.offers.len(), 1);
+    }
+
+    #[test]
+    fn tdf_offers_request_default() {
+        let request = TdfOffersRequest::default();
+        let json = serde_json::to_string(&request).unwrap();
+        assert_eq!(json, "{}");
     }
 }

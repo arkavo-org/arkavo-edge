@@ -6,7 +6,7 @@
 //! 3. Fetch and verify the encrypted data
 
 use arkavo_tdf::{BlobTransport, OpenTdfService, PolicyBuilder, TdfEncryptor};
-use arkavo_tdf_iroh::IrohTransport;
+use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 
 /// Test full encryption + transport workflow.
 #[tokio::test]
@@ -15,7 +15,7 @@ async fn opentdf_encrypt_iroh_transport() {
     let tdf_service = OpenTdfService::with_kas_url("https://kas.arkavo.net");
 
     // Create Iroh transport
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     // Create policy with attributes
     let policy = PolicyBuilder::new()
@@ -67,7 +67,7 @@ async fn opentdf_stream_encrypt_iroh_transport() {
     use std::io::Cursor;
 
     let tdf_service = OpenTdfService::with_kas_url("https://kas.example.com");
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     let policy = PolicyBuilder::new()
         .attribute("https://arkavo.net/attr/type", &["document"])
@@ -100,7 +100,7 @@ async fn opentdf_stream_encrypt_iroh_transport() {
 #[tokio::test]
 async fn multiple_encrypted_blobs() {
     let tdf_service = OpenTdfService::with_kas_url("https://kas.example.com");
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     let documents = vec![
         ("doc1", "First document content"),
@@ -145,7 +145,7 @@ async fn multiple_encrypted_blobs() {
 #[tokio::test]
 async fn policy_with_dissemination() {
     let tdf_service = OpenTdfService::with_kas_url("https://kas.example.com");
-    let transport = IrohTransport::new().await.unwrap();
+    let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
 
     let policy = PolicyBuilder::new()
         .attribute("https://arkavo.net/attr/clearance", &["secret"])

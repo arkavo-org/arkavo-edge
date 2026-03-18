@@ -237,7 +237,7 @@ async fn dispatch_event(
         | AgUiEvent::GetCostPrediction { .. } => {
             cost_handler.read().await.handle_event(&event, tx).await?;
         }
-        AgUiEvent::GetSecurityStatus => {
+        AgUiEvent::GetSecurityStatus | AgUiEvent::GetDataPlaneStatus => {
             security_handler
                 .read()
                 .await
@@ -285,7 +285,13 @@ async fn dispatch_event(
             gateway_events::handle_request_status(connections, tx).await?;
         }
         AgUiEvent::RequestMeshStatus => {
-            gateway_events::handle_request_mesh_status(agents, agent_connections, tx).await?;
+            gateway_events::handle_request_mesh_status(
+                agents,
+                agent_connections,
+                security_handler,
+                tx,
+            )
+            .await?;
         }
         AgUiEvent::ApplyPart { part_id } => {
             gateway_events::handle_apply_part(part_id, session_id, connections, tx).await?;

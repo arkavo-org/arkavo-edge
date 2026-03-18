@@ -552,7 +552,7 @@ jobs:
         with:
           path: |
             vendor/llama.cpp/build
-            target/aarch64-apple-darwin/ci/build/arkavo-llama-cpp-sys-*/out
+            target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
           key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
           restore-keys: |
             llama-cpp-${{ runner.os }}-
@@ -607,11 +607,11 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
-        run: cargo build --profile ci --target aarch64-apple-darwin --features mcp-macos -p arkavo
+        run: cargo build --release --target aarch64-apple-darwin --features mcp-macos -p arkavo
 
       - name: Check binary size
         run: |
-          SIZE=$(stat -f%z target/aarch64-apple-darwin/ci/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/ci/arkavo)
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
           if [ $SIZE_MB -gt 60 ]; then
@@ -622,7 +622,7 @@ jobs:
       - name: Prepare release artifact with ONNX Runtime
         run: |
           mkdir -p release-package
-          cp target/aarch64-apple-darwin/ci/arkavo release-package/
+          cp target/aarch64-apple-darwin/release/arkavo release-package/
           # Download ONNX Runtime for macOS ARM64
           curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
           mkdir -p ort-temp
@@ -688,7 +688,7 @@ jobs:
         with:
           path: |
             vendor/llama.cpp/build
-            target/x86_64-pc-windows-msvc/ci/build/arkavo-llama-cpp-sys-*/out
+            target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
           key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
           restore-keys: |
             llama-cpp-${{ runner.os }}-
@@ -698,12 +698,12 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          cargo build --profile ci --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
+          cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
 
       - name: Check binary
         run: |
-          Get-ChildItem target\x86_64-pc-windows-msvc\ci\arkavo.exe | Select-Object Name, Length
-          $size = (Get-Item target\x86_64-pc-windows-msvc\ci\arkavo.exe).Length / 1MB
+          Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
+          $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
           Write-Host "Binary size: $([math]::Round($size, 2))MB"
           if ($size -gt 60) {
             Write-Error "Binary size exceeds 60MB limit"
@@ -714,7 +714,7 @@ jobs:
       - name: Prepare release artifact
         run: |
           New-Item -ItemType Directory -Force -Path release-package
-          Copy-Item target\x86_64-pc-windows-msvc\ci\arkavo.exe release-package\
+          Copy-Item target\x86_64-pc-windows-msvc\release\arkavo.exe release-package\
           Write-Output "Windows build with memory and remote LLM support" > release-package\features.txt
 
       - name: Upload Windows artifact

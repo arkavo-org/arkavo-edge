@@ -15,6 +15,8 @@ var AppState = {
     securityStatus: null,
     tdfAuditLog: [],
     policyLog: [],
+    dataPlaneStatus: null,
+    dataPlaneTransfers: [],
     activeView: 'agents',
     learningAgents: {},
     routingHistory: [],
@@ -35,6 +37,7 @@ var MAX_TELEMETRY = 200;
 var MAX_METRICS_HISTORY = 60;
 var MAX_DECISIONS = 100;
 var MAX_AUDIT_LOG = 200;
+var MAX_TRANSFERS = 200;
 var MAX_ROUTING_HISTORY = 50;
 
 function escapeHtml(text) {

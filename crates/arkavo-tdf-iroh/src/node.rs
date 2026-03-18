@@ -69,6 +69,16 @@ impl IrohNode {
         Self::new(IrohNodeConfig::default())
     }
 
+    /// Create and start a node with in-memory store.
+    ///
+    /// Convenience constructor that creates a default-configured node
+    /// and starts it immediately. Most callers should use this.
+    pub async fn memory() -> Result<Arc<Self>, IrohError> {
+        let node = Arc::new(Self::with_defaults());
+        node.start().await?;
+        Ok(node)
+    }
+
     /// Start the Iroh node.
     ///
     /// Initializes the endpoint, store, and protocol router.
@@ -227,6 +237,18 @@ mod tests {
 
         assert!(node.is_running().await);
         node.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn node_memory_constructor() {
+        let node = IrohNode::memory().await.unwrap();
+        assert!(node.is_running().await);
+
+        let _endpoint = node.endpoint().await.unwrap();
+        let _store = node.store().await.unwrap();
+
+        node.stop().await.unwrap();
+        assert!(!node.is_running().await);
     }
 
     #[tokio::test]

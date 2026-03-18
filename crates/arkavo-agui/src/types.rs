@@ -421,6 +421,35 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Data plane events (Iroh P2P + TDF share)
+    GetDataPlaneStatus,
+    DataPlaneStatusUpdate {
+        #[serde(rename = "irohActive")]
+        iroh_active: bool,
+        #[serde(rename = "totalSharesSent")]
+        total_shares_sent: u64,
+        #[serde(rename = "totalSharesReceived")]
+        total_shares_received: u64,
+        #[serde(rename = "totalBytesStaged")]
+        total_bytes_staged: u64,
+        #[serde(rename = "totalBytesFetched")]
+        total_bytes_fetched: u64,
+        #[serde(rename = "pendingOffers")]
+        pending_offers: u32,
+        timestamp: String,
+    },
+    DataPlaneTransfer {
+        direction: String,
+        #[serde(rename = "peerAgentId")]
+        peer_agent_id: String,
+        #[serde(rename = "contentHash")]
+        content_hash: String,
+        #[serde(rename = "sizeBytes")]
+        size_bytes: u64,
+        status: String,
+        timestamp: String,
+    },
+
     // Learning panel events
     RequestLearningStatus,
     LearningStatusUpdate {

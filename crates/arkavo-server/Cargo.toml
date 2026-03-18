@@ -99,6 +99,7 @@ arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
@@ -107,12 +108,13 @@ arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 clap = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["kas"]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
-kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt"]
+kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt", "arkavo-protocol/kas"]
+iroh = ["dep:arkavo-tdf-iroh"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 claude-agent = ["dep:arkavo-mcp-claude"]
 

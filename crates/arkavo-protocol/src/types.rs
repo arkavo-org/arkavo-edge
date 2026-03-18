@@ -1464,3 +1464,9 @@ pub struct KasPublicKeyResponse {
     /// Algorithm this key supports
     pub algorithm: String,
 }
+
+// TDF share types — canonical definitions live in arkavo-tdf::a2a_types
+#[cfg(feature = "kas")]
+pub use arkavo_tdf::{
+    TdfOffer, TdfOffersRequest, TdfOffersResponse, TdfShareRequest, TdfShareResponse,
+};

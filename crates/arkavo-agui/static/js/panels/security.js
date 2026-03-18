@@ -21,8 +21,25 @@ function handlePolicyApplied(event) {
     renderSecurity();
 }
 
+function handleDataPlaneStatusUpdate(event) {
+    AppState.dataPlaneStatus = event;
+    renderSecurity();
+}
+
+function handleDataPlaneTransfer(event) {
+    AppState.dataPlaneTransfers.unshift(event);
+    if (AppState.dataPlaneTransfers.length > MAX_TRANSFERS) {
+        AppState.dataPlaneTransfers.length = MAX_TRANSFERS;
+    }
+    renderSecurity();
+}
+
 function requestSecurityData() {
     wsSend({ type: 'getSecurityStatus' });
+}
+
+function requestDataPlaneData() {
+    wsSend({ type: 'getDataPlaneStatus' });
 }
 
 function renderSecurity() {
@@ -72,6 +89,9 @@ function renderSecurity() {
     }
     html += '<div class="budget-alert ' + postureClass + '">' + escapeHtml(postureText) + '</div>';
 
+    // Data Plane Status
+    html += renderDataPlaneStatus();
+
     // TDF Audit Log
     html += '<div class="section-title">TDF Audit Log (' + AppState.tdfAuditLog.length + ')</div>';
     if (AppState.tdfAuditLog.length === 0) {
@@ -92,6 +112,9 @@ function renderSecurity() {
         });
         html += '</tbody></table>';
     }
+
+    // Data Plane Activity
+    html += renderDataPlaneActivity();
 
     // Policy Log
     html += '<div class="section-title">Policy Events (' + AppState.policyLog.length + ')</div>';
@@ -114,6 +137,73 @@ function renderSecurity() {
     }
 
     container.innerHTML = html;
+}
+
+function renderDataPlaneStatus() {
+    var dp = AppState.dataPlaneStatus;
+    var html = '';
+
+    html += '<div class="section-title">Data Plane (Iroh P2P)</div>';
+
+    if (!dp) {
+        html += '<div class="stats-grid">';
+        html += renderStatCard('Iroh Node', 'Unknown', '');
+        html += renderStatCard('Shares Sent', 0, '');
+        html += renderStatCard('Shares Received', 0, '');
+        html += '</div>';
+        return html;
+    }
+
+    html += '<div class="stats-grid">';
+    html += renderStatCard('Iroh Node', dp.irohActive ? 'Active' : 'Inactive', '');
+    html += renderStatCard('Shares Sent', dp.totalSharesSent, formatBytes(dp.totalBytesStaged));
+    html += renderStatCard('Shares Received', dp.totalSharesReceived, formatBytes(dp.totalBytesFetched));
+    html += renderStatCard('Pending Offers', dp.pendingOffers, '');
+    html += '</div>';
+
+    // Data plane posture indicator
+    var dpClass = dp.irohActive ? 'healthy' : 'warning';
+    var dpText = dp.irohActive ? 'Iroh P2P data plane active' : 'Iroh P2P node not started';
+    if (dp.pendingOffers > 0) {
+        dpText += ' | ' + dp.pendingOffers + ' pending offer(s)';
+    }
+    html += '<div class="budget-alert ' + dpClass + '">' + escapeHtml(dpText) + '</div>';
+
+    return html;
+}
+
+function renderDataPlaneActivity() {
+    var transfers = AppState.dataPlaneTransfers;
+    var html = '';
+
+    html += '<div class="section-title">Data Plane Activity (' + transfers.length + ')</div>';
+
+    if (transfers.length === 0) {
+        html += '<div class="empty-state"><p>No P2P transfers recorded yet</p></div>';
+        return html;
+    }
+
+    html += '<table class="cost-table"><thead><tr>' +
+        '<th>Time</th><th>Direction</th><th>Peer</th><th>Hash</th><th>Size</th><th>Status</th>' +
+        '</tr></thead><tbody>';
+    transfers.forEach(function(entry) {
+        var dirIcon = entry.direction === 'sent' ? '\u2191' : '\u2193';
+        var statusClass = '';
+        if (entry.status === 'failed') statusClass = ' style="color:var(--error)"';
+        else if (entry.status === 'staged' || entry.status === 'shared') statusClass = ' style="color:var(--success)"';
+
+        html += '<tr>' +
+            '<td>' + formatTime(entry.timestamp) + '</td>' +
+            '<td class="mono">' + dirIcon + ' ' + escapeHtml(entry.direction) + '</td>' +
+            '<td>' + escapeHtml(entry.peerAgentId) + '</td>' +
+            '<td class="mono">' + escapeHtml((entry.contentHash || '').substring(0, 12)) + '</td>' +
+            '<td class="mono">' + formatBytes(entry.sizeBytes) + '</td>' +
+            '<td' + statusClass + '>' + escapeHtml(entry.status) + '</td>' +
+            '</tr>';
+    });
+    html += '</tbody></table>';
+
+    return html;
 }
 
 function formatBytes(bytes) {

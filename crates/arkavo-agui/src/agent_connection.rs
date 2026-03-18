@@ -841,6 +841,23 @@ impl AgentConnection {
         Ok(result)
     }
 
+    /// Get KAS public key from agent (returns None if KAS not enabled)
+    pub async fn get_kas_public_key(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let result: serde_json::Value = client
+            .request(
+                "kas.publicKey",
+                rpc_params![serde_json::json!({"request": {}})],
+            )
+            .await?;
+
+        Ok(result)
+    }
+
     /// Get agent configuration
     pub async fn get_config(
         &self,

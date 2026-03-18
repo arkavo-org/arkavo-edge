@@ -1,10 +1,9 @@
 //! KAS A2A RPC handlers for TDF key operations.
 
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
-use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
+use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{
-    KasPolicyBinding, KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest,
-    KasRewrapResponse,
+    KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
 };
 use arkavo_tdf::KasA2aHandler;
 use jsonrpsee::types::ErrorObjectOwned;
@@ -133,6 +132,8 @@ pub async fn handle_kas_public_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_protocol::rate_limit::RateLimitConfig;
+    use arkavo_protocol::types::KasPolicyBinding;
 
     use std::sync::Arc;
 

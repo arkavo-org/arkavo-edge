@@ -133,7 +133,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.66.3"
+version = "0.67.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -253,7 +253,7 @@ arbitrary = { version = "1", features = ["derive"] }
 lto = "fat"
 codegen-units = 1
 strip = true
-opt-level = 3
+opt-level = 2
 panic = "abort"
 debug = false
 
@@ -283,22 +283,6 @@ codegen-units = 256    # Maximum parallelism during compilation
 incremental = true     # Enable incremental compilation for local dev
 debug-assertions = true  # Keep safety checks enabled for tests
 overflow-checks = true   # Keep safety checks enabled for tests
-
-# CI profile - fast builds for PR validation
-# Use with: cargo build --profile ci
-[profile.ci]
-inherits = "release"
-lto = "thin"              # ~70% of fat LTO benefit at ~30% link time
-codegen-units = 2         # Fewer units = better dead-code elimination
-opt-level = 2             # Slightly faster compile than opt-level=3
-strip = true
-panic = "abort"
-debug = false
-incremental = false
-
-[profile.ci.build-override]
-opt-level = 2
-codegen-units = 16
 
 [workspace.lints.rust]
 unreachable_pub = "warn"
@@ -370,3 +354,10 @@ too_many_lines = "allow"
 [workspace.metadata.clippy]
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
+
+[patch.crates-io]
+# n0-snafu enables backtraces-impl-backtrace-crate on snafu, which replaces
+# std::backtrace::Backtrace with backtrace::Backtrace (missing capture() method).
+# This breaks octocrab which calls snafu::Backtrace::capture().
+# Patch removes that feature so snafu uses std::backtrace::Backtrace everywhere.
+n0-snafu = { path = "patches/n0-snafu" }
