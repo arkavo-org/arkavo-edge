@@ -1776,10 +1776,16 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     println!("Agent server stopped.");
 
-    // Small delay to ensure GPU cleanup completes
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    // Explicitly exit to ensure all threads are terminated
+    // Use _exit() to terminate without running C++ static destructors.
+    // std::process::exit() calls libc exit() which triggers __cxa_finalize,
+    // and the ggml Metal device static destructor asserts all GPU resource
+    // sets are freed. Aborted tokio tasks may still hold Arc<LlamaModel>
+    // references, preventing full cleanup before the static destructor runs.
+    #[cfg(unix)]
+    unsafe {
+        libc::_exit(0);
+    }
+    #[cfg(not(unix))]
     std::process::exit(0);
 }
 

@@ -260,8 +260,7 @@ opt-level = 2
 panic = "abort"
 debug = false
 
-# Disable Debug trait codegen for all dependencies in release builds
-# This reduces binary size by ~1-2MB by removing fmt::Debug implementations
+# Disable debuginfo for all dependencies in release builds
 [profile.release.package."*"]
 debug = false
 
