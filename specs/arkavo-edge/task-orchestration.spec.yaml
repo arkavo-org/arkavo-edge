@@ -1,15 +1,17 @@
 # yaml-language-server: $schema=../schema.json
 
 feature: Task Orchestration and Execution
-module: arkavo_protocol::task_executor
+module: arkavo_tasks
 version: 0.67.1
 
 invariants:
   - Tasks have deterministic IDs based on content
-  - Task state persists across restarts
+  - Task state persists across restarts via SQLite
   - Executor respects concurrency limits
   - Failed tasks are retryable with backoff
   - Task dependencies resolved before execution
+  - Intent analysis extracts entities and subtask specs
+  - Agent cards describe capabilities for task routing
 
 scenarios:
   - id: TASK-001
@@ -24,7 +26,7 @@ scenarios:
       - Subtasks generated if needed
       - Dependencies identified
       - Execution plan created
-    refs: [crates/arkavo-protocol/src/task_planner.rs]
+    refs: [crates/arkavo-tasks/src/task_planner.rs]
 
   - id: TASK-002
     name: Execute task with executor
@@ -38,7 +40,7 @@ scenarios:
       - Resources acquired
       - Task executed
       - Results stored
-    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    refs: [crates/arkavo-tasks/src/task_executor.rs]
 
   - id: TASK-003
     name: Store task state persistently
@@ -52,7 +54,7 @@ scenarios:
       - Written to SQLite
       - Timestamp recorded
       - Recoverable after restart
-    refs: [crates/arkavo-protocol/src/task_store.rs]
+    refs: [crates/arkavo-tasks/src/task_store.rs]
 
   - id: TASK-004
     name: Retry failed task with backoff
@@ -66,7 +68,7 @@ scenarios:
       - Delay applied
       - Task re-executed
       - Max retries enforced
-    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    refs: [crates/arkavo-tasks/src/task_executor.rs]
 
   - id: TASK-005
     name: Human review for ambiguous tasks
@@ -93,7 +95,7 @@ scenarios:
       - Subtasks executed concurrently
       - Results aggregated
       - Parent task completed
-    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    refs: [crates/arkavo-tasks/src/task_executor.rs]
 
   - id: TASK-007
     name: Task cancellation
@@ -107,7 +109,7 @@ scenarios:
       - Running tasks stopped
       - Subtasks cancelled
       - State updated to cancelled
-    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    refs: [crates/arkavo-tasks/src/task_executor.rs]
 
   - id: TASK-008
     name: Task progress tracking
@@ -121,7 +123,7 @@ scenarios:
       - ETA computed
       - Events emitted
       - UI updated
-    refs: [crates/arkavo-protocol/src/task_executor.rs]
+    refs: [crates/arkavo-tasks/src/task_executor.rs]
     edge_cases:
       - condition: Circular dependency detected
         expected: Returns error with dependency cycle
@@ -129,4 +131,61 @@ scenarios:
         expected: Queues task, retries when available
       - condition: Human review timeout
         expected: Escalates or fails with timeout
-    changed: "2025-01-31"
+    changed: "2026-03-19"
+
+  - id: TASK-009
+    name: Intent analysis with entity extraction
+    criticality: high
+    given:
+      - RuleBasedAnalyzer initialized
+      - User input with intent
+    when: analyze() called
+    then:
+      - IntentAnalysis produced
+      - Entities extracted from input
+      - SubTaskSpecs generated
+      - Confidence scores assigned
+    refs: [crates/arkavo-tasks/src/intent_analyzer.rs]
+    changed: "2026-03-19"
+
+  - id: TASK-010
+    name: Agent card capabilities matching
+    criticality: high
+    given:
+      - AgentCard with AgentCapabilities
+      - Task requiring specific skills
+    when: Agent matched to task
+    then:
+      - AgentSkills checked against requirements
+      - AiCapabilities verified
+      - Best agent selected
+    refs: [crates/arkavo-tasks/src/types.rs]
+    changed: "2026-03-19"
+
+  - id: TASK-011
+    name: SQLite task store persistence
+    criticality: critical
+    given:
+      - SqliteTaskStore with database connection
+      - Task state to persist
+    when: TaskStore save/load called
+    then:
+      - Task serialized to SQLite
+      - Load retrieves exact state
+      - Concurrent access safe
+    refs: [crates/arkavo-tasks/src/task_store.rs]
+    changed: "2026-03-19"
+
+  - id: TASK-012
+    name: Agent registry for task routing
+    criticality: medium
+    given:
+      - AgentRegistry with registered agents
+      - Task to route
+    when: Registry queried for capable agents
+    then:
+      - Matching agents returned
+      - Capabilities filter applied
+      - Empty result if no match
+    refs: [crates/arkavo-tasks/src/agent_registry.rs]
+    changed: "2026-03-19"

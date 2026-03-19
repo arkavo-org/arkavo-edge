@@ -178,14 +178,15 @@ components:
 
   - name: task-orchestration
     file: task-orchestration.spec.yaml
-    module: arkavo_protocol::task_executor
-    description: Task planning, execution, and HRM
+    module: arkavo_tasks
+    description: Task planning, execution, intent analysis, and agent routing
     criticality: critical
-    scenario_count: 8
+    scenario_count: 12
     invariants:
       - Deterministic task IDs
-      - State persists across restarts
+      - State persists across restarts via SQLite
       - Concurrency limits respected
+      - Intent analysis extracts entities and subtask specs
 
   - name: agent-auth
     file: agent-auth.spec.yaml
@@ -702,10 +703,120 @@ components:
       - Sessions can be revoked immediately
       - Logs never contain secrets or PII
 
+  - name: agent-sdk
+    file: agent-sdk.spec.yaml
+    module: anthropic_agent_sdk
+    description: Claude Agent SDK streaming, hooks, and MCP integration
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Streaming messages yield in-order
+      - Options builder validates required fields
+      - MCP tools discoverable via rmcp
+
+  - name: agent
+    file: agent.spec.yaml
+    module: arkavo_agent
+    description: Agent lifecycle management and discovery
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - Agents follow config -> register -> discover -> operate lifecycle
+      - AgentConfig validated before use
+      - Discovery supports mDNS and directory
+
+  - name: evofabric
+    file: evofabric.spec.yaml
+    module: arkavo_evofabric
+    description: AST-level code evolution via CRDT OpBundles
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - OpBundles are cryptographically signed
+      - CRDT convergence guarantees
+      - Merkle proofs verify integrity
+
+  - name: kv-cache
+    file: kv-cache.spec.yaml
+    module: arkavo_kv_cache
+    description: KV cache context slots for multi-sequence inference
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - Context slots independently addressable
+      - Trust tiers determine eviction order
+      - Manifest tracks all loaded contexts
+
+  - name: mcp-traits
+    file: mcp-traits.spec.yaml
+    module: arkavo_mcp
+    description: MCP core traits, JSON-RPC types, and integrity
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Tool trait requires Send + Sync
+      - RPC follows JSON-RPC 2.0
+      - Error codes follow standard
+
+  - name: openclaw
+    file: openclaw.spec.yaml
+    module: arkavo_openclaw
+    description: OpenClaw WebSocket protocol adapter
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Handshake requires device authentication
+      - Translation is bidirectional and lossless
+      - WebSocket uses TLS for non-localhost
+
+  - name: qr-registration
+    file: qr-registration.spec.yaml
+    module: arkavo_registration
+    description: Agent QR registration and authorization URLs
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - Authorization URLs follow arkavo:// scheme
+      - QR codes encode valid authorization URLs
+      - Endpoint must be routable
+
+  - name: security
+    file: security.spec.yaml
+    module: arkavo_security
+    description: Auth, OAuth2, rate limiting, and data classification
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - JWT tokens validated with expiry
+      - OAuth2 follows RFC 6749
+      - Rate limiting uses token bucket
+
+  - name: server
+    file: server.spec.yaml
+    module: arkavo_server
+    description: A2A server and runtime orchestration
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Server binds to configured address
+      - JSON-RPC 2.0 compliance
+      - Tool memory persists observations
+
+  - name: validation
+    file: validation.spec.yaml
+    module: arkavo_validation
+    description: Centralized input validation and security boundaries
+    criticality: critical
+    scenario_count: 7
+    invariants:
+      - Path traversal always detected
+      - Egress filter blocks private IPs
+      - Log sanitization removes PII
+
 stats:
-  total_specs: 61
-  total_scenarios: 531
-  critical_scenarios: 123
+  total_specs: 71
+  total_scenarios: 598
+  critical_scenarios: 155
   coverage_areas:
     - authentication
     - authorization
@@ -759,6 +870,15 @@ stats:
     - rlm_activation
     - response_processing
     - sampling_parameters
+    - agent_sdk
+    - agent_lifecycle
+    - ast_evolution
+    - kv_cache
+    - mcp_traits
+    - protocol_bridging
+    - qr_registration
+    - input_validation
+    - server_runtime
 
 # Cross-component behaviors
 integration_points:
@@ -1049,3 +1169,51 @@ integration_points:
   - name: Router → Chat Session
     description: Response processing sanitizes chat output
     specs: [ROUTER-011, ROUTER-012, ROUTER-013, CHAT-024]
+
+  - name: MCP Traits → MCP Tools
+    description: Tools implement the Tool trait from arkavo-mcp
+    specs: [MCPD-001, MCP-001]
+
+  - name: MCP Traits → MCP Runtime
+    description: Runtime executes tools defined by Tool trait
+    specs: [MCPD-001, MCPR-003]
+
+  - name: Agent SDK → MCP Traits
+    description: SDK discovers and registers MCP tools via rmcp
+    specs: [CASDK-003, MCPD-001]
+
+  - name: QR Registration → Crypto
+    description: Challenge signing uses Ed25519 from arkavo-crypto
+    specs: [QREG-004, CRYPTO-002]
+
+  - name: EvoFabric → Crypto
+    description: OpBundles signed with arkavo-crypto primitives
+    specs: [EVO-001, CRYPTO-002]
+
+  - name: OpenClaw → Protocol
+    description: OpenClaw translates frames to A2A JSON-RPC
+    specs: [OCLAW-002, OCLAW-003, PROTO-001]
+
+  - name: Validation → Network Security
+    description: Egress filter and host validation used by network security
+    specs: [VAL-005, VAL-006, NET-006]
+
+  - name: Security → Protocol
+    description: OAuth2 and JWT used for protocol authentication
+    specs: [SEC-001, SEC-002, PROTO-007]
+
+  - name: Server → Agent
+    description: Server manages agent lifecycle and goals
+    specs: [SRV-007, AGENT-002]
+
+  - name: Server → Learning Bus
+    description: Server runs learning pipeline loops
+    specs: [SRV-004, AUTO-001]
+
+  - name: KV Cache → Router
+    description: Cache context slots inform routing decisions
+    specs: [KVC-002, ROUTER-001]
+
+  - name: Validation → Session Security
+    description: Log sanitization used in session security
+    specs: [VAL-003, SESS-018]

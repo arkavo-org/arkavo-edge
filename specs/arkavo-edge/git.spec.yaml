@@ -6,7 +6,7 @@ version: 0.67.1
 
 invariants:
   - All operations validate repository state first
-  - Commit messages follow conventional format
+  - Commit messages are descriptive without conventional commit prefixes
   - Safety checks prevent destructive operations
   - Remote operations use configured credentials
 
