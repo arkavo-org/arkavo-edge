@@ -80,7 +80,7 @@ The `arkavo-security` crate now has its own spec (`security.spec.yaml` SEC-003) 
 
 ## Gaps (Addressed)
 
-Ten new specs were created for crates previously missing coverage:
+Eleven new specs were created for crates previously missing coverage:
 
 | New Spec | Crate | Scenarios |
 |---|---|---|
@@ -88,6 +88,7 @@ Ten new specs were created for crates previously missing coverage:
 | `agent.spec.yaml` | arkavo-agent | 5 |
 | `evofabric.spec.yaml` | arkavo-evofabric | 8 |
 | `kv-cache.spec.yaml` | arkavo-kv-cache | 5 |
+| `llama-cpp.spec.yaml` | arkavo-llama-cpp | 10 |
 | `mcp-traits.spec.yaml` | arkavo-mcp | 6 |
 | `openclaw.spec.yaml` | arkavo-openclaw | 6 |
 | `qr-registration.spec.yaml` | arkavo-registration | 5 |
@@ -103,8 +104,7 @@ Additionally, `task-orchestration.spec.yaml` was expanded with 4 new scenarios (
 |---|---|
 | `arkavo` | Thin binary wrapper; covered by `cli.spec.yaml` |
 | `arkavo-bench` | Internal benchmarking infrastructure |
-| `arkavo-llama-cpp` | FFI binding layer; behavior defined by upstream |
-| `arkavo-llama-cpp-sys` | Auto-generated bindgen bindings |
+| `arkavo-llama-cpp-sys` | Auto-generated bindgen FFI bindings |
 | `arkavo-test-macros` | Test infrastructure proc macro |
 | `arkavo-mcp-core` | Planned but unimplemented (README only) |
 
@@ -145,4 +145,4 @@ done
 
 ### Scenario count summary
 
-After additions: **71 specs, 598 total scenarios** (was 61 specs, 531 scenarios).
+After additions: **72 specs, 608 total scenarios** (was 61 specs, 531 scenarios).

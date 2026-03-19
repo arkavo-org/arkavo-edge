@@ -813,10 +813,21 @@ components:
       - Egress filter blocks private IPs
       - Log sanitization removes PII
 
+  - name: llama-cpp
+    file: llama-cpp.spec.yaml
+    module: arkavo_llama_cpp
+    description: Local LLM inference engine with GPU fallback
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - GPU acceleration with CPU fallback
+      - Model format auto-detected
+      - FFI pointers validated for null
+
 stats:
-  total_specs: 71
-  total_scenarios: 598
-  critical_scenarios: 155
+  total_specs: 72
+  total_scenarios: 608
+  critical_scenarios: 158
   coverage_areas:
     - authentication
     - authorization
@@ -879,6 +890,7 @@ stats:
     - qr_registration
     - input_validation
     - server_runtime
+    - local_inference
 
 # Cross-component behaviors
 integration_points:
@@ -1217,3 +1229,11 @@ integration_points:
   - name: Validation → Session Security
     description: Log sanitization used in session security
     specs: [VAL-003, SESS-018]
+
+  - name: LLM Core → Llama.cpp
+    description: Local inference via llama.cpp safe wrapper
+    specs: [LLM-001, LLAMA-001]
+
+  - name: KV Cache → Llama.cpp
+    description: KV cache slots managed via LlamaMemory
+    specs: [KVC-001, LLAMA-003]
