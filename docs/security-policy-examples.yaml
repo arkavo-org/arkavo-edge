@@ -1,0 +1,490 @@
+# Arkavo Edge Security Policy Examples
+#
+# This file provides example policy configurations for common security scenarios.
+# Each example can be used as a starting point for your own security policies.
+
+---
+# Example 1: High-Security Financial Services Policy
+# Use case: Banking, trading, financial analysis agents
+policy_name: "financial-services-high-security"
+
+goal_governance:
+  constitutional_principles:
+    - id: "cp-finance-001"
+      principle: "Never expose customer PII in logs or error messages"
+      immutable: true
+      override_protection: strict
+      
+    - id: "cp-finance-002"
+      principle: "Reject all trading commands outside market hours without CFO approval"
+      immutable: true
+      override_protection: strict
+      
+    - id: "cp-finance-003"
+      principle: "Require dual authorization for transactions over $10,000"
+      immutable: true
+      override_protection: strict
+
+  hitl_triggers:
+    enabled: true
+    approval_method: "cryptographic_signature"
+    conditions:
+      - id: "hitl-finance-001"
+        name: "Large Transaction"
+        trigger:
+          tool_pattern: "execute_trade|transfer_funds"
+          transaction_amount_usd: 10000
+        approval_timeout_seconds: 300
+        require_biometric: true
+        
+      - id: "hitl-finance-002"
+        name: "Customer Data Access"
+        trigger:
+          data_classification: "restricted"
+          access_type: "read"
+        approval_timeout_seconds: 60
+        require_biometric: true
+
+tool_execution:
+  allowlist:
+    mode: "explicit_allow"
+    signature_verification:
+      enabled: true
+      required: true
+      
+  risk_classification:
+    categories:
+      critical:
+        hitl_required: true
+        biometric_auth: true
+        
+  least_privilege:
+    bindings:
+      - tool: "trading_execute"
+        required_attributes:
+          - attribute: "https://arkavo.net/attr/role"
+            values: ["trader", "portfolio_manager"]
+          - attribute: "https://arkavo.net/attr/trading-license"
+            values: ["series7", "series63"]
+          - attribute: "https://arkavo.net/attr/clearance"
+            values: ["restricted"]
+
+data_protection:
+  abac:
+    classification_levels:
+      - name: "customer_pii"
+        sensitivity: 4  # Above restricted
+        encryption: "required"
+        key_rotation_days: 1
+        hitl_for_access: true
+        biometric_required: true
+        
+  dlp:
+    enabled: true
+    sensitive_data_types:
+      - type: "financial_account"
+        patterns: ["account_number", "routing_number", "swift_code"]
+        action: "block"
+        
+      - type: "customer_ssn"
+        patterns: ["ssn", "tax_id"]
+        action: "block"
+
+blast_radius_control:
+  resource_limits:
+    financial_budgets:
+      per_task_max_usd: 100000.00
+      per_session_max_usd: 1000000.00
+      alert_thresholds:
+        warning: 0.3
+        critical: 0.6
+
+---
+# Example 2: Healthcare HIPAA-Compliant Policy
+# Use case: Medical analysis, patient data processing
+policy_name: "healthcare-hipaa-compliant"
+
+goal_governance:
+  constitutional_principles:
+    - id: "cp-health-001"
+      principle: "PHI must never leave the secure environment unencrypted"
+      immutable: true
+      
+    - id: "cp-health-002"
+      principle: "All PHI access must be logged with patient ID"
+      immutable: true
+      
+    - id: "cp-health-003"
+      principle: "Require explicit patient consent for any data sharing"
+      immutable: true
+
+data_protection:
+  abac:
+    classification_levels:
+      - name: "phi"
+        sensitivity: 4
+        encryption: "required"
+        key_rotation_days: 1
+        hitl_for_access: true
+        biometric_required: true
+        
+    agent_data_bindings:
+      - agent_role: "medical_analyst"
+        max_classification: "phi"
+        allowed_attributes:
+          - "clearance:phi-access"
+          - "license:medical"
+          - "department:healthcare"
+
+dlp:
+  enabled: true
+  sensitive_data_types:
+    - type: "phi"
+      patterns: 
+        - "patient_name"
+        - "mrn"  # Medical Record Number
+        - "diagnosis_code"
+        - "medication"
+      action: "block"
+
+auditing:
+  event_logging:
+    events:
+      - "phi_access"
+      - "patient_data_export"
+      - "consent_verification"
+      
+  retention:
+    audit_logs: "7 years"  # HIPAA requirement
+    phi_access_logs: "7 years"
+
+---
+# Example 3: Multi-Tenant SaaS Policy
+# Use case: Shared infrastructure serving multiple customers
+policy_name: "multi-tenant-saas"
+
+inter_agent_security:
+  a2a_policy:
+    mode: "deny_by_default"
+    
+    allow_rules:
+      # Tenant A agents can only talk to Tenant A services
+      - from: "tenant-a-*"
+        to: "tenant-a-*"
+        methods: ["*"]
+        
+      - from: "tenant-b-*"
+        to: "tenant-b-*"
+        methods: ["*"]
+        
+      # All tenants can access shared services
+      - from: "*-agent"
+        to: "shared-knowledge-base"
+        methods: ["query"]
+        
+    deny_rules:
+      # Explicit tenant isolation
+      - from: "tenant-a-*"
+        to: "tenant-b-*"
+        methods: ["*"]
+        
+      - from: "tenant-b-*"
+        to: "tenant-a-*"
+        methods: ["*"]
+
+data_protection:
+  memory_protection:
+    isolation:
+      user_context_isolation: true
+      task_memory_compartments: true
+      
+    poisoning_detection:
+      enabled: true
+      on_detection:
+        action: "quarantine"
+        notify_admin: true
+
+---
+# Example 4: Development/Testing Policy
+# Use case: Lower security for rapid development (NOT for production)
+policy_name: "development-mode"
+
+goal_governance:
+  # Relaxed HITL for faster iteration
+  hitl_triggers:
+    enabled: false  # WARNING: Only for dev!
+    
+  constitutional_principles:
+    - id: "cp-dev-001"
+      principle: "Allow all file operations in /tmp and project directory"
+      immutable: false
+
+tool_execution:
+  allowlist:
+    mode: "audit_only"  # Log but don't block
+    
+  sandbox:
+    defaults:
+      network_access: true  # Allow for API testing
+      filesystem_readonly: false
+      
+  risk_classification:
+    categories:
+      critical:
+        hitl_required: false  # WARNING: Only for dev!
+
+blast_radius_control:
+  resource_limits:
+    financial_budgets:
+      per_task_max_usd: 100.00  # Low budget for testing
+      
+  kill_switch:
+    enabled: true
+    triggers: []  # Disable automated triggers in dev
+
+---
+# Example 5: Edge/IoT Deployment Policy
+# Use case: Resource-constrained edge devices
+policy_name: "edge-iot-constrained"
+
+blast_radius_control:
+  resource_limits:
+    memory_limits:
+      per_task_max_mb: 256
+      per_agent_max_mb: 512
+      
+    ttl_limits:
+      max_task_duration_seconds: 300
+      max_session_duration_seconds: 3600
+
+tool_execution:
+  sandbox:
+    # Use OS-level sandboxing (lighter than Docker)
+    platform_overrides:
+      linux:
+        backend: "firejail"
+      
+  # Limited tool set for edge
+  allowlist:
+    allowed_tools:
+      - name: "file_read"
+      - name: "sensor_read"
+      - name: "local_inference"
+
+inter_agent_security:
+  # Minimize mesh communication for bandwidth
+  iroh_mesh:
+    connections:
+      known_peers_only: true
+      discovery:
+        method: "static"
+        bootstrap_nodes: []
+        
+  # Local-only operation
+  a2a_policy:
+    mode: "deny_by_default"
+    allow_rules: []  # No inter-agent communication
+
+---
+# Example 6: Research/Data Science Policy
+# Use case: Data analysis, ML training, research workflows
+policy_name: "research-data-science"
+
+goal_governance:
+  objective_drift_detection:
+    enabled: true
+    similarity_threshold: 0.5  # More lenient for exploration
+    
+  hitl_triggers:
+    conditions:
+      - id: "hitl-research-001"
+        name: "External Data Download"
+        trigger:
+          tool_pattern: "download|fetch|curl"
+          destination_except: ["internal-registry"]
+        approval_timeout_seconds: 600
+
+tool_execution:
+  risk_classification:
+    categories:
+      high:
+        # Allow more tools for data manipulation
+        hitl_required: false
+        sandbox_required: true
+        
+  sandbox:
+    defaults:
+      # Allow network for data sources
+      network_access: true
+      # Allow writes for results
+      filesystem_readonly: false
+      allowed_paths:
+        - "/tmp"
+        - "/data"
+        - "/results"
+
+data_protection:
+  # Flexible classification for research data
+  abac:
+    classification_levels:
+      - name: "research_data"
+        sensitivity: 1  # Internal level
+        encryption: "optional"
+        
+      - name: "proprietary"
+        sensitivity: 2
+        encryption: "required"
+        
+      - name: "export_controlled"
+        sensitivity: 3
+        encryption: "required"
+        hitl_for_access: true
+
+---
+# Example 7: Critical Infrastructure Protection
+# Use case: Power grid, water treatment, industrial control
+policy_name: "critical-infrastructure"
+
+goal_governance:
+  constitutional_principles:
+    - id: "cp-crit-001"
+      principle: "Never issue control commands without manual verification"
+      immutable: true
+      override_protection: strict
+      
+    - id: "cp-crit-002"
+      principle: "Require out-of-band confirmation for safety-critical actions"
+      immutable: true
+
+  hitl_triggers:
+    enabled: true
+    approval_method: "cryptographic_signature"
+    conditions:
+      - id: "hitl-crit-001"
+        name: "SCADA Command"
+        trigger:
+          tool_pattern: "scada|plc|control"
+        approval_timeout_seconds: 900
+        require_biometric: true
+        
+      - id: "hitl-crit-002"
+        name: "Safety System Bypass"
+        trigger:
+          tool_pattern: "safety_override|bypass"
+        approval_timeout_seconds: 60  # Short window for safety
+        require_biometric: true
+
+tool_execution:
+  allowlist:
+    mode: "explicit_allow"
+    # Very limited tool set
+    allowed_tools:
+      - name: "sensor_read"
+      - name: "status_query"
+      - name: "control_command"
+        requires_hitl: true
+        
+  risk_classification:
+    categories:
+      critical:
+        sandbox_required: true
+        hitl_required: true
+        biometric_auth: true
+
+blast_radius_control:
+  resource_limits:
+    # Very constrained to prevent runaway
+    parallel_execution:
+      max_concurrent_streams: 2
+      max_concurrent_agents: 1
+      
+    ttl_limits:
+      max_task_duration_seconds: 60
+      
+  kill_switch:
+    enabled: true
+    triggers:
+      - name: "safety_anomaly"
+        description: "Safety parameter outside normal range"
+        threshold: "2_sigma"
+        
+      - name: "unauthorized_control"
+        description: "Control command without authorization"
+        
+    actions:
+      terminate_processes:
+        enabled: true
+        graceful_timeout_seconds: 5  # Fast shutdown
+        
+      mesh_isolation:
+        enabled: true
+        block_inbound: true
+        block_outbound: true
+
+network_security:
+  egress_filter:
+    enabled: true
+    blocked:
+      - "*"  # Block all external by default
+    allowed:
+      # Only internal SCADA network
+      - "10.0.100.0/24"
+      
+  rate_limiting:
+    global:
+      requests_per_second: 10  # Very conservative
+
+---
+# Example 8: Education/Student Environment
+# Use case: University courses, student projects, learning environments
+policy_name: "education-student"
+
+goal_governance:
+  constitutional_principles:
+    - id: "cp-edu-001"
+      principle: "Prevent access to other students' work"
+      immutable: true
+      
+    - id: "cp-edu-002"
+      principle: "Block academic dishonesty tools"
+      immutable: true
+
+tool_execution:
+  allowlist:
+    blocked_tools:
+      - "essay_generator"
+      - "code_plagiarism"
+      - "exam_solver"
+      
+  risk_classification:
+    categories:
+      high:
+        hitl_required: true  # Instructor approval
+
+blast_radius_control:
+  resource_limits:
+    financial_budgets:
+      per_task_max_usd: 5.00  # Tight budget for students
+      per_session_max_usd: 20.00
+
+inter_agent_security:
+  a2a_policy:
+    mode: "deny_by_default"
+    
+    allow_rules:
+      # Student can only talk to their own workspace
+      - from: "student-${STUDENT_ID}"
+        to: "student-${STUDENT_ID}"
+        methods: ["*"]
+        
+      # Instructor can reach all students
+      - from: "instructor-*"
+        to: "student-*"
+        methods: ["assign", "grade", "assist"]
+
+data_protection:
+  memory_protection:
+    isolation:
+      # Ensure student isolation
+      user_context_isolation: true
+      task_memory_compartments: true

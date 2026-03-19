@@ -1,11 +1,50 @@
 use crate::{AgentDescriptor, RegistrationError};
-use qrcode::QrCode;
-use qrcode::render::unicode;
+use fast_qr::QRBuilder;
+
+/// Convert QR code matrix to Unicode string using dense 1x2 blocks
+fn render_qr_unicode(qr: &fast_qr::QRCode) -> String {
+    let size = qr.size;
+    let mut result = String::new();
+
+    // Process two rows at a time for 1x2 density
+    for row in (0..size).step_by(2) {
+        for col in 0..size {
+            let top_idx = row * size + col;
+            let top = qr.data.get(top_idx).map(|m| *m == true).unwrap_or(false);
+
+            let bottom = if row + 1 < size {
+                let bottom_idx = (row + 1) * size + col;
+                qr.data.get(bottom_idx).map(|m| *m == true).unwrap_or(false)
+            } else {
+                false
+            };
+
+            // Use Unicode block characters for density
+            let ch = match (top, bottom) {
+                (false, false) => ' ', // Empty
+                (false, true) => '▄',  // Bottom half
+                (true, false) => '▀',  // Top half
+                (true, true) => '█',   // Full block
+            };
+            result.push(ch);
+        }
+        result.push('\n');
+    }
+
+    result
+}
 
 pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
     let url = descriptor.to_url();
-    let code = QrCode::new(url.as_bytes())
-        .map_err(|e| RegistrationError::QrCodeGeneration(e.to_string()))?;
+
+    let qr = QRBuilder::new(url)
+        .build()
+        .map_err(|e| RegistrationError::QrCodeGeneration(format!("{:?}", e)))?;
+
+    let mut image = render_qr_unicode(&qr);
+
+    // Remove trailing newline for processing
+    image = image.trim_end().to_string();
 
     let short_sha = &descriptor.agent_id_short_sha;
     let overlay = if short_sha.len() <= 7 {
@@ -13,12 +52,6 @@ pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, Regist
     } else {
         short_sha[..7].to_string()
     };
-
-    let image = code
-        .render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .build();
 
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
@@ -73,8 +106,15 @@ pub fn generate_authorization_qr_string(
     descriptor: &AgentDescriptor,
 ) -> Result<String, RegistrationError> {
     let url = descriptor.to_authorization_url();
-    let code = QrCode::new(url.as_bytes())
-        .map_err(|e| RegistrationError::QrCodeGeneration(e.to_string()))?;
+
+    let qr = QRBuilder::new(url)
+        .build()
+        .map_err(|e| RegistrationError::QrCodeGeneration(format!("{:?}", e)))?;
+
+    let mut image = render_qr_unicode(&qr);
+
+    // Remove trailing newline for processing
+    image = image.trim_end().to_string();
 
     let short_sha = &descriptor.agent_id_short_sha;
     let overlay = if short_sha.len() <= 7 {
@@ -82,12 +122,6 @@ pub fn generate_authorization_qr_string(
     } else {
         short_sha[..7].to_string()
     };
-
-    let image = code
-        .render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .build();
 
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
