@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: TØRG Constrained Decoding for Policy Graphs
 module: arkavo_torg
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Token mapping bridges model vocabulary to TØRG tokens

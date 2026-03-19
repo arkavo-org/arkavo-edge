@@ -2,7 +2,7 @@
 
 feature: Trusted Data Format (TDF) Encryption
 module: arkavo_tdf
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - All TDF manifests include policy binding for integrity

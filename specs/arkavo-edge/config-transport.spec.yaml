@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Configuration Transport over A2A
 module: arkavo_config_transport
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Encrypted bundles transported via A2A agent.config.* RPC

@@ -2,11 +2,11 @@
 
 feature: Git Repository Operations
 module: arkavo_git
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - All operations validate repository state first
-  - Commit messages are descriptive without conventional commit prefixes
+  - Commit messages follow conventional format
   - Safety checks prevent destructive operations
   - Remote operations use configured credentials
 

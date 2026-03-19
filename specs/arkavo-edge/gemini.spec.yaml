@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Gemini AI Provider
-module: arkavo_gemini
-version: 0.67.1
+module: crate::gemini
+version: 0.57.2
 
 invariants:
   - Gemini API version must be valid and supported

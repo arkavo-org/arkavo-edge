@@ -2,7 +2,7 @@
 
 feature: Agent Authentication and Tokens
 module: arkavo_agent_auth
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Tokens are stored encrypted at rest

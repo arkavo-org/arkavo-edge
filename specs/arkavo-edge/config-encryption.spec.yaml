@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Configuration Bundle Encryption
 module: arkavo_config_encryption
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Bundles encrypted with OpenTDF policy

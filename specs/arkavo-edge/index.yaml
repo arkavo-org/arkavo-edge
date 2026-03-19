@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.67.1
-last_updated: 2026-03-19
+version: 0.58.0
+last_updated: 2025-02-05
 
 components:
   - name: registration
@@ -178,15 +178,14 @@ components:
 
   - name: task-orchestration
     file: task-orchestration.spec.yaml
-    module: arkavo_tasks
-    description: Task planning, execution, intent analysis, and agent routing
+    module: arkavo_protocol::task_executor
+    description: Task planning, execution, and HRM
     criticality: critical
-    scenario_count: 12
+    scenario_count: 8
     invariants:
       - Deterministic task IDs
-      - State persists across restarts via SQLite
+      - State persists across restarts
       - Concurrency limits respected
-      - Intent analysis extracts entities and subtask specs
 
   - name: agent-auth
     file: agent-auth.spec.yaml
@@ -706,68 +705,79 @@ components:
   - name: agent-sdk
     file: agent-sdk.spec.yaml
     module: anthropic_agent_sdk
-    description: Claude Agent SDK streaming, hooks, and MCP integration
+    description: Claude Agent SDK streaming and client
     criticality: critical
     scenario_count: 5
     invariants:
       - Streaming messages yield in-order
-      - Options builder validates required fields
-      - MCP tools discoverable via rmcp
+      - ClaudeSDKClient manages bidirectional communication
+      - Options builder validates required fields before build
 
   - name: agent
     file: agent.spec.yaml
     module: arkavo_agent
-    description: Agent lifecycle management and discovery
-    criticality: high
+    description: Agent lifecycle management
+    criticality: critical
     scenario_count: 5
     invariants:
-      - Agents follow config -> register -> discover -> operate lifecycle
-      - AgentConfig validated before use
-      - Discovery supports mDNS and directory
+      - Agent card describes capabilities
+      - Lifecycle transitions are valid
+      - Health checks report accurate state
 
   - name: evofabric
     file: evofabric.spec.yaml
     module: arkavo_evofabric
-    description: AST-level code evolution via CRDT OpBundles
-    criticality: critical
+    description: AST-level code evolution
+    criticality: high
     scenario_count: 8
     invariants:
-      - OpBundles are cryptographically signed
-      - CRDT convergence guarantees
-      - Merkle proofs verify integrity
+      - AST edits preserve semantics
+      - Conflict detection before merge
+      - Rollback on failed evolution
 
   - name: kv-cache
     file: kv-cache.spec.yaml
     module: arkavo_kv_cache
-    description: KV cache context slots for multi-sequence inference
+    description: KV cache context slots
     criticality: high
     scenario_count: 5
     invariants:
-      - Context slots independently addressable
-      - Trust tiers determine eviction order
-      - Manifest tracks all loaded contexts
+      - Slot allocation bounded
+      - Eviction respects priority
+      - Cache coherent across requests
+
+  - name: llama-cpp
+    file: llama-cpp.spec.yaml
+    module: arkavo_llama_cpp
+    description: Local LLM inference engine
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Model loading validates GGUF format
+      - GPU layers auto-detected
+      - Context size bounded by model
 
   - name: mcp-traits
     file: mcp-traits.spec.yaml
     module: arkavo_mcp
-    description: MCP core traits, JSON-RPC types, and integrity
+    description: MCP core traits and types
     criticality: critical
     scenario_count: 6
     invariants:
-      - Tool trait requires Send + Sync
-      - RPC follows JSON-RPC 2.0
-      - Error codes follow standard
+      - Tool trait defines execution contract
+      - Schema validation on parameters
+      - Error types propagate context
 
   - name: openclaw
     file: openclaw.spec.yaml
     module: arkavo_openclaw
-    description: OpenClaw WebSocket protocol adapter
+    description: OpenClaw protocol adapter
     criticality: high
     scenario_count: 6
     invariants:
-      - Handshake requires device authentication
-      - Translation is bidirectional and lossless
-      - WebSocket uses TLS for non-localhost
+      - Protocol messages validated
+      - Connection lifecycle managed
+      - Retry with backoff
 
   - name: qr-registration
     file: qr-registration.spec.yaml
@@ -776,20 +786,20 @@ components:
     criticality: high
     scenario_count: 5
     invariants:
-      - Authorization URLs follow arkavo:// scheme
-      - QR codes encode valid authorization URLs
-      - Endpoint must be routable
+      - QR encodes valid URL
+      - Short SHA identifies agent
+      - Terminal rendering scannable
 
   - name: security
     file: security.spec.yaml
     module: arkavo_security
-    description: Auth, OAuth2, rate limiting, and data classification
+    description: Security services
     criticality: critical
     scenario_count: 6
     invariants:
-      - JWT tokens validated with expiry
-      - OAuth2 follows RFC 6749
-      - Rate limiting uses token bucket
+      - Input sanitization on boundaries
+      - Rate limiting enforced
+      - Secrets never logged
 
   - name: server
     file: server.spec.yaml
@@ -798,36 +808,25 @@ components:
     criticality: critical
     scenario_count: 10
     invariants:
-      - Server binds to configured address
-      - JSON-RPC 2.0 compliance
-      - Tool memory persists observations
+      - Server binds localhost by default
+      - JSON-RPC 2.0 protocol
+      - Graceful shutdown
 
   - name: validation
     file: validation.spec.yaml
     module: arkavo_validation
-    description: Centralized input validation and security boundaries
-    criticality: critical
+    description: Centralized input validation
+    criticality: high
     scenario_count: 7
     invariants:
-      - Path traversal always detected
-      - Egress filter blocks private IPs
-      - Log sanitization removes PII
-
-  - name: llama-cpp
-    file: llama-cpp.spec.yaml
-    module: arkavo_llama_cpp
-    description: Local LLM inference engine with GPU fallback
-    criticality: critical
-    scenario_count: 10
-    invariants:
-      - GPU acceleration with CPU fallback
-      - Model format auto-detected
-      - FFI pointers validated for null
+      - All external input validated
+      - Validation errors descriptive
+      - Schema-driven validation
 
 stats:
   total_specs: 72
-  total_scenarios: 608
-  critical_scenarios: 158
+  total_scenarios: 604
+  critical_scenarios: 153
   coverage_areas:
     - authentication
     - authorization
@@ -881,16 +880,6 @@ stats:
     - rlm_activation
     - response_processing
     - sampling_parameters
-    - agent_sdk
-    - agent_lifecycle
-    - ast_evolution
-    - kv_cache
-    - mcp_traits
-    - protocol_bridging
-    - qr_registration
-    - input_validation
-    - server_runtime
-    - local_inference
 
 # Cross-component behaviors
 integration_points:
@@ -944,7 +933,7 @@ integration_points:
 
   - name: Task Orchestration → Router
     description: Task executor uses router for LLM calls
-    specs: [TASK-002, ROUTER-001]
+    specs: [ORCH-002, ROUTER-001]
 
   - name: Agent Auth → Registration
     description: Agent authentication used during registration
@@ -976,7 +965,7 @@ integration_points:
 
   - name: GitHub → Task Orchestration
     description: Issue handler creates tasks from GitHub issues
-    specs: [GITHUB-004, TASK-001]
+    specs: [GITHUB-004, ORCH-001]
 
   - name: LLM Core → Gemini
     description: Gemini provider implements LLM core trait
@@ -1044,7 +1033,7 @@ integration_points:
 
   - name: HRM → Task Orchestration
     description: HRM orchestrates complex multi-step tasks
-    specs: [HRM-002, TASK-001]
+    specs: [HRM-002, ORCH-001]
 
   - name: Repo → Code Search
     description: Repository context informs code search
@@ -1116,7 +1105,7 @@ integration_points:
 
   - name: Orchestrator → Task Orchestration
     description: Orchestrator uses task executor
-    specs: [ORCH-009, TASK-006]
+    specs: [ORCH-009, ORCH-006]
 
   - name: Orchestrator → HRM
     description: Orchestrator uses HRM for complex tasks
@@ -1181,59 +1170,3 @@ integration_points:
   - name: Router → Chat Session
     description: Response processing sanitizes chat output
     specs: [ROUTER-011, ROUTER-012, ROUTER-013, CHAT-024]
-
-  - name: MCP Traits → MCP Tools
-    description: Tools implement the Tool trait from arkavo-mcp
-    specs: [MCPD-001, MCP-001]
-
-  - name: MCP Traits → MCP Runtime
-    description: Runtime executes tools defined by Tool trait
-    specs: [MCPD-001, MCPR-003]
-
-  - name: Agent SDK → MCP Traits
-    description: SDK discovers and registers MCP tools via rmcp
-    specs: [CASDK-003, MCPD-001]
-
-  - name: QR Registration → Crypto
-    description: Challenge signing uses Ed25519 from arkavo-crypto
-    specs: [QREG-004, CRYPTO-002]
-
-  - name: EvoFabric → Crypto
-    description: OpBundles signed with arkavo-crypto primitives
-    specs: [EVO-001, CRYPTO-002]
-
-  - name: OpenClaw → Protocol
-    description: OpenClaw translates frames to A2A JSON-RPC
-    specs: [OCLAW-002, OCLAW-003, PROTO-001]
-
-  - name: Validation → Network Security
-    description: Egress filter and host validation used by network security
-    specs: [VAL-005, VAL-006, NET-006]
-
-  - name: Security → Protocol
-    description: OAuth2 and JWT used for protocol authentication
-    specs: [SEC-001, SEC-002, PROTO-007]
-
-  - name: Server → Agent
-    description: Server manages agent lifecycle and goals
-    specs: [SRV-007, AGENT-002]
-
-  - name: Server → Learning Bus
-    description: Server runs learning pipeline loops
-    specs: [SRV-004, AUTO-001]
-
-  - name: KV Cache → Router
-    description: Cache context slots inform routing decisions
-    specs: [KVC-002, ROUTER-001]
-
-  - name: Validation → Session Security
-    description: Log sanitization used in session security
-    specs: [VAL-003, SESS-018]
-
-  - name: LLM Core → Llama.cpp
-    description: Local inference via llama.cpp safe wrapper
-    specs: [LLM-001, LLAMA-001]
-
-  - name: KV Cache → Llama.cpp
-    description: KV cache slots managed via LlamaMemory
-    specs: [KVC-001, LLAMA-003]

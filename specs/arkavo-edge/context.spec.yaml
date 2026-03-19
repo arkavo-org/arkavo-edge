@@ -2,7 +2,7 @@
 
 feature: Context Management and Compression
 module: arkavo_context
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Context size managed via compression and chunking

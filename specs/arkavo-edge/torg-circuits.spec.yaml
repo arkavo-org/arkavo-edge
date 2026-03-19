@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: TØRG Compiled Circuits with Pre-allocated Buffers
 module: arkavo_torg_circuits
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Compiled circuits have pre-allocated input/output buffers

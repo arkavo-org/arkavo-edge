@@ -2,7 +2,7 @@
 
 feature: Chat Session Management
 module: arkavo_protocol::chat_session
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Each session has a unique UUID v4 identifier
@@ -186,7 +186,6 @@ scenarios:
       - Metrics record malformed delta
       - Stream continues (fault isolation)
       - Client receives ERROR delta with details
-    refs: [crates/arkavo-protocol/src/chat_session.rs]
     edge_cases:
       - condition: Invalid UTF-8 in text content
         expected: Sanitized or rejected with error

@@ -2,7 +2,7 @@
 
 feature: TDF Security and Control Plane Protection
 module: arkavo_tdf::security
-version: 0.67.1
+version: 1.0.0
 
 invariants:
   - All control plane messages are TDF-encrypted

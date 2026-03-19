@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Terminal UI Application
 module: arkavo_terminal
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Terminal UI with async event loop

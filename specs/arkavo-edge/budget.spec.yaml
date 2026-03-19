@@ -2,7 +2,7 @@
 
 feature: Budget and Cost Management
 module: arkavo_budget
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - All LLM calls track token usage and cost

@@ -2,7 +2,7 @@
 
 feature: Session Security Hardening
 module: arkavo_session::security
-version: 0.67.1
+version: 1.0.0
 
 invariants:
   - Sessions have mandatory timeouts (absolute and idle)
@@ -31,6 +31,7 @@ scenarios:
       - Audit log entry created (without session secrets)
     refs: [crates/arkavo-session/src/timeout.rs]
 
+
   - id: SESS-002
     name: Idle session timeout enforced
     criticality: critical
@@ -44,6 +45,7 @@ scenarios:
       - Metrics recorded for idle timeout
     refs: [crates/arkavo-session/src/timeout.rs]
 
+
   - id: SESS-003
     name: Timeout configuration validation
     criticality: high
@@ -55,6 +57,7 @@ scenarios:
       - Default secure values are used
       - Warning is logged
     refs: [crates/arkavo-session/src/timeout.rs]
+
 
   # ============================================================================
   # Device Binding
@@ -72,6 +75,7 @@ scenarios:
       - Any operation requires device key verification
     refs: [crates/arkavo-session/src/device_binding.rs]
 
+
   - id: SESS-005
     name: Session rejected from different device
     criticality: critical
@@ -85,6 +89,7 @@ scenarios:
       - "Optional: Session is revoked (configurable)"
     refs: [crates/arkavo-session/src/device_binding.rs]
 
+
   - id: SESS-006
     name: Device rotation with re-authentication
     criticality: high
@@ -97,6 +102,7 @@ scenarios:
       - Old session on Device A is revoked
       - Audit trail records the rotation
     refs: [crates/arkavo-session/src/device_binding.rs]
+
 
   # ============================================================================
   # Session Revocation
@@ -115,6 +121,7 @@ scenarios:
       - Cleanup completes within 100ms
     refs: [crates/arkavo-session/src/revocation.rs]
 
+
   - id: SESS-008
     name: User-initiated session revocation (logout)
     criticality: high
@@ -127,6 +134,7 @@ scenarios:
       - All tokens are invalidated
     refs: [crates/arkavo-session/src/revocation.rs]
 
+
   - id: SESS-009
     name: Bulk revocation by criteria
     criticality: high
@@ -138,6 +146,7 @@ scenarios:
       - Operation is atomic (all or none)
       - Audit log records bulk action
     refs: [crates/arkavo-session/src/revocation.rs]
+
 
   # ============================================================================
   # Log Sanitization
@@ -154,6 +163,7 @@ scenarios:
       - No partial token leakage
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
 
+
   - id: SESS-011
     name: PII redacted in session logs
     criticality: critical
@@ -166,6 +176,7 @@ scenarios:
       - Redaction is consistent across log levels
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
 
+
   - id: SESS-012
     name: Structured log sanitization
     criticality: high
@@ -177,6 +188,7 @@ scenarios:
       - Values are replaced with type-preserving masks
       - Arrays and nested objects are recursively sanitized
     refs: [crates/arkavo-session/src/log_sanitizer.rs]
+
 
   # ============================================================================
   # Error Sanitization
@@ -193,6 +205,7 @@ scenarios:
       - Error correlation ID is provided
     refs: [crates/arkavo-session/src/error.rs]
 
+
   - id: SESS-014
     name: Security errors have appropriate detail levels
     criticality: high
@@ -205,6 +218,7 @@ scenarios:
       - "Admin audit: Full details with timestamps"
     refs: [crates/arkavo-session/src/error.rs]
 
+
   - id: SESS-015
     name: Error chain preserves security context
     criticality: medium
@@ -216,6 +230,7 @@ scenarios:
       - Internal error chain is preserved for logging
       - Source error classification is maintained
     refs: [crates/arkavo-session/src/error.rs]
+
 
   # ============================================================================
   # Cryptographic Agility
@@ -232,6 +247,7 @@ scenarios:
       - Invalid algorithms are rejected at startup
     refs: [crates/arkavo-session/src/crypto_config.rs]
 
+
   - id: SESS-017
     name: PQC-ready algorithm negotiation
     criticality: high
@@ -244,6 +260,7 @@ scenarios:
       - Fallback to classical if PQC unavailable
     refs: [crates/arkavo-session/src/crypto_config.rs]
 
+
   - id: SESS-018
     name: Crypto agility version negotiation
     criticality: medium
@@ -255,6 +272,7 @@ scenarios:
       - Best mutual algorithm is selected
       - Downgrade attacks are detected
     refs: [crates/arkavo-session/src/crypto_config.rs]
+
 
   # ============================================================================
   # FFI Fuzzing
@@ -271,6 +289,7 @@ scenarios:
       - Return values are validated
     refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
 
+
   - id: SESS-020
     name: Fuzzing corpus generation from valid inputs
     criticality: medium
@@ -282,6 +301,7 @@ scenarios:
       - Edge cases are included (empty, max size, boundary values)
       - Mutation strategies target session-specific fields
     refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+
 
   - id: SESS-021
     name: Continuous fuzzing integration

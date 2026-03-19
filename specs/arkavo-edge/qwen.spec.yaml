@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Qwen AI Provider
-module: arkavo_qwen
-version: 0.67.1
+module: crate::qwen
+version: 0.57.2
 
 invariants:
   - Qwen region (China or International) determines endpoint

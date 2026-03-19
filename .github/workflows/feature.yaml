@@ -1449,21 +1449,33 @@ jobs:
             process.exit(1);
           }
           
+          let failed = false;
           for (const comp of index.components || []) {
             if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
               console.error('❌ Missing file: ' + comp.file);
-              process.exit(1);
+              failed = true;
+              continue;
             }
-            
+
             const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
             const actualCount = spec.scenarios?.length || 0;
             if (comp.scenario_count !== actualCount) {
               console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
-              process.exit(1);
+              failed = true;
             }
           }
-          
-          console.log('✅ Index synchronized');
+
+          const specFiles = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          const indexedFiles = new Set((index.components || []).map(c => c.file));
+          for (const file of specFiles) {
+            if (!indexedFiles.has(file)) {
+              console.error('❌ ' + file + ' not listed in index.yaml');
+              failed = true;
+            }
+          }
+
+          if (failed) process.exit(1);
+          console.log('✅ Index synchronized (' + index.components.length + ' components)');
           NODE_SCRIPT
       
       - name: Generate stats

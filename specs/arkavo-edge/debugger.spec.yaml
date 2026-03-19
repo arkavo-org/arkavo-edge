@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Session Debugger and Diagnostics
 module: arkavo_debugger
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Session recording for replay

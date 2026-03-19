@@ -2,7 +2,7 @@
 
 feature: Network Security and Secure Defaults
 module: arkavo_edge::security::network
-version: 0.67.1
+version: 1.0.0
 
 invariants:
   - Agent binds to localhost (127.0.0.1) only by default

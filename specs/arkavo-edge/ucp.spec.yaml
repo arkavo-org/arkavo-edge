@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Universal Commerce Protocol
 module: arkavo_ucp
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Payment intents with lifecycle management

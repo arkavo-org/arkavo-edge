@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Policy Ensemble with Counterfactual Evaluation
 module: arkavo_ensemble
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Maximum K candidates maintained (default 5)

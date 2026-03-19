@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: MCP macOS Test Harness
-module: arkavo_mcp_macos
-version: 0.67.1
+module: crate::mcp_macos
+version: 0.57.2
 
 invariants:
   - Only functional on macOS targets

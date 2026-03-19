@@ -1,8 +1,6 @@
-# yaml-language-server: $schema=../schema.json
-
 feature: Repository Context Management
 module: arkavo_repo
-version: 0.67.1
+version: 0.57.2
 
 invariants:
   - Repository info gathered from path
