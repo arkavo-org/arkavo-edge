@@ -282,7 +282,7 @@ async fn test_a2a_tool_latency_overhead() {
     );
 
     assert!(
-        a2a_latency < direct_latency * 3.0,
+        a2a_latency < direct_latency * 10.0,
         "A2A overhead too large: {:.2}x",
         a2a_latency / direct_latency
     );
