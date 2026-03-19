@@ -2,7 +2,7 @@
 
 feature: Cryptographic Primitives
 module: arkavo_crypto
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All key material uses constant-time operations where applicable

@@ -2,7 +2,7 @@
 
 feature: Containerized Workspace Management
 module: arkavo_workspace
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Workspaces are ephemeral and isolated

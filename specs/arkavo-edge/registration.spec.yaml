@@ -2,7 +2,7 @@
 
 feature: Device and Agent Registration
 module: arkavo_protocol::registration
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Challenge IDs are cryptographically unique (SHA-256 of random 32 bytes)
@@ -150,6 +150,7 @@ scenarios:
       - Returns A2aError::Internal error
       - Error logged for monitoring
       - No partial state left
+    refs: [crates/arkavo-protocol/src/registration.rs]
     edge_cases:
       - condition: RwLock poisoned
         expected: Panic or error recovery

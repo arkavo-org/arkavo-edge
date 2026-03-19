@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Qualcomm SNPE Hardware Acceleration
 module: arkavo_snpe
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - SNPE library loaded dynamically at runtime (no build dependency)

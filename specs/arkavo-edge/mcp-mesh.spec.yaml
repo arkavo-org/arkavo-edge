@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: MCP Tools for Agent Mesh Orchestration
 module: arkavo_mcp_mesh
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Agent discovery via mDNS

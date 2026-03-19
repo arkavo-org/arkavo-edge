@@ -2,7 +2,7 @@
 
 feature: Git Repository Operations
 module: arkavo_git
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All operations validate repository state first

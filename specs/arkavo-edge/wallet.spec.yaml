@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: EVM Wallet with secp256k1 Cryptography
 module: arkavo_wallet
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All crypto operations offline (no RPC calls)

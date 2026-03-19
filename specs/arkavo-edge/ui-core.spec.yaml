@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: UI Core Library
 module: arkavo_ui_core
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - UIContent defines renderable content

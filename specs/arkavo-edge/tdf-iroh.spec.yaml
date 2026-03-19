@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: TDF Iroh P2P Transport
-module: crate::tdf_iroh
-version: 0.57.2
+module: arkavo_tdf_iroh
+version: 0.67.1
 
 invariants:
   - Transport handles raw bytes only, no encryption

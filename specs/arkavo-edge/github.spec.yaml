@@ -2,7 +2,7 @@
 
 feature: GitHub Integration and Operations
 module: arkavo_github
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All GitHub API calls use authentication

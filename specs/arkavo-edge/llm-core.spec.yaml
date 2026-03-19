@@ -2,7 +2,7 @@
 
 feature: LLM Core Client and Streaming
 module: arkavo_llm
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All providers implement common Provider trait

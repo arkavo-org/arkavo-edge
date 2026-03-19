@@ -2,7 +2,7 @@
 
 feature: Observability and Metrics
 module: arkavo_observability
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All metrics include timestamps

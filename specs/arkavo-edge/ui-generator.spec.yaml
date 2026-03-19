@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: UI Code Generation
 module: arkavo_ui_generator
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - UI generated from intent and context

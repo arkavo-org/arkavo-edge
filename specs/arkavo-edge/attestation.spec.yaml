@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Device Attestation and Security State
 module: arkavo_attestation
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Platform evidence collected via attestor trait

@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Issue Orchestration and Cognitive Engine
 module: arkavo_orchestrator
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Orchestrator manages issue lifecycle from GitHub to resolution

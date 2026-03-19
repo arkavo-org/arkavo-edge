@@ -2,7 +2,7 @@
 
 feature: Auto-Learning with Patchlets
 module: arkavo_autolearn
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All patchlets must pass verification before application

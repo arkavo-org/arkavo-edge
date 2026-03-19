@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Chromium Embedded Framework UI Renderer
 module: arkavo_cef
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - CEF process spawned with UDS for communication

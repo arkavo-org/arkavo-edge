@@ -2,7 +2,7 @@
 
 feature: Event System and Audit Logging
 module: arkavo_events
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All events have unique UUID v4 identifiers

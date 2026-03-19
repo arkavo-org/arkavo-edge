@@ -2,7 +2,7 @@
 
 feature: Arkavo Edge CLI Interface
 module: arkavo_cli
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Tracing subscriber initialized once on first run

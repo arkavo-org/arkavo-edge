@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: SAT Solver Integration for TØRG Analysis
 module: arkavo_sat
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - CNF extraction preserves graph semantics via Tseitin

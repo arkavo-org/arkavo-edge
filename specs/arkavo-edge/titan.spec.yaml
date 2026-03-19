@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Titan Monitor - Runtime Anomaly Detection
 module: arkavo_titan
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Zero-copy inspection engine

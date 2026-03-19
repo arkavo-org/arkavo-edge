@@ -2,7 +2,7 @@
 
 feature: LLM Router with Quality Gates
 module: arkavo_router
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All routes must pass preflight moderation before model selection

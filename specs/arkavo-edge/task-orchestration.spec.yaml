@@ -2,7 +2,7 @@
 
 feature: Task Orchestration and Execution
 module: arkavo_protocol::task_executor
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Tasks have deterministic IDs based on content
@@ -12,7 +12,7 @@ invariants:
   - Task dependencies resolved before execution
 
 scenarios:
-  - id: ORCH-001
+  - id: TASK-001
     name: Plan task with dependencies
     criticality: high
     given:
@@ -26,7 +26,7 @@ scenarios:
       - Execution plan created
     refs: [crates/arkavo-protocol/src/task_planner.rs]
 
-  - id: ORCH-002
+  - id: TASK-002
     name: Execute task with executor
     criticality: critical
     given:
@@ -40,7 +40,7 @@ scenarios:
       - Results stored
     refs: [crates/arkavo-protocol/src/task_executor.rs]
 
-  - id: ORCH-003
+  - id: TASK-003
     name: Store task state persistently
     criticality: high
     given:
@@ -54,7 +54,7 @@ scenarios:
       - Recoverable after restart
     refs: [crates/arkavo-protocol/src/task_store.rs]
 
-  - id: ORCH-004
+  - id: TASK-004
     name: Retry failed task with backoff
     criticality: high
     given:
@@ -68,7 +68,7 @@ scenarios:
       - Max retries enforced
     refs: [crates/arkavo-protocol/src/task_executor.rs]
 
-  - id: ORCH-005
+  - id: TASK-005
     name: Human review for ambiguous tasks
     criticality: medium
     given:
@@ -82,7 +82,7 @@ scenarios:
       - Resumes after response
     refs: [crates/arkavo-hrm/src/conductor.rs]
 
-  - id: ORCH-006
+  - id: TASK-006
     name: Parallel subtask execution
     criticality: medium
     given:
@@ -95,7 +95,7 @@ scenarios:
       - Parent task completed
     refs: [crates/arkavo-protocol/src/task_executor.rs]
 
-  - id: ORCH-007
+  - id: TASK-007
     name: Task cancellation
     criticality: medium
     given:
@@ -109,7 +109,7 @@ scenarios:
       - State updated to cancelled
     refs: [crates/arkavo-protocol/src/task_executor.rs]
 
-  - id: ORCH-008
+  - id: TASK-008
     name: Task progress tracking
     criticality: low
     given:

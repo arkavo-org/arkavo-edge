@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.58.0
-last_updated: 2025-02-05
+version: 0.67.1
+last_updated: 2026-03-19
 
 components:
   - name: registration
@@ -812,7 +812,7 @@ integration_points:
 
   - name: Task Orchestration → Router
     description: Task executor uses router for LLM calls
-    specs: [ORCH-002, ROUTER-001]
+    specs: [TASK-002, ROUTER-001]
 
   - name: Agent Auth → Registration
     description: Agent authentication used during registration
@@ -844,7 +844,7 @@ integration_points:
 
   - name: GitHub → Task Orchestration
     description: Issue handler creates tasks from GitHub issues
-    specs: [GITHUB-004, ORCH-001]
+    specs: [GITHUB-004, TASK-001]
 
   - name: LLM Core → Gemini
     description: Gemini provider implements LLM core trait
@@ -912,7 +912,7 @@ integration_points:
 
   - name: HRM → Task Orchestration
     description: HRM orchestrates complex multi-step tasks
-    specs: [HRM-002, ORCH-001]
+    specs: [HRM-002, TASK-001]
 
   - name: Repo → Code Search
     description: Repository context informs code search
@@ -984,7 +984,7 @@ integration_points:
 
   - name: Orchestrator → Task Orchestration
     description: Orchestrator uses task executor
-    specs: [ORCH-009, ORCH-006]
+    specs: [ORCH-009, TASK-006]
 
   - name: Orchestrator → HRM
     description: Orchestrator uses HRM for complex tasks

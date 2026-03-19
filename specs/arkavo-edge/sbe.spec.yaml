@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Symbolic Boundary Evolution - Hierarchical Policy Layers
 module: arkavo_sbe
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Layer isolation enforced (Invariant > Policy > Adaptive)

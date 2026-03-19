@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: Browser Automation and Live Injection
 module: arkavo_browser
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - BrowserTool provides MCP-compatible browser automation

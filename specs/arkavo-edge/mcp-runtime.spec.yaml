@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: MCP Runtime Implementation
 module: arkavo_mcp_runtime
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - Server handles JSON-RPC 2.0 protocol

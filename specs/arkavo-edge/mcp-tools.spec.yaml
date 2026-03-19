@@ -2,7 +2,7 @@
 
 feature: MCP Tool Registry and Execution
 module: arkavo_mcp_tools
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All tools must be registered before execution

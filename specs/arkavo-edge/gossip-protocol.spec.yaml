@@ -2,7 +2,7 @@
 
 feature: Gossip Protocol for Decentralized Propagation
 module: arkavo_gossip
-version: 0.57.2
+version: 0.67.1
 
 invariants:
   - All messages must have valid Ed25519 signatures

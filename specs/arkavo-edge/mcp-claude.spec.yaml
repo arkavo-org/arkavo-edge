@@ -1,6 +1,8 @@
+# yaml-language-server: $schema=../schema.json
+
 feature: MCP Claude Code Integration
-module: crate::mcp_claude
-version: 0.57.2
+module: arkavo_mcp_claude
+version: 0.67.1
 
 invariants:
   - Anthropic API key or OAuth token required for operation
