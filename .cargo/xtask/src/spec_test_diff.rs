@@ -9,8 +9,7 @@ pub fn load_export_data(path: &Path) -> Result<ExportData> {
 }
 
 pub fn diff_markdown(baseline: &ExportData, current: &ExportData) -> String {
-    let mut md = String::from("<!-- spec-coverage-diff -->\n");
-    md.push_str("## Spec Coverage Delta\n\n");
+    let mut md = String::from("## Spec Coverage Delta\n\n");
 
     let b = &baseline.summary;
     let c = &current.summary;
