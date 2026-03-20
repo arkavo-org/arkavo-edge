@@ -257,6 +257,7 @@ dependencies = [
 name = "anthropic-agent-sdk"
 version = "0.2.75"
 dependencies = [
+ "arkavo-test-macros",
  "async-stream",
  "async-trait",
  "base64 0.22.1",
@@ -509,6 +510,7 @@ dependencies = [
  "anyhow",
  "arkavo-crypto",
  "arkavo-protocol",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "hex",
@@ -1008,6 +1010,7 @@ name = "arkavo-evofabric"
 version = "0.67.1"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-test-macros",
  "chrono",
  "hex",
  "prettyplease",
@@ -1142,6 +1145,7 @@ name = "arkavo-kv-cache"
 version = "0.67.1"
 dependencies = [
  "arkavo-llama-cpp",
+ "arkavo-test-macros",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1155,6 +1159,7 @@ name = "arkavo-llama-cpp"
 version = "0.67.1"
 dependencies = [
  "arkavo-llama-cpp-sys",
+ "arkavo-test-macros",
  "criterion",
  "glob",
 ]
@@ -1212,6 +1217,7 @@ name = "arkavo-mcp"
 version = "0.67.1"
 dependencies = [
  "anyhow",
+ "arkavo-test-macros",
  "async-trait",
  "regex",
  "serde",
@@ -1534,6 +1540,7 @@ version = "0.67.1"
 dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "fast_qr",
  "serde",
@@ -1639,6 +1646,7 @@ name = "arkavo-security"
 version = "0.67.1"
 dependencies = [
  "anyhow",
+ "arkavo-test-macros",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -1690,6 +1698,7 @@ dependencies = [
  "arkavo-tasks",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
+ "arkavo-test-macros",
  "arkavo-ucp",
  "async-trait",
  "axum",
@@ -1968,6 +1977,7 @@ dependencies = [
 name = "arkavo-validation"
 version = "0.67.1"
 dependencies = [
+ "arkavo-test-macros",
  "ipnet",
  "serde_json",
 ]

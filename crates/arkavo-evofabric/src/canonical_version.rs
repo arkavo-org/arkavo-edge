@@ -69,6 +69,7 @@ impl VersionDag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn version(id: u8, parent: Option<u8>) -> CanonicalVersion {
         CanonicalVersion {
@@ -80,6 +81,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn empty_dag() {
         let dag = VersionDag::new();
@@ -87,6 +89,7 @@ mod tests {
         assert_eq!(dag.len(), 0);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn add_and_get() {
         let mut dag = VersionDag::new();
@@ -95,6 +98,7 @@ mod tests {
         assert!(dag.get(&[2; 32]).is_none());
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn linear_ancestry() {
         let mut dag = VersionDag::new();
@@ -105,6 +109,7 @@ mod tests {
         assert_eq!(chain, vec![[3; 32], [2; 32], [1; 32]]);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn common_ancestor_linear() {
         let mut dag = VersionDag::new();
@@ -114,6 +119,7 @@ mod tests {
         assert_eq!(dag.common_ancestor(&[3; 32], &[2; 32]), Some([2; 32]));
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn common_ancestor_fork() {
         let mut dag = VersionDag::new();
@@ -123,6 +129,7 @@ mod tests {
         assert_eq!(dag.common_ancestor(&[2; 32], &[3; 32]), Some([1; 32]));
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn common_ancestor_none() {
         let mut dag = VersionDag::new();
@@ -131,6 +138,7 @@ mod tests {
         assert_eq!(dag.common_ancestor(&[1; 32], &[2; 32]), None);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn ancestors_missing_version() {
         let dag = VersionDag::new();
@@ -138,6 +146,7 @@ mod tests {
         assert_eq!(chain, vec![[99; 32]]);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn common_ancestor_same_version() {
         let mut dag = VersionDag::new();

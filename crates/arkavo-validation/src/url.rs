@@ -247,10 +247,12 @@ mod tests {
     //! - CRI-003: Egress filtering (SSRF prevention)
 
     use super::*;
+    use arkavo_test_macros::spec;
 
     /// Test: Egress filter blocks access to private IP ranges and cloud metadata
     /// Spec: NET-007 - Block cloud metadata and internal network access
     /// Vulnerability: CRI-003 - SSRF Prevention
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_blocks_private_ips() {
         let filter = EgressFilter::new();
@@ -267,6 +269,7 @@ mod tests {
 
     /// Test: Egress filter allows legitimate public URLs
     /// Spec: NET-007 - Public IPs should be accessible
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_allows_public_urls() {
         let filter = EgressFilter::new();
@@ -276,6 +279,7 @@ mod tests {
 
     /// Test: Allowlist can bypass egress filter for specific URLs
     /// Spec: NET-007 - Explicit allowlist can override for known-safe internal services
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_allowlist() {
         let mut filter = EgressFilter::new();
@@ -286,6 +290,7 @@ mod tests {
     /// Test: Host validator prevents DNS rebinding attacks
     /// Spec: NET-006 - Host header validation (anti-rebinding)
     /// Spec: HIGH-004 - Host header validation
+    #[spec("VAL-006")]
     #[test]
     fn test_host_validator() {
         let validator = HostValidator::new();
@@ -298,6 +303,7 @@ mod tests {
 
     /// Test: Loopback host detection for local binding validation
     /// Spec: NET-002 - Localhost-only binding by default
+    #[spec("VAL-006")]
     #[test]
     fn test_is_loopback_host() {
         assert!(is_loopback_host("localhost"));
@@ -307,6 +313,7 @@ mod tests {
         assert!(!is_loopback_host("example.com"));
     }
 
+    #[spec("VAL-006")]
     #[test]
     fn test_extract_host_from_url() {
         assert_eq!(
@@ -316,6 +323,7 @@ mod tests {
         assert_eq!(extract_host_from_url("not-a-url"), None);
     }
 
+    #[spec("VAL-005", "VAL-006")]
     #[test]
     fn test_userinfo_bypass_blocked() {
         assert_eq!(
@@ -324,6 +332,7 @@ mod tests {
         );
     }
 
+    #[spec("VAL-006")]
     #[test]
     fn test_ipv6_url_extraction() {
         assert_eq!(
@@ -336,6 +345,7 @@ mod tests {
         );
     }
 
+    #[spec("VAL-005")]
     #[test]
     fn test_ipv6_mapped_v4_blocked() {
         let filter = EgressFilter::new();

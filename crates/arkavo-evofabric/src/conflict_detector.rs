@@ -76,6 +76,7 @@ fn find_overlapping(a: &OpBundle, b: &OpBundle) -> Vec<TargetScope> {
 mod tests {
     use super::*;
     use crate::OpBundleStatus;
+    use arkavo_test_macros::spec;
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -92,6 +93,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn disjoint_functions() {
         let a = bundle_with_ops(vec![AstOp::AddAttribute {
@@ -111,6 +113,7 @@ mod tests {
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Disjoint);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn same_id_is_identical() {
         let a = bundle_with_ops(vec![]);
@@ -118,6 +121,7 @@ mod tests {
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Identical);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn same_content_hash_is_identical() {
         let mut a = bundle_with_ops(vec![]);
@@ -127,6 +131,7 @@ mod tests {
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Identical);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn overlapping_same_function() {
         let a = bundle_with_ops(vec![AstOp::ReplaceFnBody {
@@ -154,6 +159,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn resolve_disjoint_combines_ops() {
         let a = bundle_with_ops(vec![AstOp::AddAttribute {
@@ -174,6 +180,7 @@ mod tests {
         assert_eq!(combined.len(), 2);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn add_use_ops_always_disjoint() {
         let a = bundle_with_ops(vec![AstOp::AddUse {
@@ -185,6 +192,7 @@ mod tests {
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Disjoint);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn impl_block_overlaps_scoped_function() {
         let a = bundle_with_ops(vec![AstOp::Remove {
@@ -209,6 +217,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn file_scope_overlaps_anything() {
         let a = bundle_with_ops(vec![AstOp::InsertAfter {
@@ -228,6 +237,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn mixed_ops_partial_overlap() {
         let a = bundle_with_ops(vec![
@@ -257,6 +267,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn zero_content_hash_not_treated_as_identical() {
         let a = bundle_with_ops(vec![]);
@@ -267,6 +278,7 @@ mod tests {
         assert_eq!(detect_conflict(&a, &b), ConflictResult::Disjoint);
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn empty_bundles_disjoint() {
         let a = bundle_with_ops(vec![]);

@@ -388,6 +388,7 @@ impl OAuth2Provider {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn create_test_config() -> OAuth2Config {
         OAuth2Config {
@@ -402,6 +403,7 @@ mod tests {
         }
     }
 
+    #[spec("SEC-002")]
     #[tokio::test]
     async fn test_authorization_code_flow() {
         let config = create_test_config();
@@ -437,6 +439,7 @@ mod tests {
         assert!(response.refresh_token.is_some());
     }
 
+    #[spec("SEC-002")]
     #[tokio::test]
     async fn test_refresh_token_flow() {
         let config = create_test_config();
@@ -486,6 +489,7 @@ mod tests {
         assert!(refreshed_response.refresh_token.is_some());
     }
 
+    #[spec("SEC-002")]
     #[tokio::test]
     async fn test_token_validation() {
         let config = create_test_config();

@@ -95,7 +95,9 @@ mod tests {
     //! - [specs/arkavo-edge/mcp-tools.spec.yaml](MCP-003): Filesystem tool security - path traversal prevention
 
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("VAL-002")]
     #[test]
     fn test_valid_relative_path() {
         let root = Path::new("/workspace");
@@ -104,6 +106,7 @@ mod tests {
         assert_eq!(result.unwrap(), PathBuf::from("/workspace/src/main.rs"));
     }
 
+    #[spec("VAL-001")]
     #[test]
     fn test_traversal_blocked() {
         let root = Path::new("/workspace");
@@ -111,18 +114,21 @@ mod tests {
         assert!(validate_path_within_root(root, "src/../../etc").is_err());
     }
 
+    #[spec("VAL-001")]
     #[test]
     fn test_tilde_blocked() {
         let root = Path::new("/workspace");
         assert!(validate_path_within_root(root, "~/secret").is_err());
     }
 
+    #[spec("VAL-002")]
     #[test]
     fn test_absolute_outside_root() {
         let root = Path::new("/workspace");
         assert!(validate_path_within_root(root, "/etc/passwd").is_err());
     }
 
+    #[spec("VAL-002")]
     #[test]
     fn test_absolute_inside_root() {
         let root = Path::new("/workspace");
@@ -130,6 +136,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("VAL-001")]
     #[test]
     fn test_no_traversal_allows_absolute() {
         let base = Path::new("/workspace");
@@ -138,6 +145,7 @@ mod tests {
         assert_eq!(result.unwrap(), PathBuf::from("/tmp/file.txt"));
     }
 
+    #[spec("VAL-001")]
     #[test]
     fn test_no_traversal_blocks_dotdot() {
         let base = Path::new("/workspace");

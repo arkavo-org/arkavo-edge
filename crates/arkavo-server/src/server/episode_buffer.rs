@@ -177,6 +177,7 @@ impl EpisodeBuffer {
 mod tests {
     use super::*;
     use arkavo_router::learning::{EpisodeOutcome, Observation, QualityMetrics};
+    use arkavo_test_macros::spec;
 
     fn obs(tool: &str, success: bool) -> ToolObservation {
         ToolObservation {
@@ -208,6 +209,7 @@ mod tests {
         )
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_infer_category() {
         assert_eq!(
@@ -223,6 +225,7 @@ mod tests {
         assert_eq!(EpisodeBuffer::infer_category("unknown_tool"), "general");
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_episode_buffer_thresholds() {
         let buffer = EpisodeBuffer::with_thresholds(5, 2);
@@ -230,6 +233,7 @@ mod tests {
         assert_eq!(buffer.episode_threshold, 2);
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_add_observation() {
         let mut buffer = EpisodeBuffer::new();
@@ -248,6 +252,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_failure_triggers_immediate_synthesis() {
         let mut buffer = EpisodeBuffer::new();
@@ -259,6 +264,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_failure_after_success_triggers_synthesis() {
         let mut buffer = EpisodeBuffer::new();
@@ -273,6 +279,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_multiple_categories_independent() {
         let mut buffer = EpisodeBuffer::with_thresholds(2, 2);
@@ -289,6 +296,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_take_observations_consumes() {
         let mut buffer = EpisodeBuffer::new();
@@ -306,6 +314,7 @@ mod tests {
         assert!(buffer.take_observations("navigation").is_empty());
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_episode_lesson_threshold() {
         let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
@@ -319,6 +328,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_take_episodes_consumes() {
         let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
@@ -333,6 +343,7 @@ mod tests {
         assert!(buffer.take_episodes("code").is_empty());
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_episodes_multiple_categories_independent() {
         let mut buffer = EpisodeBuffer::with_thresholds(3, 2);
@@ -348,6 +359,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[test]
     fn test_take_observations_preserves_order() {
         let mut buffer = EpisodeBuffer::with_thresholds(3, 3);

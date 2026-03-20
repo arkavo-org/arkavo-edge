@@ -238,8 +238,10 @@ impl ToolMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_with_params() {
         let args =
@@ -251,6 +253,7 @@ mod tests {
         assert!(key.contains("Y=15"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_single_param() {
         let args = json!({"Action": {"Type": "CreateGrowingZone", "ZoneId": "food1"}});
@@ -260,6 +263,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_type_only_no_params() {
         // Action types without extra params produce a plain key (no parens)
@@ -267,18 +271,21 @@ mod tests {
         assert_eq!(ToolMemory::extract_action_key(&args), "Observe");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_no_action_is_empty() {
         let args = json!({"task": "something"});
         assert_eq!(ToolMemory::extract_action_key(&args), "");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_no_params() {
         let args = json!({"Action": {"Type": "DoSomething"}});
         assert_eq!(ToolMemory::extract_action_key(&args), "DoSomething");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_duplicate_detection() {
         let mut mem = ToolMemory::new(10);
@@ -291,6 +298,7 @@ mod tests {
         assert!(mem.entries.back().unwrap().is_duplicate);
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_no_false_duplicate_different_params() {
         let mut mem = ToolMemory::new(10);
@@ -302,6 +310,7 @@ mod tests {
         assert!(!mem.entries.back().unwrap().is_duplicate);
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_format_shows_duplicate_warning() {
         let mut mem = ToolMemory::new(10);
@@ -315,6 +324,7 @@ mod tests {
         assert!(prompt.contains("Build"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_had_meaningful_action() {
         let mut mem = ToolMemory::new(10);
@@ -352,6 +362,7 @@ mod tests {
         assert!(!mem3.had_meaningful_action());
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_warning_triggers() {
         let mut mem = ToolMemory::new(10);
@@ -369,6 +380,7 @@ mod tests {
         assert!(warning.contains("3 times"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_ignores_observe() {
         let mut mem = ToolMemory::new(10);
@@ -398,6 +410,7 @@ mod tests {
         assert!(warning.contains("3 times"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_no_warning_with_mixed() {
         let mut mem = ToolMemory::new(10);
@@ -420,6 +433,7 @@ mod tests {
         assert!(mem.action_variety_warning().is_empty());
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_recent_action_types() {
         let mut mem = ToolMemory::new(10);
@@ -443,6 +457,7 @@ mod tests {
         assert!(types.contains(&"Build".to_string()));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_last_observe_full_captured() {
         let mut mem = ToolMemory::new(10);
@@ -465,6 +480,7 @@ mod tests {
         assert_eq!(mem.last_observe_full(), Some(new_result));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_last_observe_full_state_and_status_tools() {
         let mut mem = ToolMemory::new(10);
@@ -479,6 +495,7 @@ mod tests {
         assert_eq!(mem.last_observe_full(), Some(result2));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_error_detection() {
         let mut mem = ToolMemory::new(10);

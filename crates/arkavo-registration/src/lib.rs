@@ -177,7 +177,9 @@ pub fn verify_challenge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("QREG-005")]
     #[test]
     fn test_agent_descriptor_serialization() {
         let keypair = AgentKeypair::generate();
@@ -198,6 +200,7 @@ mod tests {
         assert_eq!(descriptor.agent_id_short_sha, restored.agent_id_short_sha);
     }
 
+    #[spec("QREG-004")]
     #[test]
     fn test_challenge_signing() {
         let keypair = AgentKeypair::generate();
@@ -208,6 +211,7 @@ mod tests {
         assert!(verify_challenge(challenge, &signature, &public_key).is_ok());
     }
 
+    #[spec("QREG-004")]
     #[test]
     fn test_challenge_verification_fails_on_wrong_message() {
         let keypair = AgentKeypair::generate();
@@ -234,6 +238,7 @@ mod tests {
         assert_eq!(public_key.to_bytes(), extracted_key.to_bytes());
     }
 
+    #[spec("QREG-001")]
     #[test]
     fn test_to_url() {
         let keypair = AgentKeypair::generate();
@@ -251,6 +256,7 @@ mod tests {
         assert!(url.contains("agent-name._tcp.local."));
     }
 
+    #[spec("QREG-001")]
     #[test]
     fn test_to_url_without_mdns() {
         let keypair = AgentKeypair::generate();
@@ -267,6 +273,7 @@ mod tests {
         assert!(!url.contains("&mdns_service="));
     }
 
+    #[spec("QREG-001")]
     #[test]
     fn test_authorization_url_contains_rpc_endpoint() {
         let keypair = AgentKeypair::generate();
@@ -297,6 +304,7 @@ mod tests {
         );
     }
 
+    #[spec("QREG-001")]
     #[test]
     fn test_authorization_url_rpc_uses_websocket_scheme() {
         let keypair = AgentKeypair::generate();
@@ -318,6 +326,7 @@ mod tests {
         );
     }
 
+    #[spec("QREG-001")]
     #[test]
     #[should_panic(expected = "unroutable address 0.0.0.0")]
     fn test_authorization_url_rejects_unroutable_address() {
@@ -336,6 +345,7 @@ mod tests {
         let _ = descriptor.to_authorization_url();
     }
 
+    #[spec("QREG-001")]
     #[test]
     #[should_panic(expected = "ephemeral port :0")]
     fn test_authorization_url_rejects_port_zero() {

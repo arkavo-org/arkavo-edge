@@ -560,7 +560,9 @@ impl Default for ProtocolHandler {
 mod tests {
     use super::*;
     use crate::types::ToolName;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_request_id_generation() {
         let handler = ProtocolHandler::new();
@@ -569,6 +571,7 @@ mod tests {
         assert_ne!(id1, id2);
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_init_request_creation() {
         let handler = ProtocolHandler::new();
@@ -577,6 +580,7 @@ mod tests {
         assert!(init_req.capabilities.bidirectional);
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_serialize_deserialize() {
         let handler = ProtocolHandler::new();
@@ -592,6 +596,7 @@ mod tests {
         }
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_deserialize_invalid_json() {
         let handler = ProtocolHandler::new();
@@ -599,6 +604,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_deserialize_invalid_message_structure() {
         let handler = ProtocolHandler::new();
@@ -607,6 +613,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_deserialize_missing_fields() {
         let handler = ProtocolHandler::new();
@@ -615,6 +622,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[spec("CASDK-002")]
     #[tokio::test]
     async fn test_handle_response_with_missing_pending_request() {
         let handler = ProtocolHandler::new();
@@ -631,6 +639,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-002", "CASDK-005")]
     #[tokio::test]
     async fn test_hook_response_without_channel() {
         let handler = ProtocolHandler::new();
@@ -646,6 +655,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-002", "CASDK-004")]
     #[tokio::test]
     async fn test_permission_response_without_channel() {
         let handler = ProtocolHandler::new();
@@ -665,6 +675,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_init_response_with_wrong_version() {
         let handler = ProtocolHandler::new();
@@ -685,6 +696,7 @@ mod tests {
         assert!(!handler.is_initialized());
     }
 
+    #[spec("CASDK-002")]
     #[tokio::test]
     async fn test_send_request_without_init() {
         let handler = ProtocolHandler::new();
@@ -695,6 +707,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_serialize_all_request_types() {
         let handler = ProtocolHandler::new();
@@ -726,6 +739,7 @@ mod tests {
         assert!(handler.serialize_message(&msg).is_ok());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_serialize_all_response_types() {
         let handler = ProtocolHandler::new();
@@ -768,6 +782,7 @@ mod tests {
         assert!(handler.serialize_message(&msg).is_ok());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_get_request_id() {
         let interrupt = ControlRequest::Interrupt {

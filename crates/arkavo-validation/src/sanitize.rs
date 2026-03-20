@@ -114,8 +114,10 @@ mod tests {
     //! Sensitive data must never appear in logs, even in encrypted/debug contexts.
 
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
+    #[spec("VAL-003")]
     #[test]
     fn test_redacts_sensitive_keys() {
         let input = json!({"api_key": "secret123", "name": "test"});
@@ -125,6 +127,7 @@ mod tests {
         assert!(!result.contains("secret123"));
     }
 
+    #[spec("VAL-003")]
     #[test]
     fn test_redacts_nested() {
         let input = r#"{"result":{"token":"abc","data":"ok"}}"#;
@@ -133,12 +136,14 @@ mod tests {
         assert!(result.contains("ok"));
     }
 
+    #[spec("VAL-003")]
     #[test]
     fn test_non_json_redacted() {
         let result = sanitize_json_line_for_log("not json");
         assert!(result.contains("[non-json payload redacted]"));
     }
 
+    #[spec("VAL-003")]
     #[test]
     fn test_is_sensitive_key() {
         assert!(is_sensitive_key("api_key"));

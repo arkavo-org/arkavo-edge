@@ -132,7 +132,9 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-002")]
     #[tokio::test]
     async fn test_build_agent_card() {
         let agent_metadata = Arc::new(RwLock::new(AgentMetadata {

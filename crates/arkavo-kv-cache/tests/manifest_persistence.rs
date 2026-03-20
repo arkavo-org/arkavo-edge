@@ -1,6 +1,7 @@
 //! Integration tests for manifest persistence (save/load round-trip)
 
 use arkavo_kv_cache::{ContextEntry, ContextManifest};
+use arkavo_test_macros::spec;
 
 fn sample_entry(name: &str, model_hash: &str) -> ContextEntry {
     ContextEntry {
@@ -15,6 +16,7 @@ fn sample_entry(name: &str, model_hash: &str) -> ContextEntry {
     }
 }
 
+#[spec("KVC-004")]
 #[test]
 fn test_save_and_load_round_trip() {
     let dir = tempfile::tempdir().unwrap();
@@ -36,12 +38,14 @@ fn test_save_and_load_round_trip() {
     assert_eq!(loaded.get("policy").unwrap().model_id, "qwen3-0.6b-q8");
 }
 
+#[spec("KVC-004")]
 #[test]
 fn test_load_nonexistent_file() {
     let result = ContextManifest::load("/nonexistent/manifest.json");
     assert!(result.is_err());
 }
 
+#[spec("KVC-004")]
 #[test]
 fn test_save_overwrite() {
     let dir = tempfile::tempdir().unwrap();
@@ -61,6 +65,7 @@ fn test_save_overwrite() {
     assert!(loaded.get("new").is_some());
 }
 
+#[spec("KVC-005")]
 #[test]
 fn test_needs_rebuild_after_reload() {
     let dir = tempfile::tempdir().unwrap();

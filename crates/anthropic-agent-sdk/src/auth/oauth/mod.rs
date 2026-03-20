@@ -372,8 +372,10 @@ fn sanitize_for_display(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use pkce::urlencoding;
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_pkce_challenge_generation() {
         let pkce = PkceChallenge::generate();
@@ -385,6 +387,7 @@ mod tests {
         assert_eq!(pkce.challenge.len(), 43);
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_pkce_verifier_is_valid_base64url() {
         let pkce = PkceChallenge::generate();
@@ -401,6 +404,7 @@ mod tests {
         );
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_urlencoding() {
         assert_eq!(urlencoding("hello"), "hello");
@@ -413,6 +417,7 @@ mod tests {
         );
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_oauth_config_default() {
         let config = OAuthConfig::default();
@@ -421,6 +426,7 @@ mod tests {
         assert_eq!(config.token_url, DEFAULT_TOKEN_URL);
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_oauth_client_builder() {
         let client = OAuthClient::builder().auto_open_browser(false).build();

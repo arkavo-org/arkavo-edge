@@ -295,19 +295,23 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_short() {
         let result = "short result";
         assert_eq!(truncate_result(result, 500), "short result");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_exact_limit() {
         let result = "x".repeat(500);
         assert_eq!(truncate_result(&result, 500), result);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_over_limit() {
         let result = "a".repeat(1000);
@@ -317,6 +321,7 @@ mod tests {
         assert!(truncated.len() < 1000);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_extract_quality_score() {
         assert_eq!(extract_quality_score(r#"{"quality_score": 0.8}"#), 0.8);
@@ -324,6 +329,7 @@ mod tests {
         assert_eq!(extract_quality_score("invalid"), 0.7);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern() {
         let content = r#"{"condition": "sector_4", "action": "slow", "confidence": 0.9, "expected_outcome": "safe"}"#;
@@ -334,6 +340,7 @@ mod tests {
         assert_eq!(result.3, "safe");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_markdown() {
         let content = r#"```json
@@ -344,6 +351,7 @@ mod tests {
         assert_eq!(result.1, "avoid");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_control_characters() {
         // LLMs sometimes emit control characters that break JSON parsing
@@ -355,11 +363,13 @@ mod tests {
         assert_eq!(result.3, "stable");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_extract_quality_score_negative_clamped() {
         assert_eq!(extract_quality_score(r#"{"quality_score": -0.5}"#), 0.0);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_missing_all_fields() {
         let content = r#"{}"#;
@@ -370,12 +380,14 @@ mod tests {
         assert_eq!(result.3, "improved_outcome");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_no_braces() {
         let content = "just plain text with no JSON";
         assert!(parse_lesson_pattern(content).is_err());
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_confidence_clamped() {
         // LLM might return confidence > 1.0 — should be clamped
@@ -388,6 +400,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_surrounding_text() {
         let content = r#"Here is the pattern I found:
@@ -399,6 +412,7 @@ This pattern was found across all episodes."#;
         assert_eq!(result.2, 0.95);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_raw_newlines() {
         // Raw \n inside JSON string values is illegal but LLMs emit it

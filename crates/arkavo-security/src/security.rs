@@ -285,7 +285,9 @@ impl SecurityConfigBuilder {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SEC-005")]
     #[test]
     fn test_default_security_config() {
         let config = SecurityConfig::default();
@@ -294,6 +296,7 @@ mod tests {
         assert!(matches!(config.authentication.method, AuthMethod::None));
     }
 
+    #[spec("SEC-005")]
     #[test]
     fn test_security_config_builder() {
         let config = SecurityConfig::builder()
@@ -313,6 +316,7 @@ mod tests {
         assert_eq!(config.rate_limiting.requests_per_second, 50);
     }
 
+    #[spec("SEC-005")]
     #[test]
     fn test_validation_missing_key() {
         let mut config = SecurityConfig::default();

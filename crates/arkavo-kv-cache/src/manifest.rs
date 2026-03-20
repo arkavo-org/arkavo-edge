@@ -114,6 +114,7 @@ impl Default for ContextManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn sample_entry(name: &str) -> ContextEntry {
         ContextEntry {
@@ -128,6 +129,7 @@ mod tests {
         }
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_manifest_new() {
         let m = ContextManifest::new();
@@ -135,6 +137,7 @@ mod tests {
         assert!(m.is_empty());
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_register_and_get() {
         let mut m = ContextManifest::new();
@@ -145,6 +148,7 @@ mod tests {
         assert_eq!(entry.token_count, 512);
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_remove() {
         let mut m = ContextManifest::new();
@@ -154,18 +158,21 @@ mod tests {
         assert!(m.is_empty());
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_remove_nonexistent() {
         let mut m = ContextManifest::new();
         assert!(m.remove("nope").is_none());
     }
 
+    #[spec("KVC-005")]
     #[test]
     fn test_needs_rebuild_missing_entry() {
         let m = ContextManifest::new();
         assert!(m.needs_rebuild("role", "any_hash"));
     }
 
+    #[spec("KVC-005")]
     #[test]
     fn test_needs_rebuild_same_model() {
         let mut m = ContextManifest::new();
@@ -173,6 +180,7 @@ mod tests {
         assert!(!m.needs_rebuild("role", "model_hash_v1"));
     }
 
+    #[spec("KVC-005")]
     #[test]
     fn test_needs_rebuild_different_model() {
         let mut m = ContextManifest::new();
@@ -180,6 +188,7 @@ mod tests {
         assert!(m.needs_rebuild("role", "model_hash_v2"));
     }
 
+    #[spec("KVC-005")]
     #[test]
     fn test_prune_removes_missing_files() {
         let mut m = ContextManifest::new();
@@ -189,6 +198,7 @@ mod tests {
         assert!(m.is_empty());
     }
 
+    #[spec("KVC-005")]
     #[test]
     fn test_prune_keeps_existing_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -205,6 +215,7 @@ mod tests {
         assert_eq!(m.len(), 1);
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_register_overwrites() {
         let mut m = ContextManifest::new();
@@ -216,6 +227,7 @@ mod tests {
         assert_eq!(m.get("role").unwrap().token_count, 1024);
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_manifest_serialization() {
         let mut m = ContextManifest::new();
@@ -229,6 +241,7 @@ mod tests {
         assert_eq!(deserialized.get("role").unwrap(), m.get("role").unwrap());
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_manifest_default() {
         let m = ContextManifest::default();
@@ -236,6 +249,7 @@ mod tests {
         assert!(m.is_empty());
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_context_entry_clone() {
         let entry = sample_entry("test");
@@ -243,6 +257,7 @@ mod tests {
         assert_eq!(entry, cloned);
     }
 
+    #[spec("KVC-003")]
     #[test]
     fn test_context_entry_trust_tier_missing_defaults_empty() {
         // Simulate deserializing an entry without trust_tier (backward compat)

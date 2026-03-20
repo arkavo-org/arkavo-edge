@@ -816,7 +816,9 @@ fn find_failure_in_value(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-009")]
     #[test]
     fn test_summarize_short_results_unchanged() {
         let parts = vec!["Tool sim_step: {\"ok\":true}".to_string()];
@@ -824,6 +826,7 @@ mod tests {
         assert_eq!(result, "Tool sim_step: {\"ok\":true}");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_summarize_extracts_delta() {
         let game_state = format!(
@@ -838,6 +841,7 @@ mod tests {
         assert!(result.len() <= 500 + 50); // some overhead from prefix
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_summarize_fallback_truncation() {
         let large = format!("Tool foo: {}", "x".repeat(2000));
@@ -847,32 +851,38 @@ mod tests {
         assert!(result.len() < large.len());
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_find_matching_brace_simple() {
         assert_eq!(find_matching_brace("{\"a\":1}"), Some(6));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_find_matching_brace_nested() {
         assert_eq!(find_matching_brace("{\"a\":{\"b\":1}}"), Some(12));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_find_matching_brace_no_brace() {
         assert_eq!(find_matching_brace("no braces"), None);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_find_matching_brace_unbalanced() {
         assert_eq!(find_matching_brace("{\"a\":1"), None);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_condense_small_result_unchanged() {
         let result = condense_tool_result("sim_step", "{\"ok\":true}", 4000);
         assert_eq!(result, "Tool sim_step: {\"ok\":true}");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_condense_extracts_delta_from_large() {
         let padding = "x".repeat(10_000);
@@ -886,6 +896,7 @@ mod tests {
         assert!(result.len() <= 4000);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_condense_truncates_without_delta() {
         let large = "x".repeat(100_000);
@@ -895,6 +906,7 @@ mod tests {
         assert!(result.len() <= 4000);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_semantic_failure_nested() {
         // Any nested object with Success:false should be detected
@@ -904,18 +916,21 @@ mod tests {
         assert!(failure.unwrap().contains("Missing required field"));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_semantic_failure_success_true() {
         let result = r#"{"result":"{\"Data\":{\"Action\":{\"Success\":true,\"Message\":\"\"}}}"}"#;
         assert!(detect_semantic_failure(result).is_none());
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_semantic_failure_no_success_field() {
         let result = r#"{"result":"{\"Tick\":100}"}"#;
         assert!(detect_semantic_failure(result).is_none());
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_semantic_failure_top_level() {
         let result = r#"{"result":"{\"Success\":false,\"Message\":\"Invalid agent ID\"}"}"#;
@@ -924,6 +939,7 @@ mod tests {
         assert!(failure.unwrap().contains("Invalid agent ID"));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_semantic_failure_case_insensitive() {
         let result = r#"{"result":"{\"success\":false,\"message\":\"bad request\"}"}"#;

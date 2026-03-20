@@ -46,6 +46,9 @@ uuid = { workspace = true }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-protocol = { path = "../arkavo-protocol" }
 
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 [features]
 default = []
 mdns = ["arkavo-protocol/mdns"]
