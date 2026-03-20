@@ -26,13 +26,6 @@ pub async fn static_file_handler(AxumPath(path): AxumPath<String>) -> Response {
         }
         "js/panels/learning.js" => serve_js(include_str!("../static/js/panels/learning.js")),
         "js/panels/task-detail.js" => serve_js(include_str!("../static/js/panels/task-detail.js")),
-        "js/panels/treemap-layout.js" => {
-            serve_js(include_str!("../static/js/panels/treemap-layout.js"))
-        }
-        "js/panels/traceability.js" => {
-            serve_js(include_str!("../static/js/panels/traceability.js"))
-        }
-        "data/traceability.json" => serve_json(include_str!("../static/data/traceability.json")),
         "js/chat.js" => serve_js(include_str!("../static/js/chat.js")),
         "js/showcase.js" => serve_js(include_str!("../static/js/showcase.js")),
         "js/app.js" => serve_js(include_str!("../static/js/app.js")),
@@ -55,14 +48,6 @@ fn serve_js(content: &'static str) -> Response {
 fn serve_css(content: &'static str) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, "text/css")
-        .body(Body::from(content))
-        .expect("valid response")
-        .into_response()
-}
-
-fn serve_json(content: &'static str) -> Response {
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(content))
         .expect("valid response")
         .into_response()

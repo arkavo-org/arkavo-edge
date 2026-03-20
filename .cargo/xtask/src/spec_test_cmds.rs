@@ -2,7 +2,9 @@ use crate::spec_test::{
     CoverageAnalyzer, CoverageStatus, Criticality, SpecCoverage, SpecParser, TestDiscovery,
     TestGenerator,
 };
+use crate::spec_test_diff;
 use crate::spec_test_export;
+use crate::spec_test_html;
 use crate::spec_test_report;
 use anyhow::Result;
 use clap::Subcommand;
@@ -56,14 +58,24 @@ pub enum Commands {
         #[arg(short, long)]
         with_tests: bool,
     },
-    /// Export coverage data as JSON for the traceability dashboard
+    /// Export coverage data as JSON
     ExportJson {
-        #[arg(
-            short,
-            long,
-            default_value = "crates/arkavo-agui/static/data/traceability.json"
-        )]
+        #[arg(short, long, default_value = "traceability.json")]
         output: PathBuf,
+    },
+    /// Export coverage data as a standalone HTML report
+    ExportHtml {
+        #[arg(short, long, default_value = "traceability.html")]
+        output: PathBuf,
+    },
+    /// Compare current coverage against a baseline JSON file and output markdown diff
+    Diff {
+        /// Path to baseline traceability.json (from main)
+        #[arg(short, long)]
+        baseline: PathBuf,
+        /// Optional output file (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -99,6 +111,8 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
         } => cmd_run(scenario, spec, criticality),
         Commands::List { spec, with_tests } => cmd_list(&specs_dir, &crates_dir, spec, with_tests),
         Commands::ExportJson { output } => cmd_export_json(&specs_dir, &crates_dir, output),
+        Commands::ExportHtml { output } => cmd_export_html(&specs_dir, &crates_dir, output),
+        Commands::Diff { baseline, output } => cmd_diff(&specs_dir, &crates_dir, baseline, output),
     }
 }
 
@@ -362,6 +376,47 @@ fn cmd_export_json(specs_dir: &Path, crates_dir: &Path, output: PathBuf) -> Resu
     println!(
         "{} {}",
         "Exported traceability JSON:".green(),
+        output.display()
+    );
+    println!(
+        "  {} scenarios, {:.1}% coverage",
+        report.total_scenarios,
+        report.coverage_percentage()
+    );
+    Ok(())
+}
+
+fn cmd_diff(
+    specs_dir: &Path,
+    crates_dir: &Path,
+    baseline_path: PathBuf,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    let baseline = spec_test_diff::load_export_data(&baseline_path)?;
+    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
+    let report = CoverageAnalyzer::analyze(specs, tests);
+    let current_json = spec_test_export::export_json_string(&report)?;
+    let current: crate::spec_test_export::ExportData = serde_json::from_str(&current_json)?;
+    let md = spec_test_diff::diff_markdown(&baseline, &current);
+    match output {
+        Some(path) => {
+            std::fs::write(&path, &md)?;
+            println!("{} {}", "Wrote diff to:".green(), path.display());
+        }
+        None => print!("{md}"),
+    }
+    Ok(())
+}
+
+fn cmd_export_html(specs_dir: &Path, crates_dir: &Path, output: PathBuf) -> Result<()> {
+    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
+    let report = CoverageAnalyzer::analyze(specs, tests);
+    spec_test_html::export_html(&report, &output)?;
+    println!(
+        "{} {}",
+        "Exported traceability HTML:".green(),
         output.display()
     );
     println!(

@@ -1575,6 +1575,39 @@ jobs:
             exit 1
           fi
 
+      - name: Generate PR traceability report
+        run: cargo run -p xtask -- spec-test export-html --output traceability.html
+
+      - name: Upload traceability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: traceability-report
+          path: traceability.html
+          retention-days: 30
+
+      - name: Fetch baseline and post coverage diff
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(echo '${{ github.repository }}' | cut -d/ -f2)/traceability.json"
+          if curl -sf -o baseline.json "$PAGES_URL"; then
+            cargo run -p xtask -- spec-test diff --baseline baseline.json --output diff.md
+
+            MARKER="<!-- spec-coverage-diff -->"
+            COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
+
+            if [ -n "$COMMENT_ID" ]; then
+              gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
+                -X PATCH -f body="$(cat diff.md)"
+            else
+              gh pr comment "${{ github.event.pull_request.number }}" --body-file diff.md
+            fi
+          else
+            echo "No baseline on GitHub Pages yet — skipping diff"
+          fi
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness

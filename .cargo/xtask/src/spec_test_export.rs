@@ -4,60 +4,60 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Serialize)]
-struct ExportData {
-    specs: Vec<ExportSpec>,
-    code: Vec<ExportCrate>,
-    links: Vec<ExportLink>,
-    summary: ExportSummary,
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportData {
+    pub(crate) specs: Vec<ExportSpec>,
+    pub(crate) code: Vec<ExportCrate>,
+    pub(crate) links: Vec<ExportLink>,
+    pub(crate) summary: ExportSummary,
 }
 
-#[derive(Serialize)]
-struct ExportSpec {
-    name: String,
-    module: String,
-    scenarios: Vec<ExportScenario>,
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportSpec {
+    pub(crate) name: String,
+    pub(crate) module: String,
+    pub(crate) scenarios: Vec<ExportScenario>,
 }
 
-#[derive(Serialize)]
-struct ExportScenario {
-    id: String,
-    name: String,
-    criticality: String,
-    status: String,
-    test_count: usize,
-    refs: Vec<String>,
-    given: Vec<String>,
-    when: String,
-    then: Vec<String>,
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportScenario {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) criticality: String,
+    pub(crate) status: String,
+    pub(crate) test_count: usize,
+    pub(crate) refs: Vec<String>,
+    pub(crate) given: Vec<String>,
+    pub(crate) when: String,
+    pub(crate) then: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct ExportCrate {
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportCrate {
     name: String,
     files: Vec<ExportFile>,
 }
 
-#[derive(Serialize)]
-struct ExportFile {
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportFile {
     path: String,
     scenarios: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct ExportLink {
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportLink {
     scenario: String,
     file: String,
     kind: String,
 }
 
-#[derive(Serialize)]
-struct ExportSummary {
-    total: usize,
-    covered: usize,
-    partial: usize,
-    missing: usize,
-    pct: f64,
+#[derive(Serialize, serde::Deserialize)]
+pub(crate) struct ExportSummary {
+    pub(crate) total: usize,
+    pub(crate) covered: usize,
+    pub(crate) partial: usize,
+    pub(crate) missing: usize,
+    pub(crate) pct: f64,
 }
 
 fn status_str(s: CoverageStatus) -> &'static str {
@@ -75,7 +75,7 @@ fn spec_name(path: &Path) -> String {
         .replace(".spec", "")
 }
 
-pub fn export_json(report: &CoverageReport, output: &Path) -> Result<()> {
+pub fn export_json_string(report: &CoverageReport) -> Result<String> {
     let mut links = Vec::new();
     let mut code_map: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
 
@@ -101,10 +101,14 @@ pub fn export_json(report: &CoverageReport, output: &Path) -> Result<()> {
         },
     };
 
+    Ok(serde_json::to_string_pretty(&data)?)
+}
+
+pub fn export_json(report: &CoverageReport, output: &Path) -> Result<()> {
+    let json = export_json_string(report)?;
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(&data)?;
     std::fs::write(output, json)?;
     Ok(())
 }

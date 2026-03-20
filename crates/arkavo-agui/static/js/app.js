@@ -138,10 +138,6 @@ function switchView(viewId) {
         startLearningPolling();
     }
 
-    if (viewId === 'traceability') {
-        renderTraceability();
-    }
-
     // Stop learning polling when navigating away
     if (viewId !== 'learning' && viewId !== 'router') {
         stopLearningPolling();

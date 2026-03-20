@@ -1,5 +1,12 @@
 "use strict";
 
+function escapeHtml(text) {
+    if (text == null) return '';
+    var div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 var _traceHover = null;
 var _tracePin = null;
 var _traceDebounce = null;
@@ -10,33 +17,9 @@ var _codeLookup = null;
 var _scenarioStatusMap = null;
 var _clipIdCounter = 0;
 
-function renderTraceability() {
-    var container = document.getElementById('traceability-container');
-    if (!container) return;
-
-    if (AppState.traceabilityData) {
-        renderTraceabilityContent(container, AppState.traceabilityData);
-        return;
-    }
-
-    container.innerHTML = '<div class="empty-state"><h3>Loading Traceability Data...</h3></div>';
-
-    fetch('/static/data/traceability.json')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            AppState.traceabilityData = data;
-            renderTraceabilityContent(container, data);
-        })
-        .catch(function() {
-            container.innerHTML = '<div class="empty-state"><h3>No Traceability Data</h3>' +
-                '<p>Run: cargo xtask spec-test export-json</p></div>';
-        });
-}
-
 function renderTraceabilityContent(container, data) {
     if (!data.specs || data.specs.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>No Traceability Data</h3>' +
-            '<p>Run: cargo xtask spec-test export-json</p></div>';
+        container.innerHTML = '<div class="empty-state"><h3>No Traceability Data</h3></div>';
         return;
     }
 
@@ -117,11 +100,11 @@ function renderSummaryStats(summary) {
     return '<div class="summary-bar">' +
         '<div class="summary-stat"><div class="summary-stat-value">' + summary.total + '</div>' +
         '<div class="summary-stat-label">Scenarios</div></div>' +
-        '<div class="summary-stat"><div class="summary-stat-value" style="color:var(--success)">' + summary.covered + '</div>' +
+        '<div class="summary-stat"><div class="summary-stat-value" style="color:#22c55e">' + summary.covered + '</div>' +
         '<div class="summary-stat-label">Covered</div></div>' +
-        '<div class="summary-stat"><div class="summary-stat-value" style="color:var(--warning)">' + summary.partial + '</div>' +
+        '<div class="summary-stat"><div class="summary-stat-value" style="color:#eab308">' + summary.partial + '</div>' +
         '<div class="summary-stat-label">Partial</div></div>' +
-        '<div class="summary-stat"><div class="summary-stat-value" style="color:var(--error)">' + summary.missing + '</div>' +
+        '<div class="summary-stat"><div class="summary-stat-value" style="color:#ef4444">' + summary.missing + '</div>' +
         '<div class="summary-stat-label">Missing</div></div>' +
         '<div class="summary-stat"><div class="summary-stat-value ' + pctClass + '">' + pct + '%</div>' +
         '<div class="summary-stat-label">Coverage</div></div>' +
@@ -131,7 +114,6 @@ function renderSummaryStats(summary) {
 function renderSpecTreemap(specs, container) {
     if (!container) return;
 
-    // Build flat items: one per scenario, grouped by spec
     var groups = [];
     for (var i = 0; i < specs.length; i++) {
         var spec = specs[i];
@@ -156,7 +138,6 @@ function renderSpecTreemap(specs, container) {
     var width = rect.width || 400;
     var height = Math.max(400, rect.height);
 
-    // Layout groups first
     var groupItems = [];
     for (var g = 0; g < groups.length; g++) {
         var total = 0;
@@ -174,9 +155,8 @@ function renderSpecTreemap(specs, container) {
         var gx = grp.x, gy = grp.y, gw = grp.w, gh = grp.h;
         var labelH = 16;
 
-        // Group label background + clipped label
         svg += '<rect x="' + gx + '" y="' + gy + '" width="' + gw + '" height="' + labelH +
-            '" fill="var(--bg-tertiary)" stroke="var(--border-color)" stroke-width="0.5"/>';
+            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"/>';
         var glClip = 'gc' + (_clipIdCounter++);
         svg += '<clipPath id="' + glClip + '"><rect x="' + gx + '" y="' + gy +
             '" width="' + gw + '" height="' + labelH + '"/></clipPath>';
@@ -184,7 +164,6 @@ function renderSpecTreemap(specs, container) {
             '" clip-path="url(#' + glClip + ')" class="treemap-group-label">' +
             escapeHtml(group.name) + '</text>';
 
-        // Layout scenarios within group
         var innerRect = { x: gx + 1, y: gy + labelH, w: gw - 2, h: gh - labelH - 1 };
         if (innerRect.w > 0 && innerRect.h > 0) {
             var leafRects = squarify(group.items.slice(), innerRect);
@@ -197,7 +176,7 @@ function renderSpecTreemap(specs, container) {
                 svg += '<rect class="treemap-leaf" data-type="scenario" data-id="' + escapeHtml(leaf.id) + '"' +
                     ' x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
                     ' fill="' + color + '" opacity="' + alpha + '"' +
-                    ' stroke="var(--bg-primary)" stroke-width="1" rx="2"/>';
+                    ' stroke="#0a0a0f" stroke-width="1" rx="2"/>';
 
                 if (leaf.w > 30 && leaf.h > 14) {
                     var lClip = 'lc' + (_clipIdCounter++);
@@ -266,7 +245,7 @@ function renderCodeTreemap(code, container) {
         var labelH = 16;
 
         svg += '<rect x="' + gx + '" y="' + gy + '" width="' + gw + '" height="' + labelH +
-            '" fill="var(--bg-tertiary)" stroke="var(--border-color)" stroke-width="0.5"/>';
+            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"/>';
         var glClip2 = 'gc' + (_clipIdCounter++);
         svg += '<clipPath id="' + glClip2 + '"><rect x="' + gx + '" y="' + gy +
             '" width="' + gw + '" height="' + labelH + '"/></clipPath>';
@@ -286,7 +265,7 @@ function renderCodeTreemap(code, container) {
                 svg += '<rect class="treemap-leaf" data-type="file" data-id="' + escapeHtml(leaf.id) + '"' +
                     ' x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
                     ' fill="' + color + '" opacity="0.75"' +
-                    ' stroke="var(--bg-primary)" stroke-width="1" rx="2"/>';
+                    ' stroke="#0a0a0f" stroke-width="1" rx="2"/>';
 
                 if (leaf.w > 30 && leaf.h > 14) {
                     var fClip = 'fc' + (_clipIdCounter++);
@@ -306,7 +285,6 @@ function renderCodeTreemap(code, container) {
 }
 
 function applyHighlight(type, id) {
-    // Dim all leaves
     var leaves = document.querySelectorAll('.treemap-leaf');
     for (var i = 0; i < leaves.length; i++) {
         leaves[i].style.opacity = '0.15';
@@ -314,7 +292,6 @@ function applyHighlight(type, id) {
 
     var linkedIds = [];
     if (type === 'scenario') {
-        // Highlight this scenario and linked files
         var el = document.querySelector('.treemap-leaf[data-id="' + CSS.escape(id) + '"]');
         if (el) el.style.opacity = '1';
         linkedIds = (_scenarioLookup && _scenarioLookup[id]) || [];
@@ -462,17 +439,16 @@ function buildScenarioStatusMap(specs) {
 }
 
 function fileStatusColor(scenarioIds, statusMap) {
-    if (!scenarioIds || scenarioIds.length === 0) return 'var(--text-secondary)';
+    if (!scenarioIds || scenarioIds.length === 0) return '#6b7280';
     var covered = 0;
     for (var i = 0; i < scenarioIds.length; i++) {
         var st = statusMap && statusMap[scenarioIds[i]];
         if (st === 'covered' || st === 'partial') covered++;
     }
     var ratio = covered / scenarioIds.length;
-    if (ratio >= 0.8) return 'var(--success)';
-    if (ratio >= 0.4) return 'var(--warning)';
-    if (ratio > 0) return 'var(--error)';
-    return 'var(--error)';
+    if (ratio >= 0.8) return '#22c55e';
+    if (ratio >= 0.4) return '#eab308';
+    return '#ef4444';
 }
 
 function findScenario(data, id) {

@@ -10,7 +10,6 @@ function squarify(items, rect) {
     for (var i = 0; i < items.length; i++) total += items[i].value;
     if (total === 0) return items;
 
-    // Assign areas proportional to value
     var area = rect.w * rect.h;
     var sorted = items.slice().sort(function(a, b) { return b.value - a.value; });
 
@@ -34,7 +33,6 @@ function layoutStrip(items, start, end, rect, totalValue, out) {
     var sum = 0;
     for (var i = start; i < end; i++) sum += items[i].value;
 
-    // Find best split using squarify heuristic
     var bestIdx = start + 1;
     var bestAspect = Infinity;
     var runSum = items[start].value;
@@ -55,7 +53,6 @@ function layoutStrip(items, start, end, rect, totalValue, out) {
         }
     }
 
-    // Split rectangle
     var stripSum = 0;
     for (var k = start; k < bestIdx; k++) stripSum += items[k].value;
     var stripFrac = stripSum / sum;
@@ -71,7 +68,6 @@ function layoutStrip(items, start, end, rect, totalValue, out) {
         r2 = { x: rect.x, y: rect.y + splitH, w: rect.w, h: rect.h - splitH };
     }
 
-    // Layout strip items in the shorter dimension
     layoutSlice(items, start, bestIdx, r1, stripSum, out);
     layoutStrip(items, bestIdx, end, r2, sum - stripSum, out);
 }
@@ -120,10 +116,10 @@ function worstAspect(items, start, end, rect, frac, total, area) {
 
 function statusColor(status) {
     switch (status) {
-        case 'covered': return 'var(--success)';
-        case 'partial': return 'var(--warning)';
-        case 'missing': return 'var(--error)';
-        default: return 'var(--text-secondary)';
+        case 'covered': return '#22c55e';
+        case 'partial': return '#eab308';
+        case 'missing': return '#ef4444';
+        default: return '#6b7280';
     }
 }
 

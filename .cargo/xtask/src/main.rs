@@ -5,8 +5,10 @@ mod demo;
 mod schema;
 mod spec_test;
 mod spec_test_cmds;
+mod spec_test_diff;
 mod spec_test_discovery;
 mod spec_test_export;
+mod spec_test_html;
 mod spec_test_report;
 
 use anyhow::Result;
