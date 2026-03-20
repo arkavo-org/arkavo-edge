@@ -713,3 +713,109 @@
     color: var(--text-secondary);
     flex-shrink: 0;
 }
+
+/* Traceability treemap panel */
+.traceability-wrapper {
+    display: flex;
+    position: relative;
+    padding: 12px;
+    gap: 0;
+    min-height: 420px;
+}
+
+.treemap-container {
+    width: 48%;
+    min-height: 400px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.treemap-svg { display: block; }
+
+.treemap-leaf {
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.treemap-group-label {
+    font-size: 9px;
+    fill: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.treemap-leaf-label {
+    font-size: 8px;
+    fill: var(--bg-primary);
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.bridge-overlay {
+    position: absolute;
+    top: 12px;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.bridge-curve {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-opacity: 0.7;
+    stroke-dasharray: 6 3;
+    animation: bridgeDash 1s linear infinite;
+}
+
+@keyframes bridgeDash {
+    0% { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: 9; }
+}
+
+.traceability-detail {
+    padding: 0 12px 12px;
+}
+
+.trace-detail-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.trace-detail-header {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.trace-detail-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    text-transform: capitalize;
+}
+
+.trace-detail-section {
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.trace-detail-section strong {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.trace-detail-item {
+    padding: 2px 0 2px 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+}

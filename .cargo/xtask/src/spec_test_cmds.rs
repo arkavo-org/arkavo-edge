@@ -2,6 +2,7 @@ use crate::spec_test::{
     CoverageAnalyzer, CoverageStatus, Criticality, SpecCoverage, SpecParser, TestDiscovery,
     TestGenerator,
 };
+use crate::spec_test_export;
 use crate::spec_test_report;
 use anyhow::Result;
 use clap::Subcommand;
@@ -55,6 +56,15 @@ pub enum Commands {
         #[arg(short, long)]
         with_tests: bool,
     },
+    /// Export coverage data as JSON for the traceability dashboard
+    ExportJson {
+        #[arg(
+            short,
+            long,
+            default_value = "crates/arkavo-agui/static/data/traceability.json"
+        )]
+        output: PathBuf,
+    },
 }
 
 pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result<()> {
@@ -88,6 +98,7 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
             criticality,
         } => cmd_run(scenario, spec, criticality),
         Commands::List { spec, with_tests } => cmd_list(&specs_dir, &crates_dir, spec, with_tests),
+        Commands::ExportJson { output } => cmd_export_json(&specs_dir, &crates_dir, output),
     }
 }
 
@@ -340,6 +351,24 @@ fn cmd_run(scenario: Option<String>, spec: Option<String>, crit: Option<String>)
             "Execute:\n".dimmed()
         ),
     }
+    Ok(())
+}
+
+fn cmd_export_json(specs_dir: &Path, crates_dir: &Path, output: PathBuf) -> Result<()> {
+    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
+    let report = CoverageAnalyzer::analyze(specs, tests);
+    spec_test_export::export_json(&report, &output)?;
+    println!(
+        "{} {}",
+        "Exported traceability JSON:".green(),
+        output.display()
+    );
+    println!(
+        "  {} scenarios, {:.1}% coverage",
+        report.total_scenarios,
+        report.coverage_percentage()
+    );
     Ok(())
 }
 

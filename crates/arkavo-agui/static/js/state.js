@@ -30,7 +30,8 @@ var AppState = {
     agentSystemMetrics: {},
     optimalConfigs: [],
     metricsHistory: [],
-    lastMetricsSnapshot: null
+    lastMetricsSnapshot: null,
+    traceabilityData: null
 };
 
 var MAX_TELEMETRY = 200;
