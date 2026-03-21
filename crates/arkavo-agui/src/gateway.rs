@@ -138,12 +138,16 @@ impl AgUiGateway {
         // Start mDNS discovery
         let agent_connections_for_mdns = self.agent_connections.clone();
         let telemetry_tx_for_mdns = self.telemetry_tx.clone();
+        let browser_connections_for_mdns = self.connections.clone();
+        let security_handler_for_mdns = self.security_handler.clone();
         tokio::spawn(async move {
             println!("AG-UI: Starting mDNS discovery...");
             match crate::gateway_mdns::run_mdns_discovery(
                 agents_clone,
                 agent_connections_for_mdns,
                 telemetry_tx_for_mdns,
+                browser_connections_for_mdns,
+                security_handler_for_mdns,
             )
             .await
             {

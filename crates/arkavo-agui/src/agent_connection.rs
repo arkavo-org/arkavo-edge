@@ -841,6 +841,88 @@ impl AgentConnection {
         Ok(result)
     }
 
+    /// Subscribe to push-based metrics stream from agent.
+    /// Replaces polling of system.metrics + budget.compute_status.
+    pub async fn subscribe_metrics(
+        &self,
+        tx: mpsc::Sender<crate::types::AgUiEvent>,
+        security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let mut subscription = client
+            .subscribe::<serde_json::Value, _>(
+                "system.metrics.subscribe",
+                rpc_params![],
+                "system.metrics.unsubscribe",
+            )
+            .await?;
+        drop(client_guard);
+
+        let agent_id = self.agent_id.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(metrics)) = subscription.next().await {
+                // Forward system metrics
+                let event = crate::types::AgUiEvent::AgentSystemMetrics {
+                    agent_id: agent_id.clone(),
+                    rss_mb: metrics["rss_mb"].as_f64().unwrap_or(0.0),
+                    cpu_percent: metrics["cpu_percent"].as_f64().unwrap_or(0.0),
+                    pid: metrics["pid"].as_u64().unwrap_or(0) as u32,
+                    total_ram_mb: metrics["total_ram_mb"].as_f64(),
+                    available_ram_mb: metrics["available_ram_mb"].as_f64(),
+                };
+                let _ = tx.send(event).await;
+
+                // Forward compute budget
+                if let Some(budget) = metrics.get("compute_budget") {
+                    let event = crate::types::AgUiEvent::ComputeBudgetUpdate {
+                        agent_id: agent_id.clone(),
+                        compute_budget: budget.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = tx.send(event).await;
+                }
+
+                // Update Iroh status
+                if let Some(iroh) = metrics.get("iroh_active").and_then(|v| v.as_bool()) {
+                    let sec = security_handler.read().await;
+                    sec.update_agent_iroh(&agent_id, iroh).await;
+                    drop(sec);
+                }
+
+                // Forward subsystem timing
+                if let Some(timing) = metrics.get("subsystem_timing") {
+                    let registry = arkavo_observability::subsystem_timing::global_timing();
+                    if let Some(ms) = timing.get("routerDecisionAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.router_decisions.record(ms as u64);
+                    }
+                    if let Some(ms) = timing
+                        .get("conductorOrchestrationAvgMs")
+                        .and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.conductor_orchestration.record(ms as u64);
+                    }
+                    if let Some(ms) = timing.get("mcpToolAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.mcp_tools.record(ms as u64);
+                    }
+                    if let Some(ms) = timing.get("inferenceAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.inference.record(ms as u64);
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
     /// Get KAS public key from agent (returns None if KAS not enabled)
     pub async fn get_kas_public_key(
         &self,

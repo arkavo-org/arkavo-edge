@@ -178,68 +178,11 @@ pub async fn handle_request_mesh_status(
     };
     tx.send(mesh_status).await?;
 
-    // Poll compute budget and system metrics from each connected agent via JSON-RPC
+    // Metrics (RSS, CPU, compute budget, Iroh) are now push-based via
+    // system.metrics.subscribe — no polling needed. Only KAS status is still polled
+    // (lightweight, infrequent, separate auth concern).
     let conns = agent_connections.read().await;
     for (agent_id, conn) in conns.iter() {
-        if let Ok(budget_data) = conn.get_compute_budget().await {
-            let event = AgUiEvent::ComputeBudgetUpdate {
-                agent_id: agent_id.clone(),
-                compute_budget: budget_data,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            };
-            let _ = tx.send(event).await;
-        }
-
-        // Poll per-agent process metrics (RSS, CPU, subsystem timing)
-        if let Ok(metrics_data) = conn.get_system_metrics().await {
-            let event = AgUiEvent::AgentSystemMetrics {
-                agent_id: agent_id.clone(),
-                rss_mb: metrics_data["rss_mb"].as_f64().unwrap_or(0.0),
-                cpu_percent: metrics_data["cpu_percent"].as_f64().unwrap_or(0.0),
-                pid: metrics_data["pid"].as_u64().unwrap_or(0) as u32,
-                total_ram_mb: metrics_data["total_ram_mb"].as_f64(),
-                available_ram_mb: metrics_data["available_ram_mb"].as_f64(),
-            };
-            let _ = tx.send(event).await;
-
-            // Forward agent subsystem timing into the gateway's global registry
-            // so the MetricsSampler includes it in telemetry broadcasts.
-            if let Some(timing) = metrics_data.get("subsystem_timing") {
-                let registry = arkavo_observability::subsystem_timing::global_timing();
-                if let Some(ms) = timing.get("routerDecisionAvgMs").and_then(|v| v.as_f64())
-                    && ms > 0.0
-                {
-                    registry.router_decisions.record(ms as u64);
-                }
-                if let Some(ms) = timing
-                    .get("conductorOrchestrationAvgMs")
-                    .and_then(|v| v.as_f64())
-                    && ms > 0.0
-                {
-                    registry.conductor_orchestration.record(ms as u64);
-                }
-                if let Some(ms) = timing.get("mcpToolAvgMs").and_then(|v| v.as_f64())
-                    && ms > 0.0
-                {
-                    registry.mcp_tools.record(ms as u64);
-                }
-                if let Some(ms) = timing.get("inferenceAvgMs").and_then(|v| v.as_f64())
-                    && ms > 0.0
-                {
-                    registry.inference.record(ms as u64);
-                }
-            }
-
-            // Update per-agent Iroh P2P node status
-            let iroh = metrics_data
-                .get("iroh_active")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let sec = security_handler.read().await;
-            sec.update_agent_iroh(agent_id, iroh).await;
-            drop(sec);
-        }
-
         // Poll KAS public key to detect KAS-enabled agents
         // Perform network I/O before acquiring lock to avoid holding it during RPC
         let kas_result = conn.get_kas_public_key().await;

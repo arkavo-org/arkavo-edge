@@ -286,6 +286,10 @@ pub trait A2aRpc {
     /// Get process-level system metrics (RSS, CPU) for per-agent observability
     #[method(name = "system.metrics")]
     async fn system_metrics(&self) -> RpcResult<serde_json::Value>;
+
+    /// Push-based metrics stream — replaces polling of system.metrics + budget.compute_status
+    #[subscription(name = "system.metrics.subscribe", unsubscribe = "system.metrics.unsubscribe", item = serde_json::Value)]
+    async fn system_metrics_subscribe(&self) -> SubscriptionResult;
 }
 
 pub struct A2aRpcImpl {
@@ -1123,5 +1127,82 @@ impl A2aRpcServer for A2aRpcImpl {
             "subsystem_timing": subsystem_timing,
             "iroh_active": iroh_active,
         }))
+    }
+
+    async fn system_metrics_subscribe(&self, sink: PendingSubscriptionSink) -> SubscriptionResult {
+        let sink = match sink.accept().await {
+            Ok(s) => s,
+            Err(_) => return Ok(()),
+        };
+
+        let agent_metadata = self.agent_metadata.clone();
+        let compute_budget = self.compute_budget.clone();
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.clone();
+
+        tokio::spawn(async move {
+            loop {
+                use sysinfo::{Pid, System};
+                let pid = std::process::id();
+                let mut sys = System::new();
+                sys.refresh_memory();
+                sys.refresh_processes_specifics(
+                    sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+                    true,
+                    sysinfo::ProcessRefreshKind::nothing()
+                        .with_memory()
+                        .with_cpu(),
+                );
+                let (rss_mb, cpu_percent) = if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+                    (
+                        proc.memory() as f64 / (1024.0 * 1024.0),
+                        proc.cpu_usage() as f64,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+
+                let agent_id = agent_metadata.read().await.name.clone();
+
+                let timing = arkavo_observability::subsystem_timing::global_timing().snapshot();
+                let subsystem_timing = if timing.is_empty() {
+                    None
+                } else {
+                    Some(timing)
+                };
+
+                let budget_snapshot = {
+                    let b = compute_budget.read().await;
+                    serde_json::to_value(b.snapshot()).ok()
+                };
+
+                #[cfg(feature = "iroh")]
+                let iroh_active = iroh_node.is_some();
+                #[cfg(not(feature = "iroh"))]
+                let iroh_active = false;
+
+                let metrics = serde_json::json!({
+                    "agent_id": agent_id,
+                    "rss_mb": rss_mb,
+                    "cpu_percent": cpu_percent,
+                    "pid": pid,
+                    "total_ram_mb": sys.total_memory() as f64 / (1024.0 * 1024.0),
+                    "available_ram_mb": sys.available_memory() as f64 / (1024.0 * 1024.0),
+                    "subsystem_timing": subsystem_timing,
+                    "iroh_active": iroh_active,
+                    "compute_budget": budget_snapshot,
+                });
+
+                if let Ok(msg) = serde_json::value::to_raw_value(&metrics)
+                    && sink.send(msg).await.is_err()
+                {
+                    break; // Client disconnected
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
+
+        Ok(())
     }
 }
