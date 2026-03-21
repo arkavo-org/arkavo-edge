@@ -342,6 +342,22 @@ pub(super) async fn run_tool_loop(
         if reward_signals.last().is_some_and(|&r| r < 0.0) {
             force_planning = true;
             consecutive_negative_rewards += 1;
+
+            // Sustained failure → synthesize a recovery lesson via learning bus.
+            // At 10+ consecutive negatives the colony is in systemic failure;
+            // teach the agent to call episodeSummary and consider reset/checkpoint.
+            if consecutive_negative_rewards == 10
+                && let Some(bus) = learning_bus
+            {
+                bus.add_fast_lesson(
+                    "colony_management",
+                    "10+ consecutive negative rewards indicate systemic colony failure. \
+                     Call game-rl:episodeSummary to assess total reward. \
+                     If cumulative reward is very negative, call game-rl:step with \
+                     Type=LoadCheckpoint Name=\"best_colony\" or reset the game.",
+                )
+                .await;
+            }
         } else if reward_signals.last().is_some() {
             consecutive_negative_rewards = 0;
         }
