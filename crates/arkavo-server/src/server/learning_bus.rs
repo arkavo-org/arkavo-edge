@@ -181,8 +181,6 @@ pub struct LearningBus {
     /// Peer GPU inference state (updated via gossip broadcasts)
     pub(super) peer_inference_state:
         Arc<RwLock<HashMap<String, arkavo_gossip::InferenceStateBroadcast>>>,
-    /// Data artifacts announced via gossip (Iroh tickets for retrieval)
-    pub(super) data_available: Arc<RwLock<Vec<arkavo_gossip::DataAvailableAnnounce>>>,
 }
 
 impl LearningBus {
@@ -264,7 +262,6 @@ impl LearningBus {
             patchlet_bridge: OnceLock::new(),
             task_completions: Arc::new(RwLock::new(Vec::new())),
             peer_inference_state: Arc::new(RwLock::new(HashMap::new())),
-            data_available: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -406,11 +403,6 @@ impl LearningBus {
     /// Drain task completions received via gossip push.
     pub async fn drain_task_completions(&self) -> Vec<arkavo_gossip::TaskCompletionNotice> {
         self.task_completions.write().await.drain(..).collect()
-    }
-
-    /// Drain data availability announcements received via gossip.
-    pub async fn drain_data_available(&self) -> Vec<arkavo_gossip::DataAvailableAnnounce> {
-        self.data_available.write().await.drain(..).collect()
     }
 
     /// Count GPU-active peers on a given device, expiring entries older than 30s.

@@ -279,14 +279,6 @@ impl GossipProtocol {
                 );
                 Ok(vec![])
             }
-            GossipMessage::DataAvailable(announce) => {
-                tracing::info!(
-                    originator = %announce.originator,
-                    content_type = %announce.content_type,
-                    "data available on Iroh data plane"
-                );
-                Ok(vec![])
-            }
         }
     }
 
