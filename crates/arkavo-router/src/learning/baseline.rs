@@ -63,7 +63,7 @@ impl BaselineBuilder {
                 }
             })
             .collect();
-        patterns.sort_by(|a, b| b.frequency.partial_cmp(&a.frequency).unwrap());
+        patterns.sort_by(|a, b| b.frequency.partial_cmp(&a.frequency).unwrap_or(std::cmp::Ordering::Equal));
 
         Some(Baseline {
             skill_id: self.skill_id.clone(),

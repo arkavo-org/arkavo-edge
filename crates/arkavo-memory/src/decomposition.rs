@@ -15,6 +15,7 @@ pub enum AttackPattern {
     GradualExfiltration,
 }
 
+#[derive(Default)]
 pub struct DecompositionDetector;
 
 impl DecompositionDetector {

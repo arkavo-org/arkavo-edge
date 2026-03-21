@@ -37,7 +37,7 @@ impl AsyncSequenceMonitor {
         }
         let tool_ratio = self.unique_tools.len() as f64 / self.action_count as f64;
         let taint_ratio = self.tainted_count as f64 / self.action_count as f64;
-        (tool_ratio * 0.5 + taint_ratio * 0.5).min(1.0)
+        0.5f64.mul_add(tool_ratio, 0.5 * taint_ratio).min(1.0)
     }
 
     pub fn check_alert(&self) -> MonitorAlert {

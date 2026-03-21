@@ -34,6 +34,7 @@ pub struct TaintLabel {
     pub provenance_chain: Vec<String>,
 }
 
+#[derive(Default)]
 pub struct DataTaintTracker {
     labels: HashMap<String, TaintLabel>,
 }
@@ -59,9 +60,7 @@ const CREDENTIAL_PATTERNS: &[&str] = &[
 
 impl DataTaintTracker {
     pub fn new() -> Self {
-        Self {
-            labels: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn tag(&mut self, source_id: &str, data: &[u8]) -> TaintLabel {
@@ -81,9 +80,7 @@ impl DataTaintTracker {
         let has_credentials = CREDENTIAL_PATTERNS.iter().any(|p| text.contains(p));
         let has_pii = PII_PATTERNS.iter().any(|p| text.contains(p));
 
-        if has_credentials && has_pii {
-            Classification::Credentials
-        } else if has_credentials {
+        if has_credentials {
             Classification::Credentials
         } else if has_pii {
             Classification::Pii

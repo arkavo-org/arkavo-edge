@@ -7,6 +7,7 @@ pub struct CrossAgentFlow {
     pub composite_threat_score: f64,
 }
 
+#[derive(Default)]
 pub struct CrossAgentFlowAnalyzer;
 
 impl CrossAgentFlowAnalyzer {
@@ -68,10 +69,9 @@ impl CrossAgentFlowAnalyzer {
                                     .data_flows
                                     .iter()
                                     .any(|fc| fc.sink.starts_with("http"))
+                                && !chain.contains(&entry_c.agent_id)
                             {
-                                if !chain.contains(&entry_c.agent_id) {
-                                    chain.push(entry_c.agent_id.clone());
-                                }
+                                chain.push(entry_c.agent_id.clone());
                             }
                         }
 
@@ -95,10 +95,10 @@ impl CrossAgentFlowAnalyzer {
         let mut agents = Vec::new();
         for entry in entries {
             for flow in &entry.data_flows {
-                if flow.taint_classification == taint_label {
-                    if !agents.contains(&entry.agent_id) {
-                        agents.push(entry.agent_id.clone());
-                    }
+                if flow.taint_classification == taint_label
+                    && !agents.contains(&entry.agent_id)
+                {
+                    agents.push(entry.agent_id.clone());
                 }
             }
         }

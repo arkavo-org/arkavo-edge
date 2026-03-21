@@ -48,10 +48,11 @@ impl SequenceAnomalyDetector {
         let max_len = current.len().max(baseline.len());
         let mut matches = 0usize;
         for (i, node) in current.iter().enumerate() {
-            if let Some(base_node) = baseline.get(i) {
-                if node.tool_name == base_node.tool_name {
-                    matches += 1;
-                }
+            if baseline
+                .get(i)
+                .is_some_and(|base_node| node.tool_name == base_node.tool_name)
+            {
+                matches += 1;
             }
         }
 

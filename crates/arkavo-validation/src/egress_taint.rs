@@ -20,6 +20,7 @@ pub enum EgressDecision {
     RequiresAuthorization { reason: String },
 }
 
+#[derive(Default)]
 pub struct EgressTaintGate;
 
 impl EgressTaintGate {

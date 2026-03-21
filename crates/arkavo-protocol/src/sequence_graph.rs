@@ -12,6 +12,7 @@ pub struct ActionEdge {
     pub to: u64,
 }
 
+#[derive(Default)]
 pub struct SequenceGraph {
     nodes: Vec<ActionNode>,
     edges: Vec<ActionEdge>,

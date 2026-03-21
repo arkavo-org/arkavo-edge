@@ -13,6 +13,12 @@ pub struct TitanSequenceBridge {
     drifting: bool,
 }
 
+impl Default for TitanSequenceBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TitanSequenceBridge {
     pub fn new() -> Self {
         Self {
@@ -29,10 +35,10 @@ impl TitanSequenceBridge {
             || features.max_path_length > 15;
 
         let z_score = self.accumulator.update(0, is_anomalous);
-        if let Some(z) = z_score {
-            if z.abs() > 3.0 {
-                self.drifting = true;
-            }
+        if let Some(z) = z_score
+            && z.abs() > 3.0
+        {
+            self.drifting = true;
         }
         z_score
     }
