@@ -85,13 +85,16 @@ impl LlamaMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("LLAMA-001")]
     #[test]
     fn test_llama_memory_send() {
         fn assert_send<T: Send>() {}
         assert_send::<LlamaMemory>();
     }
 
+    #[spec("LLAMA-001")]
     #[test]
     fn test_llama_memory_size() {
         // LlamaMemory should be pointer-sized

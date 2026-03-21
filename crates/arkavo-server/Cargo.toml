@@ -122,6 +122,7 @@ claude-agent = ["dep:arkavo-mcp-claude"]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

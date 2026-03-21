@@ -1,0 +1,158 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: A2A Server and Runtime Orchestration
+module: arkavo_server
+version: 0.67.1
+
+invariants:
+  - Server binds to configured address
+  - JSON-RPC 2.0 compliance for all A2A methods
+  - Tool memory persists observations across sessions
+  - Learning pipeline processes episodes asynchronously
+  - Gossip transport maintains peer connections
+  - Anti-entropy runs on configured interval
+  - Agent goals have defined lifecycle
+  - Well-known state endpoint is discoverable
+
+scenarios:
+  - id: SRV-001
+    name: Server startup and binding
+    criticality: critical
+    given:
+      - A2aServer configured
+      - Address and port specified
+    when: Server starts
+    then:
+      - Binds to address
+      - Transports initialized
+      - Startup loops launched
+      - Ready to accept connections
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Port already in use
+        expected: Bind error with details
+      - condition: TLS cert missing for non-localhost
+        expected: Startup fails with TLS error
+
+  - id: SRV-002
+    name: JSON-RPC request handling
+    criticality: critical
+    given:
+      - Server running
+      - Client connected
+    when: JSON-RPC request received
+    then:
+      - Method dispatched to handler
+      - Response returned with matching id
+      - Errors follow JSON-RPC 2.0 format
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-003
+    name: Tool memory observation storage
+    criticality: high
+    given:
+      - ToolMemory initialized
+      - Tool executed with result
+    when: ToolObservation recorded
+    then:
+      - ToolMemoryEntry created
+      - Observation persisted
+      - Pattern cache updated
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-004
+    name: Learning pipeline episode processing
+    criticality: high
+    given:
+      - LearningBus active
+      - LearningConfig set
+    when: LearningEvent emitted
+    then:
+      - Episode buffered
+      - AutoLearnBridge processes episodes
+      - Behavior advice generated
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-005
+    name: Gossip transport peer management
+    criticality: high
+    given:
+      - start_gossip_transport() called
+    when: Peers discovered
+    then:
+      - Connections established
+      - Messages propagated
+      - Peer state tracked
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-006
+    name: Anti-entropy reconciliation
+    criticality: medium
+    given:
+      - start_anti_entropy_loop() running
+    when: Interval triggers
+    then:
+      - State compared with peers
+      - Missing data requested
+      - Consistency restored
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-007
+    name: Agent goal lifecycle
+    criticality: high
+    given:
+      - AgentGoal created
+    when: Goal progresses through states
+    then:
+      - GoalStatus transitions tracked
+      - AgentPlan generated
+      - Completion or failure recorded
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-008
+    name: Well-known state endpoint
+    criticality: medium
+    given:
+      - WellKnownState populated
+    when: Discovery endpoint queried
+    then:
+      - Agent capabilities returned
+      - Version information included
+      - State reflects current runtime
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-009
+    name: Execute with conductor and learning
+    criticality: high
+    given:
+      - Task to execute
+      - Conductor available
+      - Learning pipeline active
+    when: execute_with_conductor_and_learning() called
+    then:
+      - Task executed via conductor
+      - Learning events emitted
+      - Results returned to caller
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: SRV-010
+    name: Cleanup loop maintenance
+    criticality: low
+    given:
+      - start_cleanup_loop() running
+    when: Cleanup interval triggers
+    then:
+      - Stale sessions removed
+      - Expired data purged
+      - Resources reclaimed
+    refs: [crates/arkavo-server/src/server.rs]
+    changed: "2026-03-19"

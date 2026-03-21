@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: KV Cache Context Slots
+module: arkavo_kv_cache
+version: 0.67.1
+
+invariants:
+  - Context slots are independently addressable by name
+  - Trust tiers determine slot priority and eviction order
+  - Manifest tracks all loaded contexts
+  - Slot composition is order-independent
+  - Cache eviction respects trust tier hierarchy
+
+scenarios:
+  - id: KVC-001
+    name: Create and load context slot
+    criticality: critical
+    given:
+      - ContextManager initialized
+      - Named context data available
+    when: ContextSlot created and loaded
+    then:
+      - Slot assigned unique identity
+      - Data loaded into KV cache region
+      - TrustTier assigned
+      - Manifest updated
+    refs: [crates/arkavo-kv-cache/src/context_manager.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Duplicate slot name
+        expected: Error or replace existing
+      - condition: Slot data exceeds memory
+        expected: Allocation error
+
+  - id: KVC-002
+    name: Compose multiple context slots
+    criticality: critical
+    given:
+      - Multiple ContextSlots loaded
+      - Composition requested
+    when: Slots composed for inference
+    then:
+      - Slots merged in trust tier order
+      - No data loss from composition
+      - Result usable for multi-sequence inference
+    refs: [crates/arkavo-kv-cache/src/context_manager.rs]
+    changed: "2026-03-19"
+
+  - id: KVC-003
+    name: Trust tier enforcement
+    criticality: high
+    given:
+      - Slots with different TrustTiers
+      - Memory pressure triggers eviction
+    when: Eviction policy applied
+    then:
+      - Lower trust slots evicted first
+      - Higher trust slots preserved
+      - System remains functional after eviction
+    refs: [crates/arkavo-kv-cache/src/context_manager.rs]
+    changed: "2026-03-19"
+
+  - id: KVC-004
+    name: Context manifest persistence
+    criticality: high
+    given:
+      - ContextManifest with entries
+    when: Manifest serialized
+    then:
+      - All ContextEntries captured
+      - Slot metadata preserved
+      - Manifest restorable from serialized form
+    refs: [crates/arkavo-kv-cache/src/manifest.rs]
+    changed: "2026-03-19"
+
+  - id: KVC-005
+    name: Slot eviction under memory pressure
+    criticality: medium
+    given:
+      - Cache near capacity
+      - New slot load requested
+    when: ContextManager evaluates capacity
+    then:
+      - Eviction candidates selected by trust tier
+      - Evicted slots removed cleanly
+      - New slot loaded successfully
+    refs: [crates/arkavo-kv-cache/src/context_manager.rs]
+    changed: "2026-03-19"

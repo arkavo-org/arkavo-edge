@@ -112,6 +112,7 @@ impl ProvenanceQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn make_record(id: Uuid) -> ProvenanceRecord {
         ProvenanceRecord {
@@ -125,6 +126,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn trace_bundle_found() {
         let store = CanonicalStore::new();
@@ -134,6 +136,7 @@ mod tests {
         assert!(pq.trace_bundle(id).is_some());
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn trace_bundle_not_found() {
         let store = CanonicalStore::new();
@@ -141,6 +144,7 @@ mod tests {
         assert!(pq.trace_bundle(Uuid::new_v4()).is_none());
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn trace_file_follows_ancestry() {
         let mut store = CanonicalStore::new();
@@ -155,6 +159,7 @@ mod tests {
         assert!(ids.contains(&id2));
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn verify_provenance_in_store() {
         let mut store = CanonicalStore::new();
@@ -166,6 +171,7 @@ mod tests {
         assert!(pq.verify_provenance(&record));
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn verify_provenance_not_in_store() {
         let store = CanonicalStore::new();
@@ -174,6 +180,7 @@ mod tests {
         assert!(!pq.verify_provenance(&record));
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn verify_with_valid_merkle_proof() {
         use crate::merkle_tree::MerkleTree;
@@ -208,6 +215,7 @@ mod tests {
         assert!(pq.verify_provenance(&record));
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn verify_fails_with_unanchored_proof() {
         use crate::merkle_tree::MerkleTree;
@@ -226,6 +234,7 @@ mod tests {
         assert!(!pq.verify_provenance(&record));
     }
 
+    #[spec("EVO-007")]
     #[test]
     fn empty_store_trace_file() {
         let store = CanonicalStore::new();

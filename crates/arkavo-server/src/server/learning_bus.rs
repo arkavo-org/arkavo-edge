@@ -565,6 +565,7 @@ impl arkavo_observability::health_reporter::HealthReporter for LearningPipelineR
 mod tests {
     use super::*;
     use arkavo_router::learning::{Lesson, LessonPattern};
+    use arkavo_test_macros::spec;
 
     fn make_bus() -> LearningBus {
         let keypair = Arc::new(AgentKeypair::generate());
@@ -576,6 +577,7 @@ mod tests {
         )
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_learning_bus_creation() {
         let bus = make_bus();
@@ -585,6 +587,7 @@ mod tests {
         assert_eq!(bus.peer_count().await, 0);
     }
 
+    #[spec("SRV-005")]
     #[tokio::test]
     async fn test_peer_management() {
         let keypair = Arc::new(AgentKeypair::generate());
@@ -603,6 +606,7 @@ mod tests {
         assert_eq!(bus.peer_count().await, 0);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_behavior_guidance_via_bus() {
         let bus = make_bus();
@@ -626,6 +630,7 @@ mod tests {
         assert!(guidance.contains("generic non-answers"));
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_record_quality_via_bus() {
         let bus = make_bus();
@@ -637,6 +642,7 @@ mod tests {
         assert_eq!(trends[0].scores, vec![0.5]);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_behavior_lesson_count_via_bus() {
         let bus = make_bus();
@@ -660,6 +666,7 @@ mod tests {
         assert_eq!(bus.behavior_lesson_count().await, 3);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_lesson_receiver_stores_in_policy_cache() {
         let bus = make_bus();
@@ -695,6 +702,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_stats_initial() {
         let bus = make_bus();
@@ -706,6 +714,7 @@ mod tests {
         assert!(stats.last_event_secs_ago.is_none());
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_stats_after_events() {
         let bus = make_bus();

@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent QR Registration and Authorization URLs
+module: arkavo_registration
+version: 0.67.1
+
+invariants:
+  - Authorization URLs follow arkavo://agent/authorize scheme
+  - QR codes encode valid authorization URLs
+  - Endpoint must be routable (no 0.0.0.0 or port 0)
+  - DID:key included when available
+  - Challenge signatures use Ed25519
+
+scenarios:
+  - id: QREG-001
+    name: Generate authorization URL
+    criticality: critical
+    given:
+      - AgentDescriptor with public key and endpoint
+    when: to_authorization_url() called
+    then:
+      - URL starts with arkavo://agent/authorize
+      - Public key base64-encoded in query
+      - Endpoint included as parameter
+      - Agent ID short SHA included
+    refs: [crates/arkavo-registration/src/lib.rs:89-113]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Endpoint is 0.0.0.0
+        expected: Panic with unroutable address error
+      - condition: Port is 0
+        expected: Panic with unroutable port error
+
+  - id: QREG-002
+    name: QR code from agent descriptor
+    criticality: high
+    given:
+      - AgentDescriptor valid
+      - Authorization URL generated
+    when: QR code generated
+    then:
+      - QR encodes full authorization URL
+      - QR scannable by mobile app
+      - All descriptor fields preserved in URL
+    refs: [crates/arkavo-registration/src/qr.rs]
+    changed: "2026-03-19"
+
+  - id: QREG-003
+    name: Descriptor with entitlements
+    criticality: high
+    given:
+      - AgentDescriptor created
+      - Entitlements specified
+    when: with_entitlements() called
+    then:
+      - Entitlements URL-encoded in authorization URL
+      - Multiple entitlements comma-separated
+      - Entitlements preserved through serialization
+    refs: [crates/arkavo-registration/src/lib.rs:75-78]
+    changed: "2026-03-19"
+
+  - id: QREG-004
+    name: Sign and verify challenge
+    criticality: critical
+    given:
+      - Challenge bytes from server
+      - Agent keypair available
+    when: sign_challenge() and verify_challenge() called
+    then:
+      - Ed25519 signature produced
+      - Verification succeeds with correct key
+      - Verification fails with wrong key
+    refs: [crates/arkavo-registration/src/lib.rs:163-175]
+    changed: "2026-03-19"
+
+  - id: QREG-005
+    name: Descriptor serialization round-trip
+    criticality: medium
+    given:
+      - AgentDescriptor with all fields
+    when: to_json() then from_json()
+    then:
+      - All fields preserved
+      - Public key correctly encoded
+      - Endpoint unchanged
+    refs: [crates/arkavo-registration/src/lib.rs:150-156]
+    changed: "2026-03-19"

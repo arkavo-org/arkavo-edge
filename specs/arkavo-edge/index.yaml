@@ -702,10 +702,131 @@ components:
       - Sessions can be revoked immediately
       - Logs never contain secrets or PII
 
+  - name: agent-sdk
+    file: agent-sdk.spec.yaml
+    module: anthropic_agent_sdk
+    description: Claude Agent SDK streaming and client
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Streaming messages yield in-order
+      - ClaudeSDKClient manages bidirectional communication
+      - Options builder validates required fields before build
+
+  - name: agent
+    file: agent.spec.yaml
+    module: arkavo_agent
+    description: Agent lifecycle management
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Agent card describes capabilities
+      - Lifecycle transitions are valid
+      - Health checks report accurate state
+
+  - name: evofabric
+    file: evofabric.spec.yaml
+    module: arkavo_evofabric
+    description: AST-level code evolution
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - AST edits preserve semantics
+      - Conflict detection before merge
+      - Rollback on failed evolution
+
+  - name: kv-cache
+    file: kv-cache.spec.yaml
+    module: arkavo_kv_cache
+    description: KV cache context slots
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - Slot allocation bounded
+      - Eviction respects priority
+      - Cache coherent across requests
+
+  - name: llama-cpp
+    file: llama-cpp.spec.yaml
+    module: arkavo_llama_cpp
+    description: Local LLM inference engine
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Model loading validates GGUF format
+      - GPU layers auto-detected
+      - Context size bounded by model
+
+  - name: mcp-traits
+    file: mcp-traits.spec.yaml
+    module: arkavo_mcp
+    description: MCP core traits and types
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Tool trait defines execution contract
+      - Schema validation on parameters
+      - Error types propagate context
+
+  - name: openclaw
+    file: openclaw.spec.yaml
+    module: arkavo_openclaw
+    description: OpenClaw protocol adapter
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Protocol messages validated
+      - Connection lifecycle managed
+      - Retry with backoff
+
+  - name: qr-registration
+    file: qr-registration.spec.yaml
+    module: arkavo_registration
+    description: Agent QR registration and authorization URLs
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - QR encodes valid URL
+      - Short SHA identifies agent
+      - Terminal rendering scannable
+
+  - name: security
+    file: security.spec.yaml
+    module: arkavo_security
+    description: Security services
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Input sanitization on boundaries
+      - Rate limiting enforced
+      - Secrets never logged
+
+  - name: server
+    file: server.spec.yaml
+    module: arkavo_server
+    description: A2A server and runtime orchestration
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Server binds localhost by default
+      - JSON-RPC 2.0 protocol
+      - Graceful shutdown
+
+  - name: validation
+    file: validation.spec.yaml
+    module: arkavo_validation
+    description: Centralized input validation
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - All external input validated
+      - Validation errors descriptive
+      - Schema-driven validation
+
 stats:
-  total_specs: 61
-  total_scenarios: 531
-  critical_scenarios: 123
+  total_specs: 72
+  total_scenarios: 604
+  critical_scenarios: 153
   coverage_areas:
     - authentication
     - authorization

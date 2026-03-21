@@ -225,7 +225,9 @@ pub enum Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_question_option_serde() {
         let opt = QuestionOption {
@@ -242,6 +244,7 @@ mod tests {
         assert_eq!(parsed.description, "First option");
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_question_spec_serde() {
         let spec = QuestionSpec {
@@ -272,6 +275,7 @@ mod tests {
         assert!(!parsed.multi_select);
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_question_spec_multi_select() {
         let spec = QuestionSpec {
@@ -295,6 +299,7 @@ mod tests {
         assert!(parsed.multi_select);
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_ask_user_question_input_serde() {
         let input = AskUserQuestionInput {
@@ -325,6 +330,7 @@ mod tests {
         assert!(parsed.answers.is_none());
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_ask_user_question_input_with_answers() {
         let mut answers = HashMap::new();
@@ -355,6 +361,7 @@ mod tests {
         );
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_ask_user_question_output_serde() {
         let mut answers = HashMap::new();
@@ -371,6 +378,7 @@ mod tests {
         assert_eq!(parsed.answers.get("Framework"), Some(&"axum".to_string()));
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_ask_user_question_from_json_value() {
         // Simulate parsing from a ToolUse input

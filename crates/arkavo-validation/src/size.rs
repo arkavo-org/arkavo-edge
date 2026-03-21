@@ -48,17 +48,21 @@ mod tests {
     //! - [specs/arkavo-edge/protocol.spec.yaml](PROTO-007): Rate limiting enforcement
 
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("VAL-004")]
     #[test]
     fn test_within_limit() {
         assert!(validate_str_size("hello", 10, "test").is_ok());
     }
 
+    #[spec("VAL-004")]
     #[test]
     fn test_at_limit() {
         assert!(validate_str_size("hello", 5, "test").is_ok());
     }
 
+    #[spec("VAL-004")]
     #[test]
     fn test_exceeds_limit() {
         let result = validate_str_size("hello world", 5, "payload");

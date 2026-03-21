@@ -183,7 +183,9 @@ impl AntiPatternStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-006")]
     #[test]
     fn test_record_and_query() {
         let mut store = AntiPatternStore::new();
@@ -196,6 +198,7 @@ mod tests {
         assert_eq!(store.negative_signal("model-b", "code"), 0.0);
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_deduplication() {
         let mut store = AntiPatternStore::new();
@@ -210,6 +213,7 @@ mod tests {
         assert_eq!(sig1.unwrap().failure_count, 2);
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_trace_id_tracking() {
         let mut store = AntiPatternStore::new();
@@ -220,6 +224,7 @@ mod tests {
         assert_eq!(patterns[0].decision_trace_ids, vec![tid]);
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_trace_id_eviction() {
         let mut store = AntiPatternStore::new();
@@ -234,6 +239,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_classify_failure() {
         assert_eq!(
@@ -258,6 +264,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_total_failures_for_signature() {
         let mut store = AntiPatternStore::new();
@@ -268,6 +275,7 @@ mod tests {
         assert_eq!(store.total_failures_for_signature("refusal:exec"), 3);
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_empty_store() {
         let store = AntiPatternStore::new();
@@ -276,6 +284,7 @@ mod tests {
         assert_eq!(store.negative_signal("any", "any"), 0.0);
     }
 
+    #[spec("SRV-006")]
     #[test]
     fn test_decay_weight() {
         let mut pattern = AntiPattern::new("m".into(), "c".into(), "sig".into());

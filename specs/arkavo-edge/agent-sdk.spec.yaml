@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Claude Agent SDK Streaming and Client
+module: anthropic_agent_sdk
+version: 0.67.1
+
+invariants:
+  - Streaming messages yield in-order
+  - ClaudeSDKClient manages bidirectional communication
+  - Options builder validates required fields before build
+  - MCP tools discoverable via rmcp feature
+  - Subprocess transport spawns and manages claude CLI process
+
+scenarios:
+  - id: CASDK-001
+    name: Execute one-shot streaming query
+    criticality: critical
+    given:
+      - ClaudeAgentOptions configured with prompt
+      - Claude CLI binary available on PATH
+    when: query() called with options
+    then:
+      - Subprocess spawned with correct arguments
+      - Messages streamed via async-stream
+      - Final result collected
+    refs: [crates/anthropic-agent-sdk/src/query.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Claude CLI not found
+        expected: Error with helpful message
+      - condition: CLI version too old
+        expected: Version check fails with minimum version
+
+  - id: CASDK-002
+    name: Interactive client lifecycle
+    criticality: critical
+    given:
+      - ClaudeSDKClient initialized
+      - Transport connected to subprocess
+    when: Client sends and receives messages
+    then:
+      - Bidirectional message passing works
+      - Client tracks session state
+      - Cleanup on drop
+    refs: [crates/anthropic-agent-sdk/src/client.rs]
+    changed: "2026-03-19"
+
+  - id: CASDK-003
+    name: MCP tool registration via rmcp
+    criticality: high
+    given:
+      - rmcp feature enabled
+      - Tool implements schema
+    when: Tool registered with SDK
+    then:
+      - Tool discoverable by Claude
+      - Schema passed to subprocess
+      - Tool calls routed back
+    refs: [crates/anthropic-agent-sdk/src/mcp.rs]
+    changed: "2026-03-19"
+
+  - id: CASDK-004
+    name: Permission management
+    criticality: high
+    given:
+      - PermissionManager configured
+      - Tool call requires approval
+    when: Permission check triggered
+    then:
+      - PermissionResult returned
+      - Allowed or denied based on rules
+      - Permission state tracked
+    refs: [crates/anthropic-agent-sdk/src/permissions.rs]
+    changed: "2026-03-19"
+
+  - id: CASDK-005
+    name: Hook event processing
+    criticality: medium
+    given:
+      - HookManager with registered hooks
+      - HookEvent emitted
+    when: Event matches hook pattern
+    then:
+      - Hook callback invoked
+      - HookOutput returned
+      - Non-matching events pass through
+    refs: [crates/anthropic-agent-sdk/src/hooks.rs]
+    changed: "2026-03-19"

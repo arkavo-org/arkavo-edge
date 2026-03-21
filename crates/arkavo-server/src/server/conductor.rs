@@ -546,13 +546,16 @@ pub async fn execute_with_conductor_and_learning(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_positive() {
         let json = r#"{"result":"{\"Reward\":0.5,\"State\":{}}"}"#;
         assert_eq!(extract_reward_from_result(json), Some(0.5));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_negative() {
         let json = r#"{"result":"{\"Reward\":-0.294,\"food_critical\":-0.2}"}"#;
@@ -560,29 +563,34 @@ mod tests {
         assert!((reward - (-0.294)).abs() < 1e-6);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_lowercase_key() {
         let json = r#"{"result":"{\"reward\":1.0}"}"#;
         assert_eq!(extract_reward_from_result(json), Some(1.0));
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_missing() {
         let json = r#"{"result":"{\"State\":{\"colonists\":3}}"}"#;
         assert_eq!(extract_reward_from_result(json), None);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_not_double_wrapped() {
         let json = r#"{"Reward":0.5}"#;
         assert_eq!(extract_reward_from_result(json), None);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn extract_reward_invalid_json() {
         assert_eq!(extract_reward_from_result("not json"), None);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn reward_to_quality_mapping() {
         // Reward -0.294 → quality midpoint(-0.294, 1.0) = 0.353

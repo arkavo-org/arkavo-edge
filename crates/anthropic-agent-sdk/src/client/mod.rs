@@ -400,7 +400,9 @@ impl Drop for ClaudeSDKClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-002")]
     #[tokio::test]
     async fn test_client_creation_without_cli() {
         // When CLI is not found, client creation should fail with a clear error
@@ -409,6 +411,7 @@ mod tests {
         assert!(result.is_err(), "Should fail when CLI path doesn't exist");
     }
 
+    #[spec("CASDK-002")]
     #[tokio::test]
     async fn test_session_id_initially_none() {
         let options = ClaudeAgentOptions::default();
@@ -418,6 +421,7 @@ mod tests {
         }
     }
 
+    #[spec("CASDK-002")]
     #[tokio::test]
     async fn test_is_connected() {
         let options = ClaudeAgentOptions::default();

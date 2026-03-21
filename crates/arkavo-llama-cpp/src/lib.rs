@@ -1750,7 +1750,9 @@ pub fn test_minimal_init() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_mistral() {
         assert_eq!(
@@ -1771,6 +1773,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_gemma() {
         assert_eq!(detect_model_format("gemma-3-4b"), ModelFormat::Gemma3);
@@ -1780,6 +1783,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_unknown_defaults_to_qwen3() {
         // Unknown models should default to Qwen3 (TØRG-compatible)
@@ -1789,6 +1793,7 @@ mod tests {
         assert_eq!(detect_model_format("unknown-model"), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_qwen() {
         assert_eq!(detect_model_format("qwen2.5-7b"), ModelFormat::Qwen3);
@@ -1799,6 +1804,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_case_insensitive() {
         assert_eq!(detect_model_format("MINISTRAL-3B"), ModelFormat::MistralV3);
@@ -1806,17 +1812,20 @@ mod tests {
         assert_eq!(detect_model_format("QWEN3-1B"), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_model_format_default() {
         assert_eq!(ModelFormat::default(), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_gemma3_template_contains_markers() {
         assert!(GEMMA3_TEMPLATE.contains("<start_of_turn>"));
         assert!(GEMMA3_TEMPLATE.contains("<end_of_turn>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_mistral_v3_template_contains_markers() {
         assert!(MISTRAL_V3_TEMPLATE.contains("{{ bos_token }}"));
@@ -1827,6 +1836,7 @@ mod tests {
         assert!(MISTRAL_V3_TEMPLATE.contains("</s>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_qwen3_template_contains_markers() {
         assert!(QWEN3_TEMPLATE.contains("<|im_start|>"));
@@ -1836,6 +1846,7 @@ mod tests {
         assert!(QWEN3_TEMPLATE.contains("assistant"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_glm4_template_contains_markers() {
         assert!(GLM4_TEMPLATE.contains("[gMASK]<sop>"));
@@ -1845,6 +1856,7 @@ mod tests {
         assert!(GLM4_TEMPLATE.contains("<|observation|>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_glm4_observation_role_no_trailing_newline() {
         // CRITICAL: GLM-4 expects content immediately after <|observation|>
@@ -1863,6 +1875,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_glm() {
         assert_eq!(detect_model_format("GLM-4.7-Flash"), ModelFormat::GLM4);
@@ -1873,6 +1886,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-007")]
     #[test]
     fn test_dry_sampling_config_defaults() {
         let config = DrySamplingConfig::default();
@@ -1884,6 +1898,7 @@ mod tests {
         assert!(glm_config.is_enabled());
     }
 
+    #[spec("LLAMA-002")]
     #[cfg(not(target_env = "musl"))]
     #[test]
     fn test_reset_gpu_status() {

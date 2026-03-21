@@ -1449,21 +1449,33 @@ jobs:
             process.exit(1);
           }
           
+          let failed = false;
           for (const comp of index.components || []) {
             if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
               console.error('❌ Missing file: ' + comp.file);
-              process.exit(1);
+              failed = true;
+              continue;
             }
-            
+
             const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
             const actualCount = spec.scenarios?.length || 0;
             if (comp.scenario_count !== actualCount) {
               console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
-              process.exit(1);
+              failed = true;
             }
           }
-          
-          console.log('✅ Index synchronized');
+
+          const specFiles = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          const indexedFiles = new Set((index.components || []).map(c => c.file));
+          for (const file of specFiles) {
+            if (!indexedFiles.has(file)) {
+              console.error('❌ ' + file + ' not listed in index.yaml');
+              failed = true;
+            }
+          }
+
+          if (failed) process.exit(1);
+          console.log('✅ Index synchronized (' + index.components.length + ' components)');
           NODE_SCRIPT
       
       - name: Generate stats
@@ -1537,22 +1549,40 @@ jobs:
           echo "gate_exit_code=$?" >> "$GITHUB_OUTPUT"
           cat report.md
 
+      - name: Generate traceability report and coverage diff
+        run: |
+          cargo run -p xtask -- spec-test export-html --output traceability.html
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(echo '${{ github.repository }}' | cut -d/ -f2)/traceability.json"
+          if curl -sf -o baseline.json "$PAGES_URL"; then
+            cargo run -p xtask -- spec-test diff --baseline baseline.json --output diff.md
+          else
+            echo "No baseline on GitHub Pages yet — skipping diff"
+          fi
+
       - name: Post PR comment
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           MARKER="<!-- spec-coverage-report -->"
+
+          # Combine delta (if available) + full report into one comment
+          {
+            if [ -f diff.md ]; then
+              cat diff.md
+              echo ""
+            fi
+            cat report.md
+          } > comment.md
+
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
 
-          BODY=$(cat report.md)
-
           if [ -n "$COMMENT_ID" ]; then
             gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-              -X PATCH -f body="$BODY"
+              -X PATCH -f body="$(cat comment.md)"
           else
-            gh pr comment "${{ github.event.pull_request.number }}" --body-file report.md
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
           fi
 
       - name: Quality gate check
@@ -1562,6 +1592,13 @@ jobs:
             cat gate_result.txt
             exit 1
           fi
+
+      - name: Upload traceability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: traceability-report
+          path: traceability.html
+          retention-days: 30
 
   # Final check that depends on all critical jobs
   release-readiness:

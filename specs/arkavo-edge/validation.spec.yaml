@@ -1,0 +1,121 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Centralized Input Validation
+module: arkavo_validation
+version: 0.67.1
+
+invariants:
+  - Path traversal always detected regardless of encoding
+  - Log sanitization removes all PII and secrets
+  - Size limits enforced before memory allocation
+  - Egress filter blocks private and metadata IP ranges
+  - Host validation prevents SSRF via DNS rebinding
+  - Content boundaries enforced at system edges
+
+scenarios:
+  - id: VAL-001
+    name: Path traversal prevention
+    criticality: critical
+    given:
+      - User-supplied path string
+    when: validate_no_traversal() called
+    then:
+      - Paths with ../ rejected
+      - Encoded traversal attempts caught
+      - Clean paths pass validation
+    refs: [crates/arkavo-validation/src/path.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: URL-encoded ..%2F
+        expected: Detected and rejected
+      - condition: Backslash traversal ..\
+        expected: Detected on all platforms
+
+  - id: VAL-002
+    name: Path within root enforcement
+    criticality: critical
+    given:
+      - Root directory defined
+      - Resolved file path
+    when: validate_path_within_root() called
+    then:
+      - Paths within root allowed
+      - Paths escaping root rejected
+      - Symlink resolution considered
+    refs: [crates/arkavo-validation/src/path.rs]
+    changed: "2026-03-19"
+
+  - id: VAL-003
+    name: JSON log sanitization
+    criticality: critical
+    given:
+      - JSON data potentially containing secrets
+    when: sanitize_json_line_for_log() called
+    then:
+      - API keys redacted
+      - Passwords removed
+      - PII patterns masked
+      - Structure preserved for debugging
+    refs: [crates/arkavo-validation/src/sanitize.rs]
+    changed: "2026-03-19"
+
+  - id: VAL-004
+    name: String size validation
+    criticality: high
+    given:
+      - Input string from external source
+      - Maximum size configured
+    when: validate_str_size() called
+    then:
+      - Strings within limit pass
+      - Oversized strings rejected with error
+      - Size check before allocation
+    refs: [crates/arkavo-validation/src/size.rs]
+    changed: "2026-03-19"
+
+  - id: VAL-005
+    name: Egress filter blocks private IPs
+    criticality: critical
+    given:
+      - EgressFilter configured
+      - URL targeting private/metadata IP
+    when: Egress check performed
+    then:
+      - Private ranges blocked (10.x, 172.16.x, 192.168.x)
+      - Cloud metadata IPs blocked (169.254.169.254)
+      - Localhost blocked for external requests
+      - Public IPs allowed
+    refs: [crates/arkavo-validation/src/url.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: DNS resolves to private IP
+        expected: Blocked after resolution
+      - condition: IPv6 mapped IPv4 private
+        expected: Detected and blocked
+
+  - id: VAL-006
+    name: Host validation
+    criticality: high
+    given:
+      - URL with hostname
+    when: HostValidator checks host
+    then:
+      - extract_host_from_url() parses correctly
+      - is_loopback_host() identifies localhost variants
+      - Invalid hosts rejected
+    refs: [crates/arkavo-validation/src/url.rs]
+    changed: "2026-03-19"
+
+  - id: VAL-007
+    name: Bounded content enforcement
+    criticality: high
+    given:
+      - External content received
+      - ContentBoundary configured
+    when: BoundedContent wraps input
+    then:
+      - Content within bounds accepted
+      - Oversized content truncated or rejected
+      - Boundary metadata preserved
+    refs: [crates/arkavo-validation/src/external_content.rs]
+    changed: "2026-03-19"

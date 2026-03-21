@@ -315,13 +315,16 @@ pub fn preprocess_image_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("LLAMA-010")]
     #[test]
     fn test_default_media_marker() {
         let marker = default_media_marker();
         assert!(marker.contains("media") || marker.contains("image"));
     }
 
+    #[spec("LLAMA-010")]
     #[test]
     fn test_preprocess_image_size() {
         let fake_png = vec![

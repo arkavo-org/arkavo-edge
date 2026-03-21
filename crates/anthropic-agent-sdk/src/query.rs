@@ -125,8 +125,10 @@ pub async fn query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use futures::StreamExt;
 
+    #[spec("CASDK-001")]
     #[tokio::test]
     async fn test_simple_query() {
         let stream = query("What is 2+2?", None).await.unwrap();

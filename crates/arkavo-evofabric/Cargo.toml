@@ -28,6 +28,7 @@ reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

@@ -141,7 +141,9 @@ impl DlpPolicy {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SEC-004")]
     #[test]
     fn test_datum_type_category() {
         assert_eq!(DatumType::Email.category(), DataCategory::Pii);
@@ -152,6 +154,7 @@ mod tests {
         );
     }
 
+    #[spec("SEC-004")]
     #[test]
     fn test_datum_type_sensitivity() {
         assert_eq!(
@@ -172,6 +175,7 @@ mod tests {
         );
     }
 
+    #[spec("SEC-004")]
     #[test]
     fn test_dlp_policy() {
         let policy = DlpPolicy::strict();
@@ -194,6 +198,7 @@ mod tests {
         assert_eq!(policy.evaluate(&classified_low), DlpAction::Allow);
     }
 
+    #[spec("SEC-004")]
     #[test]
     fn test_classified_datum_helpers() {
         let classified = ClassifiedDatum {

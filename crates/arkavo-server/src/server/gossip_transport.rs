@@ -140,7 +140,9 @@ mod tests {
     use super::*;
     use arkavo_crypto::AgentKeypair;
     use arkavo_gossip::GossipConfig;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-006")]
     #[tokio::test]
     async fn test_anti_entropy_loop_starts() {
         let keypair = Arc::new(AgentKeypair::generate());

@@ -2023,7 +2023,9 @@ async fn send_advisory_task(
 #[cfg(test)]
 mod broadcast_tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-005")]
     #[tokio::test]
     async fn test_broadcast_skips_when_no_peers() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
@@ -2031,6 +2033,7 @@ mod broadcast_tests {
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
+    #[spec("SRV-005")]
     #[tokio::test]
     async fn test_broadcast_creates_task_per_peer() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
@@ -2047,6 +2050,7 @@ mod broadcast_tests {
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
+    #[spec("SRV-001")]
     #[test]
     fn test_dynamic_memory_128gb_3_specialists() {
         let total_ram = 128 * 1024 * 1024 * 1024_u64; // 128 GB
@@ -2061,6 +2065,7 @@ mod broadcast_tests {
         assert!(per_agent > 30 * 1024 * 1024 * 1024);
     }
 
+    #[spec("SRV-001")]
     #[test]
     fn test_dynamic_memory_floor_enforced() {
         // Tiny system: 4 GB total, large commander model, many specialists
@@ -2073,6 +2078,7 @@ mod broadcast_tests {
 
 #[cfg(test)]
 mod dedup_tests {
+    use arkavo_test_macros::spec;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -2087,6 +2093,7 @@ mod dedup_tests {
         hasher.finish()
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_same_context_different_ticks_same_hash() {
         let h1 = context_hash("action-a: OK", "", "", 3);
@@ -2094,6 +2101,7 @@ mod dedup_tests {
         assert_eq!(h1, h2, "identical context must produce identical hash");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_different_actions_different_hash() {
         let h1 = context_hash("action-a: OK", "", "", 3);
@@ -2101,6 +2109,7 @@ mod dedup_tests {
         assert_ne!(h1, h2);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_specialist_response_changes_hash() {
         let h1 = context_hash("action-a: OK", "", "", 5);
@@ -2108,6 +2117,7 @@ mod dedup_tests {
         assert_ne!(h1, h2, "new specialist advice must change hash");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_dead_man_category_caps_at_5() {
         // Ticks 5, 6, 7... all hash the same (capped at 5)
@@ -2118,6 +2128,7 @@ mod dedup_tests {
         assert_eq!(h5, h99);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_dedup_logic_skips_when_stuck() {
         let mut last_hash: u64 = 0;
@@ -2146,6 +2157,7 @@ mod dedup_tests {
         assert_eq!(executed, vec![1, 6]);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_dedup_resets_on_new_specialist_advice() {
         let mut last_hash: u64 = 0;
@@ -2188,25 +2200,30 @@ mod dedup_tests {
 mod urgency_tests {
     use super::*;
     use arkavo_budget::UrgencyLevel;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_json_alerts_low() {
         let data = r#"{"alerts":[],"colonists":[{"name":"Jess"}]}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::Low);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_json_alerts_medium() {
         let data = r#"{"alerts":["cold snap","food shortage","crop blight"]}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_json_alerts_high() {
         let data = r#"{"alerts":["a","b","c","d","e","f","g"]}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::High);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_json_alerts_critical() {
         let alerts: Vec<String> = (0..12).map(|i| format!("alert_{i}")).collect();
@@ -2214,24 +2231,28 @@ mod urgency_tests {
         assert_eq!(detect_urgency(&data), UrgencyLevel::Critical);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_keyword_fallback() {
         let data = "Colony is under raid! Attack from the north. Fire in storage.";
         assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_no_threats() {
         let data = "All colonists are happy. Resources are plentiful.";
         assert_eq!(detect_urgency(data), UrgencyLevel::Low);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_keyword_critical() {
         let data = "raid attack threat alert fire bleed danger raid attack threat alert";
         assert_eq!(detect_urgency(data), UrgencyLevel::Critical);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_detect_urgency_json_without_alerts_key() {
         let data = r#"{"colonists":3,"resources":{"wood":50}}"#;

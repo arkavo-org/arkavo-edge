@@ -165,8 +165,10 @@ impl AuthBackend for MultiAuthBackend {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use jsonwebtoken::{EncodingKey, Header, encode};
 
+    #[spec("SEC-001")]
     #[tokio::test]
     async fn test_jwt_auth_backend() {
         let secret = "test_secret";
@@ -192,6 +194,7 @@ mod tests {
         assert_eq!(auth.scopes, vec!["read", "write"]);
     }
 
+    #[spec("SEC-006")]
     #[tokio::test]
     async fn test_validate_scopes() {
         // Create a mock backend for testing

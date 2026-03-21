@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Security Services
+module: arkavo_security
+version: 0.67.1
+
+invariants:
+  - JWT tokens validated with expiry and signature
+  - OAuth2 flows follow RFC 6749
+  - Rate limiting uses token bucket algorithm
+  - Data classification detects PII patterns
+  - No secrets in error messages
+  - Constant-time comparison for token verification
+
+scenarios:
+  - id: SEC-001
+    name: JWT token generation and validation
+    criticality: critical
+    given:
+      - JwtAuthBackend configured with secret
+    when: Token generated then validated
+    then:
+      - Token contains claims with expiry
+      - Validation succeeds for valid tokens
+      - Expired tokens rejected
+      - Tampered tokens rejected
+    refs: [crates/arkavo-security/src/auth.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Token with future nbf claim
+        expected: Rejected until valid
+      - condition: Empty secret key
+        expected: Configuration error
+
+  - id: SEC-002
+    name: OAuth2 authorization flow
+    criticality: critical
+    given:
+      - OAuth2 provider configured
+      - Client credentials available
+    when: Authorization initiated
+    then:
+      - Authorization URL generated
+      - Token exchange completes
+      - Access token stored securely
+      - Refresh token handled
+    refs: [crates/arkavo-security/src/oauth2.rs]
+    changed: "2026-03-19"
+
+  - id: SEC-003
+    name: Rate limiting enforcement
+    criticality: high
+    given:
+      - Rate limiter configured with limits
+      - Requests arriving
+    when: Request rate exceeds limit
+    then:
+      - Requests within limit allowed
+      - Excess requests rejected with 429
+      - Token bucket refills over time
+    refs: [crates/arkavo-security/src/rate_limit.rs]
+    changed: "2026-03-19"
+
+  - id: SEC-004
+    name: PII detection in data classification
+    criticality: critical
+    given:
+      - Data classification rules loaded
+      - Input contains PII patterns
+    when: Classification scan runs
+    then:
+      - PII patterns detected
+      - Classification labels applied
+      - Sensitive data flagged
+    refs: [crates/arkavo-security/src/data_classification.rs]
+    changed: "2026-03-19"
+
+  - id: SEC-005
+    name: TLS configuration
+    criticality: high
+    given:
+      - SecurityConfig with TlsSettings
+    when: TLS applied to connections
+    then:
+      - rustls used exclusively
+      - Certificate chain validated
+      - Minimum TLS version enforced
+    refs: [crates/arkavo-security/src/security.rs]
+    changed: "2026-03-19"
+
+  - id: SEC-006
+    name: Session authentication backend
+    criticality: high
+    given:
+      - SessionAuth configured
+      - Request with session cookie
+    when: Authentication checked
+    then:
+      - Session looked up
+      - Valid sessions authorized
+      - Invalid sessions rejected
+      - AuthBackend trait satisfied
+    refs: [crates/arkavo-security/src/auth.rs]
+    changed: "2026-03-19"

@@ -9,6 +9,7 @@ use arkavo_crypto::AgentKeypair;
 use arkavo_gossip::GossipConfig;
 use arkavo_router::learning::{Lesson, LessonPattern};
 use arkavo_server::{LearningBus, PolicyCache};
+use arkavo_test_macros::spec;
 
 fn make_bus() -> LearningBus {
     let keypair = Arc::new(AgentKeypair::generate());
@@ -37,6 +38,7 @@ fn behavior_lesson(agent: &str, category: &str, condition: &str, quality: f64) -
 }
 
 /// Multi-round learning: lessons accumulate and guidance grows across rounds
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_multi_round_guidance_accumulation() {
     let bus = make_bus();
@@ -83,6 +85,7 @@ async fn test_multi_round_guidance_accumulation() {
 }
 
 /// New category gets no guidance while existing categories retain theirs
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_new_category_clean_slate() {
     let bus = make_bus();
@@ -108,7 +111,8 @@ async fn test_new_category_clean_slate() {
     );
 }
 
-/// lesson_tx → PolicyCache async flow: lessons sent through channel appear in guidance
+/// lesson_tx -> PolicyCache async flow: lessons sent through channel appear in guidance
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_lesson_tx_to_guidance_flow() {
     let bus = make_bus();
@@ -147,6 +151,7 @@ async fn test_lesson_tx_to_guidance_flow() {
 }
 
 /// Quality scores propagate from lesson metadata into quality trends
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_quality_score_propagation_via_lesson() {
     let bus = make_bus();
@@ -163,6 +168,7 @@ async fn test_quality_score_propagation_via_lesson() {
 }
 
 /// Deduplication: identical lessons don't produce duplicate guidance lines
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_duplicate_lessons_deduplicated_in_guidance() {
     let bus = make_bus();
@@ -187,6 +193,7 @@ async fn test_duplicate_lessons_deduplicated_in_guidance() {
 }
 
 /// PolicyCache directly: verify ring buffer eviction preserves newest lessons
+#[spec("SRV-004")]
 #[test]
 fn test_policy_cache_ring_buffer_newest_retained() {
     let mut cache = PolicyCache::new();
@@ -219,6 +226,7 @@ fn test_policy_cache_ring_buffer_newest_retained() {
 }
 
 /// Anti-patterns recorded from tool errors appear in behavior guidance
+#[spec("SRV-006")]
 #[tokio::test]
 async fn test_anti_pattern_in_guidance() {
     let bus = make_bus();
@@ -235,6 +243,7 @@ async fn test_anti_pattern_in_guidance() {
 }
 
 /// Case retrieval returns empty when no episodes indexed
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_case_retrieval_empty_index() {
     let bus = make_bus();
@@ -248,6 +257,7 @@ async fn test_case_retrieval_empty_index() {
 }
 
 /// EpisodeBuffer: observations + episodes flow through thresholds correctly
+#[spec("SRV-004")]
 #[test]
 fn test_episode_buffer_full_lifecycle() {
     use arkavo_router::learning::{Episode, EpisodeOutcome, Observation, QualityMetrics};
@@ -318,6 +328,7 @@ fn test_episode_buffer_full_lifecycle() {
 }
 
 /// Retrospective update with per-step rewards applies correct credit
+#[spec("SRV-004")]
 #[tokio::test]
 async fn test_retrospective_per_step_rewards() {
     use arkavo_router::learning::{AgentContribution, FinalTaskReport, LearningModule};

@@ -299,7 +299,9 @@ impl HookMatcherBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_manager() {
         let mut manager = HookManager::new();
@@ -324,6 +326,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_manager_by_event() {
         let mut manager = HookManager::new();
@@ -395,6 +398,7 @@ mod tests {
         assert!(result.system_message.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_matcher_wildcard() {
         assert!(HookManager::matches(
@@ -407,6 +411,7 @@ mod tests {
         ));
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_matcher_specific() {
         assert!(HookManager::matches(
@@ -419,6 +424,7 @@ mod tests {
         ));
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_matcher_pattern() {
         assert!(HookManager::matches(
@@ -439,6 +445,7 @@ mod tests {
     // Security: Timeout Tests
     // ========================================================================
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_timeout_prevents_blocking() {
         let mut manager = HookManager::new();
@@ -483,6 +490,7 @@ mod tests {
         assert!(output.decision.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_custom_timeout_respected() {
         let mut manager = HookManager::new();
@@ -517,6 +525,7 @@ mod tests {
         assert_eq!(result.system_message, Some("completed".to_string()));
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_default_timeout_is_60_seconds() {
         // Verify the constant is set correctly
@@ -530,6 +539,7 @@ mod tests {
         assert!(matcher.timeout.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_fast_hook_unaffected_by_timeout() {
         let mut manager = HookManager::new();
@@ -566,6 +576,7 @@ mod tests {
     // Security: Cancellation Token Tests
     // ========================================================================
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_context_cancellation() {
         let token = CancellationToken::new();
@@ -585,6 +596,7 @@ mod tests {
         assert!(ctx.is_cancelled());
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_receives_cancellation_token() {
         use std::sync::Arc;
@@ -625,6 +637,7 @@ mod tests {
         assert!(was_cancelled.load(Ordering::SeqCst));
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_context_default_has_no_token() {
         let ctx = HookContext::default();

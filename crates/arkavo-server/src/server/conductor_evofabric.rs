@@ -335,7 +335,9 @@ fn gossip_evofabric_success(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("EVO-008")]
     #[test]
     fn test_is_evofabric_task() {
         assert!(is_evofabric_task(
@@ -346,6 +348,7 @@ mod tests {
         assert!(!is_evofabric_task("[autoresearch] sweep"));
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn test_extract_target_and_instruction() {
         let (path, instr) =
@@ -355,16 +358,19 @@ mod tests {
         assert_eq!(instr, "add #[inline]");
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn test_extract_target_missing_instruction() {
         assert!(extract_target_and_instruction("[evofabric] ").is_none());
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn test_extract_target_no_path() {
         assert!(extract_target_and_instruction("[evofabric]").is_none());
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn test_build_prompt_contains_source() {
         let prompt = build_evofabric_prompt("fn foo() {}", "src/lib.rs", "optimize");
@@ -374,6 +380,7 @@ mod tests {
         assert!(prompt.contains("ReplaceFnBody"));
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn test_subtask_budget_evofabric() {
         let budget = SubTaskBudget::evofabric();

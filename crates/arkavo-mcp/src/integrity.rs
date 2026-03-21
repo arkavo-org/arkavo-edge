@@ -145,7 +145,9 @@ fn compute_sha256(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_verified() {
         let mut registry = IntegrityRegistry::new();
@@ -156,6 +158,7 @@ mod tests {
         assert_eq!(registry.verify("my_tool", data), IntegrityStatus::Verified);
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_hash_mismatch() {
         let mut registry = IntegrityRegistry::new();
@@ -165,6 +168,7 @@ mod tests {
         assert!(matches!(status, IntegrityStatus::HashMismatch { .. }));
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_not_in_allowlist() {
         let mut registry = IntegrityRegistry::new();
@@ -174,6 +178,7 @@ mod tests {
         assert_eq!(status, IntegrityStatus::NotInAllowlist);
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_missing_hash_empty_registry() {
         let registry = IntegrityRegistry::new();
@@ -181,6 +186,7 @@ mod tests {
         assert_eq!(status, IntegrityStatus::MissingHash);
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_enforce_mode_blocks() {
         let registry = IntegrityRegistry::with_mode(EnforcementMode::Enforce);
@@ -193,6 +199,7 @@ mod tests {
         assert!(!registry.should_block(&IntegrityStatus::MissingHash));
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_warn_mode_never_blocks() {
         let registry = IntegrityRegistry::with_mode(EnforcementMode::WarnOnly);
@@ -203,6 +210,7 @@ mod tests {
         }));
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_sha256_deterministic() {
         let hash1 = compute_sha256(b"hello");
@@ -215,6 +223,7 @@ mod tests {
         );
     }
 
+    #[spec("MCPD-004")]
     #[test]
     fn test_toml_roundtrip() {
         let mut registry = IntegrityRegistry::with_mode(EnforcementMode::Enforce);
