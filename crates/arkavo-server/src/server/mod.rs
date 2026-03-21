@@ -11,8 +11,6 @@ mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
 mod handlers;
-#[cfg(feature = "iroh")]
-pub(crate) mod iroh_tdf_bridge;
 mod learning_bus;
 mod learning_bus_gossip;
 mod learning_bus_synthesis;
@@ -485,6 +483,8 @@ impl A2aRpcServer for A2aRpcImpl {
             self.mesh_state.as_ref(),
             &self.agent_metadata,
             &self.agent_memory,
+            #[cfg(feature = "iroh")]
+            self.iroh_node.as_ref(),
             request,
         )
         .await

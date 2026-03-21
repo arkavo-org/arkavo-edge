@@ -4,7 +4,6 @@
 
 use arkavo_tdf::{BlobTransport, TransportError};
 use async_trait::async_trait;
-use iroh_base::EndpointAddr;
 use iroh_blobs::ticket::BlobTicket;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -63,9 +62,8 @@ impl IrohTransport {
 
         debug!(?tag.hash, "Data stored");
 
-        // Create ticket with our endpoint's address
-        let endpoint_id = endpoint.id();
-        let addr = EndpointAddr::from(endpoint_id);
+        // Create ticket with full endpoint address (includes relay URL + direct addrs)
+        let addr = endpoint.addr();
         let ticket = BlobTicket::new(addr, tag.hash, tag.format);
 
         info!(?ticket, "Ticket created");

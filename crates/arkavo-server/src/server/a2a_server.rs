@@ -810,6 +810,8 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
         let model_hint = self.resolve_model_hint().await;
+        #[cfg(feature = "iroh")]
+        let notification_iroh_node = self.iroh_node.read().await.clone();
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
@@ -904,6 +906,8 @@ impl A2aServer {
                             model_hint.as_ref(),
                             None,
                             None,
+                            #[cfg(feature = "iroh")]
+                            notification_iroh_node.as_ref(),
                         )
                         .await
                         {
@@ -1320,6 +1324,9 @@ impl A2aServer {
         let self_agent_id = self.agent_metadata.read().await.name.clone();
         let commander_model = self.agent_metadata.read().await.model.clone();
 
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.read().await.clone();
+
         let agent_mode = self.agent_metadata.read().await.mode.clone();
         info!(
             mode = ?agent_mode,
@@ -1550,6 +1557,8 @@ impl A2aServer {
                     model_hint.as_ref(),
                     None,
                     tool_loop_budget,
+                    #[cfg(feature = "iroh")]
+                    iroh_node.as_ref(),
                 )
                 .await
                 {

@@ -34,6 +34,7 @@ pub async fn handle_message_send(
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
+    #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -166,6 +167,8 @@ pub async fn handle_message_send(
                 let agent_memory = agent_memory.clone();
                 let specialist_id = agent_metadata.read().await.name.clone();
                 let task_start = std::time::Instant::now();
+                #[cfg(feature = "iroh")]
+                let iroh_node = iroh_node.cloned();
 
                 tokio::spawn(async move {
                     if let Err(e) = task_executor
@@ -196,6 +199,8 @@ pub async fn handle_message_send(
                         model_hint.as_ref(),
                         images,
                         Some(&compute_budget),
+                        #[cfg(feature = "iroh")]
+                        iroh_node.as_ref(),
                     )
                     .await
                     {

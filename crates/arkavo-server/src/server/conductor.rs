@@ -50,6 +50,8 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        #[cfg(feature = "iroh")]
+        None,
     )
     .await
 }
@@ -74,6 +76,7 @@ pub async fn execute_with_conductor_and_learning(
     model_hint: Option<&arkavo_router::ModelChoice>,
     images: Option<Vec<String>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -248,6 +251,13 @@ pub async fn execute_with_conductor_and_learning(
     if let Some(state) = mesh_state {
         arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
         info!("Registered 4 mesh delegation tools");
+    }
+
+    // Register Iroh P2P data tools (iroh_stage, iroh_fetch) for inter-agent sharing
+    #[cfg(feature = "iroh")]
+    if let Some(node) = iroh_node {
+        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
+        info!("Registered 2 Iroh P2P data tools");
     }
 
     info!(
