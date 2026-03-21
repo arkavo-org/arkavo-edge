@@ -268,16 +268,14 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
     let json: serde_json::Value =
         serde_json::from_str(&sanitized).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
-    let condition = json
-        .get("condition")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let action = json
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("slow")
-        .to_string();
+    let condition = match json.get("condition").and_then(|v| v.as_str()) {
+        Some(c) if !c.is_empty() && c != "unknown" => c.to_string(),
+        _ => return Err("No condition extracted — rejecting junk lesson".to_string()),
+    };
+    let action = match json.get("action").and_then(|v| v.as_str()) {
+        Some(a) if !a.is_empty() && a != "slow" => a.to_string(),
+        _ => return Err("No action extracted — rejecting junk lesson".to_string()),
+    };
     let confidence = json
         .get("confidence")
         .and_then(|v| v.as_f64())
