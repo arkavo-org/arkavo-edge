@@ -204,11 +204,18 @@ impl A2aServer {
         registry.map(|r| r.model_names()).unwrap_or_default()
     }
 
-    pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
+    pub async fn set_agent_metadata(
+        &self,
+        name: String,
+        purpose: String,
+        model: String,
+        mode: arkavo_protocol::agent_config::AgentMode,
+    ) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.name.clone_from(&name);
         metadata.purpose = purpose;
         metadata.model.clone_from(&model);
+        metadata.mode = mode;
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
         drop(metadata);
 
@@ -262,6 +269,7 @@ impl A2aServer {
             new_config.name.clone(),
             new_config.purpose.clone(),
             new_config.model.clone(),
+            new_config.mode.clone(),
         )
         .await;
 
@@ -1312,12 +1320,27 @@ impl A2aServer {
         let self_agent_id = self.agent_metadata.read().await.name.clone();
         let commander_model = self.agent_metadata.read().await.model.clone();
 
-        info!("Starting orchestrator loop (observe → plan → act)");
+        let agent_mode = self.agent_metadata.read().await.mode.clone();
+        info!(
+            mode = ?agent_mode,
+            "Starting agent loop"
+        );
 
         tokio::spawn(async move {
             // Wait for MCP server to be ready, then discover peers
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             mesh_state.discover_peers().await;
+
+            // Specialists are passive — they only respond to message/send tasks.
+            // No autonomous tick loop. Sleep and let the RPC handler do the work.
+            if agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
+                info!("Specialist mode: waiting for tasks via message/send");
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    // Re-discover peers periodically for gossip
+                    mesh_state.discover_peers().await;
+                }
+            }
 
             let mut tick: u64 = 0;
             let mut consecutive_no_action_ticks: u32 = 0;
@@ -1337,8 +1360,7 @@ impl A2aServer {
                     continue;
                 }
 
-                // Specialists (no MCP tools) check compute budget before each tick.
-                // Commander (has MCP tools) always runs — it allocates budgets.
+                // Budget gate: orchestrators with no MCP tools check before each tick.
                 if !has_mcp_tools {
                     let budget = compute_budget.read().await;
                     let snapshot = budget.snapshot();

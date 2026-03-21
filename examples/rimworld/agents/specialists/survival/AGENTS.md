@@ -31,6 +31,7 @@ purpose: |
   - Hypothermia/heatstroke can kill quickly. Check temperature alerts.
   - If no food IDs available, recommend UnforbidArea around colonist positions.
 
+mode: specialist
 model: qwen3.5-9b
 listen: 0.0.0.0:8410
 mdns: true

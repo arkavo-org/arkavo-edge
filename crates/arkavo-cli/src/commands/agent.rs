@@ -310,6 +310,7 @@ fn run_agent_with_options(
             name: agent_name,
             purpose: "A general-purpose AI agent".to_string(),
             model: String::new(), // Empty model - let arkavo-router decide
+            mode: arkavo_protocol::agent_config::AgentMode::default(),
             listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
             mdns_enabled: true,
             mcp_servers: Vec::new(),
@@ -355,6 +356,7 @@ fn run_agent_with_options(
                     name: agent_name,
                     purpose: "A general-purpose AI agent".to_string(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
@@ -430,6 +432,7 @@ fn run_agent_with_options(
                 name: format!("{hostname}-{folder_name}"),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
+                mode: arkavo_protocol::agent_config::AgentMode::default(),
                 listen: "0.0.0.0:0".to_string(), // Dynamic port
                 mdns_enabled: true,
                 mcp_servers: Vec::new(),
@@ -469,6 +472,7 @@ pub struct AgentConfig {
     pub name: String,
     pub purpose: String, // Used as system prompt for LLM
     pub model: String,
+    pub mode: arkavo_protocol::agent_config::AgentMode,
     pub listen: String,
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
@@ -511,6 +515,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             name: String::new(),
             purpose: String::new(),
             model: String::new(),
+            mode: arkavo_protocol::agent_config::AgentMode::default(),
             listen: "0.0.0.0:0".to_string(),
             mdns_enabled: true,
             mcp_servers: Vec::new(),
@@ -526,6 +531,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             "name:",
             "purpose:",
             "model:",
+            "mode:",
             "listen:",
             "mdns:",
             "swarm:",
@@ -602,6 +608,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(),
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
@@ -653,6 +660,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         name: section_name.clone(),
                         purpose: String::new(),
                         model: String::new(),
+                        mode: arkavo_protocol::agent_config::AgentMode::default(),
                         listen: "0.0.0.0:0".to_string(),
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
@@ -773,6 +781,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,              // Default to true for zero-config
                     mcp_servers: Vec::new(),
@@ -1085,6 +1094,16 @@ fn parse_yaml_properties(
                 .trim()
                 .trim_matches('"')
                 .to_string();
+        } else if trimmed.starts_with("mode:") {
+            let mode_str = trimmed
+                .strip_prefix("mode:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+            agent.mode = match mode_str {
+                "specialist" => arkavo_protocol::agent_config::AgentMode::Specialist,
+                _ => arkavo_protocol::agent_config::AgentMode::Orchestrator,
+            };
         } else if trimmed.starts_with("listen:") {
             agent.listen = trimmed
                 .strip_prefix("listen:")
@@ -1221,6 +1240,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             config.name.clone(),
             config.purpose.clone(),
             config.model.clone(),
+            config.mode.clone(),
         )
         .await;
 
@@ -1656,9 +1676,8 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                             let request = A2aRequest::new("gossip/message", params);
 
                             // Reconnect if connection dropped or missing
-                            let needs_reconnect = connections
-                                .get(&peer_id)
-                                .map_or(true, |c| !c.is_connected());
+                            let needs_reconnect =
+                                connections.get(&peer_id).is_none_or(|c| !c.is_connected());
 
                             if needs_reconnect {
                                 connections.remove(&peer_id);

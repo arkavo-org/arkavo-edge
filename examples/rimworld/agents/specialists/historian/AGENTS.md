@@ -22,6 +22,7 @@ purpose: |
   {"condition": "Draft called with no active threats", "action": "skip Draft, use SetWorkPriority instead to assign productive work", "expected_outcome": "colonist remains productive, no wasted time", "confidence": 0.85}
   {"condition": "PlaceBlueprint fails with position error", "action": "observe terrain first to find valid placement coordinates", "expected_outcome": "blueprint placed successfully", "confidence": 0.8}
 
+mode: specialist
 model: qwen3.5-9b
 listen: 0.0.0.0:8413
 mdns: true
