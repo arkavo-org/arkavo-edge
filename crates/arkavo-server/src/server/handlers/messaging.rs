@@ -164,6 +164,8 @@ pub async fn handle_message_send(
                 let compute_budget = compute_budget.clone();
                 let mesh_state = mesh_state.cloned();
                 let agent_memory = agent_memory.clone();
+                let specialist_id = agent_metadata.read().await.name.clone();
+                let task_start = std::time::Instant::now();
 
                 tokio::spawn(async move {
                     if let Err(e) = task_executor
@@ -198,6 +200,7 @@ pub async fn handle_message_send(
                     .await
                     {
                         Ok(result_content) => {
+                            let result_for_notice = result_content.clone();
                             let result_message = Message {
                                 parts: vec![arkavo_protocol::types::MessagePart::Text {
                                     content: result_content,
@@ -214,6 +217,26 @@ pub async fn handle_message_send(
                                 warn!("Failed to complete task {}: {}", task_id_clone, e);
                             } else {
                                 info!("Task {} completed successfully via HRM", task_id_clone);
+
+                                // Push completion to commander via gossip (no polling needed)
+                                if let Some(ref bus) = learning_bus {
+                                    let snapshot = {
+                                        let b = compute_budget.read().await;
+                                        serde_json::to_value(b.snapshot()).ok()
+                                    };
+                                    let notice = arkavo_gossip::TaskCompletionNotice {
+                                        task_id: task_id_clone.to_string(),
+                                        specialist_id: specialist_id.clone(),
+                                        succeeded: true,
+                                        content: result_for_notice,
+                                        budget_snapshot: snapshot,
+                                        completion_ms: task_start.elapsed().as_millis() as u64,
+                                    };
+                                    bus.broadcast_to_peers(
+                                        arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                    )
+                                    .await;
+                                }
                             }
                         }
                         Err(error_msg) => {
@@ -235,6 +258,26 @@ pub async fn handle_message_send(
                                 warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
                             } else {
                                 warn!("Task {} failed: {}", task_id_clone, error_msg);
+
+                                // Push failure to commander via gossip
+                                if let Some(ref bus) = learning_bus {
+                                    let snapshot = {
+                                        let b = compute_budget.read().await;
+                                        serde_json::to_value(b.snapshot()).ok()
+                                    };
+                                    let notice = arkavo_gossip::TaskCompletionNotice {
+                                        task_id: task_id_clone.to_string(),
+                                        specialist_id: specialist_id.clone(),
+                                        succeeded: false,
+                                        content: error_msg,
+                                        budget_snapshot: snapshot,
+                                        completion_ms: task_start.elapsed().as_millis() as u64,
+                                    };
+                                    bus.broadcast_to_peers(
+                                        arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                    )
+                                    .await;
+                                }
                             }
                         }
                     }

@@ -71,6 +71,8 @@ pub struct MeshToolsState {
     pub agent_addresses: Arc<RwLock<HashMap<String, String>>>,
     /// Delegated tasks awaiting specialist responses
     pub pending_delegations: Arc<RwLock<Vec<PendingDelegation>>>,
+    /// Completions pushed by gossip (specialist → commander, no polling)
+    push_completions: Arc<RwLock<Vec<CompletedDelegation>>>,
 }
 
 impl MeshToolsState {
@@ -79,17 +81,33 @@ impl MeshToolsState {
             registry: Arc::new(AgentRegistry::new()),
             agent_addresses: Arc::new(RwLock::new(HashMap::new())),
             pending_delegations: Arc::new(RwLock::new(Vec::new())),
+            push_completions: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// Push a completion received via gossip into the local queue.
+    /// Called by the gossip handler when a TaskCompleted message arrives.
+    pub async fn push_completed(&self, task_id: &str, completion: CompletedDelegation) {
+        // Remove matching pending delegation so polling doesn't duplicate it
+        let mut pending = self.pending_delegations.write().await;
+        pending.retain(|d| d.task_id != task_id);
+        drop(pending);
+
+        self.push_completions.write().await.push(completion);
     }
 
     /// Fetch all completed specialist responses, removing them from pending.
     ///
-    /// Called by the orchestrator before each tick so the commander can act on
-    /// specialist advice immediately without wasting iterations on `get_task_status`.
+    /// Drains push-delivered completions first (zero network cost), then falls
+    /// back to HTTP polling for any remaining pending delegations.
     pub async fn collect_completed(&self) -> Vec<CompletedDelegation> {
+        // Drain push-delivered completions first (from gossip TaskCompleted messages)
+        let mut pushed: Vec<CompletedDelegation> =
+            self.push_completions.write().await.drain(..).collect();
+
         let mut pending = self.pending_delegations.write().await;
         if pending.is_empty() {
-            return Vec::new();
+            return pushed;
         }
 
         let mut completed = Vec::new();
@@ -150,7 +168,8 @@ impl MeshToolsState {
         }
 
         *pending = still_pending;
-        completed
+        pushed.extend(completed);
+        pushed
     }
 }
 

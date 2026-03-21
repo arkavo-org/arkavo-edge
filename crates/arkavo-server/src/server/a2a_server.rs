@@ -1358,9 +1358,28 @@ impl A2aServer {
                 let error_corrections = memory_guard.format_errors_for_prompt();
                 drop(memory_guard);
 
-                // Pre-fetch completed specialist responses so the commander
-                // can act on advice immediately without wasting iterations on
-                // get_task_status polling.
+                // Drain gossip-pushed completions into mesh_state (zero network cost)
+                if let Some(ref bus) = learning_bus {
+                    for notice in bus.drain_task_completions().await {
+                        let budget_snapshot = notice
+                            .budget_snapshot
+                            .and_then(|v| serde_json::from_value(v).ok());
+                        mesh_state
+                            .push_completed(
+                                &notice.task_id,
+                                arkavo_mcp_mesh::CompletedDelegation {
+                                    agent_id: notice.specialist_id,
+                                    response: notice.content,
+                                    response_latency_ms: notice.completion_ms,
+                                    budget_snapshot,
+                                },
+                            )
+                            .await;
+                    }
+                }
+
+                // Collect completions: push-delivered first, then poll fallback
+                // for any remaining pending delegations.
                 let completed = mesh_state.collect_completed().await;
 
                 // Use budget feedback from specialists to detect overload

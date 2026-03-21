@@ -261,6 +261,15 @@ impl GossipProtocol {
                 tracing::debug!(block = a.block_number, "evofabric anchor committed");
                 Ok(vec![GossipMessage::EvoFabricAnchor(a)])
             }
+            GossipMessage::TaskCompleted(notice) => {
+                tracing::debug!(
+                    task_id = %notice.task_id,
+                    specialist = %notice.specialist_id,
+                    succeeded = notice.succeeded,
+                    "task completion notice received"
+                );
+                Ok(vec![])
+            }
         }
     }
 

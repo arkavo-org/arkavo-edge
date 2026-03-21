@@ -42,7 +42,7 @@ pub use learning_message::{
 pub use lesson_consensus::{LessonConsensusState, LessonConsensusStatus};
 pub use message::{
     AdvisorAdjustmentAnnouncement, AntiEntropyDigest, GossipMessage, PatchAnnouncement,
-    PatchDelivery, PatchDigestEntry, PatchRequest, PatchStatus, PatchVote,
+    PatchDelivery, PatchDigestEntry, PatchRequest, PatchStatus, PatchVote, TaskCompletionNotice,
 };
 pub use protocol::{
     DEFAULT_ANTI_ENTROPY_INTERVAL, DEFAULT_FANOUT, GossipConfig, GossipProtocol, GossipStats,

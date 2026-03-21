@@ -176,6 +176,8 @@ pub struct LearningBus {
     pain_tx: Option<mpsc::Sender<PainSignal>>,
     /// Lock-free bridge for patchlet message forwarding (set once at startup)
     patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
+    /// Task completions received via gossip (pushed by specialists)
+    pub(super) task_completions: Arc<RwLock<Vec<arkavo_gossip::TaskCompletionNotice>>>,
 }
 
 impl LearningBus {
@@ -255,6 +257,7 @@ impl LearningBus {
             last_event_at: Arc::new(RwLock::new(None)),
             pain_tx: None,
             patchlet_bridge: OnceLock::new(),
+            task_completions: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -391,6 +394,22 @@ impl LearningBus {
     /// Get address for a peer
     pub async fn get_peer_address(&self, peer_id: &str) -> Option<String> {
         self.peer_addresses.read().await.get(peer_id).cloned()
+    }
+
+    /// Drain task completions received via gossip push.
+    pub async fn drain_task_completions(&self) -> Vec<arkavo_gossip::TaskCompletionNotice> {
+        self.task_completions.write().await.drain(..).collect()
+    }
+
+    /// Broadcast a gossip message to all connected peers.
+    pub async fn broadcast_to_peers(&self, message: GossipMessage) {
+        let gossip = self.gossip.read().await;
+        let peers = gossip.select_propagation_peers(None).await;
+        drop(gossip);
+
+        for peer_id in &peers {
+            let _ = self.gossip_out_tx.send((peer_id.clone(), message.clone()));
+        }
     }
 
     /// Get all peer addresses

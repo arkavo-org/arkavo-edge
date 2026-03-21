@@ -62,6 +62,26 @@ pub enum GossipMessage {
     EvoFabricConflict(EvoFabricConflictNotice),
     /// Merkle root anchored on-chain for EvoFabric
     EvoFabricAnchor(EvoFabricAnchorCommitted),
+    /// Task completion notification from specialist to commander
+    TaskCompleted(TaskCompletionNotice),
+}
+
+/// Push notification when a specialist finishes a delegated task.
+/// Sent over gossip so the commander doesn't need to poll.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCompletionNotice {
+    /// The task_id that was delegated via send_task
+    pub task_id: String,
+    /// Agent ID of the specialist that completed the task
+    pub specialist_id: String,
+    /// Whether the task succeeded or failed
+    pub succeeded: bool,
+    /// Result text (on success) or error message (on failure)
+    pub content: String,
+    /// Budget snapshot from the specialist, bundled to avoid a separate round-trip
+    pub budget_snapshot: Option<serde_json::Value>,
+    /// Wall-clock time from task receipt to completion
+    pub completion_ms: u64,
 }
 
 /// Announcement of a new patch
