@@ -364,11 +364,19 @@ pub async fn execute_with_conductor_and_learning(
         }
 
         if prefix.is_empty() {
+            info!(
+                behavior_empty = behavior_guidance.is_empty(),
+                few_shot_empty = few_shot_examples.is_empty(),
+                case_empty = case_context.is_empty(),
+                behavior_lesson_count,
+                "No guidance prefix — all sources empty"
+            );
             task_content.clone()
         } else {
             format!("{prefix}\n{task_content}")
         }
     } else {
+        info!("No learning bus available for guidance injection");
         task_content.clone()
     };
 

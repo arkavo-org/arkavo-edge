@@ -441,6 +441,12 @@ impl LearningBus {
             0.9,
             1,
         );
+        // Persist to SQLite so lessons survive restarts
+        if let Some(ref store) = *self.learning_store.read().await
+            && let Err(e) = store.store_lesson(&lesson).await
+        {
+            tracing::warn!(tool = tool_name, "Failed to persist fast-path lesson: {e}");
+        }
         let mut cache = self.policy_cache.write().await;
         cache.add_lesson(lesson);
         tracing::info!(tool = tool_name, "Fast-path lesson added from tool error");
