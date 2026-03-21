@@ -12,6 +12,143 @@ use tokio::sync::mpsc;
 
 use super::episode_buffer::ToolObservation;
 use super::learning_bus::{LearningBus, LearningEvent};
+use super::synthesis::parse_lesson_from_historian;
+
+/// Delegate lesson synthesis to the historian agent via A2A message/send.
+/// Returns Ok(Some(lesson)) if historian produces a valid lesson, Ok(None) if
+/// no pattern found, Err if transport or parsing fails (caller falls back to local).
+async fn delegate_to_historian(
+    historian_addr: &str,
+    episodes: &[arkavo_router::learning::Episode],
+    category: &str,
+    agent_id: &str,
+    swarm_id: &str,
+) -> Result<Option<Lesson>, String> {
+    use arkavo_protocol::http::HttpTransport;
+    use arkavo_protocol::transport::{
+        A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig,
+    };
+
+    let eps_json: Vec<serde_json::Value> = episodes
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "category": e.task_category,
+                "action": e.observation.action_taken,
+                "success": e.outcome.success,
+                "quality": e.outcome.quality_metrics.correctness,
+                "tools": e.observation.tools_used
+            })
+        })
+        .collect();
+
+    let failure_count = episodes.iter().filter(|e| !e.outcome.success).count();
+    let success_count = episodes.iter().filter(|e| e.outcome.success).count();
+
+    let prompt = format!(
+        "Analyze these {} episodes ({} successes, {} failures) in category '{}' \
+         and extract a reusable lesson.\n\n{}\n\n\
+         Respond with a JSON lesson or NO_LESSON.",
+        episodes.len(),
+        success_count,
+        failure_count,
+        category,
+        serde_json::to_string_pretty(&eps_json).unwrap_or_default()
+    );
+
+    let mut config = TransportConfig::default();
+    config.tls_config.require_tls = false;
+    config.timeout_ms = 60_000; // historian may take a while with 9b model
+
+    let transport = HttpTransport::new(config).map_err(|e| format!("Transport: {e}"))?;
+    let endpoint = A2aEndpoint {
+        url: historian_addr.to_string(),
+        agent_id: "historian".to_string(),
+        public_key: None,
+    };
+    transport
+        .connect(&endpoint)
+        .await
+        .map_err(|e| format!("Connect: {e}"))?;
+
+    let message = serde_json::json!({
+        "parts": [{"type": "text", "content": prompt}]
+    });
+    let request = A2aRequest::new("message/send", serde_json::json!([{"message": message}]));
+
+    let response = transport
+        .send_request(request)
+        .await
+        .map_err(|e| format!("Request: {e}"))?;
+
+    let _ = transport.close().await;
+
+    // Extract task_id from response, then poll for result
+    let task_id = match response {
+        A2aResponse::Success { result, .. } => result
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or("No task_id in historian response")?,
+        A2aResponse::Error { error, .. } => {
+            return Err(format!("Historian RPC error: {}", error.message));
+        }
+    };
+
+    // Poll for completion (historian runs inference asynchronously)
+    for _ in 0..30 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let transport2 = HttpTransport::new({
+            let mut c = TransportConfig::default();
+            c.tls_config.require_tls = false;
+            c.timeout_ms = 5_000;
+            c
+        })
+        .map_err(|e| format!("Transport: {e}"))?;
+        transport2
+            .connect(&endpoint)
+            .await
+            .map_err(|e| format!("Connect: {e}"))?;
+
+        let get_request = A2aRequest::new("tasks/get", serde_json::json!([{"task_id": task_id}]));
+        let get_response = transport2
+            .send_request(get_request)
+            .await
+            .map_err(|e| format!("Poll: {e}"))?;
+        let _ = transport2.close().await;
+
+        if let A2aResponse::Success { result, .. } = get_response {
+            let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if status == "completed" || status == "failed" {
+                let text = result
+                    .get("result")
+                    .and_then(|v| v.get("parts"))
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|p| p.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                tracing::info!(
+                    task_id = %task_id,
+                    response_len = text.len(),
+                    "Historian synthesis completed"
+                );
+
+                return parse_lesson_from_historian(
+                    text,
+                    agent_id,
+                    swarm_id,
+                    category,
+                    episodes.len(),
+                );
+            }
+        }
+    }
+
+    Err("Historian timed out after 60s".to_string())
+}
 
 /// Start the lesson application loop that processes approved lessons
 ///
@@ -228,10 +365,29 @@ pub async fn start_event_processing_loop(
                                             lesson_category
                                         );
 
-                                        match learning_bus
-                                            .synthesize_lesson(&episodes, &lesson_category)
-                                            .await
+                                        // Try historian agent first (9b, high quality),
+                                        // fall back to local route_fast (0.8b) if unavailable.
+                                        let lesson_result = if let Some(addr) =
+                                            learning_bus.get_peer_address("historian").await
                                         {
+                                            tracing::info!(
+                                                "Delegating lesson synthesis to historian at {addr}"
+                                            );
+                                            delegate_to_historian(
+                                                &addr,
+                                                &episodes,
+                                                &lesson_category,
+                                                learning_bus.agent_id(),
+                                                learning_bus.swarm_id(),
+                                            )
+                                            .await
+                                        } else {
+                                            learning_bus
+                                                .synthesize_lesson(&episodes, &lesson_category)
+                                                .await
+                                        };
+
+                                        match lesson_result {
                                             Ok(Some(lesson)) => {
                                                 tracing::info!(
                                                     "Lesson synthesized: {} confidence={}",

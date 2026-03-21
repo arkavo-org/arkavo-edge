@@ -250,6 +250,30 @@ fn extract_quality_score(content: &str) -> f64 {
     0.7
 }
 
+/// Parse a historian agent's response into a Lesson.
+/// Reuses parse_lesson_pattern for JSON extraction.
+pub(super) fn parse_lesson_from_historian(
+    text: &str,
+    agent_id: &str,
+    swarm_id: &str,
+    category: &str,
+    episode_count: usize,
+) -> Result<Option<Lesson>, String> {
+    if text.contains("NO_LESSON") {
+        return Ok(None);
+    }
+    let (condition, action, confidence, expected_outcome) = parse_lesson_pattern(text)?;
+    let lesson = Lesson::new(
+        agent_id.to_string(),
+        swarm_id.to_string(),
+        category.to_string(),
+        LessonPattern::new(condition, action, expected_outcome),
+        confidence,
+        episode_count as u32,
+    );
+    Ok(Some(lesson))
+}
+
 /// Parse lesson pattern from LLM response
 fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), String> {
     // Try to extract JSON from content (may have markdown wrapping)
