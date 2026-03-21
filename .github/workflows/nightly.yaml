@@ -1,4 +1,4 @@
-name: Nightly Fuzz
+name: Nightly
 
 on:
   schedule:

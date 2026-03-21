@@ -8,7 +8,7 @@
 //! - TDF-003: Policy round-trip serialization
 //! - TDF-004: Manifest integrity checks
 
-use arkavo_tdf::types::{Attribute, Policy, TdfManifest};
+use arkavo_tdf::{Attribute, Policy, TdfManifest};
 use libfuzzer_sys::fuzz_target;
 
 /// Fuzz input for TDF policy testing
