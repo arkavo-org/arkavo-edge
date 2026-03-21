@@ -42,6 +42,7 @@ pub(super) async fn run_tool_loop(
     let mut decision_model_name = None;
     let mut total_step_idx: usize = 0;
     let mut first_inference_timing = None;
+    let mut force_planning = false;
     let loop_start = std::time::Instant::now();
 
     // Context budget: estimate model window in chars (tokens × 4)
@@ -80,7 +81,16 @@ pub(super) async fn run_tool_loop(
         // Execution iterations (1+) use a stripped inference profile:
         // temp 0.1, thinking off, max 200 tokens, 10s timeout.
         // Planning iterations (0) use full reasoning with model defaults.
-        let is_execution = iteration > 0;
+        // Negative reward from previous iteration forces planning mode so the
+        // capable model can reason about what went wrong and pick a better action.
+        let is_execution = iteration > 0 && !force_planning;
+        if force_planning {
+            info!(
+                iteration = iteration + 1,
+                "Reward-driven escalation: using planning model"
+            );
+            force_planning = false;
+        }
 
         // Context-aware timeout scaled by model generation speed.
         // Benchmarked TG speeds: 0.8B=170t/s, 3B=136t/s, 9B=50t/s, 27B=14t/s.
@@ -325,6 +335,12 @@ pub(super) async fn run_tool_loop(
             &mut total_step_idx,
         )
         .await;
+
+        // Negative reward from game actions → escalate next iteration to planning mode
+        // so the capable model can reason about the failure and pick a better action.
+        if reward_signals.last().is_some_and(|&r| r < 0.0) {
+            force_planning = true;
+        }
 
         let tool_results_text = tool_result_parts.join("\n\n");
         let raw_result_chars = tool_results_text.len();
