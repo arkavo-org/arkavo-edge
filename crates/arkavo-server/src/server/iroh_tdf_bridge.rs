@@ -12,7 +12,7 @@ use arkavo_tdf_iroh::IrohNode;
 /// For now, stages raw bytes without TDF encryption. TDF encryption can be
 /// composed by the caller when KAS is configured.
 #[cfg(feature = "iroh")]
-pub async fn stage_blob(
+pub(crate) async fn stage_blob(
     iroh_node: std::sync::Arc<IrohNode>,
     data: &[u8],
 ) -> Result<String, String> {
@@ -35,7 +35,7 @@ pub async fn stage_blob(
 
 /// Fetch a blob from Iroh using a ticket string. Returns the raw bytes.
 #[cfg(feature = "iroh")]
-pub async fn fetch_blob(
+pub(crate) async fn fetch_blob(
     iroh_node: std::sync::Arc<IrohNode>,
     ticket_str: &str,
 ) -> Result<Vec<u8>, String> {
