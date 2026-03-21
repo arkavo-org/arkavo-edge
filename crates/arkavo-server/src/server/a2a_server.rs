@@ -1608,6 +1608,34 @@ impl A2aServer {
                             }
                         }
 
+                        // Degenerate output detection: after 8 ticks of no meaningful
+                        // action, the model's context is likely poisoned. Stop, rethink,
+                        // replan: clear short-term memory so the next tick starts fresh
+                        // with a clean observation instead of building on garbage history.
+                        if consecutive_no_action_ticks >= 8 {
+                            warn!(
+                                "Context reset: {} ticks without action — clearing short-term memory",
+                                consecutive_no_action_ticks
+                            );
+                            let mut mem = agent_memory.write().await;
+                            mem.clear();
+                            drop(mem);
+                            consecutive_no_action_ticks = 0;
+                            consecutive_duplicate_prompts = 0;
+
+                            // Synthesize a fast-path lesson about the failure pattern
+                            if let Some(ref bus) = learning_bus {
+                                bus.add_fast_lesson(
+                                    "orchestrator",
+                                    "8 consecutive ticks produced no meaningful action. \
+                                     The conversation context was poisoned. On the next tick, \
+                                     call game-rl:observe first to get fresh colony state, \
+                                     then pick ONE concrete action from the alerts.",
+                                )
+                                .await;
+                            }
+                        }
+
                         // Adaptive tick interval: scale based on inference duration.
                         // Fast ticks when GPU is responsive, back off when contended.
                         let elapsed_secs = elapsed.as_secs();
