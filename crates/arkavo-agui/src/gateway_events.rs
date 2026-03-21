@@ -229,6 +229,15 @@ pub async fn handle_request_mesh_status(
                     registry.inference.record(ms as u64);
                 }
             }
+
+            // Update per-agent Iroh P2P node status
+            let iroh = metrics_data
+                .get("iroh_active")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let sec = security_handler.read().await;
+            sec.update_agent_iroh(agent_id, iroh).await;
+            drop(sec);
         }
 
         // Poll KAS public key to detect KAS-enabled agents

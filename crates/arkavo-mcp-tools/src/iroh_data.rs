@@ -42,8 +42,7 @@ impl IrohStageTool {
                     "type": "object",
                     "properties": {
                         "data": {
-                            "type": "string",
-                            "description": "The data to stage (text or JSON)"
+                            "description": "The data to stage (string or JSON object)"
                         }
                     },
                     "required": ["data"]
@@ -61,11 +60,19 @@ impl Tool for IrohStageTool {
     }
 
     async fn execute(&self, args: Value) -> crate::Result<Value> {
-        let data = args["data"]
-            .as_str()
+        let data_value = args
+            .get("data")
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing data parameter".to_string()))?;
 
-        let bytes = data.as_bytes();
+        // Accept string directly or serialize objects/arrays to JSON
+        let data_string = match data_value.as_str() {
+            Some(s) => s.to_string(),
+            None => serde_json::to_string(data_value).map_err(|e| {
+                crate::ToolError::InvalidParams(format!("Cannot serialize data: {e}"))
+            })?,
+        };
+
+        let bytes = data_string.as_bytes();
         let transport = IrohTransport::new(self.iroh_node.clone());
 
         let ticket = transport

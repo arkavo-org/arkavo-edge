@@ -1108,6 +1108,11 @@ impl A2aRpcServer for A2aRpcImpl {
             Some(timing)
         };
 
+        #[cfg(feature = "iroh")]
+        let iroh_active = self.iroh_node.is_some();
+        #[cfg(not(feature = "iroh"))]
+        let iroh_active = false;
+
         Ok(serde_json::json!({
             "agent_id": agent_id,
             "rss_mb": rss_mb,
@@ -1116,6 +1121,7 @@ impl A2aRpcServer for A2aRpcImpl {
             "total_ram_mb": total_ram_mb,
             "available_ram_mb": available_ram_mb,
             "subsystem_timing": subsystem_timing,
+            "iroh_active": iroh_active,
         }))
     }
 }
