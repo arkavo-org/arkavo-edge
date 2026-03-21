@@ -5,7 +5,6 @@
 
 pub mod code_scanner;
 pub mod integrity;
-pub mod taint;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
