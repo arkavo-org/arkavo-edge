@@ -37,6 +37,18 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup vendor/llama.cpp
+        run: |
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          git checkout d23355afc
+
+      - name: Install build dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
 
@@ -72,6 +84,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          git checkout d23355afc
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
