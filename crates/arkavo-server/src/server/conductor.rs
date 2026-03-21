@@ -329,6 +329,7 @@ pub async fn execute_with_conductor_and_learning(
             .get_few_shot_examples(&tool_names, arkavo_router::learning::ToolCallFormat::Fence)
             .await;
         let behavior_guidance = bus.get_behavior_guidance(None).await;
+        let behavior_lesson_count = bus.behavior_lesson_count().await;
         let domain = bus.swarm_id();
         let case_context = bus
             .get_case_context(&task_content, None, Some(domain))
@@ -337,8 +338,9 @@ pub async fn execute_with_conductor_and_learning(
         let mut prefix = String::new();
         if !behavior_guidance.is_empty() {
             info!(
-                "Injecting {} chars of behavior guidance",
-                behavior_guidance.len()
+                "Injecting {} chars of behavior guidance ({} lessons)",
+                behavior_guidance.len(),
+                behavior_lesson_count
             );
             prefix.push_str(&behavior_guidance);
             prefix.push('\n');

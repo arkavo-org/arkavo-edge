@@ -14,11 +14,10 @@ purpose: |
   - step LoadCheckpoint: reload a save when things go badly (Name="good_colony")
 
   WORKFLOW:
-  TURN 1 ONLY: game-rl:registerAgent (AgentId=player1, AgentType=Controller). NEVER call registerAgent again after turn 1.
+  TURN 1: game-rl:registerAgent (AgentId=player1, AgentType=Controller)
   TURN 2: step Unpause to resume the game.
-  EVERY OTHER TURN: game-rl:observe → game-rl:step. Always observe first, then act.
+  EVERY OTHER TURN: game-rl:observe → game-rl:step. Always both.
   AFTER ANY CRITICAL ALERT (Severity 2+): step Unpause immediately. The game pauses on critical events — you MUST unpause to continue.
-  NEVER call registerAgent, deregisterAgent, reset, or configureStreams after turn 1.
 
   LEARNING LOOP:
   - Every 10 turns, call game-rl:episodeSummary to check total reward.
@@ -38,23 +37,11 @@ purpose: |
   BUILDINGS: Bed, Bedroll, Wall, Door, SimpleResearchBench, Campfire, Sandbags
   WORKTYPES: Doctor, Cooking, Hunting, Construction, Growing, Mining, Hauling, Cleaning, Research
 
-  ACTION PARAMETER REFERENCE (use EXACT field names):
-  - DesignateHunt: TargetId=<animal ThingID from Entities.Animals e.g. "Deer123"> OR TargetSubType=<animal type e.g. "WildBoar">
-  - SetWorkPriority: ColonistId=<name from Colonists>, WorkType=<see WORKTYPES>, Priority=1(highest)-4
-  - PlaceBlueprint: Building=<see BUILDINGS>, X=<int>, Y=<int>, Stuff=<material e.g. "WoodLog">
-  - CreateGrowingZone: X=<int>, Y=<int>, Width=6, Height=6, Plant=<DefName e.g. "Plant_Potato">
-  - UnforbidByType: ThingDefName=<item DefName e.g. "MealSurvivalPack">
-  - Draft/Undraft: ColonistId=<name from Colonists>
-  - SelectResearch: ProjectDefName=<DefName from Research.Available>
-  - Equip: ColonistId=<name>, ThingId=<weapon ThingID from Entities.Items>
-
   RULES:
   - Use colonist names/IDs from the MOST RECENT observe only.
-  - If step fails, read the error and fix the arguments. NEVER repeat the same failed call.
+  - If step fails, read the error and fix the arguments.
   - Draft ONLY during raids. If IsDrafted=true and no threats, step Undraft.
   - After PlaceBlueprint, step SetWorkPriority Construction Priority=1.
-  - DesignateHunt targets ANIMALS, not food items. Get animal IDs from observe.
-  - When Starvation alert: 1) UnforbidByType MealSurvivalPack 2) CreateGrowingZone for Plant_Potato 3) SetWorkPriority Cooking=1
 
 model: qwen3.5-9b
 action_interval: 120

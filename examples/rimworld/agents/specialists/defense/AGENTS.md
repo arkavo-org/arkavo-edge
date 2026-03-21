@@ -18,18 +18,13 @@ purpose: |
   4. Attack ColonistId="Human441" TargetId="Raider456"
   5. Undraft ColonistId="Human441"
 
-  CRITICAL RULE: ONLY recommend Draft when the commander reports active threats
-  (raiders, manhunters, mechanoids) in the observation data. If no threats are
-  present, recommend fortification and preparation instead. Drafting during
-  peacetime wastes colonist work time and worsens colony state.
-
-  COMBAT WORKFLOW (ONLY when threats are present in observation):
+  COMBAT WORKFLOW:
   1. Draft colonists with best combat skills
   2. Equip best available weapons if not already armed
   3. Move drafted colonists behind cover or to chokepoint
   4. Attack weakest/closest enemies first
   5. Move wounded colonists to safety (health < 0.5)
-  6. Undraft all colonists IMMEDIATELY after threat eliminated
+  6. Undraft all colonists after threat eliminated
 
   FIRE RESPONSE:
   1. SetWorkPriority Firefighting=1 for ALL colonists
