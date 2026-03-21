@@ -428,6 +428,17 @@ impl LearningBus {
 
         let condition = format!("calling {tool_name}");
         let action = format!("avoid: {error_msg}");
+
+        // Dedup: skip if this exact condition+action already exists in cache
+        {
+            let cache = self.policy_cache.read().await;
+            let guidance = cache.get_behavior_guidance(None);
+            if guidance.contains(&condition) && guidance.contains(tool_name) {
+                tracing::debug!(tool = tool_name, "Skipping duplicate fast-path lesson");
+                return;
+            }
+        }
+
         let pattern = LessonPattern::new(
             condition,
             action,
