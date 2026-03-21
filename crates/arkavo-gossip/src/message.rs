@@ -66,6 +66,28 @@ pub enum GossipMessage {
     TaskCompleted(TaskCompletionNotice),
     /// GPU inference state broadcast for distributed scheduling
     InferenceState(InferenceStateBroadcast),
+    /// Data artifact available on the Iroh data plane
+    DataAvailable(DataAvailableAnnounce),
+}
+
+/// Announcement that a data artifact is available for retrieval via Iroh.
+///
+/// Generic: any agent can announce any data blob. The content_type field
+/// tells receivers how to interpret the data (e.g. "episode_summary",
+/// "observation_batch", "checkpoint"). Domain-specific interpretation
+/// happens at the agent level, not in core crates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataAvailableAnnounce {
+    /// Agent that staged the data
+    pub originator: String,
+    /// Iroh ticket string for data retrieval
+    pub iroh_ticket: String,
+    /// Content type hint (e.g. "episode_summary", "observation_batch")
+    pub content_type: String,
+    /// Optional metadata (reward totals, step counts, etc.)
+    pub metadata: Option<serde_json::Value>,
+    /// When the data was staged
+    pub timestamp: DateTime<Utc>,
 }
 
 /// GPU inference activity broadcast.

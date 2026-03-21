@@ -47,6 +47,12 @@ impl LearningBus {
             None
         };
 
+        let data_available = if let GossipMessage::DataAvailable(ref announce) = message {
+            Some(announce.clone())
+        } else {
+            None
+        };
+
         // Forward patchlet gossip to AutoLearner's bridge for processing
         if matches!(
             &message,
@@ -194,6 +200,16 @@ impl LearningBus {
                 .write()
                 .await
                 .insert(state.agent_id.clone(), state);
+        }
+
+        // Queue data availability announcements for Iroh retrieval
+        if let Some(announce) = data_available {
+            tracing::info!(
+                originator = %announce.originator,
+                content_type = %announce.content_type,
+                "Queued data available announcement for processing"
+            );
+            self.data_available.write().await.push(announce);
         }
 
         // Handle task completion notifications from specialists
