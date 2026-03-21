@@ -43,6 +43,7 @@ pub(super) async fn run_tool_loop(
     let mut total_step_idx: usize = 0;
     let mut first_inference_timing = None;
     let mut force_planning = false;
+    let mut consecutive_negative_rewards: u32 = 0;
     let loop_start = std::time::Instant::now();
 
     // Context budget: estimate model window in chars (tokens × 4)
@@ -340,6 +341,9 @@ pub(super) async fn run_tool_loop(
         // so the capable model can reason about the failure and pick a better action.
         if reward_signals.last().is_some_and(|&r| r < 0.0) {
             force_planning = true;
+            consecutive_negative_rewards += 1;
+        } else if reward_signals.last().is_some() {
+            consecutive_negative_rewards = 0;
         }
 
         let tool_results_text = tool_result_parts.join("\n\n");
@@ -386,8 +390,23 @@ pub(super) async fn run_tool_loop(
             tool_results_text
         };
 
+        let exploration_nudge = if consecutive_negative_rewards >= 3 {
+            info!(
+                consecutive_negative_rewards,
+                "Injecting exploration prompt after repeated negative rewards"
+            );
+            format!(
+                "\n\nWARNING: The last {consecutive_negative_rewards} actions worsened colony state. \
+                 Choose an action category NOT used in the last 3 ticks. \
+                 Read the observe output for the most critical unmet need \
+                 and address it directly."
+            )
+        } else {
+            String::new()
+        };
+
         messages.push(arkavo_llm::Message::user(format!(
-            "Tool results:\n{result_to_append}\n\nContinue your workflow. What is the next step?"
+            "Tool results:\n{result_to_append}{exploration_nudge}\n\nContinue your workflow. What is the next step?"
         )));
     }
 
