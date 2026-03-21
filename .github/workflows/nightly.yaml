@@ -3,12 +3,6 @@ name: Nightly
 on:
   schedule:
     - cron: '0 2 * * *' # 2 AM UTC daily
-  pull_request:
-    branches: [main]
-    paths:
-      - 'crates/arkavo-protocol/**'
-      - 'crates/arkavo-tdf/**'
-      - 'crates/arkavo-protocol/fuzz/**'
   workflow_dispatch:
 
 permissions:
