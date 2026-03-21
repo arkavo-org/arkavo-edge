@@ -54,7 +54,7 @@ impl EpisodeBuffer {
         Self {
             observations: HashMap::new(),
             episodes: HashMap::new(),
-            observation_threshold: 3, // Synthesize episode after 3 observations
+            observation_threshold: 2, // Synthesize episode after 2 observations
             episode_threshold: 3,     // Synthesize lesson after 3 episodes
         }
     }

@@ -420,6 +420,32 @@ impl LearningBus {
             .sum()
     }
 
+    /// Write a corrective lesson directly to PolicyCache, bypassing the
+    /// observation → episode → lesson accumulation pipeline. Used for tool
+    /// errors where the error message is ground truth (no synthesis needed).
+    pub async fn add_fast_lesson(&self, tool_name: &str, error_msg: &str) {
+        use arkavo_router::learning::{Lesson, LessonPattern};
+
+        let condition = format!("calling {tool_name}");
+        let action = format!("avoid: {error_msg}");
+        let pattern = LessonPattern::new(
+            condition,
+            action,
+            "prevent repeated tool failures".to_string(),
+        );
+        let lesson = Lesson::new(
+            self.agent_id.clone(),
+            self.swarm_id.clone(),
+            "tool_error".to_string(),
+            pattern,
+            0.9,
+            1,
+        );
+        let mut cache = self.policy_cache.write().await;
+        cache.add_lesson(lesson);
+        tracing::info!(tool = tool_name, "Fast-path lesson added from tool error");
+    }
+
     /// Broadcast a gossip message to all connected peers.
     pub async fn broadcast_to_peers(&self, message: GossipMessage) {
         let gossip = self.gossip.read().await;

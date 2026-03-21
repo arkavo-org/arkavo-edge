@@ -505,6 +505,11 @@ async fn execute_tool_calls(
                                 Some(&model_name),
                             )
                             .await;
+
+                            // Fast-path lesson: tool error messages are ground truth.
+                            // Bypass the 3-observation accumulation threshold and write
+                            // a corrective lesson directly to PolicyCache.
+                            bus.add_fast_lesson(&tool_call.tool_name, err_msg).await;
                         }
                     }
                 } else {
