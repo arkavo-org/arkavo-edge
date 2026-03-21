@@ -1100,8 +1100,14 @@ impl A2aServer {
 
                     drop(memory);
 
-                    // Cap to avoid exceeding context limits
-                    ctx.truncate(4096);
+                    // Cap to avoid exceeding context limits (floor to char boundary)
+                    if ctx.len() > 4096 {
+                        let mut end = 4096;
+                        while !ctx.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        ctx.truncate(end);
+                    }
                     *tc.write().await = ctx;
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
