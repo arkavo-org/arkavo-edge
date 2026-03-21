@@ -117,8 +117,11 @@ fuzz_target!(|input: A2AFuzzInput| {
             // Message parsing (A2A Message)
             match serde_json::from_str::<Message>(json_str) {
                 Ok(msg) => {
-                    // Message must have at least one part
-                    assert!(!msg.parts.is_empty(), "Message must have at least one part");
+                    // Empty parts are now rejected at deserialization time
+                    assert!(
+                        !msg.parts.is_empty(),
+                        "Serde validation should reject empty parts"
+                    );
 
                     let encoded = serde_json::to_string(&msg).expect("encode should succeed");
                     let decoded: Message =

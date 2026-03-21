@@ -398,7 +398,7 @@
             "description": "Optional metadata"
           },
           "parts": {
-            "description": "Message parts",
+            "description": "Message parts (must contain at least one)",
             "items": {
               "$ref": "#/definitions/MessagePart"
             },
@@ -1084,7 +1084,7 @@
                 "description": "Optional metadata"
               },
               "parts": {
-                "description": "Message parts",
+                "description": "Message parts (must contain at least one)",
                 "items": {
                   "$ref": "#/definitions/MessagePart"
                 },
@@ -1297,7 +1297,7 @@
                 "description": "Optional metadata"
               },
               "parts": {
-                "description": "Message parts",
+                "description": "Message parts (must contain at least one)",
                 "items": {
                   "$ref": "#/definitions/MessagePart"
                 },
@@ -1795,7 +1795,7 @@
                 "description": "Optional metadata"
               },
               "parts": {
-                "description": "Message parts",
+                "description": "Message parts (must contain at least one)",
                 "items": {
                   "$ref": "#/definitions/MessagePart"
                 },
@@ -2364,7 +2364,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.61.0"
+    "version": "0.67.4"
   },
   "methods": [
     {
@@ -2772,7 +2772,7 @@
                     "description": "Optional metadata"
                   },
                   "parts": {
-                    "description": "Message parts",
+                    "description": "Message parts (must contain at least one)",
                     "items": {
                       "$ref": "#/definitions/MessagePart"
                     },
@@ -2990,7 +2990,7 @@
                   "description": "Optional metadata"
                 },
                 "parts": {
-                  "description": "Message parts",
+                  "description": "Message parts (must contain at least one)",
                   "items": {
                     "$ref": "#/definitions/MessagePart"
                   },
@@ -3306,7 +3306,7 @@
                   "description": "Optional metadata"
                 },
                 "parts": {
-                  "description": "Message parts",
+                  "description": "Message parts (must contain at least one)",
                   "items": {
                     "$ref": "#/definitions/MessagePart"
                   },

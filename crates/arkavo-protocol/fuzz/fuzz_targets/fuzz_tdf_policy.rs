@@ -8,7 +8,7 @@
 //! - TDF-003: Policy round-trip serialization
 //! - TDF-004: Manifest integrity checks
 
-use arkavo_tdf::types::{Attribute, Policy, TdfManifest};
+use arkavo_tdf::{Attribute, Policy, TdfManifest};
 use libfuzzer_sys::fuzz_target;
 
 /// Fuzz input for TDF policy testing
@@ -155,9 +155,13 @@ fuzz_target!(|input: TdfFuzzInput| {
     }
 
     // Additional: Test Attribute deserialization directly
+    // Empty FQN is now rejected at deserialization time
     if input.test_type == 0 {
         if let Ok(attr) = serde_json::from_str::<Attribute>(json_str) {
-            assert!(!attr.attribute.is_empty(), "Attribute FQN cannot be empty");
+            assert!(
+                !attr.attribute.is_empty(),
+                "Serde validation should reject empty FQN"
+            );
             let _ = attr.values.len();
         }
     }

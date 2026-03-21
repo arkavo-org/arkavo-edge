@@ -86,9 +86,11 @@ cargo +nightly fuzz coverage fuzz_rate_limit_concurrent
 
 ## CI Integration
 
-Fuzz tests run automatically in GitHub Actions:
-- Nightly at 2 AM UTC  
-- On pull requests modifying arkavo-protocol
+Fuzz tests run automatically via `.github/workflows/nightly.yaml`:
+- Nightly at 2 AM UTC
+- On pull requests modifying `arkavo-protocol` or `arkavo-tdf`
 - Via manual workflow dispatch
 
-Each target runs for 10 minutes with crash artifacts uploaded on failure.
+Each target runs in parallel for 10 minutes. Corpus is cached between runs for incremental coverage. Crash artifacts are uploaded on failure with 30-day retention.
+
+A separate job checks the fuzz `Cargo.lock` for outdated dependencies to prevent vulnerability blind spots in Dependabot scanning.

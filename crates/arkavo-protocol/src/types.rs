@@ -744,12 +744,26 @@ pub struct MessageSendRequest {
 /// Message for A2A communication
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Message {
-    /// Message parts
+    /// Message parts (must contain at least one)
+    #[serde(deserialize_with = "deserialize_non_empty_parts")]
     pub parts: Vec<MessagePart>,
 
     /// Optional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+}
+
+fn deserialize_non_empty_parts<'de, D>(deserializer: D) -> Result<Vec<MessagePart>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let parts = Vec::<MessagePart>::deserialize(deserializer)?;
+    if parts.is_empty() {
+        return Err(serde::de::Error::custom(
+            "message must have at least one part",
+        ));
+    }
+    Ok(parts)
 }
 
 /// Part of a message
