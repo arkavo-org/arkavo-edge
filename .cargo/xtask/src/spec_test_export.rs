@@ -183,12 +183,13 @@ fn add_to_code_map(
 
 fn extract_crate_name(path: &str) -> String {
     // Extract crate name from paths like "crates/arkavo-crypto/src/lib.rs"
+    // and strip the redundant "arkavo-" prefix for display
     let parts: Vec<&str> = path.split('/').collect();
     for (i, part) in parts.iter().enumerate() {
         if *part == "crates"
             && let Some(name) = parts.get(i + 1)
         {
-            return name.to_string();
+            return name.strip_prefix("arkavo-").unwrap_or(name).to_string();
         }
     }
     "other".into()

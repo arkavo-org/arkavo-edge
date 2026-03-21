@@ -40,7 +40,11 @@ function renderTraceabilityContent(container, data) {
     html += '</div>';
     html += '<div class="traceability-detail" id="trace-detail"></div>';
 
+    html += '<div class="treemap-tooltip" id="treemap-tooltip"></div>';
+
     container.innerHTML = html;
+
+    var tooltip = document.getElementById('treemap-tooltip');
 
     renderSpecTreemap(data.specs, document.getElementById('spec-treemap'));
     renderCodeTreemap(data.code, document.getElementById('code-treemap'));
@@ -69,6 +73,11 @@ function renderTraceabilityContent(container, data) {
     });
 
     container.addEventListener('mouseover', function(e) {
+        var target = e.target.closest('[data-tooltip]');
+        if (target && tooltip) {
+            tooltip.textContent = target.dataset.tooltip;
+            tooltip.style.display = 'block';
+        }
         if (_tracePin) return;
         var leaf = e.target.closest('.treemap-leaf');
         if (!leaf) return;
@@ -82,7 +91,18 @@ function renderTraceabilityContent(container, data) {
         }, 50);
     });
 
+    container.addEventListener('mousemove', function(e) {
+        if (tooltip && tooltip.style.display === 'block') {
+            tooltip.style.left = (e.clientX + 12) + 'px';
+            tooltip.style.top = (e.clientY + 12) + 'px';
+        }
+    });
+
     container.addEventListener('mouseout', function(e) {
+        var target = e.target.closest('[data-tooltip]');
+        if (target && tooltip) {
+            tooltip.style.display = 'none';
+        }
         if (_tracePin) return;
         var leaf = e.target.closest('.treemap-leaf');
         if (!leaf) return;
@@ -156,12 +176,14 @@ function renderSpecTreemap(specs, container) {
         var labelH = 16;
 
         svg += '<rect x="' + gx + '" y="' + gy + '" width="' + gw + '" height="' + labelH +
-            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"/>';
+            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"' +
+            ' data-tooltip="' + escapeHtml(group.name) + ' (' + group.items.length + ' scenarios)"' +
+            ' data-group-name="' + escapeHtml(group.name) + '"/>';
         var glClip = 'gc' + (_clipIdCounter++);
         svg += '<clipPath id="' + glClip + '"><rect x="' + gx + '" y="' + gy +
             '" width="' + gw + '" height="' + labelH + '"/></clipPath>';
         svg += '<text x="' + (gx + 4) + '" y="' + (gy + 11) +
-            '" clip-path="url(#' + glClip + ')" class="treemap-group-label">' +
+            '" clip-path="url(#' + glClip + ')" class="treemap-group-label" pointer-events="none">' +
             escapeHtml(group.name) + '</text>';
 
         var innerRect = { x: gx + 1, y: gy + labelH, w: gw - 2, h: gh - labelH - 1 };
@@ -174,6 +196,8 @@ function renderSpecTreemap(specs, container) {
                 _scenarioRects[leaf.id] = { x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h };
 
                 svg += '<rect class="treemap-leaf" data-type="scenario" data-id="' + escapeHtml(leaf.id) + '"' +
+                    ' data-tooltip="' + escapeHtml(leaf.id) + ' \u2014 ' + escapeHtml(leaf.name) + '"' +
+                    ' data-group="' + escapeHtml(leaf.specName) + '" data-label="' + escapeHtml(leaf.id) + '"' +
                     ' x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
                     ' fill="' + color + '" opacity="' + alpha + '"' +
                     ' stroke="#0a0a0f" stroke-width="1" rx="2"/>';
@@ -245,12 +269,14 @@ function renderCodeTreemap(code, container) {
         var labelH = 16;
 
         svg += '<rect x="' + gx + '" y="' + gy + '" width="' + gw + '" height="' + labelH +
-            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"/>';
+            '" fill="#1a1a2e" stroke="#2a2a3e" stroke-width="0.5"' +
+            ' data-tooltip="' + escapeHtml(group.name) + ' (' + group.items.length + ' files)"' +
+            ' data-group-name="' + escapeHtml(group.name) + '"/>';
         var glClip2 = 'gc' + (_clipIdCounter++);
         svg += '<clipPath id="' + glClip2 + '"><rect x="' + gx + '" y="' + gy +
             '" width="' + gw + '" height="' + labelH + '"/></clipPath>';
         svg += '<text x="' + (gx + 4) + '" y="' + (gy + 11) +
-            '" clip-path="url(#' + glClip2 + ')" class="treemap-group-label">' +
+            '" clip-path="url(#' + glClip2 + ')" class="treemap-group-label" pointer-events="none">' +
             escapeHtml(group.name) + '</text>';
 
         var innerRect = { x: gx + 1, y: gy + labelH, w: gw - 2, h: gh - labelH - 1 };
@@ -263,6 +289,8 @@ function renderCodeTreemap(code, container) {
                 var color = fileStatusColor(leaf.scenarios, _scenarioStatusMap);
 
                 svg += '<rect class="treemap-leaf" data-type="file" data-id="' + escapeHtml(leaf.id) + '"' +
+                    ' data-tooltip="' + escapeHtml(leaf.id) + ' (' + leaf.scenarioCount + ' scenarios)"' +
+                    ' data-group="' + escapeHtml(leaf.crateName) + '" data-label="' + escapeHtml(leaf.name) + '"' +
                     ' x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
                     ' fill="' + color + '" opacity="0.75"' +
                     ' stroke="#0a0a0f" stroke-width="1" rx="2"/>';
@@ -290,25 +318,27 @@ function applyHighlight(type, id) {
         leaves[i].style.opacity = '0.15';
     }
 
+    var highlighted = [];
     var linkedIds = [];
     if (type === 'scenario') {
         var el = document.querySelector('.treemap-leaf[data-id="' + CSS.escape(id) + '"]');
-        if (el) el.style.opacity = '1';
+        if (el) { el.style.opacity = '1'; highlighted.push(el); }
         linkedIds = (_scenarioLookup && _scenarioLookup[id]) || [];
         for (var j = 0; j < linkedIds.length; j++) {
             var fileEl = document.querySelector('.treemap-leaf[data-id="' + CSS.escape(linkedIds[j]) + '"]');
-            if (fileEl) fileEl.style.opacity = '1';
+            if (fileEl) { fileEl.style.opacity = '1'; highlighted.push(fileEl); }
         }
     } else if (type === 'file') {
         var fileLeaf = document.querySelector('.treemap-leaf[data-id="' + CSS.escape(id) + '"]');
-        if (fileLeaf) fileLeaf.style.opacity = '1';
+        if (fileLeaf) { fileLeaf.style.opacity = '1'; highlighted.push(fileLeaf); }
         linkedIds = (_codeLookup && _codeLookup[id]) || [];
         for (var k = 0; k < linkedIds.length; k++) {
             var scEl = document.querySelector('.treemap-leaf[data-id="' + CSS.escape(linkedIds[k]) + '"]');
-            if (scEl) scEl.style.opacity = '1';
+            if (scEl) { scEl.style.opacity = '1'; highlighted.push(scEl); }
         }
     }
 
+    showActiveLabels(highlighted);
     drawBridgeCurves(type, id, linkedIds);
 }
 
@@ -317,8 +347,69 @@ function clearHighlight() {
     for (var i = 0; i < leaves.length; i++) {
         leaves[i].style.opacity = '';
     }
+    clearActiveLabels();
     var bridgeSvg = document.getElementById('bridge-svg');
     if (bridgeSvg) bridgeSvg.innerHTML = '';
+}
+
+function showActiveLabels(highlightedEls) {
+    clearActiveLabels();
+    var groupsSeen = Object.create(null);
+
+    for (var i = 0; i < highlightedEls.length; i++) {
+        var el = highlightedEls[i];
+        var svg = el.closest('svg');
+        if (!svg) continue;
+
+        var overlay = svg.querySelector('.active-label-overlay');
+        if (!overlay) {
+            overlay = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            overlay.setAttribute('class', 'active-label-overlay');
+            svg.appendChild(overlay);
+        }
+
+        // Show full leaf label
+        var lx = parseFloat(el.getAttribute('x'));
+        var ly = parseFloat(el.getAttribute('y'));
+        var lw = parseFloat(el.getAttribute('width'));
+        var lh = parseFloat(el.getAttribute('height'));
+        var label = el.dataset.label || el.dataset.id || '';
+        if (label && lh >= 10) {
+            var txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            txt.setAttribute('x', lx + lw / 2);
+            txt.setAttribute('y', ly + lh / 2 + 3);
+            txt.setAttribute('text-anchor', 'middle');
+            txt.setAttribute('class', 'active-label-text');
+            txt.textContent = label;
+            overlay.appendChild(txt);
+        }
+
+        // Show full group header label (once per group per SVG)
+        var groupName = el.dataset.group;
+        var svgId = svg.closest('.treemap-container') ? svg.closest('.treemap-container').id : '';
+        var groupKey = svgId + ':' + groupName;
+        if (groupName && !groupsSeen[groupKey]) {
+            groupsSeen[groupKey] = true;
+            var header = svg.querySelector('rect[data-group-name="' + CSS.escape(groupName) + '"]');
+            if (header) {
+                var hx = parseFloat(header.getAttribute('x'));
+                var hy = parseFloat(header.getAttribute('y'));
+                var htxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                htxt.setAttribute('x', hx + 4);
+                htxt.setAttribute('y', hy + 11);
+                htxt.setAttribute('class', 'active-group-text');
+                htxt.textContent = groupName;
+                overlay.appendChild(htxt);
+            }
+        }
+    }
+}
+
+function clearActiveLabels() {
+    var overlays = document.querySelectorAll('.active-label-overlay');
+    for (var i = 0; i < overlays.length; i++) {
+        overlays[i].parentNode.removeChild(overlays[i]);
+    }
 }
 
 function drawBridgeCurves(type, id, linkedIds) {

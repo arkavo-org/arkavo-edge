@@ -1,6 +1,7 @@
 pub mod error;
 pub mod event;
 pub mod payload;
+pub mod sequence_evidence;
 pub mod writer;
 
 pub use error::EventError;

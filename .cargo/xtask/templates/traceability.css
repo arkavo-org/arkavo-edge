@@ -122,3 +122,44 @@ h1 {
 .trace-detail-item { padding: 2px 0 2px 12px; color: var(--text-primary); font-size: 12px; }
 
 .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
+
+.active-label-text {
+    font-size: 8px;
+    fill: #e0e0e8;
+    font-weight: 700;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0a0a0f;
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.active-group-text {
+    font-size: 10px;
+    fill: #e0e0e8;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0a0a0f;
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+
+.treemap-tooltip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 100;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: none;
+}

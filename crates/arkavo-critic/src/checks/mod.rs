@@ -6,6 +6,8 @@ mod lint;
 mod policy;
 mod schema;
 mod semantic;
+pub mod sequence_circuit;
+pub mod sequence_gate;
 mod traits;
 
 pub use circuit::{CircuitCheck, PolicyId};

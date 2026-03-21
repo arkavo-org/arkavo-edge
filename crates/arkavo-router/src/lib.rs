@@ -2,6 +2,7 @@
 #![allow(clippy::unused_async)]
 
 pub mod architect;
+pub mod async_monitor;
 pub mod classifier;
 pub mod connectivity;
 pub mod decision;

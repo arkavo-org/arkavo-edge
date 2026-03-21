@@ -1,5 +1,7 @@
 pub mod advisor_state;
 pub mod case_retrieval;
+pub mod cross_agent;
+pub mod decomposition;
 pub mod embeddings;
 pub mod encryption;
 pub mod error;
@@ -12,6 +14,7 @@ pub mod memory_lifecycle;
 pub mod models;
 pub mod orchestrator_state;
 pub mod plan_state;
+pub mod sequence_ledger;
 #[cfg(feature = "vector-search")]
 pub mod storage;
 pub mod tdf_audit_store;

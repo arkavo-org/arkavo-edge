@@ -38,6 +38,8 @@ mod accumulator;
 mod detector;
 mod evidence;
 mod monitor;
+pub mod sequence_anomaly;
+pub mod sequence_bridge;
 
 pub use accumulator::EmaAccumulator;
 pub use detector::{BoundaryDetector, DriftDetector, HardFailureDetector, SurpriseDetector};

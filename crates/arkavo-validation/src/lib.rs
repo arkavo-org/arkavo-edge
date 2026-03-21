@@ -1,5 +1,7 @@
+pub mod egress_taint;
 pub mod external_content;
 pub mod path;
+pub mod provenance_egress;
 pub mod sanitize;
 pub mod size;
 pub mod url;

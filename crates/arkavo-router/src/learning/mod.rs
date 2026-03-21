@@ -34,6 +34,7 @@
 //! Agents graduate from probation after 50 successful observations.
 
 mod agent_utility;
+pub mod baseline;
 mod config;
 pub mod coordination;
 pub mod decision_trace;
