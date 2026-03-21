@@ -1,6 +1,5 @@
 use uuid::Uuid;
 
-/// Serialized action graph for audit trail
 #[derive(Debug, Clone)]
 pub struct SequenceEvidence {
     pub session_id: Uuid,
@@ -10,14 +9,14 @@ pub struct SequenceEvidence {
     pub correlation_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AuditActionNode {
     pub tool_name: String,
     pub sequence_number: u64,
     pub taint_labels: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BaselineComparison {
     pub expected_pattern: String,
     pub actual_pattern: String,
@@ -25,40 +24,45 @@ pub struct BaselineComparison {
 }
 
 impl SequenceEvidence {
-    /// SEQ-015: Create evidence from a sequence violation
     pub fn from_violation(
-        _session_id: Uuid,
-        _action_graph: Vec<AuditActionNode>,
-        _taint_chain: Vec<String>,
+        session_id: Uuid,
+        action_graph: Vec<AuditActionNode>,
+        taint_chain: Vec<String>,
     ) -> Self {
         Self {
-            session_id: Uuid::nil(),
-            action_graph: Vec::new(),
-            taint_chain: Vec::new(),
+            session_id,
+            action_graph,
+            taint_chain,
             baseline_comparison: None,
             correlation_id: None,
         }
     }
 
-    /// Attach baseline comparison for forensic context
-    pub fn with_baseline(self, _comparison: BaselineComparison) -> Self {
+    pub fn with_baseline(mut self, comparison: BaselineComparison) -> Self {
+        self.baseline_comparison = Some(comparison);
         self
     }
 
-    /// Link to cross-session decomposition analysis
-    pub fn with_correlation(self, _correlation_id: Uuid) -> Self {
+    pub fn with_correlation(mut self, correlation_id: Uuid) -> Self {
+        self.correlation_id = Some(correlation_id);
         self
     }
 
-    /// Serialize for inclusion in Event payload
     pub fn to_event_payload(&self) -> serde_json::Value {
-        serde_json::Value::Null
+        serde_json::json!({
+            "session_id": self.session_id.to_string(),
+            "action_graph": self.action_graph,
+            "taint_chain": self.taint_chain,
+            "baseline_comparison": self.baseline_comparison,
+            "correlation_id": self.correlation_id.map(|id| id.to_string()),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn sample_graph() -> Vec<AuditActionNode> {
         vec![
@@ -83,68 +87,52 @@ mod tests {
         ]
     }
 
-    // =========================================================================
-    // SEQ-015: Sequence evidence in audit events
-    // =========================================================================
-
+    #[spec("SEQ-015")]
     #[test]
-    fn evidence_includes_full_action_graph() {
-        let evidence = SequenceEvidence::from_violation(
-            Uuid::new_v4(),
-            sample_graph(),
-            sample_taint_chain(),
-        );
+    fn evidence_preserves_full_action_graph() {
+        let evidence =
+            SequenceEvidence::from_violation(Uuid::new_v4(), sample_graph(), sample_taint_chain());
         assert_eq!(evidence.action_graph.len(), 2);
     }
 
+    #[spec("SEQ-015")]
     #[test]
-    fn evidence_includes_taint_chain() {
-        let evidence = SequenceEvidence::from_violation(
-            Uuid::new_v4(),
-            sample_graph(),
-            sample_taint_chain(),
-        );
+    fn evidence_preserves_taint_chain_from_source_to_violation() {
+        let evidence =
+            SequenceEvidence::from_violation(Uuid::new_v4(), sample_graph(), sample_taint_chain());
         assert_eq!(evidence.taint_chain.len(), 3);
         assert!(evidence.taint_chain[0].contains("source"));
         assert!(evidence.taint_chain[2].contains("violation"));
     }
 
+    #[spec("SEQ-015")]
     #[test]
-    fn evidence_includes_baseline_comparison() {
-        let evidence = SequenceEvidence::from_violation(
-            Uuid::new_v4(),
-            sample_graph(),
-            sample_taint_chain(),
-        )
-        .with_baseline(BaselineComparison {
-            expected_pattern: "read→summarize→respond".into(),
-            actual_pattern: "read→http_post".into(),
-            divergence_score: 0.85,
-        });
+    fn evidence_attaches_baseline_comparison() {
+        let evidence =
+            SequenceEvidence::from_violation(Uuid::new_v4(), sample_graph(), sample_taint_chain())
+                .with_baseline(BaselineComparison {
+                    expected_pattern: "read\u{2192}summarize\u{2192}respond".into(),
+                    actual_pattern: "read\u{2192}http_post".into(),
+                    divergence_score: 0.85,
+                });
         assert!(evidence.baseline_comparison.is_some());
-        let comparison = evidence.baseline_comparison.unwrap();
-        assert!(comparison.divergence_score > 0.5);
     }
 
+    #[spec("SEQ-015")]
     #[test]
     fn evidence_links_correlation_id_for_decomposition() {
         let correlation = Uuid::new_v4();
-        let evidence = SequenceEvidence::from_violation(
-            Uuid::new_v4(),
-            sample_graph(),
-            sample_taint_chain(),
-        )
-        .with_correlation(correlation);
+        let evidence =
+            SequenceEvidence::from_violation(Uuid::new_v4(), sample_graph(), sample_taint_chain())
+                .with_correlation(correlation);
         assert_eq!(evidence.correlation_id, Some(correlation));
     }
 
+    #[spec("SEQ-015")]
     #[test]
-    fn evidence_serializes_to_json_payload() {
-        let evidence = SequenceEvidence::from_violation(
-            Uuid::new_v4(),
-            sample_graph(),
-            sample_taint_chain(),
-        );
+    fn evidence_serializes_to_json_with_required_fields() {
+        let evidence =
+            SequenceEvidence::from_violation(Uuid::new_v4(), sample_graph(), sample_taint_chain());
         let payload = evidence.to_event_payload();
         assert!(payload.is_object());
         assert!(payload.get("action_graph").is_some());

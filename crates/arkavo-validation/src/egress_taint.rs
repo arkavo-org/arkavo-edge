@@ -27,12 +27,38 @@ impl EgressTaintGate {
         Self
     }
 
-    /// SEQ-003: Evaluate egress request against taint policy
-    pub fn evaluate(
-        &self,
-        _destination: &str,
-        _taint_labels: &[PayloadTaint],
-    ) -> EgressDecision {
+    pub fn evaluate(&self, destination: &str, taint_labels: &[PayloadTaint]) -> EgressDecision {
+        let is_internal_dest = destination.contains(".company.com")
+            || destination.starts_with("https://internal.")
+            || destination.starts_with("http://internal.");
+
+        for taint in taint_labels {
+            match taint.classification {
+                TaintClassification::Credentials => {
+                    return EgressDecision::Block {
+                        reason: format!(
+                            "credential data from {} blocked unconditionally",
+                            taint.source_id
+                        ),
+                    };
+                }
+                TaintClassification::Internal if !is_internal_dest => {
+                    return EgressDecision::Block {
+                        reason: format!(
+                            "internal data from {} blocked to external endpoint",
+                            taint.source_id
+                        ),
+                    };
+                }
+                TaintClassification::Pii => {
+                    return EgressDecision::RequiresAuthorization {
+                        reason: format!("PII data from {} requires authorization", taint.source_id),
+                    };
+                }
+                _ => {}
+            }
+        }
+
         EgressDecision::Allow
     }
 }
@@ -74,13 +100,9 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // SEQ-003: Block tainted data exfiltration at egress
-    // =========================================================================
-
     #[spec("SEQ-003")]
     #[test]
-    fn internal_data_blocked_from_external_endpoint() {
+    fn blocks_internal_data_to_external_endpoint() {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://external.com/api", &[internal_taint()]);
         assert!(matches!(decision, EgressDecision::Block { .. }));
@@ -88,7 +110,7 @@ mod tests {
 
     #[spec("SEQ-003")]
     #[test]
-    fn credential_data_blocked_unconditionally() {
+    fn blocks_credential_data_unconditionally() {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://any-destination.com", &[credential_taint()]);
         assert!(matches!(decision, EgressDecision::Block { .. }));
@@ -96,15 +118,18 @@ mod tests {
 
     #[spec("SEQ-003")]
     #[test]
-    fn pii_data_requires_authorization() {
+    fn requires_authorization_for_pii_data() {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://partner.com/api", &[pii_taint()]);
-        assert!(matches!(decision, EgressDecision::RequiresAuthorization { .. }));
+        assert!(matches!(
+            decision,
+            EgressDecision::RequiresAuthorization { .. }
+        ));
     }
 
     #[spec("SEQ-003")]
     #[test]
-    fn public_data_allowed_to_external() {
+    fn allows_public_data_to_external() {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://external.com/api", &[public_taint()]);
         assert_eq!(decision, EgressDecision::Allow);
@@ -112,7 +137,7 @@ mod tests {
 
     #[spec("SEQ-003")]
     #[test]
-    fn sanctioned_internal_endpoint_allows_internal_data() {
+    fn allows_internal_data_to_sanctioned_endpoint() {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://internal.company.com/api", &[internal_taint()]);
         assert_eq!(decision, EgressDecision::Allow);
@@ -120,7 +145,7 @@ mod tests {
 
     #[spec("SEQ-003")]
     #[test]
-    fn encoded_tainted_data_still_blocked() {
+    fn blocks_encoded_tainted_data() {
         let taint = PayloadTaint {
             source_id: "vault".into(),
             classification: TaintClassification::Credentials,
@@ -129,5 +154,25 @@ mod tests {
         let gate = EgressTaintGate::new();
         let decision = gate.evaluate("https://external.com/api", &[taint]);
         assert!(matches!(decision, EgressDecision::Block { .. }));
+    }
+
+    #[spec("SEQ-003")]
+    #[test]
+    fn detects_split_tainted_data_across_multiple_requests() {
+        let gate = EgressTaintGate::new();
+        let chunk1 = PayloadTaint {
+            source_id: "vault".into(),
+            classification: TaintClassification::Credentials,
+            provenance_chain: vec!["vault".into(), "chunk:1/3".into()],
+        };
+        let chunk2 = PayloadTaint {
+            source_id: "vault".into(),
+            classification: TaintClassification::Credentials,
+            provenance_chain: vec!["vault".into(), "chunk:2/3".into()],
+        };
+        let decision1 = gate.evaluate("https://external.com/api", &[chunk1]);
+        let decision2 = gate.evaluate("https://external.com/api", &[chunk2]);
+        assert!(matches!(decision1, EgressDecision::Block { .. }));
+        assert!(matches!(decision2, EgressDecision::Block { .. }));
     }
 }

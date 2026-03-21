@@ -1,6 +1,5 @@
 use std::fmt;
 
-/// SEQ-017: Error types for sequence integrity system
 #[derive(Debug)]
 pub enum SequenceIntegrityError {
     StorageFailure { source: String },
@@ -11,51 +10,63 @@ pub enum SequenceIntegrityError {
 
 impl fmt::Display for SequenceIntegrityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "sequence integrity error")
+        match self {
+            Self::StorageFailure { source } => {
+                write!(f, "storage failure: {source}")
+            }
+            Self::TrackingTimeout { action } => {
+                write!(f, "tracking timeout on action: {action}")
+            }
+            Self::TaintBridgeUnavailable => {
+                write!(f, "taint bridge unavailable")
+            }
+            Self::LedgerCorrupted { detail } => {
+                write!(f, "ledger corrupted: {detail}")
+            }
+        }
     }
 }
 
 impl std::error::Error for SequenceIntegrityError {}
 
-/// Policy for how errors affect agent operation
 #[derive(Debug, PartialEq)]
 pub enum ErrorPolicy {
-    /// Continue operation, log the error
     ContinueWithLogging,
-    /// Block high-consequence actions only
     BlockHighConsequence,
-    /// Block all actions until recovery
     BlockAll,
 }
 
 impl SequenceIntegrityError {
-    /// Determine error policy based on error type
     pub fn policy(&self) -> ErrorPolicy {
-        ErrorPolicy::ContinueWithLogging
+        match self {
+            Self::TrackingTimeout { .. } => ErrorPolicy::ContinueWithLogging,
+            Self::StorageFailure { .. } | Self::TaintBridgeUnavailable => {
+                ErrorPolicy::BlockHighConsequence
+            }
+            Self::LedgerCorrupted { .. } => ErrorPolicy::BlockAll,
+        }
     }
 
-    /// Attempt recovery from the error
     pub fn can_recover(&self) -> bool {
-        true
+        !matches!(self, Self::LedgerCorrupted { .. })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
-    // =========================================================================
-    // SEQ-017: Handle sequence tracking errors gracefully
-    // =========================================================================
-
+    #[spec("SEQ-017")]
     #[test]
-    fn storage_failure_allows_reads_but_blocks_writes() {
+    fn storage_failure_blocks_high_consequence_actions() {
         let err = SequenceIntegrityError::StorageFailure {
             source: "sqlite".into(),
         };
         assert_eq!(err.policy(), ErrorPolicy::BlockHighConsequence);
     }
 
+    #[spec("SEQ-017")]
     #[test]
     fn tracking_timeout_continues_with_logging() {
         let err = SequenceIntegrityError::TrackingTimeout {
@@ -64,42 +75,54 @@ mod tests {
         assert_eq!(err.policy(), ErrorPolicy::ContinueWithLogging);
     }
 
+    #[spec("SEQ-017")]
     #[test]
     fn taint_bridge_unavailable_blocks_high_consequence() {
         let err = SequenceIntegrityError::TaintBridgeUnavailable;
         assert_eq!(err.policy(), ErrorPolicy::BlockHighConsequence);
     }
 
+    #[spec("SEQ-017")]
     #[test]
-    fn ledger_corruption_blocks_all() {
+    fn ledger_corruption_blocks_all_actions() {
         let err = SequenceIntegrityError::LedgerCorrupted {
             detail: "checksum mismatch".into(),
         };
         assert_eq!(err.policy(), ErrorPolicy::BlockAll);
     }
 
+    #[spec("SEQ-017")]
     #[test]
-    fn storage_failure_can_recover() {
+    fn storage_failure_is_recoverable() {
         let err = SequenceIntegrityError::StorageFailure {
             source: "sqlite".into(),
         };
         assert!(err.can_recover());
     }
 
+    #[spec("SEQ-017")]
     #[test]
-    fn ledger_corruption_cannot_recover() {
+    fn ledger_corruption_is_not_recoverable() {
         let err = SequenceIntegrityError::LedgerCorrupted {
             detail: "data loss".into(),
         };
         assert!(!err.can_recover());
     }
 
+    #[spec("SEQ-017")]
     #[test]
-    fn error_displays_meaningful_message() {
+    fn display_includes_error_context() {
         let err = SequenceIntegrityError::StorageFailure {
             source: "sqlite".into(),
         };
         let msg = format!("{err}");
         assert!(msg.contains("sqlite"));
+    }
+
+    #[spec("SEQ-017")]
+    #[test]
+    fn cross_agent_bridge_unavailable_continues_local_tracking() {
+        let err = SequenceIntegrityError::TaintBridgeUnavailable;
+        assert!(err.can_recover());
     }
 }

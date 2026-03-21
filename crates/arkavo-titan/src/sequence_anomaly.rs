@@ -1,4 +1,3 @@
-/// Sequence divergence score with classification
 #[derive(Debug)]
 pub struct DivergenceResult {
     pub score: f64,
@@ -13,28 +12,67 @@ pub enum DivergenceAction {
 }
 
 pub struct SequenceAnomalyDetector {
-    _threshold_low: f64,
-    _threshold_high: f64,
+    threshold_low: f64,
+    threshold_high: f64,
 }
 
 impl SequenceAnomalyDetector {
     pub fn new(threshold_low: f64, threshold_high: f64) -> Self {
         Self {
-            _threshold_low: threshold_low,
-            _threshold_high: threshold_high,
+            threshold_low,
+            threshold_high,
         }
     }
 
-    /// SEQ-006: Compute graph edit distance to nearest baseline
     pub fn evaluate(
         &self,
-        _current_graph: &[ActionNode],
-        _baseline: &[ActionNode],
+        current_graph: &[ActionNode],
+        baseline: &[ActionNode],
     ) -> DivergenceResult {
-        DivergenceResult {
-            score: 0.5,
-            action: DivergenceAction::Allow,
+        let score = Self::graph_edit_distance(current_graph, baseline);
+        let action = if score > self.threshold_high {
+            DivergenceAction::SynchronousGate
+        } else if score > self.threshold_low {
+            DivergenceAction::AsyncAlert
+        } else {
+            DivergenceAction::Allow
+        };
+        DivergenceResult { score, action }
+    }
+
+    fn graph_edit_distance(current: &[ActionNode], baseline: &[ActionNode]) -> f64 {
+        if current.is_empty() && baseline.is_empty() {
+            return 0.0;
         }
+
+        let max_len = current.len().max(baseline.len());
+        let mut matches = 0usize;
+        for (i, node) in current.iter().enumerate() {
+            if let Some(base_node) = baseline.get(i) {
+                if node.tool_name == base_node.tool_name {
+                    matches += 1;
+                }
+            }
+        }
+
+        // Factor in taint divergence: new taint labels not in baseline
+        let mut taint_diff = 0usize;
+        for node in current {
+            if !node.taint_labels.is_empty() {
+                let has_baseline_match = baseline
+                    .iter()
+                    .any(|b| b.tool_name == node.tool_name && b.taint_labels == node.taint_labels);
+                if !has_baseline_match {
+                    taint_diff += 1;
+                }
+            }
+        }
+
+        let len_diff = (current.len() as f64 - baseline.len() as f64).abs();
+        let name_diff = max_len.saturating_sub(matches) as f64;
+        let taint_penalty = taint_diff as f64 * 0.15;
+        let raw = (len_diff + name_diff) / (max_len as f64 + 1.0) + taint_penalty;
+        raw.min(1.0)
     }
 }
 
@@ -48,6 +86,8 @@ pub struct ActionNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+    use std::time::Instant;
 
     fn baseline_graph() -> Vec<ActionNode> {
         vec![
@@ -64,20 +104,27 @@ mod tests {
         ]
     }
 
-    // =========================================================================
-    // SEQ-006: Detect sequence divergence from baseline
-    // =========================================================================
+    #[spec("SEQ-006")]
+    #[test]
+    fn identical_graph_produces_zero_divergence() {
+        let detector = SequenceAnomalyDetector::new(0.3, 0.7);
+        let graph = baseline_graph();
+        let result = detector.evaluate(&graph, &graph);
+        assert!((result.score - 0.0).abs() < f64::EPSILON);
+        assert_eq!(result.action, DivergenceAction::Allow);
+    }
 
+    #[spec("SEQ-006")]
     #[test]
     fn low_divergence_allows_action() {
         let detector = SequenceAnomalyDetector::new(0.3, 0.7);
         let current = baseline_graph();
         let baseline = baseline_graph();
         let result = detector.evaluate(&current, &baseline);
-        assert_eq!(result.action, DivergenceAction::Allow);
         assert!(result.score < 0.3);
     }
 
+    #[spec("SEQ-006")]
     #[test]
     fn medium_divergence_triggers_async_alert() {
         let detector = SequenceAnomalyDetector::new(0.3, 0.7);
@@ -92,6 +139,7 @@ mod tests {
         assert_eq!(result.action, DivergenceAction::AsyncAlert);
     }
 
+    #[spec("SEQ-006")]
     #[test]
     fn high_divergence_triggers_synchronous_gate() {
         let detector = SequenceAnomalyDetector::new(0.3, 0.7);
@@ -113,11 +161,40 @@ mod tests {
         assert!(result.score > 0.7);
     }
 
+    #[spec("SEQ-006")]
     #[test]
-    fn identical_graph_has_zero_divergence() {
+    fn detection_completes_within_latency_budget() {
         let detector = SequenceAnomalyDetector::new(0.3, 0.7);
-        let graph = baseline_graph();
-        let result = detector.evaluate(&graph, &graph);
-        assert!((result.score - 0.0).abs() < f64::EPSILON);
+        let current = baseline_graph();
+        let baseline = baseline_graph();
+        let start = Instant::now();
+        let _result = detector.evaluate(&current, &baseline);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_micros() < 50,
+            "detection took {}μs, budget is 50μs",
+            elapsed.as_micros()
+        );
+    }
+
+    #[spec("SEQ-006")]
+    #[test]
+    fn novel_workflow_gates_with_human_option_not_hard_block() {
+        let detector = SequenceAnomalyDetector::new(0.3, 0.7);
+        let novel = vec![
+            ActionNode {
+                tool_name: "new_read_tool".into(),
+                params_hash: 111,
+                taint_labels: vec![],
+            },
+            ActionNode {
+                tool_name: "new_summarize_tool".into(),
+                params_hash: 222,
+                taint_labels: vec!["internal".into()],
+            },
+        ];
+        let baseline = baseline_graph();
+        let result = detector.evaluate(&novel, &baseline);
+        assert_ne!(result.action, DivergenceAction::Allow);
     }
 }

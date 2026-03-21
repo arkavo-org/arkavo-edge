@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-/// Summary of data flow within a session
 #[derive(Debug, Clone)]
 pub struct DataFlowSummary {
     pub source: String,
@@ -9,7 +8,6 @@ pub struct DataFlowSummary {
     pub complete: bool,
 }
 
-/// A persisted session action graph
 #[derive(Debug, Clone)]
 pub struct LedgerEntry {
     pub agent_id: String,
@@ -19,45 +17,62 @@ pub struct LedgerEntry {
     pub action_count: usize,
 }
 
-/// SEQ-007: Cross-session sequence ledger
 pub struct SequenceLedger {
-    _retention_window: Duration,
+    retention_window: Duration,
+    entries: Vec<LedgerEntry>,
 }
 
 impl SequenceLedger {
     pub fn new(retention_window: Duration) -> Self {
         Self {
-            _retention_window: retention_window,
+            retention_window,
+            entries: Vec::new(),
         }
     }
 
-    /// Persist a finalized session graph
-    pub fn commit(&mut self, _entry: LedgerEntry) {}
-
-    /// Query entries for a given agent
-    pub fn entries_for_agent(&self, _agent_id: &str) -> Vec<LedgerEntry> {
-        Vec::new()
+    pub fn commit(&mut self, entry: LedgerEntry) {
+        self.entries.push(entry);
     }
 
-    /// Query entries within retention window
+    pub fn entries_for_agent(&self, agent_id: &str) -> Vec<LedgerEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.agent_id == agent_id)
+            .cloned()
+            .collect()
+    }
+
     pub fn recent_entries(&self) -> Vec<LedgerEntry> {
-        Vec::new()
+        if self.entries.is_empty() {
+            return Vec::new();
+        }
+        let max_ts = self.entries.iter().map(|e| e.timestamp).max().unwrap_or(0);
+        let cutoff = max_ts.saturating_sub(self.retention_window.as_secs());
+        self.entries
+            .iter()
+            .filter(|e| e.timestamp >= cutoff)
+            .cloned()
+            .collect()
     }
 
-    /// Count entries in ledger
     pub fn entry_count(&self) -> usize {
-        0
+        self.entries.len()
     }
 
-    /// Flag incomplete exfiltration patterns
     pub fn pending_exfiltration_patterns(&self) -> Vec<DataFlowSummary> {
-        Vec::new()
+        self.entries
+            .iter()
+            .flat_map(|e| e.data_flows.iter())
+            .filter(|f| !f.complete)
+            .cloned()
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn sample_entry(agent_id: &str, session_id: &str) -> LedgerEntry {
         LedgerEntry {
@@ -74,19 +89,17 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // SEQ-007: Persist sequence fragments to cross-session ledger
-    // =========================================================================
-
+    #[spec("SEQ-007")]
     #[test]
-    fn session_graph_persisted() {
+    fn committed_entry_increments_count() {
         let mut ledger = SequenceLedger::new(Duration::from_secs(86400));
         ledger.commit(sample_entry("agent-1", "session-1"));
         assert_eq!(ledger.entry_count(), 1);
     }
 
+    #[spec("SEQ-007")]
     #[test]
-    fn data_flow_summaries_indexed() {
+    fn entries_queryable_by_agent_id() {
         let mut ledger = SequenceLedger::new(Duration::from_secs(86400));
         ledger.commit(sample_entry("agent-1", "session-1"));
         let entries = ledger.entries_for_agent("agent-1");
@@ -94,8 +107,9 @@ mod tests {
         assert_eq!(entries[0].data_flows.len(), 1);
     }
 
+    #[spec("SEQ-007")]
     #[test]
-    fn incomplete_exfiltration_flagged() {
+    fn incomplete_exfiltration_patterns_flagged_as_pending() {
         let mut ledger = SequenceLedger::new(Duration::from_secs(86400));
         let mut entry = sample_entry("agent-1", "session-1");
         entry.data_flows.push(DataFlowSummary {
@@ -110,13 +124,29 @@ mod tests {
         assert_eq!(pending[0].source, "credentials_db");
     }
 
+    #[spec("SEQ-007")]
     #[test]
-    fn multiple_sessions_persisted() {
+    fn multiple_sessions_from_multiple_agents_persisted() {
         let mut ledger = SequenceLedger::new(Duration::from_secs(86400));
         ledger.commit(sample_entry("agent-1", "session-1"));
         ledger.commit(sample_entry("agent-1", "session-2"));
         ledger.commit(sample_entry("agent-2", "session-3"));
         assert_eq!(ledger.entry_count(), 3);
         assert_eq!(ledger.entries_for_agent("agent-1").len(), 2);
+    }
+
+    #[spec("SEQ-007")]
+    #[test]
+    fn entries_outside_retention_window_not_returned() {
+        let mut ledger = SequenceLedger::new(Duration::from_secs(100));
+        let mut old_entry = sample_entry("agent-1", "old-session");
+        old_entry.timestamp = 0;
+        ledger.commit(old_entry);
+        let mut new_entry = sample_entry("agent-1", "new-session");
+        new_entry.timestamp = 500;
+        ledger.commit(new_entry);
+        let recent = ledger.recent_entries();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].session_id, "new-session");
     }
 }

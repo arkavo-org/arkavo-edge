@@ -1,6 +1,5 @@
 use crate::EmaAccumulator;
 
-/// Feature vector extracted from action sequence context
 #[derive(Debug, Clone)]
 pub struct SequenceFeatureVector {
     pub action_count: usize,
@@ -9,35 +8,44 @@ pub struct SequenceFeatureVector {
     pub max_path_length: usize,
 }
 
-/// Bridge between sequence integrity system and TitanMonitor
 pub struct TitanSequenceBridge {
-    _accumulator: EmaAccumulator,
+    accumulator: EmaAccumulator,
+    drifting: bool,
 }
 
 impl TitanSequenceBridge {
     pub fn new() -> Self {
         Self {
-            _accumulator: EmaAccumulator::default(),
+            accumulator: EmaAccumulator::with_config(0.05, 3.0, 50),
+            drifting: false,
         }
     }
 
-    /// SEQ-013: Feed sequence features into EMA accumulator for drift detection
-    pub fn track_sequence_entropy(
-        &mut self,
-        _features: &SequenceFeatureVector,
-    ) -> Option<f64> {
-        None
+    pub fn track_sequence_entropy(&mut self, features: &SequenceFeatureVector) -> Option<f64> {
+        // Map feature vector to a boolean signal for EMA tracking:
+        // high tainted_ratio or unusual action count = true (anomalous)
+        let is_anomalous = features.tainted_ratio > 0.5
+            || features.action_count > 20
+            || features.max_path_length > 15;
+
+        let z_score = self.accumulator.update(0, is_anomalous);
+        if let Some(z) = z_score {
+            if z.abs() > 3.0 {
+                self.drifting = true;
+            }
+        }
+        z_score
     }
 
-    /// Check if current sequence shows statistical drift
     pub fn is_drifting(&self) -> bool {
-        false
+        self.drifting
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn normal_features() -> SequenceFeatureVector {
         SequenceFeatureVector {
@@ -48,20 +56,17 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // SEQ-013: Titan integration for statistical sequence drift
-    // =========================================================================
-
+    #[spec("SEQ-013")]
     #[test]
-    fn ema_tracks_sequence_entropy() {
+    fn ema_returns_none_or_normal_during_warmup() {
         let mut bridge = TitanSequenceBridge::new();
-        let features = normal_features();
-        let z_score = bridge.track_sequence_entropy(&features);
+        let z_score = bridge.track_sequence_entropy(&normal_features());
         assert!(z_score.is_none() || z_score.unwrap().abs() < 3.0);
     }
 
+    #[spec("SEQ-013")]
     #[test]
-    fn drift_detected_after_behavioral_shift() {
+    fn detects_drift_after_behavioral_shift() {
         let mut bridge = TitanSequenceBridge::new();
         for _ in 0..100 {
             bridge.track_sequence_entropy(&normal_features());
@@ -77,6 +82,7 @@ mod tests {
         assert!(z_score.unwrap().abs() > 3.0);
     }
 
+    #[spec("SEQ-013")]
     #[test]
     fn no_drift_during_warmup() {
         let bridge = TitanSequenceBridge::new();

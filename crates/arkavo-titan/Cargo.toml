@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 criterion = { workspace = true }
 

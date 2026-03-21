@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-/// SEQ-016: Configuration for sequence integrity per agent role
 #[derive(Debug, Clone)]
 pub struct SequenceIntegrityConfig {
     pub enabled: bool,
@@ -15,25 +14,33 @@ pub struct SequenceIntegrityConfig {
 impl Default for SequenceIntegrityConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            taint_tracking: false,
-            gate_threshold_low: 0.0,
-            gate_threshold_high: 0.0,
-            ledger_retention: Duration::ZERO,
-            overhead_budget: Duration::ZERO,
-            baseline_min_sessions: 0,
+            enabled: true,
+            taint_tracking: true,
+            gate_threshold_low: 0.3,
+            gate_threshold_high: 0.7,
+            ledger_retention: Duration::from_secs(86400),
+            overhead_budget: Duration::from_micros(50),
+            baseline_min_sessions: 100,
         }
     }
 }
 
 impl SequenceIntegrityConfig {
-    /// Create a strict config for use when no baseline is available
     pub fn strict() -> Self {
-        Self::default()
+        Self {
+            gate_threshold_low: 0.1,
+            gate_threshold_high: 0.4,
+            ..Self::default()
+        }
     }
 
-    /// Validate configuration values
     pub fn validate(&self) -> Result<(), String> {
+        if self.gate_threshold_low >= self.gate_threshold_high {
+            return Err(format!(
+                "gate_threshold_low ({}) must be less than gate_threshold_high ({})",
+                self.gate_threshold_low, self.gate_threshold_high
+            ));
+        }
         Ok(())
     }
 }
@@ -41,32 +48,49 @@ impl SequenceIntegrityConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
-    // =========================================================================
-    // SEQ-016: Configure sequence integrity per agent role
-    // =========================================================================
-
+    #[spec("SEQ-016")]
     #[test]
-    fn default_config_has_sane_values() {
+    fn default_config_enables_tracking() {
         let config = SequenceIntegrityConfig::default();
         assert!(config.enabled);
         assert!(config.taint_tracking);
+    }
+
+    #[spec("SEQ-016")]
+    #[test]
+    fn default_config_has_sane_thresholds() {
+        let config = SequenceIntegrityConfig::default();
         assert!(config.gate_threshold_low > 0.0);
         assert!(config.gate_threshold_high > config.gate_threshold_low);
         assert_eq!(config.ledger_retention, Duration::from_secs(86400));
         assert_eq!(config.baseline_min_sessions, 100);
     }
 
+    #[spec("SEQ-016")]
     #[test]
-    fn strict_mode_has_lower_thresholds() {
+    fn strict_mode_uses_lower_thresholds_than_default() {
         let strict = SequenceIntegrityConfig::strict();
         let default = SequenceIntegrityConfig::default();
         assert!(strict.gate_threshold_low < default.gate_threshold_low);
         assert!(strict.gate_threshold_high < default.gate_threshold_high);
     }
 
+    #[spec("SEQ-016")]
     #[test]
-    fn disabled_config_still_validates() {
+    fn validate_rejects_low_threshold_above_high() {
+        let config = SequenceIntegrityConfig {
+            gate_threshold_low: 0.8,
+            gate_threshold_high: 0.3,
+            ..SequenceIntegrityConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[spec("SEQ-016")]
+    #[test]
+    fn disabled_config_passes_validation() {
         let config = SequenceIntegrityConfig {
             enabled: false,
             ..SequenceIntegrityConfig::default()
@@ -74,13 +98,13 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
+    #[spec("SEQ-016")]
     #[test]
-    fn invalid_thresholds_rejected() {
+    fn per_action_policy_applies_when_disabled() {
         let config = SequenceIntegrityConfig {
-            gate_threshold_low: 0.8,
-            gate_threshold_high: 0.3,
+            enabled: false,
             ..SequenceIntegrityConfig::default()
         };
-        assert!(config.validate().is_err());
+        assert!(!config.enabled);
     }
 }

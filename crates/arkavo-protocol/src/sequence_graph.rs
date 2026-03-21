@@ -12,7 +12,6 @@ pub struct ActionEdge {
     pub to: u64,
 }
 
-/// SEQ-004: Directed action graph built per session
 pub struct SequenceGraph {
     nodes: Vec<ActionNode>,
     edges: Vec<ActionEdge>,
@@ -26,11 +25,15 @@ impl SequenceGraph {
         }
     }
 
-    pub fn add_node(&mut self, _node: ActionNode) -> u64 {
-        0
+    pub fn add_node(&mut self, node: ActionNode) -> u64 {
+        let id = self.nodes.len() as u64;
+        self.nodes.push(node);
+        id
     }
 
-    pub fn add_edge(&mut self, _from: u64, _to: u64) {}
+    pub fn add_edge(&mut self, from: u64, to: u64) {
+        self.edges.push(ActionEdge { from, to });
+    }
 
     pub fn nodes(&self) -> &[ActionNode] {
         &self.nodes
@@ -41,14 +44,14 @@ impl SequenceGraph {
     }
 
     pub fn node_count(&self) -> usize {
-        0
+        self.nodes.len()
     }
 }
 
 pub struct SequenceGraphBuilder {
     _session_id: String,
     graph: SequenceGraph,
-    _next_sequence: u64,
+    next_sequence: u64,
 }
 
 impl SequenceGraphBuilder {
@@ -56,24 +59,31 @@ impl SequenceGraphBuilder {
         Self {
             _session_id: session_id.to_string(),
             graph: SequenceGraph::new(),
-            _next_sequence: 0,
+            next_sequence: 0,
         }
     }
 
-    /// Record a completed tool call as a node in the action graph
     pub fn record_action(
         &mut self,
-        _tool_name: &str,
-        _params_hash: u64,
-        _taint_labels: Vec<String>,
+        tool_name: &str,
+        params_hash: u64,
+        taint_labels: Vec<String>,
     ) -> u64 {
-        0
+        let seq = self.next_sequence;
+        self.next_sequence += 1;
+        let node = ActionNode {
+            tool_name: tool_name.to_string(),
+            params_hash,
+            taint_labels,
+            sequence_number: seq,
+        };
+        self.graph.add_node(node)
     }
 
-    /// Connect data flow between two actions
-    pub fn connect(&mut self, _from: u64, _to: u64) {}
+    pub fn connect(&mut self, from: u64, to: u64) {
+        self.graph.add_edge(from, to);
+    }
 
-    /// Get the current session graph
     pub fn graph(&self) -> &SequenceGraph {
         &self.graph
     }
@@ -82,21 +92,19 @@ impl SequenceGraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
-    // =========================================================================
-    // SEQ-004: Build directed action graph per session
-    // =========================================================================
-
+    #[spec("SEQ-004")]
     #[test]
-    fn node_added_on_tool_call() {
+    fn graph_node_count_increments_after_recording_action() {
         let mut builder = SequenceGraphBuilder::new("session-1");
-        let id = builder.record_action("read_file", 123, vec![]);
+        builder.record_action("read_file", 123, vec![]);
         assert_eq!(builder.graph().node_count(), 1);
-        assert_eq!(id, 0);
     }
 
+    #[spec("SEQ-004")]
     #[test]
-    fn edges_connect_data_flow() {
+    fn edges_connect_data_flow_between_actions() {
         let mut builder = SequenceGraphBuilder::new("session-1");
         let a = builder.record_action("read_file", 123, vec![]);
         let b = builder.record_action("summarize", 456, vec!["internal".into()]);
@@ -104,16 +112,18 @@ mod tests {
         assert_eq!(builder.graph().edges().len(), 1);
     }
 
+    #[spec("SEQ-004")]
     #[test]
-    fn node_metadata_includes_taint_labels() {
+    fn recorded_node_preserves_taint_labels() {
         let mut builder = SequenceGraphBuilder::new("session-1");
         builder.record_action("read_db", 789, vec!["pii".into(), "internal".into()]);
         let nodes = builder.graph().nodes();
         assert_eq!(nodes[0].taint_labels.len(), 2);
     }
 
+    #[spec("SEQ-004")]
     #[test]
-    fn sequence_numbers_monotonically_increase() {
+    fn sequence_numbers_increase_monotonically() {
         let mut builder = SequenceGraphBuilder::new("session-1");
         builder.record_action("a", 1, vec![]);
         builder.record_action("b", 2, vec![]);
@@ -123,8 +133,9 @@ mod tests {
         assert!(nodes[1].sequence_number < nodes[2].sequence_number);
     }
 
+    #[spec("SEQ-004")]
     #[test]
-    fn graph_updated_atomically() {
+    fn graph_count_reflects_each_added_action() {
         let mut builder = SequenceGraphBuilder::new("session-1");
         builder.record_action("read_file", 100, vec!["internal".into()]);
         let count_before = builder.graph().node_count();

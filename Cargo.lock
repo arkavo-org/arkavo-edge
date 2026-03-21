@@ -862,6 +862,7 @@ dependencies = [
  "arkavo-evofabric",
  "arkavo-llm",
  "arkavo-mcp-tools",
+ "arkavo-test-macros",
  "arkavo-torg-circuits",
  "async-trait",
  "chrono",
@@ -1359,6 +1360,7 @@ dependencies = [
  "anyhow",
  "arkavo-events",
  "arkavo-mcp",
+ "arkavo-test-macros",
  "async-trait",
  "bytemuck",
  "chrono",
@@ -1581,6 +1583,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-tdf",
+ "arkavo-test-macros",
  "arkavo-torg-circuits",
  "async-trait",
  "chrono",
@@ -1886,6 +1889,7 @@ name = "arkavo-titan"
 version = "0.67.4"
 dependencies = [
  "arkavo-sbe",
+ "arkavo-test-macros",
  "criterion",
  "thiserror 2.0.18",
  "tokio",
