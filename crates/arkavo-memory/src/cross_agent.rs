@@ -95,9 +95,7 @@ impl CrossAgentFlowAnalyzer {
         let mut agents = Vec::new();
         for entry in entries {
             for flow in &entry.data_flows {
-                if flow.taint_classification == taint_label
-                    && !agents.contains(&entry.agent_id)
-                {
+                if flow.taint_classification == taint_label && !agents.contains(&entry.agent_id) {
                     agents.push(entry.agent_id.clone());
                 }
             }
