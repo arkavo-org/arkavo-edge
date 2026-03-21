@@ -41,6 +41,12 @@ impl LearningBus {
             None
         };
 
+        let inference_state = if let GossipMessage::InferenceState(ref state) = message {
+            Some(state.clone())
+        } else {
+            None
+        };
+
         // Forward patchlet gossip to AutoLearner's bridge for processing
         if matches!(
             &message,
@@ -180,6 +186,14 @@ impl LearningBus {
                     }
                 }
             }
+        }
+
+        // Update peer GPU inference state for distributed scheduling
+        if let Some(state) = inference_state {
+            self.peer_inference_state
+                .write()
+                .await
+                .insert(state.agent_id.clone(), state);
         }
 
         // Handle task completion notifications from specialists

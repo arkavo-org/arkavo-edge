@@ -590,6 +590,13 @@ impl LlamaCppProvider {
         messages: Vec<Message>,
         max_tokens: Option<usize>,
     ) -> Result<(String, Option<crate::provider::InferenceTiming>)> {
+        // Global GPU gate — serializes inference across all agents on this device.
+        // Semaphore parks the task until a slot is available (no polling).
+        // Guard drops on return/panic, freeing the slot.
+        let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+            .acquire(&self.name)
+            .await;
+
         let custom_provider;
         let provider = if let Some(max) = max_tokens {
             let mut config = self.config.clone();

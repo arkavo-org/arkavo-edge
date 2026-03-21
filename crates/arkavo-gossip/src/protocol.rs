@@ -270,6 +270,15 @@ impl GossipProtocol {
                 );
                 Ok(vec![])
             }
+            GossipMessage::InferenceState(state) => {
+                tracing::debug!(
+                    agent_id = %state.agent_id,
+                    active_count = state.active_count,
+                    model = %state.model_name,
+                    "inference state broadcast received"
+                );
+                Ok(vec![])
+            }
         }
     }
 

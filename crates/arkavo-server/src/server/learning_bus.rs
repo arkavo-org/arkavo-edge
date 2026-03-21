@@ -178,6 +178,9 @@ pub struct LearningBus {
     patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
     /// Task completions received via gossip (pushed by specialists)
     pub(super) task_completions: Arc<RwLock<Vec<arkavo_gossip::TaskCompletionNotice>>>,
+    /// Peer GPU inference state (updated via gossip broadcasts)
+    pub(super) peer_inference_state:
+        Arc<RwLock<HashMap<String, arkavo_gossip::InferenceStateBroadcast>>>,
 }
 
 impl LearningBus {
@@ -258,6 +261,7 @@ impl LearningBus {
             pain_tx: None,
             patchlet_bridge: OnceLock::new(),
             task_completions: Arc::new(RwLock::new(Vec::new())),
+            peer_inference_state: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -399,6 +403,21 @@ impl LearningBus {
     /// Drain task completions received via gossip push.
     pub async fn drain_task_completions(&self) -> Vec<arkavo_gossip::TaskCompletionNotice> {
         self.task_completions.write().await.drain(..).collect()
+    }
+
+    /// Count GPU-active peers on a given device, expiring entries older than 30s.
+    pub async fn gpu_peers_active(&self, device_id: &str) -> u32 {
+        let now = chrono::Utc::now();
+        let state = self.peer_inference_state.read().await;
+        state
+            .values()
+            .filter(|s| {
+                s.device_id == device_id
+                    && s.active_count > 0
+                    && (now - s.timestamp).num_seconds() < 30
+            })
+            .map(|s| s.active_count)
+            .sum()
     }
 
     /// Broadcast a gossip message to all connected peers.

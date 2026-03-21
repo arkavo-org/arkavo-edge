@@ -64,6 +64,29 @@ pub enum GossipMessage {
     EvoFabricAnchor(EvoFabricAnchorCommitted),
     /// Task completion notification from specialist to commander
     TaskCompleted(TaskCompletionNotice),
+    /// GPU inference state broadcast for distributed scheduling
+    InferenceState(InferenceStateBroadcast),
+}
+
+/// GPU inference activity broadcast.
+///
+/// Agents emit this on state transitions (idle→running, running→idle) so
+/// peers on the same device can coordinate GPU access without a central
+/// scheduler. Stale entries (timestamp > 30s) are expired by receivers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceStateBroadcast {
+    /// Agent emitting this state
+    pub agent_id: String,
+    /// Number of active GPU inferences (u32, not bool — captures concurrent calls)
+    pub active_count: u32,
+    /// Model currently loaded/running
+    pub model_name: String,
+    /// Remaining inference budget for this agent
+    pub budget_remaining: u32,
+    /// Device identifier for multi-device filtering
+    pub device_id: String,
+    /// Timestamp for stale entry expiry
+    pub timestamp: DateTime<Utc>,
 }
 
 /// Push notification when a specialist finishes a delegated task.

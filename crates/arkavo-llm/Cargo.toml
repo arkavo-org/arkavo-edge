@@ -53,6 +53,7 @@ arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-kv-cache = { path = "../arkavo-kv-cache", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-observability = { path = "../arkavo-observability" }
 
 # llama-cpp specific dependencies
 scopeguard = { workspace = true, optional = true }
