@@ -1316,6 +1316,8 @@ impl A2aServer {
             .map(|tools| !tools.is_empty())
             .unwrap_or(false);
         let loop_metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.clone();
         let total_ram_bytes = self.total_ram_bytes;
         let self_agent_id = self.agent_metadata.read().await.name.clone();
         let commander_model = self.agent_metadata.read().await.model.clone();
@@ -1674,6 +1676,63 @@ impl A2aServer {
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
+
+                        // Stage large structured results on Iroh and forward to
+                        // historian for deep analysis (e.g. episode summaries).
+                        #[cfg(feature = "iroh")]
+                        if result.contains("TotalReward")
+                            && let Some(ref bus) = learning_bus
+                            && let Some(historian_addr) = bus.get_peer_address("historian").await
+                            && let Some(ref iroh) = *iroh_node.read().await
+                        {
+                            let data = result.as_bytes().to_vec();
+                            let iroh_clone = iroh.clone();
+                            let historian = historian_addr.clone();
+                            tokio::spawn(async move {
+                                match super::iroh_tdf_bridge::stage_blob(iroh_clone, &data).await {
+                                    Ok(ticket) => {
+                                        info!(
+                                            ticket_len = ticket.len(),
+                                            "Episode data staged on Iroh, sending to historian"
+                                        );
+                                        // Send ticket to historian via A2A
+                                        use arkavo_protocol::http::HttpTransport;
+                                        use arkavo_protocol::transport::{
+                                            A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
+                                        };
+                                        let mut config = TransportConfig::default();
+                                        config.tls_config.require_tls = false;
+                                        if let Ok(transport) = HttpTransport::new(config) {
+                                            let endpoint = A2aEndpoint {
+                                                url: historian,
+                                                agent_id: "historian".to_string(),
+                                                public_key: None,
+                                            };
+                                            if transport.connect(&endpoint).await.is_ok() {
+                                                let msg = serde_json::json!({
+                                                    "parts": [{"type": "text", "content": format!(
+                                                        "Analyze this episode summary and produce a post-mortem lesson. \
+                                                         The data is available on Iroh at ticket: {ticket}\n\n\
+                                                         Respond with a JSON lesson."
+                                                    )}]
+                                                });
+                                                let request = A2aRequest::new(
+                                                    "message/send",
+                                                    serde_json::json!([{"message": msg}]),
+                                                );
+                                                if let Err(e) =
+                                                    transport.send_request(request).await
+                                                {
+                                                    warn!("Failed to send to historian: {e}");
+                                                }
+                                            }
+                                            let _ = transport.close().await;
+                                        }
+                                    }
+                                    Err(e) => warn!("Failed to stage on Iroh: {e}"),
+                                }
+                            });
+                        }
                     }
                     Err(e) => {
                         consecutive_no_action_ticks += 1;
