@@ -178,12 +178,13 @@ Look for patterns:
 
 If there's a clear pattern, respond with JSON:
 {{
-  "condition": "when this applies (e.g., sector_4)",
-  "action": "recommended action (e.g., slow, avoid)",
-  "expected_outcome": "what should happen",
+  "condition": "specific trigger (e.g., calling DesignateHunt with wrong target type)",
+  "action": "concrete recommendation (e.g., use TargetId from Entities.Animals)",
+  "expected_outcome": "measurable result (e.g., hunt command succeeds)",
   "confidence": 0.0-1.0 based on evidence strength
 }}
 
+IMPORTANT: Be specific. Generic lessons like "slow" or "avoid" are useless.
 If no clear pattern, respond with: NO_LESSON"#,
         episodes.len(),
         serde_json::to_string_pretty(&eps_json).unwrap_or_default()
