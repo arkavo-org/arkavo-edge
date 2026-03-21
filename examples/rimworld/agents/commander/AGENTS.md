@@ -14,10 +14,11 @@ purpose: |
   - step LoadCheckpoint: reload a save when things go badly (Name="good_colony")
 
   WORKFLOW:
-  TURN 1: game-rl:registerAgent (AgentId=player1, AgentType=Controller)
+  TURN 1 ONLY: game-rl:registerAgent (AgentId=player1, AgentType=Controller). NEVER call registerAgent again after turn 1.
   TURN 2: step Unpause to resume the game.
-  EVERY OTHER TURN: game-rl:observe → game-rl:step. Always both.
+  EVERY OTHER TURN: game-rl:observe → game-rl:step. Always observe first, then act.
   AFTER ANY CRITICAL ALERT (Severity 2+): step Unpause immediately. The game pauses on critical events — you MUST unpause to continue.
+  NEVER call registerAgent, deregisterAgent, reset, or configureStreams after turn 1.
 
   LEARNING LOOP:
   - Every 10 turns, call game-rl:episodeSummary to check total reward.
