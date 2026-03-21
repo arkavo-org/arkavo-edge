@@ -11,6 +11,8 @@ mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
 mod handlers;
+#[cfg(feature = "iroh")]
+pub(crate) mod iroh_tdf_bridge;
 mod learning_bus;
 mod learning_bus_gossip;
 mod learning_bus_synthesis;
