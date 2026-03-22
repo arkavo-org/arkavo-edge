@@ -126,6 +126,8 @@ function renderSummaryStats(summary) {
         '<div class="summary-stat-label">Partial</div></div>' +
         '<div class="summary-stat"><div class="summary-stat-value" style="color:#ef4444">' + summary.missing + '</div>' +
         '<div class="summary-stat-label">Missing</div></div>' +
+        '<div class="summary-stat"><div class="summary-stat-value" style="color:#a855f7">' + (summary.wip || 0) + '</div>' +
+        '<div class="summary-stat-label">WIP</div></div>' +
         '<div class="summary-stat"><div class="summary-stat-value ' + pctClass + '">' + pct + '%</div>' +
         '<div class="summary-stat-label">Coverage</div></div>' +
         '</div>';
@@ -146,7 +148,8 @@ function renderSpecTreemap(specs, container) {
                 name: sc.name,
                 status: sc.status,
                 criticality: sc.criticality,
-                specName: spec.name
+                specName: spec.name,
+                wip: sc.wip || false
             });
         }
         if (items.length > 0) {
@@ -167,7 +170,9 @@ function renderSpecTreemap(specs, container) {
 
     var groupRects = squarify(groupItems, { x: 0, y: 0, w: width, h: height });
 
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" class="treemap-svg">';
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" class="treemap-svg">' +
+        '<defs><pattern id="wip-stripes" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+        '<line x1="0" y1="0" x2="0" y2="6" stroke="#0a0a0f" stroke-width="2"/></pattern></defs>';
 
     for (var gr = 0; gr < groupRects.length; gr++) {
         var grp = groupRects[gr];
@@ -196,11 +201,16 @@ function renderSpecTreemap(specs, container) {
                 _scenarioRects[leaf.id] = { x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h };
 
                 svg += '<rect class="treemap-leaf" data-type="scenario" data-id="' + escapeHtml(leaf.id) + '"' +
-                    ' data-tooltip="' + escapeHtml(leaf.id) + ' \u2014 ' + escapeHtml(leaf.name) + '"' +
+                    ' data-tooltip="' + escapeHtml(leaf.id) + ' \u2014 ' + escapeHtml(leaf.name) + (leaf.wip ? ' (WIP)' : '') + '"' +
                     ' data-group="' + escapeHtml(leaf.specName) + '" data-label="' + escapeHtml(leaf.id) + '"' +
                     ' x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
                     ' fill="' + color + '" opacity="' + alpha + '"' +
                     ' stroke="#0a0a0f" stroke-width="1" rx="2"/>';
+
+                if (leaf.wip) {
+                    svg += '<rect x="' + leaf.x + '" y="' + leaf.y + '" width="' + leaf.w + '" height="' + leaf.h + '"' +
+                        ' fill="url(#wip-stripes)" opacity="0.4" pointer-events="none" rx="2"/>';
+                }
 
                 if (leaf.w > 30 && leaf.h > 14) {
                     var lClip = 'lc' + (_clipIdCounter++);
@@ -493,13 +503,20 @@ function showDetail(type, id, data) {
             }
             html += '</div>';
         }
+        if (scenario.wip && scenario.issue) {
+            var issueNum = scenario.issue.split('/').pop();
+            html += '<div class="trace-detail-section"><strong>Issue:</strong>' +
+                '<div class="trace-detail-item"><a href="' + escapeHtml(scenario.issue) +
+                '" target="_blank" rel="noopener" style="color:#a855f7">#' +
+                escapeHtml(issueNum) + '</a> (WIP)</div></div>';
+        }
         html += '</div>';
         detailEl.innerHTML = html;
     } else if (type === 'file') {
         var linkedScenarios = (_codeLookup && _codeLookup[id]) || [];
         var html2 = '<div class="trace-detail-card">';
         html2 += '<div class="trace-detail-header" style="font-family:monospace">' + escapeHtml(id) + '</div>';
-        html2 += '<div class="trace-detail-meta">' + linkedScenarios.length + ' linked scenario(s)</div>';
+        html2 += '<div class="trace-detail-meta">' + linkedScenarios.length + ' linked scenarios</div>';
         for (var s = 0; s < linkedScenarios.length; s++) {
             var sc = findScenario(data, linkedScenarios[s]);
             if (sc) {

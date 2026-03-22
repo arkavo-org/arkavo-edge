@@ -3,6 +3,9 @@
 .mcp.json
 .arkavo/
 
+# Generated reports
+docs/traceability.html
+
 # IDE files
 .idea/
 .vscode/

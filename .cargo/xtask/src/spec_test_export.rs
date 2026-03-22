@@ -61,6 +61,7 @@ pub(crate) struct ExportSummary {
     pub(crate) covered: usize,
     pub(crate) partial: usize,
     pub(crate) missing: usize,
+    pub(crate) wip: usize,
     pub(crate) pct: f64,
 }
 
@@ -92,6 +93,13 @@ pub fn export_json_string(report: &CoverageReport) -> Result<String> {
     let code = build_code_tree(code_map);
     let pct = report.coverage_percentage();
 
+    let wip_count: usize = report
+        .specs
+        .iter()
+        .flat_map(|s| s.scenarios.iter())
+        .filter(|s| s.scenario.wip)
+        .count();
+
     let data = ExportData {
         specs,
         code,
@@ -100,7 +108,8 @@ pub fn export_json_string(report: &CoverageReport) -> Result<String> {
             total: report.total_scenarios,
             covered: report.covered_scenarios,
             partial: report.partial_scenarios,
-            missing: report.missing_scenarios,
+            missing: report.missing_scenarios.saturating_sub(wip_count),
+            wip: wip_count,
             pct,
         },
     };
