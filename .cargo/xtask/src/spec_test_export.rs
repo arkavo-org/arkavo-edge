@@ -30,9 +30,9 @@ pub(crate) struct ExportScenario {
     pub(crate) given: Vec<String>,
     pub(crate) when: String,
     pub(crate) then: Vec<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) wip: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) issue: Option<String>,
 }
 
@@ -61,6 +61,7 @@ pub(crate) struct ExportSummary {
     pub(crate) covered: usize,
     pub(crate) partial: usize,
     pub(crate) missing: usize,
+    #[serde(default)]
     pub(crate) wip: usize,
     pub(crate) pct: f64,
 }
