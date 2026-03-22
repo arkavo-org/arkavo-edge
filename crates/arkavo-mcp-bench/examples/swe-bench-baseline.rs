@@ -1,4 +1,4 @@
-use arkavo_bench::SweBenchTool;
+use arkavo_mcp_bench::SweBenchTool;
 use arkavo_mcp::Tool;
 use serde_json::json;
 use std::time::Instant;

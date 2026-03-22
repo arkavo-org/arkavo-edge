@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-bench"
+name = "arkavo-mcp-bench"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-workspace = { path = "../arkavo-workspace" }
+arkavo-mcp-workspace = { path = "../arkavo-mcp-workspace" }
 arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
 arkavo-orchestrator = { path = "../arkavo-orchestrator" }
 arkavo-context = { path = "../arkavo-context" }
