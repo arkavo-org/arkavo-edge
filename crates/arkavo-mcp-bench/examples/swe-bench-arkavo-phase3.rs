@@ -1,5 +1,5 @@
-use arkavo_mcp_bench::{ArkavoMode, BenchMetrics, BenchSummary, SweBenchInstance, SweBenchTool};
 use arkavo_mcp::Tool;
+use arkavo_mcp_bench::{ArkavoMode, BenchMetrics, BenchSummary, SweBenchInstance, SweBenchTool};
 use arkavo_router::Router;
 use serde_json::json;
 use std::fs;
