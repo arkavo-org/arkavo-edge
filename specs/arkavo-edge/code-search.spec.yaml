@@ -1,6 +1,6 @@
 feature: Code Search and Refactoring Tools
-module: arkavo_code_search
-version: 0.57.2
+module: arkavo_mcp_code_search
+version: 0.67.6
 
 invariants:
   - All tools implement arkavo_mcp::Tool trait
@@ -21,7 +21,7 @@ scenarios:
       - CombyTool registered
       - TreeSitterTool registered
       - Tools ready for invocation
-    refs: [crates/arkavo-code-search/src/lib.rs:10-15]
+    refs: [crates/arkavo-mcp-code-search/src/lib.rs:10-15]
     changed: "2025-01-31"
     edge_cases:
       - condition: Registry already has tool with same name
@@ -42,7 +42,7 @@ scenarios:
       - Pattern matched against content
       - Results include file, line, context
       - Formatted as MCP tool result
-    refs: [crates/arkavo-code-search/src/codegrep.rs:1-60]
+    refs: [crates/arkavo-mcp-code-search/src/codegrep.rs:1-60]
     changed: "2025-01-31"
     edge_cases:
       - condition: Invalid regex pattern
@@ -65,7 +65,7 @@ scenarios:
       - Code matched structurally
       - Rewrites applied
       - Changes previewed or applied
-    refs: [crates/arkavo-code-search/src/comby.rs:1-60]
+    refs: [crates/arkavo-mcp-code-search/src/comby.rs:1-60]
     changed: "2025-01-31"
     edge_cases:
       - condition: Invalid match template
@@ -88,7 +88,7 @@ scenarios:
       - AST constructed
       - Query executed if provided
       - Matches returned with node info
-    refs: [crates/arkavo-code-search/src/treesitter.rs:1-60]
+    refs: [crates/arkavo-mcp-code-search/src/treesitter.rs:1-60]
     changed: "2025-01-31"
     edge_cases:
       - condition: Parse errors in source
@@ -109,7 +109,7 @@ scenarios:
       - Context preserved
       - User-friendly message
       - Result::Err returned
-    refs: [crates/arkavo-code-search/src/error.rs:1-40]
+    refs: [crates/arkavo-mcp-code-search/src/error.rs:1-40]
     changed: "2025-01-31"
     edge_cases:
       - condition: IO error during search
