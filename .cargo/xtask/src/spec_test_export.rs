@@ -30,6 +30,10 @@ pub(crate) struct ExportScenario {
     pub(crate) given: Vec<String>,
     pub(crate) when: String,
     pub(crate) then: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) wip: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) issue: Option<String>,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -154,6 +158,8 @@ fn build_export_spec(
                 given: cov.scenario.given.clone(),
                 when: cov.scenario.when.clone(),
                 then: cov.scenario.then.clone(),
+                wip: cov.scenario.wip,
+                issue: cov.scenario.issue.clone(),
             }
         })
         .collect();

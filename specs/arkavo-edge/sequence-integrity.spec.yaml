@@ -21,6 +21,8 @@ scenarios:
   - id: SEQ-001
     name: Tag data with provenance at ingestion
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/549
     given:
       - Agent reads data from any source (email, file, API, database)
       - DataTaintTracker initialized for session
@@ -43,6 +45,8 @@ scenarios:
   - id: SEQ-002
     name: Propagate taint through data transformations
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/549
     given:
       - Tainted data in agent context
       - Agent performs transformation (encode, restructure, summarize, chunk)
@@ -65,6 +69,8 @@ scenarios:
   - id: SEQ-003
     name: Block tainted data exfiltration at egress
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/548
     given:
       - Agent attempts outbound action (HTTP POST, email send, file write to external)
       - Payload contains taint-tracked data
@@ -92,6 +98,8 @@ scenarios:
   - id: SEQ-004
     name: Build directed action graph per session
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/556
     given:
       - Agent session active
       - SequenceGraphBuilder initialized
@@ -107,6 +115,8 @@ scenarios:
   - id: SEQ-005
     name: Learn behavioral baselines per agent skill
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/552
     given:
       - Agent has executed N sessions for a given skill/role
       - BaselineBuilder has sufficient history (configurable, default 100 sessions)
@@ -130,6 +140,8 @@ scenarios:
   - id: SEQ-006
     name: Detect sequence divergence from baseline
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
     given:
       - Baseline exists for agent skill
       - Current session action graph building
@@ -157,6 +169,8 @@ scenarios:
   - id: SEQ-007
     name: Persist sequence fragments to cross-session ledger
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
     given:
       - Agent session completes
       - Session action graph finalized
@@ -172,6 +186,8 @@ scenarios:
   - id: SEQ-008
     name: Detect multi-session decomposition attacks
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
     given:
       - SequenceLedger has entries from multiple sessions
       - DecompositionDetector running on ledger
@@ -195,6 +211,8 @@ scenarios:
   - id: SEQ-009
     name: Correlate decomposition across agent identities
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
     given:
       - Multiple agents in mesh share data
       - Agent A reads sensitive data, passes to Agent B
@@ -219,6 +237,8 @@ scenarios:
   - id: SEQ-010
     name: Evaluate sequence-aware TØR-G circuit before action
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/555
     given:
       - CriticPipeline with CircuitCheck active
       - TØR-G circuit compiled with sequence features
@@ -241,6 +261,8 @@ scenarios:
   - id: SEQ-011
     name: Synchronous gate on high-consequence actions
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/555
     given:
       - Action classified as high-consequence (egress, delete, credential use)
       - SequenceGate configured for synchronous evaluation
@@ -262,6 +284,8 @@ scenarios:
   - id: SEQ-012
     name: Async detection for low-consequence action coverage
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
     given:
       - Action classified as low-consequence (read, transform, internal write)
       - AsyncSequenceMonitor running
@@ -280,6 +304,8 @@ scenarios:
   - id: SEQ-013
     name: Titan integration for statistical sequence drift
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
     given:
       - TitanMonitor active
       - Sequence feature vector computed per action
@@ -295,6 +321,8 @@ scenarios:
   - id: SEQ-014
     name: Egress filter enhanced with provenance
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/548
     given:
       - EgressFilter from arkavo-validation active
       - Outbound request intercepted
@@ -317,6 +345,8 @@ scenarios:
   - id: SEQ-015
     name: Sequence evidence in audit events
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/550
     given:
       - EventWriter from arkavo-events active
       - Sequence violation or anomaly detected
@@ -336,6 +366,8 @@ scenarios:
   - id: SEQ-016
     name: Configure sequence integrity per agent role
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/551
     given:
       - AgentConfig includes sequence_integrity section
       - AGENTS.md defines agent roles
@@ -357,6 +389,8 @@ scenarios:
   - id: SEQ-017
     name: Handle sequence tracking errors gracefully
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/551
     given:
       - Sequence tracking encounters error (storage failure, timeout)
     when: Error propagated
