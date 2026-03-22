@@ -5,7 +5,7 @@
 //! Canonical tier (axioms). Axioms have falsifiability — confidence
 //! decays on failure, demotion at 0.3, deletion at 0.0.
 
-use arkavo_router::learning::{Lesson, LessonSource, MemoryTier};
+use arkavo_router::learning::{Lesson, LessonPattern, LessonSource, MemoryTier};
 use std::collections::HashMap;
 
 /// Minimum cluster size before consolidation merges them.
@@ -155,6 +155,129 @@ pub(super) fn falsify(lesson: &mut Lesson) -> bool {
     }
 
     false
+}
+
+/// Detect contradictions within a category using the LLM.
+/// Returns scoped replacement lessons for any contradictions found.
+/// One LLM call per category — bounded cost.
+pub(super) async fn detect_contradictions(
+    router: &arkavo_router::Router,
+    category: &str,
+    lessons: &[Lesson],
+) -> Vec<Lesson> {
+    if lessons.len() < 2 {
+        return Vec::new();
+    }
+
+    // Build a prompt listing all lessons in this category
+    let mut lesson_text = String::new();
+    for (i, lesson) in lessons.iter().enumerate() {
+        use std::fmt::Write;
+        let _ = writeln!(
+            lesson_text,
+            "{}. When: {} → Then: {}",
+            i + 1,
+            lesson.pattern.condition,
+            lesson.pattern.action
+        );
+    }
+
+    let prompt = format!(
+        r#"You are analyzing learned rules for contradictions.
+
+Category: {category}
+
+Rules:
+{lesson_text}
+Do any rules contradict each other? If so, respond with JSON:
+{{"contradictions": [{{"rule_a": <number>, "rule_b": <number>, "resolution": "scoped rule text"}}]}}
+
+If no contradictions, respond: NO_CONTRADICTIONS
+
+Resolution should create scoped rules that specify WHEN each applies.
+Example: "For urgent tasks: act immediately. For routine tasks: queue for batch."
+Keep resolutions specific and actionable."#
+    );
+
+    let messages = vec![arkavo_llm::Message::user(prompt)];
+    let stream = match router.route_fast("contradiction_detection", messages).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!("Contradiction detection skipped: {e}");
+            return Vec::new();
+        }
+    };
+    let result = match stream.complete().await {
+        Ok(r) => r.content,
+        Err(e) => {
+            tracing::debug!("Contradiction detection failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    if result.contains("NO_CONTRADICTIONS") {
+        return Vec::new();
+    }
+
+    // Parse contradictions from JSON
+    parse_contradiction_resolutions(&result, category, lessons)
+}
+
+/// Parse LLM contradiction response into scoped replacement lessons.
+fn parse_contradiction_resolutions(
+    response: &str,
+    category: &str,
+    lessons: &[Lesson],
+) -> Vec<Lesson> {
+    let json_str = response
+        .find('{')
+        .and_then(|start| response.rfind('}').map(|end| &response[start..=end]));
+
+    let Some(json_str) = json_str else {
+        return Vec::new();
+    };
+
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) else {
+        return Vec::new();
+    };
+
+    let Some(contradictions) = parsed.get("contradictions").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut new_lessons = Vec::new();
+    for c in contradictions {
+        let resolution = c.get("resolution").and_then(|v| v.as_str()).unwrap_or("");
+        if resolution.is_empty() {
+            continue;
+        }
+
+        // Use the first conflicting lesson as the template
+        let rule_a = c.get("rule_a").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let template = lessons.get(rule_a.saturating_sub(1)).unwrap_or(&lessons[0]);
+
+        let lesson = Lesson::new(
+            template.agent_id.clone(),
+            template.swarm_id.clone(),
+            category.to_string(),
+            LessonPattern::new(
+                template.pattern.condition.clone(),
+                resolution.to_string(),
+                "contextual bifurcation from contradiction resolution".to_string(),
+            ),
+            0.8, // Moderate confidence — LLM-generated resolution
+            1,
+        );
+        new_lessons.push(lesson);
+
+        tracing::info!(
+            category,
+            resolution,
+            "Contradiction resolved via contextual bifurcation"
+        );
+    }
+
+    new_lessons
 }
 
 #[cfg(test)]

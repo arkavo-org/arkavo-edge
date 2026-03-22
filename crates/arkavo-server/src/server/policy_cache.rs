@@ -391,6 +391,11 @@ impl PolicyCache {
             .any(|l| l.pattern.failure_mode_key() == failure_key)
     }
 
+    /// Iterate over behavior lessons grouped by (agent_id, category).
+    pub fn behavior_lessons_iter(&self) -> impl Iterator<Item = (&(String, String), &Vec<Lesson>)> {
+        self.behavior_lessons.iter()
+    }
+
     /// Run consolidation: merge clusters, then promote surviving lessons to axioms.
     /// Returns (lessons_merged, axioms_promoted).
     pub fn run_consolidation(&mut self) -> (usize, usize) {

@@ -477,13 +477,17 @@ pub async fn start_event_processing_loop(
                                 let cache = learning_bus.policy_cache().read().await;
                                 cache.behavior_lesson_count()
                             };
-                            if merged > 0 || promoted > 0 {
+                            // Contradiction detection after consolidation (1 LLM call per category)
+                            let contradictions = learning_bus.detect_contradictions().await;
+
+                            if merged > 0 || promoted > 0 || contradictions > 0 {
                                 tracing::info!(
                                     before,
                                     after,
                                     merged,
                                     promoted,
-                                    "Consolidation: {merged} merged, {promoted} promoted to axiom"
+                                    contradictions,
+                                    "Consolidation: {merged} merged, {promoted} axioms, {contradictions} contradictions resolved"
                                 );
                             }
                         }
