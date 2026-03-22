@@ -130,6 +130,32 @@ impl LearningBus {
         total_resolutions
     }
 
+    /// Scan the agent × category Beta prior matrix for uncertainty gaps.
+    /// Returns generated task prompts targeting the highest-variance cells.
+    pub async fn generate_curiosity_tasks(&self) -> Vec<String> {
+        let learning = self.learning.read().await;
+        let agents_guard = learning.agents().await;
+        let gaps = super::curiosity::find_uncertainty_gaps(&agents_guard);
+        drop(agents_guard);
+        drop(learning);
+
+        let tasks: Vec<String> = gaps
+            .iter()
+            .map(super::curiosity::generate_curiosity_task)
+            .collect();
+
+        if !tasks.is_empty() {
+            tracing::info!(
+                count = tasks.len(),
+                gaps = gaps.len(),
+                "Curiosity: generated {} exploration tasks from uncertainty gaps",
+                tasks.len()
+            );
+        }
+
+        tasks
+    }
+
     /// Check if there are patterns ready for lesson synthesis
     pub async fn has_ready_patterns(&self) -> bool {
         let observer = self.tool_pattern_observer.read().await;

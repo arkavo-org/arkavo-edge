@@ -480,15 +480,29 @@ pub async fn start_event_processing_loop(
                             // Contradiction detection after consolidation (1 LLM call per category)
                             let contradictions = learning_bus.detect_contradictions().await;
 
-                            if merged > 0 || promoted > 0 || contradictions > 0 {
+                            // Curiosity: generate exploration tasks from uncertainty gaps
+                            let curiosity_tasks = learning_bus.generate_curiosity_tasks().await;
+
+                            if merged > 0
+                                || promoted > 0
+                                || contradictions > 0
+                                || !curiosity_tasks.is_empty()
+                            {
                                 tracing::info!(
                                     before,
                                     after,
                                     merged,
                                     promoted,
                                     contradictions,
-                                    "Consolidation: {merged} merged, {promoted} axioms, {contradictions} contradictions resolved"
+                                    curiosity = curiosity_tasks.len(),
+                                    "Consolidation: {merged} merged, {promoted} axioms, {contradictions} contradictions, {} curiosity tasks",
+                                    curiosity_tasks.len()
                                 );
+                            }
+
+                            // Log curiosity tasks (execution is handled by the orchestrator)
+                            for task in &curiosity_tasks {
+                                tracing::info!(task = %task, "Curiosity exploration task generated");
                             }
                         }
                     }
