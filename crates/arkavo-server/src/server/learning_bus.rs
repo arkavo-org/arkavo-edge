@@ -181,6 +181,8 @@ pub struct LearningBus {
     /// Peer GPU inference state (updated via gossip broadcasts)
     pub(super) peer_inference_state:
         Arc<RwLock<HashMap<String, arkavo_gossip::InferenceStateBroadcast>>>,
+    /// Task counter for periodic consolidation
+    tasks_since_consolidation: Arc<AtomicU64>,
 }
 
 impl LearningBus {
@@ -262,7 +264,18 @@ impl LearningBus {
             patchlet_bridge: OnceLock::new(),
             task_completions: Arc::new(RwLock::new(Vec::new())),
             peer_inference_state: Arc::new(RwLock::new(HashMap::new())),
+            tasks_since_consolidation: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Increment task counter and return true if consolidation is due.
+    pub fn should_consolidate(&self) -> bool {
+        const CONSOLIDATION_INTERVAL: u64 = 50;
+        let count = self
+            .tasks_since_consolidation
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        count.is_multiple_of(CONSOLIDATION_INTERVAL)
     }
 
     /// Initialize the persistent learning store and load existing lessons
@@ -429,11 +442,12 @@ impl LearningBus {
         let condition = format!("calling {tool_name}");
         let action = format!("avoid: {error_msg}");
 
-        // Dedup: skip if this exact condition+action already exists in cache
+        // Dedup via normalized failure mode key
         {
+            let pattern = LessonPattern::new(condition.clone(), action.clone(), String::new());
+            let failure_key = pattern.failure_mode_key();
             let cache = self.policy_cache.read().await;
-            let guidance = cache.get_behavior_guidance(None);
-            if guidance.contains(&condition) && guidance.contains(tool_name) {
+            if cache.has_failure_mode(&failure_key, "tool_error") {
                 tracing::debug!(tool = tool_name, "Skipping duplicate fast-path lesson");
                 return;
             }

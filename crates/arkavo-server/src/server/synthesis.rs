@@ -178,9 +178,9 @@ Look for patterns:
 
 If there's a clear pattern, respond with JSON:
 {{
-  "condition": "specific trigger (e.g., calling DesignateHunt with wrong target type)",
-  "action": "concrete recommendation (e.g., use TargetId from Entities.Animals)",
-  "expected_outcome": "measurable result (e.g., hunt command succeeds)",
+  "condition": "specific trigger (e.g., calling tool X with wrong parameter type)",
+  "action": "concrete recommendation (e.g., use valid ID from observation data)",
+  "expected_outcome": "measurable result (e.g., tool call succeeds)",
   "confidence": 0.0-1.0 based on evidence strength
 }}
 

@@ -344,17 +344,16 @@ pub(super) async fn run_tool_loop(
             consecutive_negative_rewards += 1;
 
             // Sustained failure → synthesize a recovery lesson via learning bus.
-            // At 10+ consecutive negatives the colony is in systemic failure;
-            // teach the agent to call episodeSummary and consider reset/checkpoint.
+            // At 10+ consecutive negatives the environment is in systemic failure;
+            // teach the agent to assess performance and consider recovery actions.
             if consecutive_negative_rewards == 10
                 && let Some(bus) = learning_bus
             {
                 bus.add_fast_lesson(
-                    "colony_management",
-                    "10+ consecutive negative rewards indicate systemic colony failure. \
-                     Call game-rl:episodeSummary to assess total reward. \
-                     If cumulative reward is very negative, call game-rl:step with \
-                     Type=LoadCheckpoint Name=\"best_colony\" or reset the game.",
+                    "sustained_failure",
+                    "10+ consecutive negative rewards indicate systemic failure. \
+                     Assess cumulative reward via summary/status tools. \
+                     If reward is very negative, consider resetting or loading a checkpoint.",
                 )
                 .await;
             }
@@ -412,9 +411,9 @@ pub(super) async fn run_tool_loop(
                 "Injecting exploration prompt after repeated negative rewards"
             );
             format!(
-                "\n\nWARNING: The last {consecutive_negative_rewards} actions worsened colony state. \
-                 Choose an action category NOT used in the last 3 ticks. \
-                 Read the observe output for the most critical unmet need \
+                "\n\nWARNING: The last {consecutive_negative_rewards} actions produced negative rewards. \
+                 Choose a different action category than the last 3 ticks. \
+                 Observe the current state for the most critical unmet need \
                  and address it directly."
             )
         } else {

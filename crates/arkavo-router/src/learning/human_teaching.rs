@@ -104,9 +104,9 @@ fn build_intent_prompt(text: &str) -> String {
         r#"Classify this user message into exactly ONE intent.
 
 Categories:
-- question: asking for information or normal conversation. Example: "how many colonists are alive?"
+- question: asking for information or normal conversation. Example: "how many agents are active?"
 - instruction: telling the agent to change behavior. Example: "it might be better to focus on defense"
-- correction: disapproving or noting a problem with a recent action. Example: "the colony keeps running out of medicine"
+- correction: disapproving or noting a problem with a recent action. Example: "the system keeps running out of resources"
 - reinforcement: praising or approving behavior. Example: "that approach is working well"
 
 Message: {text}

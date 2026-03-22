@@ -16,6 +16,8 @@ use super::tool_pattern_observer::TOOL_FORMAT_CATEGORY;
 const MAX_BEHAVIOR_LESSONS_PER_KEY: usize = 5;
 const MAX_QUALITY_HISTORY: usize = 20;
 const MAX_GUIDANCE_LESSONS: usize = 5;
+const MAX_GUIDANCE_TOKENS: usize = 500;
+const CHARS_PER_TOKEN: usize = 4;
 
 /// Quality trend data for a specific (agent, category) pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,13 +99,32 @@ impl PolicyCache {
                     .push(lesson.clone());
             }
 
-            // Index as behavior lesson by (agent_id, category)
+            // Index as behavior lesson by (agent_id, category) with failure-mode dedup
+            let failure_key = lesson.pattern.failure_mode_key();
             let key = (lesson.agent_id.clone(), lesson.category.clone());
             let entries = self.behavior_lessons.entry(key).or_default();
-            if entries.len() >= MAX_BEHAVIOR_LESSONS_PER_KEY {
-                entries.remove(0);
+
+            if let Some(idx) = entries
+                .iter()
+                .position(|l| l.pattern.failure_mode_key() == failure_key)
+            {
+                // Duplicate failure mode — keep higher confidence
+                if lesson.confidence > entries[idx].confidence
+                    || lesson.episode_count > entries[idx].episode_count
+                {
+                    entries[idx] = lesson.clone();
+                } else {
+                    // Skip — existing version is better
+                    self.lessons_by_id.insert(lesson.id, lesson);
+                    return;
+                }
+            } else {
+                // New failure mode — ring buffer eviction
+                if entries.len() >= MAX_BEHAVIOR_LESSONS_PER_KEY {
+                    entries.remove(0);
+                }
+                entries.push(lesson.clone());
             }
-            entries.push(lesson.clone());
 
             // Record quality from lesson metadata if present
             if let Some(meta) = &lesson.pattern.metadata
@@ -272,7 +293,7 @@ impl PolicyCache {
     /// as guidance for prompt injection, plus any active anti-pattern warnings.
     pub fn get_behavior_guidance(&self, category: Option<&str>) -> String {
         let mut seen_conditions = HashSet::new();
-        let lessons: Vec<&Lesson> = self
+        let mut lessons: Vec<&Lesson> = self
             .behavior_lessons
             .iter()
             .filter(|((_, cat), _)| category.is_none() || category == Some(cat.as_str()))
@@ -281,19 +302,35 @@ impl PolicyCache {
             .take(MAX_GUIDANCE_LESSONS)
             .collect();
 
+        // Sort by confidence descending — highest-quality lessons get budget priority
+        lessons.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
         let mut lines = Vec::new();
+        let max_chars = MAX_GUIDANCE_TOKENS * CHARS_PER_TOKEN;
+        let mut total_chars = 0;
 
         if !lessons.is_empty() {
-            lines.push("RULES (follow these strictly):".to_string());
+            let header = "RULES (follow these strictly):".to_string();
+            total_chars += header.len();
+            lines.push(header);
             for lesson in &lessons {
-                if lesson.pattern.condition == "human_instruction" {
-                    lines.push(format!("- {}", lesson.pattern.action));
+                let line = if lesson.pattern.condition == "human_instruction" {
+                    format!("- {}", lesson.pattern.action)
                 } else {
-                    lines.push(format!(
+                    format!(
                         "- When {}, then {}.",
                         lesson.pattern.condition, lesson.pattern.action
-                    ));
+                    )
+                };
+                if total_chars + line.len() > max_chars {
+                    break;
                 }
+                total_chars += line.len();
+                lines.push(line);
             }
         }
 
@@ -310,6 +347,31 @@ impl PolicyCache {
             String::new()
         } else {
             lines.join("\n")
+        }
+    }
+
+    /// Check if a lesson with the given failure mode key exists in a category.
+    pub fn has_failure_mode(&self, failure_key: &str, category: &str) -> bool {
+        self.behavior_lessons
+            .iter()
+            .filter(|((_, cat), _)| cat == category)
+            .flat_map(|(_, lessons)| lessons.iter())
+            .any(|l| l.pattern.failure_mode_key() == failure_key)
+    }
+
+    /// Run consolidation: merge duplicate failure mode clusters into single lessons.
+    pub fn run_consolidation(&mut self) {
+        let all_lessons: Vec<Lesson> = self
+            .behavior_lessons
+            .drain()
+            .flat_map(|(_, lessons)| lessons)
+            .collect();
+
+        let consolidated = super::consolidation::consolidate_lessons(all_lessons);
+
+        for lesson in consolidated {
+            let key = (lesson.agent_id.clone(), lesson.category.clone());
+            self.behavior_lessons.entry(key).or_default().push(lesson);
         }
     }
 

@@ -45,7 +45,7 @@ impl ToolMemory {
         self.entries.clear();
         self.last_action_type = None;
         self.consecutive_same_type = 0;
-        // Preserve last_observe_full — the colony state is still valid
+        // Preserve last_observe_full — the observed state is still valid
     }
 
     pub fn add(&mut self, tool_name: String, args: &serde_json::Value, result: &str) {

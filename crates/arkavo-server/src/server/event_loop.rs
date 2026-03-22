@@ -463,8 +463,29 @@ pub async fn start_event_processing_loop(
                             category,
                             success
                         );
-                        // Task completion can trigger immediate episode synthesis
-                        // even before threshold is reached
+                        // Periodic consolidation of duplicate lessons
+                        if learning_bus.should_consolidate() {
+                            let before = {
+                                let cache = learning_bus.policy_cache().read().await;
+                                cache.behavior_lesson_count()
+                            };
+                            {
+                                let mut cache = learning_bus.policy_cache().write().await;
+                                cache.run_consolidation();
+                            }
+                            let after = {
+                                let cache = learning_bus.policy_cache().read().await;
+                                cache.behavior_lesson_count()
+                            };
+                            if before != after {
+                                tracing::info!(
+                                    before,
+                                    after,
+                                    reduced = before - after,
+                                    "Lesson consolidation completed"
+                                );
+                            }
+                        }
                     }
                     LearningEvent::GossipReceived(_) => {
                         // Gossip messages are handled separately via handle_gossip

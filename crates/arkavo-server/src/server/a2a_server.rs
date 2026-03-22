@@ -1098,7 +1098,7 @@ impl A2aServer {
                     let memory = agent_memory.read().await;
                     let mut ctx = String::new();
 
-                    // Include last observed state (colony/environment state)
+                    // Include last observed state (environment state)
                     if let Some(state) = memory.last_observe_full() {
                         use std::fmt::Write;
                         let _ = write!(ctx, "## Current Observed State\n{state}\n");
@@ -1659,9 +1659,9 @@ impl A2aServer {
                                 bus.add_fast_lesson(
                                     "orchestrator",
                                     "8 consecutive ticks produced no meaningful action. \
-                                     The conversation context was poisoned. On the next tick, \
-                                     call game-rl:observe first to get fresh colony state, \
-                                     then pick ONE concrete action from the alerts.",
+                                     The conversation context may be stale. On the next tick, \
+                                     observe the current state first, \
+                                     then pick ONE concrete action from the most urgent need.",
                                 )
                                 .await;
                             }

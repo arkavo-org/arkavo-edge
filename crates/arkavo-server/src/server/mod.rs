@@ -7,6 +7,7 @@ mod conductor_evofabric;
 mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
+mod consolidation;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
