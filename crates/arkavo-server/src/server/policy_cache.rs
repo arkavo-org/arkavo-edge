@@ -292,40 +292,72 @@ impl PolicyCache {
     /// Optionally filters by category. Returns up to 5 lessons formatted
     /// as guidance for prompt injection, plus any active anti-pattern warnings.
     pub fn get_behavior_guidance(&self, category: Option<&str>) -> String {
+        use arkavo_router::learning::MemoryTier;
+
         let mut seen_conditions = HashSet::new();
-        let mut lessons: Vec<&Lesson> = self
+        let all_lessons: Vec<&Lesson> = self
             .behavior_lessons
             .iter()
             .filter(|((_, cat), _)| category.is_none() || category == Some(cat.as_str()))
             .flat_map(|(_, lessons)| lessons.iter())
             .filter(|l| seen_conditions.insert(l.pattern.condition.as_str()))
-            .take(MAX_GUIDANCE_LESSONS)
+            .take(MAX_GUIDANCE_LESSONS * 2) // Collect more, then split
             .collect();
 
-        // Sort by confidence descending — highest-quality lessons get budget priority
-        lessons.sort_by(|a, b| {
+        // Split: fresh lessons first (recency bias), axioms after
+        let mut fresh: Vec<&Lesson> = all_lessons
+            .iter()
+            .filter(|l| l.tier != MemoryTier::Canonical)
+            .copied()
+            .collect();
+        let mut axioms: Vec<&Lesson> = all_lessons
+            .iter()
+            .filter(|l| l.tier == MemoryTier::Canonical)
+            .copied()
+            .collect();
+
+        // Sort each group by confidence descending
+        let cmp = |a: &&Lesson, b: &&Lesson| {
             b.confidence
                 .partial_cmp(&a.confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        };
+        fresh.sort_by(cmp);
+        axioms.sort_by(cmp);
 
         let mut lines = Vec::new();
         let max_chars = MAX_GUIDANCE_TOKENS * CHARS_PER_TOKEN;
         let mut total_chars = 0;
 
-        if !lessons.is_empty() {
+        let format_lesson = |lesson: &&Lesson| -> String {
+            if lesson.pattern.condition == "human_instruction" {
+                format!("- {}", lesson.pattern.action)
+            } else {
+                format!(
+                    "- When {}, then {}.",
+                    lesson.pattern.condition, lesson.pattern.action
+                )
+            }
+        };
+
+        // Fresh lessons first — transformer recency bias gives them more weight
+        if !fresh.is_empty() || !axioms.is_empty() {
             let header = "RULES (follow these strictly):".to_string();
             total_chars += header.len();
             lines.push(header);
-            for lesson in &lessons {
-                let line = if lesson.pattern.condition == "human_instruction" {
-                    format!("- {}", lesson.pattern.action)
-                } else {
-                    format!(
-                        "- When {}, then {}.",
-                        lesson.pattern.condition, lesson.pattern.action
-                    )
-                };
+
+            for lesson in fresh.iter().take(MAX_GUIDANCE_LESSONS) {
+                let line = format_lesson(lesson);
+                if total_chars + line.len() > max_chars {
+                    break;
+                }
+                total_chars += line.len();
+                lines.push(line);
+            }
+
+            // Axioms after fresh lessons — stable knowledge, lower priority
+            for lesson in axioms.iter().take(MAX_GUIDANCE_LESSONS) {
+                let line = format_lesson(lesson);
                 if total_chars + line.len() > max_chars {
                     break;
                 }
@@ -359,20 +391,46 @@ impl PolicyCache {
             .any(|l| l.pattern.failure_mode_key() == failure_key)
     }
 
-    /// Run consolidation: merge duplicate failure mode clusters into single lessons.
-    pub fn run_consolidation(&mut self) {
+    /// Run consolidation: merge clusters, then promote surviving lessons to axioms.
+    /// Returns (lessons_merged, axioms_promoted).
+    pub fn run_consolidation(&mut self) -> (usize, usize) {
         let all_lessons: Vec<Lesson> = self
             .behavior_lessons
             .drain()
             .flat_map(|(_, lessons)| lessons)
             .collect();
 
-        let consolidated = super::consolidation::consolidate_lessons(all_lessons);
+        let before = all_lessons.len();
+        let mut consolidated = super::consolidation::consolidate_lessons(all_lessons);
+        let merged = before.saturating_sub(consolidated.len());
+
+        let promoted = super::consolidation::promote_axioms(&mut consolidated);
 
         for lesson in consolidated {
             let key = (lesson.agent_id.clone(), lesson.category.clone());
             self.behavior_lessons.entry(key).or_default().push(lesson);
         }
+
+        (merged, promoted)
+    }
+
+    /// Record a falsification against a lesson matching the given failure mode.
+    /// Returns true if any lesson was deleted.
+    pub fn falsify_lesson(&mut self, failure_key: &str, category: &str) -> bool {
+        let mut deleted = false;
+        for ((_agent, cat), lessons) in self.behavior_lessons.iter_mut() {
+            if cat != category {
+                continue;
+            }
+            lessons.retain_mut(|l| {
+                if l.pattern.failure_mode_key() == failure_key && super::consolidation::falsify(l) {
+                    deleted = true;
+                    return false; // Remove
+                }
+                true
+            });
+        }
+        deleted
     }
 
     /// Get behavior lesson count

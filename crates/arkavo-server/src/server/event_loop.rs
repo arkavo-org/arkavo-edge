@@ -463,26 +463,27 @@ pub async fn start_event_processing_loop(
                             category,
                             success
                         );
-                        // Periodic consolidation of duplicate lessons
+                        // Periodic consolidation + axiom promotion
                         if learning_bus.should_consolidate() {
                             let before = {
                                 let cache = learning_bus.policy_cache().read().await;
                                 cache.behavior_lesson_count()
                             };
-                            {
+                            let (merged, promoted) = {
                                 let mut cache = learning_bus.policy_cache().write().await;
-                                cache.run_consolidation();
-                            }
+                                cache.run_consolidation()
+                            };
                             let after = {
                                 let cache = learning_bus.policy_cache().read().await;
                                 cache.behavior_lesson_count()
                             };
-                            if before != after {
+                            if merged > 0 || promoted > 0 {
                                 tracing::info!(
                                     before,
                                     after,
-                                    reduced = before - after,
-                                    "Lesson consolidation completed"
+                                    merged,
+                                    promoted,
+                                    "Consolidation: {merged} merged, {promoted} promoted to axiom"
                                 );
                             }
                         }
