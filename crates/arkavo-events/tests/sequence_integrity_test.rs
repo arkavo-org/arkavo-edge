@@ -24,12 +24,13 @@ fn events_allow_duplicate_sequence_numbers() {
     let event2 = make_event(5);
 
     assert_eq!(event1.sequence, event2.sequence);
-    // SEQ-015: sequence numbers should be validated for gaps/duplicates
 }
 
 /// SEQ-015: EventMetadata has correlation_id but no taint_chain field.
+/// Tripwire: when taint_chain is added, this will stop panicking.
 #[spec("SEQ-015")]
 #[test]
+#[should_panic(expected = "SEQ-015")]
 fn event_metadata_has_no_taint_chain() {
     let event = make_event(1);
 
@@ -42,8 +43,10 @@ fn event_metadata_has_no_taint_chain() {
 }
 
 /// SEQ-015: Event payload has no variant for sequence integrity evidence.
+/// Tripwire: when SequenceViolation variant is added, this will stop panicking.
 #[spec("SEQ-015")]
 #[test]
+#[should_panic(expected = "SEQ-015")]
 fn event_payload_has_no_sequence_violation_variant() {
     let error_payload = EventPayload::Error {
         error_type: "sequence_violation".into(),

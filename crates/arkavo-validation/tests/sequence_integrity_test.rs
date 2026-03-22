@@ -12,13 +12,13 @@ fn egress_filter_allows_external_url_regardless_of_data_sensitivity() {
 
     let result = filter.is_allowed("https://external-attacker.com/exfil");
     assert!(result.is_ok());
-    // SEQ-003: should be blockable when payload carries credential data.
-    // Currently no API to pass data classification context.
 }
 
 /// SEQ-003: A request to a public API carrying credential data should be blocked.
+/// Tripwire: when taint-aware egress is implemented, this will stop panicking.
 #[spec("SEQ-003")]
 #[test]
+#[should_panic(expected = "SEQ-003")]
 fn egress_filter_has_no_taint_aware_evaluation() {
     let filter = EgressFilter::new();
 
@@ -31,8 +31,10 @@ fn egress_filter_has_no_taint_aware_evaluation() {
 }
 
 /// SEQ-014: EgressFilter error type has no provenance information.
+/// Tripwire: when provenance is added to EgressError, this will stop panicking.
 #[spec("SEQ-014")]
 #[test]
+#[should_panic(expected = "SEQ-014")]
 fn egress_error_contains_no_provenance_chain() {
     let filter = EgressFilter::new();
 
