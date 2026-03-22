@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.58.0
-last_updated: 2025-02-05
+version: 0.59.0
+last_updated: 2026-03-21
 
 components:
   - name: registration
@@ -801,6 +801,22 @@ components:
       - Rate limiting enforced
       - Secrets never logged
 
+  - name: sequence-integrity
+    file: sequence-integrity.spec.yaml
+    module: arkavo_sequence_integrity
+    description: Agent behavioral sequence integrity and taint tracking
+    criticality: critical
+    scenario_count: 17
+    invariants:
+      - Every tool call is taint-tracked from data source to data sink
+      - Action sequences are evaluated as directed graphs, not isolated calls
+      - Cross-session decomposition detected via persistent sequence ledger
+      - Sensitive data classification propagates through transformation steps
+      - Pre-execution gates enforce sequence-aware policy
+      - Sequence anomaly detection adds <50μs overhead per tool call
+      - CriticPipeline CircuitCheck evaluates sequence context
+      - Egress decisions incorporate data provenance
+
   - name: server
     file: server.spec.yaml
     module: arkavo_server
@@ -824,9 +840,9 @@ components:
       - Schema-driven validation
 
 stats:
-  total_specs: 72
-  total_scenarios: 604
-  critical_scenarios: 153
+  total_specs: 73
+  total_scenarios: 621
+  critical_scenarios: 160
   coverage_areas:
     - authentication
     - authorization
@@ -880,6 +896,11 @@ stats:
     - rlm_activation
     - response_processing
     - sampling_parameters
+    - sequence_integrity
+    - data_provenance
+    - taint_tracking
+    - behavioral_baseline
+    - cross_session_analysis
 
 # Cross-component behaviors
 integration_points:
@@ -1162,6 +1183,26 @@ integration_points:
   - name: Critic → Chat Session
     description: Response analysis improves conversation quality
     specs: [CRIT-011, CRIT-012, CHAT-017]
+
+  - name: Sequence Integrity → Titan
+    description: Sequence integrity uses Titan for drift detection
+    specs: [SEQ-013, TITAN-001]
+
+  - name: Sequence Integrity → Validation
+    description: Egress filter enhanced with provenance tracking
+    specs: [SEQ-014, VAL-005]
+
+  - name: Sequence Integrity → Events
+    description: Security events include sequence evidence
+    specs: [SEQ-015, EVENT-003]
+
+  - name: Sequence Integrity → Critic
+    description: CircuitCheck evaluates sequence context
+    specs: [SEQ-010, CRIT-003]
+
+  - name: Sequence Integrity → Session Security
+    description: Session security enhanced with taint tracking
+    specs: [SEQ-001, SEQ-003, SESS-010]
 
   - name: Memory → Context
     description: Context ledger uses memory storage

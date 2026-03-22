@@ -30,6 +30,10 @@ pub(crate) struct ExportScenario {
     pub(crate) given: Vec<String>,
     pub(crate) when: String,
     pub(crate) then: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) wip: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) issue: Option<String>,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -57,6 +61,8 @@ pub(crate) struct ExportSummary {
     pub(crate) covered: usize,
     pub(crate) partial: usize,
     pub(crate) missing: usize,
+    #[serde(default)]
+    pub(crate) wip: usize,
     pub(crate) pct: f64,
 }
 
@@ -88,6 +94,13 @@ pub fn export_json_string(report: &CoverageReport) -> Result<String> {
     let code = build_code_tree(code_map);
     let pct = report.coverage_percentage();
 
+    let wip_count: usize = report
+        .specs
+        .iter()
+        .flat_map(|s| s.scenarios.iter())
+        .filter(|s| s.scenario.wip)
+        .count();
+
     let data = ExportData {
         specs,
         code,
@@ -96,7 +109,8 @@ pub fn export_json_string(report: &CoverageReport) -> Result<String> {
             total: report.total_scenarios,
             covered: report.covered_scenarios,
             partial: report.partial_scenarios,
-            missing: report.missing_scenarios,
+            missing: report.missing_scenarios.saturating_sub(wip_count),
+            wip: wip_count,
             pct,
         },
     };
@@ -154,6 +168,8 @@ fn build_export_spec(
                 given: cov.scenario.given.clone(),
                 when: cov.scenario.when.clone(),
                 then: cov.scenario.then.clone(),
+                wip: cov.scenario.wip,
+                issue: cov.scenario.issue.clone(),
             }
         })
         .collect();
@@ -183,12 +199,13 @@ fn add_to_code_map(
 
 fn extract_crate_name(path: &str) -> String {
     // Extract crate name from paths like "crates/arkavo-crypto/src/lib.rs"
+    // and strip the redundant "arkavo-" prefix for display
     let parts: Vec<&str> = path.split('/').collect();
     for (i, part) in parts.iter().enumerate() {
         if *part == "crates"
             && let Some(name) = parts.get(i + 1)
         {
-            return name.to_string();
+            return name.strip_prefix("arkavo-").unwrap_or(name).to_string();
         }
     }
     "other".into()

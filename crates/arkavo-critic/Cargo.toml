@@ -30,6 +30,7 @@ arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 criterion = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 

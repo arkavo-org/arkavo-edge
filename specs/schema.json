@@ -77,6 +77,14 @@
             "type": "string",
             "format": "date",
             "description": "Last modification date (YYYY-MM-DD)"
+          },
+          "wip": {
+            "type": "boolean",
+            "description": "Scenario is work-in-progress (not yet implemented)"
+          },
+          "issue": {
+            "type": "string",
+            "description": "GitHub issue URL tracking implementation"
           }
         }
       }
