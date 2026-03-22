@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Write;
 
 /// Sliding window memory for recent tool calls and responses.
@@ -12,6 +12,8 @@ pub struct ToolMemory {
     /// Tracks consecutive same-type actions across ticks (persists beyond window)
     last_action_type: Option<String>,
     consecutive_same_type: usize,
+    /// Tools that succeeded once and should not be called again (e.g., registration)
+    completed_setup_tools: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,7 @@ impl ToolMemory {
             last_observe_full: None,
             last_action_type: None,
             consecutive_same_type: 0,
+            completed_setup_tools: HashSet::new(),
         }
     }
 
@@ -90,6 +93,11 @@ impl ToolMemory {
         let result_limit = if is_error { 400 } else { 200 };
         let result_summary: String = result.chars().take(result_limit).collect();
 
+        // Track one-time setup tools that succeeded (register, init, connect patterns)
+        if !is_error && Self::is_setup_tool(&tool_name) {
+            self.completed_setup_tools.insert(tool_name.clone());
+        }
+
         if self.entries.len() >= self.max_entries {
             self.entries.pop_front();
         }
@@ -106,32 +114,53 @@ impl ToolMemory {
         });
     }
 
+    /// Check if a tool is a one-time setup tool (should not be called repeatedly).
+    fn is_setup_tool(tool_name: &str) -> bool {
+        let lower = tool_name.to_lowercase();
+        lower.contains("register")
+            || lower.contains("init")
+            || lower.contains("connect")
+            || lower.contains("setup")
+    }
+
     pub fn format_for_prompt(&self) -> String {
-        if self.entries.is_empty() {
+        if self.entries.is_empty() && self.completed_setup_tools.is_empty() {
             return String::new();
         }
-        let mut output = String::from("\n\n## Recent Actions\n");
-        for (i, entry) in self.entries.iter().enumerate() {
-            let status = if entry.is_error { "FAILED" } else { "OK" };
-            let label = if !entry.action_type.is_empty() {
-                &entry.action_type
-            } else {
-                &entry.tool_name
-            };
-            let dup_warning = if entry.is_duplicate {
-                " ← DUPLICATE (already done, try different params)"
-            } else {
-                ""
-            };
-            let _ = writeln!(
-                output,
-                "{}. {}: {}{}\n   → {}",
-                i + 1,
-                label,
-                status,
-                dup_warning,
-                entry.result_summary
-            );
+        let mut output = String::new();
+
+        // Warn about one-time tools that already succeeded
+        if !self.completed_setup_tools.is_empty() {
+            output.push_str("\n\n## Already Completed (DO NOT call again)\n");
+            for tool in &self.completed_setup_tools {
+                let _ = writeln!(output, "- {tool} ← succeeded, calling again is wasteful");
+            }
+        }
+
+        if !self.entries.is_empty() {
+            output.push_str("\n\n## Recent Actions\n");
+            for (i, entry) in self.entries.iter().enumerate() {
+                let status = if entry.is_error { "FAILED" } else { "OK" };
+                let label = if !entry.action_type.is_empty() {
+                    &entry.action_type
+                } else {
+                    &entry.tool_name
+                };
+                let dup_warning = if entry.is_duplicate {
+                    " ← DUPLICATE (already done, try different params)"
+                } else {
+                    ""
+                };
+                let _ = writeln!(
+                    output,
+                    "{}. {}: {}{}\n   → {}",
+                    i + 1,
+                    label,
+                    status,
+                    dup_warning,
+                    entry.result_summary
+                );
+            }
         }
         output
     }
