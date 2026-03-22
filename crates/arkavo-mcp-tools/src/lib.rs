@@ -13,6 +13,8 @@ pub mod github_checks;
 pub mod github_org_knowledge;
 pub mod github_review;
 pub mod health_check;
+#[cfg(feature = "iroh")]
+pub mod iroh_data;
 pub mod mcp_connection;
 pub mod osv;
 pub mod registry;

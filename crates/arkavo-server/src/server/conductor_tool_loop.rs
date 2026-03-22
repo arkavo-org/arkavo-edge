@@ -42,6 +42,8 @@ pub(super) async fn run_tool_loop(
     let mut decision_model_name = None;
     let mut total_step_idx: usize = 0;
     let mut first_inference_timing = None;
+    let mut force_planning = false;
+    let mut consecutive_negative_rewards: u32 = 0;
     let loop_start = std::time::Instant::now();
 
     // Context budget: estimate model window in chars (tokens × 4)
@@ -80,7 +82,16 @@ pub(super) async fn run_tool_loop(
         // Execution iterations (1+) use a stripped inference profile:
         // temp 0.1, thinking off, max 200 tokens, 10s timeout.
         // Planning iterations (0) use full reasoning with model defaults.
-        let is_execution = iteration > 0;
+        // Negative reward from previous iteration forces planning mode so the
+        // capable model can reason about what went wrong and pick a better action.
+        let is_execution = iteration > 0 && !force_planning;
+        if force_planning {
+            info!(
+                iteration = iteration + 1,
+                "Reward-driven escalation: using planning model"
+            );
+            force_planning = false;
+        }
 
         // Context-aware timeout scaled by model generation speed.
         // Benchmarked TG speeds: 0.8B=170t/s, 3B=136t/s, 9B=50t/s, 27B=14t/s.
@@ -326,6 +337,30 @@ pub(super) async fn run_tool_loop(
         )
         .await;
 
+        // Negative reward from game actions → escalate next iteration to planning mode
+        // so the capable model can reason about the failure and pick a better action.
+        if reward_signals.last().is_some_and(|&r| r < 0.0) {
+            force_planning = true;
+            consecutive_negative_rewards += 1;
+
+            // Sustained failure → synthesize a recovery lesson via learning bus.
+            // At 10+ consecutive negatives the environment is in systemic failure;
+            // teach the agent to assess performance and consider recovery actions.
+            if consecutive_negative_rewards == 10
+                && let Some(bus) = learning_bus
+            {
+                bus.add_fast_lesson(
+                    "sustained_failure",
+                    "10+ consecutive negative rewards indicate systemic failure. \
+                     Assess cumulative reward via summary/status tools. \
+                     If reward is very negative, consider resetting or loading a checkpoint.",
+                )
+                .await;
+            }
+        } else if reward_signals.last().is_some() {
+            consecutive_negative_rewards = 0;
+        }
+
         let tool_results_text = tool_result_parts.join("\n\n");
         let raw_result_chars = tool_results_text.len();
 
@@ -370,8 +405,23 @@ pub(super) async fn run_tool_loop(
             tool_results_text
         };
 
+        let exploration_nudge = if consecutive_negative_rewards >= 3 {
+            info!(
+                consecutive_negative_rewards,
+                "Injecting exploration prompt after repeated negative rewards"
+            );
+            format!(
+                "\n\nWARNING: The last {consecutive_negative_rewards} actions produced negative rewards. \
+                 Choose a different action category than the last 3 ticks. \
+                 Observe the current state for the most critical unmet need \
+                 and address it directly."
+            )
+        } else {
+            String::new()
+        };
+
         messages.push(arkavo_llm::Message::user(format!(
-            "Tool results:\n{result_to_append}\n\nContinue your workflow. What is the next step?"
+            "Tool results:\n{result_to_append}{exploration_nudge}\n\nContinue your workflow. What is the next step?"
         )));
     }
 
@@ -489,6 +539,11 @@ async fn execute_tool_calls(
                                 Some(&model_name),
                             )
                             .await;
+
+                            // Fast-path lesson: tool error messages are ground truth.
+                            // Bypass the 3-observation accumulation threshold and write
+                            // a corrective lesson directly to PolicyCache.
+                            bus.add_fast_lesson(&tool_call.tool_name, err_msg).await;
                         }
                     }
                 } else {

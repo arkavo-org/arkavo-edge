@@ -50,6 +50,8 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        #[cfg(feature = "iroh")]
+        None,
     )
     .await
 }
@@ -74,6 +76,7 @@ pub async fn execute_with_conductor_and_learning(
     model_hint: Option<&arkavo_router::ModelChoice>,
     images: Option<Vec<String>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
@@ -250,6 +253,13 @@ pub async fn execute_with_conductor_and_learning(
         info!("Registered 4 mesh delegation tools");
     }
 
+    // Register Iroh P2P data tools (iroh_stage, iroh_fetch) for inter-agent sharing
+    #[cfg(feature = "iroh")]
+    if let Some(node) = iroh_node {
+        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
+        info!("Registered 2 Iroh P2P data tools");
+    }
+
     info!(
         "Task has {} tools available: {:?}",
         tool_registry.list_tools().len(),
@@ -329,6 +339,7 @@ pub async fn execute_with_conductor_and_learning(
             .get_few_shot_examples(&tool_names, arkavo_router::learning::ToolCallFormat::Fence)
             .await;
         let behavior_guidance = bus.get_behavior_guidance(None).await;
+        let behavior_lesson_count = bus.behavior_lesson_count().await;
         let domain = bus.swarm_id();
         let case_context = bus
             .get_case_context(&task_content, None, Some(domain))
@@ -337,8 +348,9 @@ pub async fn execute_with_conductor_and_learning(
         let mut prefix = String::new();
         if !behavior_guidance.is_empty() {
             info!(
-                "Injecting {} chars of behavior guidance",
-                behavior_guidance.len()
+                "Injecting {} chars of behavior guidance ({} lessons)",
+                behavior_guidance.len(),
+                behavior_lesson_count
             );
             prefix.push_str(&behavior_guidance);
             prefix.push('\n');
@@ -362,11 +374,19 @@ pub async fn execute_with_conductor_and_learning(
         }
 
         if prefix.is_empty() {
+            info!(
+                behavior_empty = behavior_guidance.is_empty(),
+                few_shot_empty = few_shot_examples.is_empty(),
+                case_empty = case_context.is_empty(),
+                behavior_lesson_count,
+                "No guidance prefix — all sources empty"
+            );
             task_content.clone()
         } else {
             format!("{prefix}\n{task_content}")
         }
     } else {
+        info!("No learning bus available for guidance injection");
         task_content.clone()
     };
 

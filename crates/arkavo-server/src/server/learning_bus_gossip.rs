@@ -35,6 +35,18 @@ impl LearningBus {
             None
         };
 
+        let task_completed = if let GossipMessage::TaskCompleted(ref notice) = message {
+            Some(notice.clone())
+        } else {
+            None
+        };
+
+        let inference_state = if let GossipMessage::InferenceState(ref state) = message {
+            Some(state.clone())
+        } else {
+            None
+        };
+
         // Forward patchlet gossip to AutoLearner's bridge for processing
         if matches!(
             &message,
@@ -174,6 +186,26 @@ impl LearningBus {
                     }
                 }
             }
+        }
+
+        // Update peer GPU inference state for distributed scheduling
+        if let Some(state) = inference_state {
+            self.peer_inference_state
+                .write()
+                .await
+                .insert(state.agent_id.clone(), state);
+        }
+
+        // Handle task completion notifications from specialists
+        if let Some(notice) = task_completed {
+            tracing::info!(
+                task_id = %notice.task_id,
+                specialist = %notice.specialist_id,
+                succeeded = notice.succeeded,
+                completion_ms = notice.completion_ms,
+                "Received push task completion via gossip"
+            );
+            self.task_completions.write().await.push(notice);
         }
 
         responses

@@ -402,6 +402,11 @@ impl LessonPattern {
         self.metadata = Some(metadata);
         self
     }
+
+    /// Normalized key for deduplication. Strips entity IDs, quoted names, etc.
+    pub fn failure_mode_key(&self) -> String {
+        super::normalization::normalize_for_dedup(&self.condition, &self.action)
+    }
 }
 
 #[cfg(test)]

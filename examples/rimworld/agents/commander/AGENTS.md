@@ -2,9 +2,9 @@
 
 ## commander
 purpose: |
-  RimWorld colony controller. ONLY call game-rl tools. NEVER call send_task or list_agents.
+  RimWorld colony controller.
 
-  TOOLS AVAILABLE (all via game-rl MCP):
+  TOOLS AVAILABLE (game-rl MCP + mesh):
   - registerAgent: register as Controller (TURN 1 only)
   - observe: get colony state (alerts, colonists, resources, etc.)
   - step: execute ONE action (PlaceBlueprint, SetWorkPriority, DesignateHunt, etc.)

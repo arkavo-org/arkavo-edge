@@ -90,6 +90,72 @@ impl LearningBus {
         cache.get_behavior_guidance(category)
     }
 
+    /// Detect and resolve contradictions within each category using the LLM.
+    /// One LLM call per category — bounded cost per consolidation cycle.
+    pub async fn detect_contradictions(&self) -> usize {
+        let router_guard = self.router.read().await;
+        let Some(router) = router_guard.as_ref() else {
+            return 0;
+        };
+
+        // Collect lessons grouped by category
+        let categories: Vec<(String, Vec<arkavo_router::learning::Lesson>)> = {
+            let cache = self.policy_cache.read().await;
+            let mut by_category: std::collections::HashMap<
+                String,
+                Vec<arkavo_router::learning::Lesson>,
+            > = std::collections::HashMap::new();
+            for ((_, cat), lessons) in cache.behavior_lessons_iter() {
+                by_category
+                    .entry(cat.clone())
+                    .or_default()
+                    .extend(lessons.iter().cloned());
+            }
+            by_category.into_iter().collect()
+        };
+
+        let mut total_resolutions = 0;
+        for (category, lessons) in &categories {
+            let new_lessons =
+                super::consolidation::detect_contradictions(router, category, lessons).await;
+            if !new_lessons.is_empty() {
+                total_resolutions += new_lessons.len();
+                let mut cache = self.policy_cache.write().await;
+                for lesson in new_lessons {
+                    cache.add_lesson(lesson);
+                }
+            }
+        }
+
+        total_resolutions
+    }
+
+    /// Scan the agent × category Beta prior matrix for uncertainty gaps.
+    /// Returns generated task prompts targeting the highest-variance cells.
+    pub async fn generate_curiosity_tasks(&self) -> Vec<String> {
+        let learning = self.learning.read().await;
+        let agents_guard = learning.agents().await;
+        let gaps = super::curiosity::find_uncertainty_gaps(&agents_guard);
+        drop(agents_guard);
+        drop(learning);
+
+        let tasks: Vec<String> = gaps
+            .iter()
+            .map(super::curiosity::generate_curiosity_task)
+            .collect();
+
+        if !tasks.is_empty() {
+            tracing::info!(
+                count = tasks.len(),
+                gaps = gaps.len(),
+                "Curiosity: generated {} exploration tasks from uncertainty gaps",
+                tasks.len()
+            );
+        }
+
+        tasks
+    }
+
     /// Check if there are patterns ready for lesson synthesis
     pub async fn has_ready_patterns(&self) -> bool {
         let observer = self.tool_pattern_observer.read().await;

@@ -10,6 +10,7 @@ pub struct AgentMetadata {
     pub name: String,
     pub purpose: String,
     pub model: String,
+    pub mode: arkavo_protocol::agent_config::AgentMode,
     pub endpoint: String,
     pub api_keys: std::collections::HashMap<String, String>,
 }

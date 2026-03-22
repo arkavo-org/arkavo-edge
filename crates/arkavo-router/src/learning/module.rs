@@ -36,6 +36,11 @@ impl LearningModule {
         Self::with_config(LearningConfig::default())
     }
 
+    /// Access the agent utility map for analysis (e.g., curiosity scanning).
+    pub async fn agents(&self) -> tokio::sync::RwLockReadGuard<'_, HashMap<String, AgentUtility>> {
+        self.agents.read().await
+    }
+
     /// Create a new learning module with custom config
     pub fn with_config(config: LearningConfig) -> Self {
         Self {

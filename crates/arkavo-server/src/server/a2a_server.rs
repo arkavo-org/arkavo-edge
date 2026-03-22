@@ -204,11 +204,18 @@ impl A2aServer {
         registry.map(|r| r.model_names()).unwrap_or_default()
     }
 
-    pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
+    pub async fn set_agent_metadata(
+        &self,
+        name: String,
+        purpose: String,
+        model: String,
+        mode: arkavo_protocol::agent_config::AgentMode,
+    ) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.name.clone_from(&name);
         metadata.purpose = purpose;
         metadata.model.clone_from(&model);
+        metadata.mode = mode;
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
         drop(metadata);
 
@@ -262,6 +269,7 @@ impl A2aServer {
             new_config.name.clone(),
             new_config.purpose.clone(),
             new_config.model.clone(),
+            new_config.mode.clone(),
         )
         .await;
 
@@ -802,6 +810,8 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
         let model_hint = self.resolve_model_hint().await;
+        #[cfg(feature = "iroh")]
+        let notification_iroh_node = self.iroh_node.read().await.clone();
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
@@ -896,6 +906,8 @@ impl A2aServer {
                             model_hint.as_ref(),
                             None,
                             None,
+                            #[cfg(feature = "iroh")]
+                            notification_iroh_node.as_ref(),
                         )
                         .await
                         {
@@ -1086,7 +1098,7 @@ impl A2aServer {
                     let memory = agent_memory.read().await;
                     let mut ctx = String::new();
 
-                    // Include last observed state (colony/environment state)
+                    // Include last observed state (environment state)
                     if let Some(state) = memory.last_observe_full() {
                         use std::fmt::Write;
                         let _ = write!(ctx, "## Current Observed State\n{state}\n");
@@ -1100,8 +1112,14 @@ impl A2aServer {
 
                     drop(memory);
 
-                    // Cap to avoid exceeding context limits
-                    ctx.truncate(4096);
+                    // Cap to avoid exceeding context limits (floor to char boundary)
+                    if ctx.len() > 4096 {
+                        let mut end = 4096;
+                        while !ctx.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        ctx.truncate(end);
+                    }
                     *tc.write().await = ctx;
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
@@ -1306,12 +1324,30 @@ impl A2aServer {
         let self_agent_id = self.agent_metadata.read().await.name.clone();
         let commander_model = self.agent_metadata.read().await.model.clone();
 
-        info!("Starting orchestrator loop (observe → plan → act)");
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.read().await.clone();
+
+        let agent_mode = self.agent_metadata.read().await.mode.clone();
+        info!(
+            mode = ?agent_mode,
+            "Starting agent loop"
+        );
 
         tokio::spawn(async move {
             // Wait for MCP server to be ready, then discover peers
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             mesh_state.discover_peers().await;
+
+            // Specialists are passive — they only respond to message/send tasks.
+            // No autonomous tick loop. Sleep and let the RPC handler do the work.
+            if agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
+                info!("Specialist mode: waiting for tasks via message/send");
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    // Re-discover peers periodically for gossip
+                    mesh_state.discover_peers().await;
+                }
+            }
 
             let mut tick: u64 = 0;
             let mut consecutive_no_action_ticks: u32 = 0;
@@ -1331,8 +1367,7 @@ impl A2aServer {
                     continue;
                 }
 
-                // Specialists (no MCP tools) check compute budget before each tick.
-                // Commander (has MCP tools) always runs — it allocates budgets.
+                // Budget gate: orchestrators with no MCP tools check before each tick.
                 if !has_mcp_tools {
                     let budget = compute_budget.read().await;
                     let snapshot = budget.snapshot();
@@ -1358,9 +1393,28 @@ impl A2aServer {
                 let error_corrections = memory_guard.format_errors_for_prompt();
                 drop(memory_guard);
 
-                // Pre-fetch completed specialist responses so the commander
-                // can act on advice immediately without wasting iterations on
-                // get_task_status polling.
+                // Drain gossip-pushed completions into mesh_state (zero network cost)
+                if let Some(ref bus) = learning_bus {
+                    for notice in bus.drain_task_completions().await {
+                        let budget_snapshot = notice
+                            .budget_snapshot
+                            .and_then(|v| serde_json::from_value(v).ok());
+                        mesh_state
+                            .push_completed(
+                                &notice.task_id,
+                                arkavo_mcp_mesh::CompletedDelegation {
+                                    agent_id: notice.specialist_id,
+                                    response: notice.content,
+                                    response_latency_ms: notice.completion_ms,
+                                    budget_snapshot,
+                                },
+                            )
+                            .await;
+                    }
+                }
+
+                // Collect completions: push-delivered first, then poll fallback
+                // for any remaining pending delegations.
                 let completed = mesh_state.collect_completed().await;
 
                 // Use budget feedback from specialists to detect overload
@@ -1503,6 +1557,8 @@ impl A2aServer {
                     model_hint.as_ref(),
                     None,
                     tool_loop_budget,
+                    #[cfg(feature = "iroh")]
+                    iroh_node.as_ref(),
                 )
                 .await
                 {
@@ -1580,6 +1636,34 @@ impl A2aServer {
                                     "Dead-man's switch: {} consecutive ticks without meaningful action",
                                     consecutive_no_action_ticks
                                 );
+                            }
+                        }
+
+                        // Degenerate output detection: after 8 ticks of no meaningful
+                        // action, the model's context is likely poisoned. Stop, rethink,
+                        // replan: clear short-term memory so the next tick starts fresh
+                        // with a clean observation instead of building on garbage history.
+                        if consecutive_no_action_ticks >= 8 {
+                            warn!(
+                                "Context reset: {} ticks without action — clearing short-term memory",
+                                consecutive_no_action_ticks
+                            );
+                            let mut mem = agent_memory.write().await;
+                            mem.clear();
+                            drop(mem);
+                            consecutive_no_action_ticks = 0;
+                            consecutive_duplicate_prompts = 0;
+
+                            // Synthesize a fast-path lesson about the failure pattern
+                            if let Some(ref bus) = learning_bus {
+                                bus.add_fast_lesson(
+                                    "orchestrator",
+                                    "8 consecutive ticks produced no meaningful action. \
+                                     The conversation context may be stale. On the next tick, \
+                                     observe the current state first, \
+                                     then pick ONE concrete action from the most urgent need.",
+                                )
+                                .await;
                             }
                         }
 

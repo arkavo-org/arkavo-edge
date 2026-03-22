@@ -310,6 +310,7 @@ fn run_agent_with_options(
             name: agent_name,
             purpose: "A general-purpose AI agent".to_string(),
             model: String::new(), // Empty model - let arkavo-router decide
+            mode: arkavo_protocol::agent_config::AgentMode::default(),
             listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
             mdns_enabled: true,
             mcp_servers: Vec::new(),
@@ -355,6 +356,7 @@ fn run_agent_with_options(
                     name: agent_name,
                     purpose: "A general-purpose AI agent".to_string(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
@@ -430,6 +432,7 @@ fn run_agent_with_options(
                 name: format!("{hostname}-{folder_name}"),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
+                mode: arkavo_protocol::agent_config::AgentMode::default(),
                 listen: "0.0.0.0:0".to_string(), // Dynamic port
                 mdns_enabled: true,
                 mcp_servers: Vec::new(),
@@ -469,6 +472,7 @@ pub struct AgentConfig {
     pub name: String,
     pub purpose: String, // Used as system prompt for LLM
     pub model: String,
+    pub mode: arkavo_protocol::agent_config::AgentMode,
     pub listen: String,
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
@@ -511,6 +515,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             name: String::new(),
             purpose: String::new(),
             model: String::new(),
+            mode: arkavo_protocol::agent_config::AgentMode::default(),
             listen: "0.0.0.0:0".to_string(),
             mdns_enabled: true,
             mcp_servers: Vec::new(),
@@ -526,6 +531,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             "name:",
             "purpose:",
             "model:",
+            "mode:",
             "listen:",
             "mdns:",
             "swarm:",
@@ -602,6 +608,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(),
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
@@ -653,6 +660,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         name: section_name.clone(),
                         purpose: String::new(),
                         model: String::new(),
+                        mode: arkavo_protocol::agent_config::AgentMode::default(),
                         listen: "0.0.0.0:0".to_string(),
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
@@ -773,6 +781,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     name,
                     purpose: String::new(),
                     model: String::new(),
+                    mode: arkavo_protocol::agent_config::AgentMode::default(),
                     listen: "0.0.0.0:0".to_string(), // Dynamic port
                     mdns_enabled: true,              // Default to true for zero-config
                     mcp_servers: Vec::new(),
@@ -1085,6 +1094,16 @@ fn parse_yaml_properties(
                 .trim()
                 .trim_matches('"')
                 .to_string();
+        } else if trimmed.starts_with("mode:") {
+            let mode_str = trimmed
+                .strip_prefix("mode:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+            agent.mode = match mode_str {
+                "specialist" => arkavo_protocol::agent_config::AgentMode::Specialist,
+                _ => arkavo_protocol::agent_config::AgentMode::Orchestrator,
+            };
         } else if trimmed.starts_with("listen:") {
             agent.listen = trimmed
                 .strip_prefix("listen:")
@@ -1221,6 +1240,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             config.name.clone(),
             config.purpose.clone(),
             config.model.clone(),
+            config.mode.clone(),
         )
         .await;
 
@@ -1633,54 +1653,77 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         }));
 
         // Start gossip message transport (sends outgoing messages to peers via A2A)
+        // Prefers persistent WebSocket connections, falls back to HTTP per-message.
         let learning_bus_transport = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
             use arkavo_protocol::http::HttpTransport;
             use arkavo_protocol::transport::{
-                A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
+                A2aEndpoint, A2aRequest, A2aTransport, A2aTransportRef, TransportConfig,
             };
+            use arkavo_protocol::websocket::WebSocketTransport;
+            use std::collections::HashMap;
+            use std::sync::Arc;
+
+            let mut connections: HashMap<String, A2aTransportRef> = HashMap::new();
 
             let mut rx = learning_bus_transport.subscribe_gossip_out();
             loop {
                 match rx.recv().await {
                     Ok((peer_id, message)) => {
-                        // Look up peer address
                         if let Some(addr) = learning_bus_transport.get_peer_address(&peer_id).await
                         {
-                            // Create JSON-RPC request for gossip/message
-                            // jsonrpsee expects params as {"message": <value>}
-                            let params = serde_json::json!({
-                                "message": message
-                            });
+                            let params = serde_json::json!({ "message": message });
                             let request = A2aRequest::new("gossip/message", params);
 
-                            // Create transport and send (allow non-TLS for local mDNS discovery)
-                            let mut config = TransportConfig::default();
-                            config.tls_config.require_tls = false;
-                            let transport = match HttpTransport::new(config) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    tracing::warn!("Failed to create transport: {}", e);
+                            // Reconnect if connection dropped or missing
+                            let needs_reconnect =
+                                connections.get(&peer_id).is_none_or(|c| !c.is_connected());
+
+                            if needs_reconnect {
+                                connections.remove(&peer_id);
+                                let mut config = TransportConfig::default();
+                                config.tls_config.require_tls = false;
+
+                                // Try WebSocket first (persistent), fall back to HTTP
+                                let ws_url = addr.replace("http://", "ws://");
+                                let ws = WebSocketTransport::new(config.clone());
+                                let endpoint = A2aEndpoint {
+                                    url: ws_url,
+                                    agent_id: peer_id.clone(),
+                                    public_key: None,
+                                };
+
+                                if ws.connect(&endpoint).await.is_ok() {
+                                    tracing::info!("Gossip: WebSocket connected to {}", peer_id);
+                                    connections.insert(peer_id.clone(), Arc::new(ws));
+                                } else if let Ok(http) = HttpTransport::new(config) {
+                                    let endpoint = A2aEndpoint {
+                                        url: addr.clone(),
+                                        agent_id: peer_id.clone(),
+                                        public_key: None,
+                                    };
+                                    if http.connect(&endpoint).await.is_ok() {
+                                        tracing::info!("Gossip: HTTP fallback to {}", peer_id);
+                                        connections.insert(peer_id.clone(), Arc::new(http));
+                                    } else {
+                                        tracing::warn!("Gossip: failed to connect to {}", peer_id);
+                                        continue;
+                                    }
+                                } else {
+                                    tracing::warn!("Gossip: transport error for {}", peer_id);
                                     continue;
                                 }
-                            };
-
-                            let endpoint = A2aEndpoint {
-                                url: addr.clone(),
-                                agent_id: peer_id.clone(),
-                                public_key: None,
-                            };
-                            if let Err(e) = transport.connect(&endpoint).await {
-                                tracing::warn!("Failed to connect to {}: {}", peer_id, e);
-                                continue;
                             }
 
-                            match transport.send_request(request).await {
-                                Ok(_response) => {
-                                    tracing::debug!("Gossip sent to {}", peer_id);
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to send gossip to {}: {}", peer_id, e);
+                            if let Some(conn) = connections.get(&peer_id) {
+                                match conn.send_request(request).await {
+                                    Ok(_) => {
+                                        tracing::debug!("Gossip sent to {}", peer_id);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Gossip send failed to {}: {}", peer_id, e);
+                                        connections.remove(&peer_id);
+                                    }
                                 }
                             }
                         } else {

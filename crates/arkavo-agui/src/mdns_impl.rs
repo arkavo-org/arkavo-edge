@@ -15,6 +15,8 @@ pub mod mdns {
             RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
         >,
         telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
+        browser_connections: Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
+        security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("AG-UI: mDNS daemon starting...");
 
@@ -63,6 +65,8 @@ pub mod mdns {
                     agents.clone(),
                     agent_connections.clone(),
                     telemetry_tx.clone(),
+                    browser_connections.clone(),
+                    security_handler.clone(),
                 )
                 .await;
             }
@@ -81,6 +85,8 @@ pub mod mdns {
             RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
         >,
         telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
+        browser_connections: Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
+        security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
     ) {
         let service_name = info.get_fullname();
         let port = info.get_port();
@@ -178,6 +184,31 @@ pub mod mdns {
                     );
                 } else {
                     println!("AG-UI: Connected to agent: {}", agent_id_clone);
+
+                    // Subscribe to push-based metrics stream
+                    let (metrics_tx, mut metrics_rx) = mpsc::channel::<crate::types::AgUiEvent>(32);
+                    if let Err(e) = connection
+                        .subscribe_metrics(metrics_tx, security_handler.clone())
+                        .await
+                    {
+                        println!(
+                            "AG-UI: Metrics subscription failed for {}: {} (falling back to polling)",
+                            agent_id_clone, e
+                        );
+                    } else {
+                        println!("AG-UI: Metrics subscription active for {}", agent_id_clone);
+                        // Forward metrics events to all browser sessions
+                        let browser_conns = browser_connections.clone();
+                        tokio::spawn(async move {
+                            while let Some(event) = metrics_rx.recv().await {
+                                let conns = browser_conns.read().await;
+                                for (_, ci) in conns.iter() {
+                                    let _ = ci._ws_tx.send(event.clone()).await;
+                                }
+                            }
+                        });
+                    }
+
                     let mut connections = agent_connections_clone.write().await;
                     connections.insert(agent_id_clone.clone(), connection);
                 }

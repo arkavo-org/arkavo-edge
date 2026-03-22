@@ -396,6 +396,9 @@ pub enum AgUiEvent {
         preflight_enabled: bool,
         #[serde(rename = "preflightPolicies")]
         preflight_policies: u32,
+        /// Per-agent security posture
+        #[serde(default)]
+        agents: Vec<AgentSecurityInfo>,
         timestamp: String,
     },
     TdfAuditEvent {
@@ -584,6 +587,19 @@ pub struct UiPlanPart {
     pub id: String,
     pub name: String,
     pub description: String,
+}
+
+/// Per-agent security and data plane posture.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSecurityInfo {
+    pub id: String,
+    #[serde(rename = "kasEnabled")]
+    pub kas_enabled: bool,
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+    pub algorithm: String,
+    #[serde(rename = "irohActive")]
+    pub iroh_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

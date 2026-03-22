@@ -178,12 +178,13 @@ Look for patterns:
 
 If there's a clear pattern, respond with JSON:
 {{
-  "condition": "when this applies (e.g., sector_4)",
-  "action": "recommended action (e.g., slow, avoid)",
-  "expected_outcome": "what should happen",
+  "condition": "specific trigger (e.g., calling tool X with wrong parameter type)",
+  "action": "concrete recommendation (e.g., use valid ID from observation data)",
+  "expected_outcome": "measurable result (e.g., tool call succeeds)",
   "confidence": 0.0-1.0 based on evidence strength
 }}
 
+IMPORTANT: Be specific. Generic lessons like "slow" or "avoid" are useless.
 If no clear pattern, respond with: NO_LESSON"#,
         episodes.len(),
         serde_json::to_string_pretty(&eps_json).unwrap_or_default()
@@ -249,6 +250,30 @@ fn extract_quality_score(content: &str) -> f64 {
     0.7
 }
 
+/// Parse a historian agent's response into a Lesson.
+/// Reuses parse_lesson_pattern for JSON extraction.
+pub(super) fn parse_lesson_from_historian(
+    text: &str,
+    agent_id: &str,
+    swarm_id: &str,
+    category: &str,
+    episode_count: usize,
+) -> Result<Option<Lesson>, String> {
+    if text.contains("NO_LESSON") {
+        return Ok(None);
+    }
+    let (condition, action, confidence, expected_outcome) = parse_lesson_pattern(text)?;
+    let lesson = Lesson::new(
+        agent_id.to_string(),
+        swarm_id.to_string(),
+        category.to_string(),
+        LessonPattern::new(condition, action, expected_outcome),
+        confidence,
+        episode_count as u32,
+    );
+    Ok(Some(lesson))
+}
+
 /// Parse lesson pattern from LLM response
 fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), String> {
     // Try to extract JSON from content (may have markdown wrapping)
@@ -268,16 +293,14 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
     let json: serde_json::Value =
         serde_json::from_str(&sanitized).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
-    let condition = json
-        .get("condition")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let action = json
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("slow")
-        .to_string();
+    let condition = match json.get("condition").and_then(|v| v.as_str()) {
+        Some(c) if !c.is_empty() && c != "unknown" => c.to_string(),
+        _ => return Err("No condition extracted — rejecting junk lesson".to_string()),
+    };
+    let action = match json.get("action").and_then(|v| v.as_str()) {
+        Some(a) if !a.is_empty() && a != "slow" => a.to_string(),
+        _ => return Err("No action extracted — rejecting junk lesson".to_string()),
+    };
     let confidence = json
         .get("confidence")
         .and_then(|v| v.as_f64())

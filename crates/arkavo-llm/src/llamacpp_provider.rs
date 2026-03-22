@@ -526,7 +526,12 @@ impl LlamaCppProvider {
             if let Ok(pooled) = registry.acquire_fresh_context(&model_name) {
                 let pooled_ctx = pooled.context.clone();
                 let registry_clone = registry.clone();
+                let agent_name = self.name.clone();
                 tokio::spawn(async move {
+                    // GPU guard held for entire inference — serializes Metal access
+                    let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                        .acquire(&agent_name)
+                        .await;
                     crate::llamacpp_streaming::generate_tokens_pooled(
                         pooled_ctx,
                         model,
@@ -541,7 +546,12 @@ impl LlamaCppProvider {
             }
         }
 
+        let agent_name = self.name.clone();
         tokio::spawn(async move {
+            // GPU guard held for entire inference — serializes Metal access
+            let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                .acquire(&agent_name)
+                .await;
             generate_tokens(model, prompt_bytes, streaming_config, tx).await;
         });
 
@@ -578,7 +588,12 @@ impl LlamaCppProvider {
             additional_stops: Vec::new(),
         };
 
+        let agent_name = self.name.clone();
         tokio::spawn(async move {
+            // GPU guard held for entire inference — serializes Metal access
+            let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                .acquire(&agent_name)
+                .await;
             generate_tokens_with_vision(model, mtmd_ctx, messages, streaming_config, tx).await;
         });
 

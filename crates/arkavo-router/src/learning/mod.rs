@@ -40,6 +40,7 @@ pub mod decision_trace;
 mod feedback_types;
 pub mod human_teaching;
 mod module;
+pub mod normalization;
 mod persistence;
 mod planner_score;
 mod store;

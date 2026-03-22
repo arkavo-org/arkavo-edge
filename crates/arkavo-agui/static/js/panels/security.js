@@ -47,30 +47,54 @@ function renderSecurity() {
     if (!container) return;
 
     var ss = AppState.securityStatus;
+    var dp = AppState.dataPlaneStatus;
     var html = '';
 
     if (!ss) {
-        html = '<div class="empty-state"><h3>Loading Security Status...</h3><p>Requesting KAS and TDF audit data</p></div>';
+        html = '<div class="empty-state"><h3>Loading Security Status...</h3><p>Requesting KAS and data plane status</p></div>';
         container.innerHTML = html;
         return;
     }
 
-    // KAS Status card
-    html += '<div class="section-title">KAS Status</div>';
-    html += '<div class="stats-grid">';
-    html += renderStatCard('KAS', ss.kasEnabled ? 'Enabled' : 'Disabled', '');
-    html += renderStatCard('Agent', ss.agentId || 'unknown', '');
-    html += renderStatCard('Key ID', ss.keyId || 'none', '');
-    html += renderStatCard('Algorithm', ss.encryptionAlgorithm || 'N/A', '');
-    html += '</div>';
+    // Per-agent security posture table
+    var agents = ss.agents || [];
+    html += '<div class="section-title">Agent Security Posture (' + agents.length + ')</div>';
 
-    // KAS URL
-    if (ss.kasUrl) {
-        html += '<div class="sys-info">';
-        html += '<div class="sys-info-label">KAS Endpoint</div>';
-        html += '<div class="sys-info-value mono">' + escapeHtml(ss.kasUrl) + '</div>';
-        html += '</div>';
+    if (agents.length === 0) {
+        html += '<div class="empty-state"><p>No agents connected</p></div>';
+    } else {
+        html += '<table class="cost-table"><thead><tr>' +
+            '<th>Agent</th><th>KAS</th><th>Key ID</th><th>Algorithm</th><th>Iroh P2P</th>' +
+            '</tr></thead><tbody>';
+        agents.forEach(function(agent) {
+            var kasStyle = agent.kasEnabled
+                ? ' style="color:var(--success)"'
+                : '';
+            var irohStyle = agent.irohActive
+                ? ' style="color:var(--success)"'
+                : '';
+            html += '<tr>' +
+                '<td>' + escapeHtml(agent.id) + '</td>' +
+                '<td' + kasStyle + '>' + (agent.kasEnabled ? 'Enabled' : '\u2014') + '</td>' +
+                '<td class="mono">' + escapeHtml(agent.keyId || '\u2014') + '</td>' +
+                '<td class="mono">' + escapeHtml(agent.algorithm || '\u2014') + '</td>' +
+                '<td' + irohStyle + '>' + (agent.irohActive ? 'Active' : 'Inactive') + '</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
     }
+
+    // Mesh-wide summary
+    var kasCount = agents.filter(function(a) { return a.kasEnabled; }).length;
+    var irohCount = agents.filter(function(a) { return a.irohActive; }).length;
+    var summaryParts = [];
+    if (kasCount > 0) summaryParts.push(kasCount + '/' + agents.length + ' KAS');
+    if (irohCount > 0) summaryParts.push(irohCount + '/' + agents.length + ' Iroh');
+    var summaryClass = (kasCount > 0 || irohCount > 0) ? 'healthy' : 'warning';
+    var summaryText = summaryParts.length > 0
+        ? summaryParts.join(' \u2022 ')
+        : 'No security services active';
+    html += '<div class="budget-alert ' + summaryClass + '">' + escapeHtml(summaryText) + '</div>';
 
     // Encryption posture
     html += '<div class="section-title">Encryption Posture</div>';
@@ -81,16 +105,21 @@ function renderSecurity() {
     html += renderStatCard('Policies', ss.preflightPolicies || 0, '');
     html += '</div>';
 
-    // Posture indicator
-    var postureClass = ss.kasEnabled ? 'healthy' : 'warning';
-    var postureText = ss.kasEnabled ? 'TDF encryption active' : 'KAS not enabled';
-    if (ss.preflightEnabled) {
-        postureText += ' | Preflight active (' + ss.preflightPolicies + ' policies)';
+    // Data Plane aggregate stats
+    html += '<div class="section-title">Data Plane (Iroh P2P)</div>';
+    if (dp) {
+        html += '<div class="stats-grid">';
+        html += renderStatCard('Shares Sent', dp.totalSharesSent, formatBytes(dp.totalBytesStaged));
+        html += renderStatCard('Shares Received', dp.totalSharesReceived, formatBytes(dp.totalBytesFetched));
+        html += renderStatCard('Pending Offers', dp.pendingOffers, '');
+        html += '</div>';
+    } else {
+        html += '<div class="stats-grid">';
+        html += renderStatCard('Shares Sent', 0, '');
+        html += renderStatCard('Shares Received', 0, '');
+        html += renderStatCard('Pending Offers', 0, '');
+        html += '</div>';
     }
-    html += '<div class="budget-alert ' + postureClass + '">' + escapeHtml(postureText) + '</div>';
-
-    // Data Plane Status
-    html += renderDataPlaneStatus();
 
     // TDF Audit Log
     html += '<div class="section-title">TDF Audit Log (' + AppState.tdfAuditLog.length + ')</div>';
@@ -137,39 +166,6 @@ function renderSecurity() {
     }
 
     container.innerHTML = html;
-}
-
-function renderDataPlaneStatus() {
-    var dp = AppState.dataPlaneStatus;
-    var html = '';
-
-    html += '<div class="section-title">Data Plane (Iroh P2P)</div>';
-
-    if (!dp) {
-        html += '<div class="stats-grid">';
-        html += renderStatCard('Iroh Node', 'Unknown', '');
-        html += renderStatCard('Shares Sent', 0, '');
-        html += renderStatCard('Shares Received', 0, '');
-        html += '</div>';
-        return html;
-    }
-
-    html += '<div class="stats-grid">';
-    html += renderStatCard('Iroh Node', dp.irohActive ? 'Active' : 'Inactive', '');
-    html += renderStatCard('Shares Sent', dp.totalSharesSent, formatBytes(dp.totalBytesStaged));
-    html += renderStatCard('Shares Received', dp.totalSharesReceived, formatBytes(dp.totalBytesFetched));
-    html += renderStatCard('Pending Offers', dp.pendingOffers, '');
-    html += '</div>';
-
-    // Data plane posture indicator
-    var dpClass = dp.irohActive ? 'healthy' : 'warning';
-    var dpText = dp.irohActive ? 'Iroh P2P data plane active' : 'Iroh P2P node not started';
-    if (dp.pendingOffers > 0) {
-        dpText += ' | ' + dp.pendingOffers + ' pending offer(s)';
-    }
-    html += '<div class="budget-alert ' + dpClass + '">' + escapeHtml(dpText) + '</div>';
-
-    return html;
 }
 
 function renderDataPlaneActivity() {

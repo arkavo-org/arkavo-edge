@@ -7,7 +7,7 @@
 use crate::types::AgUiEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tokio::sync::{RwLock, mpsc};
 
 /// Per-agent KAS info discovered via polling.
@@ -27,8 +27,10 @@ pub struct SecurityHandler {
     preflight_enabled: bool,
     preflight_policy_count: u32,
     audit_count: Arc<AtomicU64>,
+    // Per-agent Iroh status (populated by polling agents)
+    agent_iroh: Arc<RwLock<HashMap<String, bool>>>,
     // Data plane tracking
-    iroh_active: bool,
+    iroh_active: AtomicBool,
     shares_sent: Arc<AtomicU64>,
     shares_received: Arc<AtomicU64>,
     bytes_staged: Arc<AtomicU64>,
@@ -49,7 +51,8 @@ impl SecurityHandler {
             preflight_enabled: false,
             preflight_policy_count: 0,
             audit_count: Arc::new(AtomicU64::new(0)),
-            iroh_active: false,
+            agent_iroh: Arc::new(RwLock::new(HashMap::new())),
+            iroh_active: AtomicBool::new(false),
             shares_sent: Arc::new(AtomicU64::new(0)),
             shares_received: Arc::new(AtomicU64::new(0)),
             bytes_staged: Arc::new(AtomicU64::new(0)),
@@ -91,9 +94,20 @@ impl SecurityHandler {
         self.audit_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Set whether the Iroh P2P node is active.
-    pub fn set_iroh_active(&mut self, active: bool) {
-        self.iroh_active = active;
+    /// Update Iroh status for a specific agent and recalculate mesh-wide flag.
+    pub async fn update_agent_iroh(&self, agent_id: &str, active: bool) {
+        self.agent_iroh
+            .write()
+            .await
+            .insert(agent_id.to_string(), active);
+        // Any agent with Iroh means the mesh data plane is active
+        let any_active = self.agent_iroh.read().await.values().any(|&v| v);
+        self.iroh_active.store(any_active, Ordering::Relaxed);
+    }
+
+    /// Set whether any Iroh P2P node is active in the mesh.
+    pub fn set_iroh_active(&self, active: bool) {
+        self.iroh_active.store(active, Ordering::Relaxed);
     }
 
     /// Record a TDF share sent via Iroh.
@@ -122,6 +136,7 @@ impl SecurityHandler {
         match event {
             AgUiEvent::GetSecurityStatus => {
                 let kas_map = self.agent_kas.read().await;
+                let iroh_map = self.agent_iroh.read().await;
                 let kas_count = kas_map.len();
                 let any_kas_enabled = !kas_map.is_empty();
 
@@ -139,6 +154,30 @@ impl SecurityHandler {
                     agent_id
                 };
 
+                // Build per-agent security info from KAS + Iroh maps
+                let mut agent_ids: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                agent_ids.extend(kas_map.keys().cloned());
+                agent_ids.extend(iroh_map.keys().cloned());
+                let agents: Vec<crate::types::AgentSecurityInfo> = agent_ids
+                    .into_iter()
+                    .map(|id| {
+                        let kas = kas_map.get(&id);
+                        let iroh = iroh_map.get(&id).copied().unwrap_or(false);
+                        crate::types::AgentSecurityInfo {
+                            id: id.clone(),
+                            kas_enabled: kas.is_some(),
+                            key_id: kas.map(|k| k.key_id.clone()).unwrap_or_default(),
+                            algorithm: kas
+                                .map(|k| k.algorithm.clone())
+                                .unwrap_or_else(|| "N/A".to_string()),
+                            iroh_active: iroh,
+                        }
+                    })
+                    .collect();
+                drop(kas_map);
+                drop(iroh_map);
+
                 let response = AgUiEvent::SecurityStatusUpdate {
                     kas_enabled: any_kas_enabled,
                     kas_url: if any_kas_enabled {
@@ -152,13 +191,14 @@ impl SecurityHandler {
                     audit_count: self.audit_count.load(Ordering::Relaxed),
                     preflight_enabled: self.preflight_enabled,
                     preflight_policies: self.preflight_policy_count,
+                    agents,
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
                 tx.send(response).await?;
             }
             AgUiEvent::GetDataPlaneStatus => {
                 let response = AgUiEvent::DataPlaneStatusUpdate {
-                    iroh_active: self.iroh_active,
+                    iroh_active: self.iroh_active.load(Ordering::Relaxed),
                     total_shares_sent: self.shares_sent.load(Ordering::Relaxed),
                     total_shares_received: self.shares_received.load(Ordering::Relaxed),
                     total_bytes_staged: self.bytes_staged.load(Ordering::Relaxed),
@@ -287,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_get_data_plane_status() {
-        let mut handler = SecurityHandler::new();
+        let handler = SecurityHandler::new();
         handler.set_iroh_active(true);
         handler.record_share_sent(1024);
         handler.record_share_received(512);

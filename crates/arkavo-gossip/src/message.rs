@@ -62,6 +62,49 @@ pub enum GossipMessage {
     EvoFabricConflict(EvoFabricConflictNotice),
     /// Merkle root anchored on-chain for EvoFabric
     EvoFabricAnchor(EvoFabricAnchorCommitted),
+    /// Task completion notification from specialist to commander
+    TaskCompleted(TaskCompletionNotice),
+    /// GPU inference state broadcast for distributed scheduling
+    InferenceState(InferenceStateBroadcast),
+}
+
+/// GPU inference activity broadcast.
+///
+/// Agents emit this on state transitions (idle→running, running→idle) so
+/// peers on the same device can coordinate GPU access without a central
+/// scheduler. Stale entries (timestamp > 30s) are expired by receivers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceStateBroadcast {
+    /// Agent emitting this state
+    pub agent_id: String,
+    /// Number of active GPU inferences (u32, not bool — captures concurrent calls)
+    pub active_count: u32,
+    /// Model currently loaded/running
+    pub model_name: String,
+    /// Remaining inference budget for this agent
+    pub budget_remaining: u32,
+    /// Device identifier for multi-device filtering
+    pub device_id: String,
+    /// Timestamp for stale entry expiry
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Push notification when a specialist finishes a delegated task.
+/// Sent over gossip so the commander doesn't need to poll.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCompletionNotice {
+    /// The task_id that was delegated via send_task
+    pub task_id: String,
+    /// Agent ID of the specialist that completed the task
+    pub specialist_id: String,
+    /// Whether the task succeeded or failed
+    pub succeeded: bool,
+    /// Result text (on success) or error message (on failure)
+    pub content: String,
+    /// Budget snapshot from the specialist, bundled to avoid a separate round-trip
+    pub budget_snapshot: Option<serde_json::Value>,
+    /// Wall-clock time from task receipt to completion
+    pub completion_ms: u64,
 }
 
 /// Announcement of a new patch

@@ -49,7 +49,7 @@ impl TaskCategory {
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
-            "game_simulation" | "game" | "colony" | "simulation" => Self::GameSimulation,
+            "game_simulation" | "game" | "simulation" | "environment" => Self::GameSimulation,
             _ => Self::General,
         }
     }
@@ -308,18 +308,14 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("ui from")
     {
         TaskCategory::VisionAnalysis
-    } else if lower.contains("colony")
-        || lower.contains("colonist")
-        || contains_word(&lower, "zone")
+    } else if contains_word(&lower, "zone")
         || lower.contains("defend")
         || contains_word(&lower, "raid")
         || lower.contains("harvest")
         || contains_word(&lower, "craft")
-        || lower.contains("caravan")
-        || lower.contains("rimworld")
-        || lower.contains("pawns")
-        || lower.contains("plant_")
         || lower.contains("stockpile")
+        || lower.contains("simulation")
+        || lower.contains("environment")
     {
         TaskCategory::GameSimulation
     } else {
@@ -525,18 +521,14 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
-        } else if task_lower.contains("colony")
-            || task_lower.contains("colonist")
-            || contains_word(&task_lower, "zone")
+        } else if contains_word(&task_lower, "zone")
             || task_lower.contains("defend")
             || contains_word(&task_lower, "raid")
             || task_lower.contains("harvest")
             || contains_word(&task_lower, "craft")
-            || task_lower.contains("caravan")
-            || task_lower.contains("rimworld")
-            || task_lower.contains("pawns")
-            || task_lower.contains("plant_")
             || task_lower.contains("stockpile")
+            || task_lower.contains("simulation")
+            || task_lower.contains("environment")
         {
             (
                 TaskCategory::GameSimulation,
@@ -769,18 +761,14 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
-        } else if task_lower.contains("colony")
-            || task_lower.contains("colonist")
-            || contains_word(&task_lower, "zone")
+        } else if contains_word(&task_lower, "zone")
             || task_lower.contains("defend")
             || contains_word(&task_lower, "raid")
             || task_lower.contains("harvest")
             || contains_word(&task_lower, "craft")
-            || task_lower.contains("caravan")
-            || task_lower.contains("rimworld")
-            || task_lower.contains("pawns")
-            || task_lower.contains("plant_")
             || task_lower.contains("stockpile")
+            || task_lower.contains("simulation")
+            || task_lower.contains("environment")
         {
             (
                 TaskCategory::GameSimulation,
@@ -907,19 +895,19 @@ mod tests {
         );
         // Game/simulation tasks
         assert_eq!(
-            classify_task_keywords("Build a defensive perimeter around the colony"),
+            classify_task_keywords("Build a defensive perimeter in the zone"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Plant_Rice in growing zone 1"),
+            classify_task_keywords("Set up a stockpile for resources"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Manage colonist work priorities"),
+            classify_task_keywords("Defend against the raid"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Send a caravan to trade"),
+            classify_task_keywords("Harvest crops from the field"),
             TaskCategory::GameSimulation
         );
     }

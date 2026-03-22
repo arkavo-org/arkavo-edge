@@ -115,7 +115,7 @@ verify_swarm() {
     print_status "INFO" "Verifying swarm connectivity..."
     local all_healthy=true
 
-    local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412")
+    local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412" "historian:8413")
 
     for agent in "${agents[@]}"; do
         IFS=':' read -r name port <<< "$agent"
@@ -197,6 +197,7 @@ main() {
     start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
     start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
     start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
+    start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
     sleep 1
 
     start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1
@@ -215,6 +216,7 @@ main() {
         echo "  Survival:  http://localhost:8410"
         echo "  Industry:  http://localhost:8411"
         echo "  Defense:   http://localhost:8412"
+        echo "  Historian: http://localhost:8413  (lesson synthesis)"
         echo ""
         echo "RimWorld: Connect via socket at $RIMWORLD_SOCKET"
         echo ""
