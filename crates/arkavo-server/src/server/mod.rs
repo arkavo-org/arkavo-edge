@@ -220,6 +220,7 @@ pub trait A2aRpc {
         device_id: String,
         public_key: String,
         signature: String,
+        delegation_jwt: Option<String>,
     ) -> RpcResult<VerifyResponse>;
 
     /// Get registration status for a device
@@ -687,12 +688,14 @@ impl A2aRpcServer for A2aRpcImpl {
         device_id: String,
         public_key: String,
         signature: String,
+        delegation_jwt: Option<String>,
     ) -> RpcResult<VerifyResponse> {
         let request = VerifyRequest {
             challenge_id,
             device_id,
             public_key,
             signature,
+            delegation_jwt,
         };
         handlers::registration::handle_registration_verify(
             &self.metrics,

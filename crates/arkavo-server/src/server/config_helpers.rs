@@ -13,6 +13,13 @@ pub struct AgentMetadata {
     pub mode: arkavo_protocol::agent_config::AgentMode,
     pub endpoint: String,
     pub api_keys: std::collections::HashMap<String, String>,
+    /// DID:key identifier derived from the agent's device keypair.
+    /// Shared across all protocols (A2A, gossip, metrics, UCP).
+    pub did: Option<String>,
+    /// ES256-signed delegation JWT binding human DID → agent DID.
+    pub delegation_jwt: Option<String>,
+    /// Entitlements granted via human delegation (from JWT scope claim).
+    pub delegated_entitlements: Vec<String>,
 }
 
 /// Simple agent configuration structure for validation

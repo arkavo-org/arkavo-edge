@@ -10,7 +10,7 @@
 
 use arkavo_config_bundle::{AgentRole, BundleTarget, ConfigurationBundle};
 use arkavo_config_encryption::{
-    AgentIdentity, ConfigBundleDecryptor, ConfigBundleEncryptor, Policy, PolicyAttribute,
+    AgentCredential, ConfigBundleDecryptor, ConfigBundleEncryptor, Policy, PolicyAttribute,
 };
 use std::collections::HashMap;
 
@@ -100,7 +100,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     agent_attributes.insert("agent.role".to_string(), "monitoring-agent".to_string());
     agent_attributes.insert("environment".to_string(), "production".to_string());
 
-    let agent_identity = AgentIdentity::new("monitoring-agent-001".to_string(), agent_attributes)?;
+    let agent_identity =
+        AgentCredential::new("monitoring-agent-001".to_string(), agent_attributes)?;
 
     println!("  ✓ Agent ID: {}", agent_identity.agent_id);
     println!("  ✓ Attributes: {:?}", agent_identity.attributes);

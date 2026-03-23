@@ -142,8 +142,7 @@ mod tests {
             purpose: "Test agent for unit tests".to_string(),
             model: "test-model".to_string(),
             endpoint: "http://localhost:8080".to_string(),
-            api_keys: Default::default(),
-            mode: Default::default(),
+            ..Default::default()
         }));
         let mcp_registry = Arc::new(McpRegistry::new());
 

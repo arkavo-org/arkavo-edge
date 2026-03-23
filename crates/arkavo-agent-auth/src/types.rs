@@ -24,6 +24,9 @@ pub struct TokenResponse {
     pub expires_at: DateTime<Utc>,
     #[serde(default)]
     pub entitlements: Vec<String>,
+    /// ES256-signed delegation JWT from authnz-rs binding human DID → agent DID
+    #[serde(default)]
+    pub delegation_jwt: Option<String>,
 }
 
 /// Token stored locally on disk.
@@ -34,6 +37,9 @@ pub struct StoredToken {
     pub expires_at: DateTime<Utc>,
     pub entitlements: Vec<String>,
     pub stored_at: DateTime<Utc>,
+    /// ES256-signed delegation JWT binding human DID → agent DID
+    #[serde(default)]
+    pub delegation_jwt: Option<String>,
 }
 
 impl StoredToken {
@@ -49,7 +55,13 @@ impl StoredToken {
             expires_at,
             entitlements,
             stored_at: Utc::now(),
+            delegation_jwt: None,
         }
+    }
+
+    pub fn with_delegation_jwt(mut self, jwt: Option<String>) -> Self {
+        self.delegation_jwt = jwt;
+        self
     }
 
     pub fn is_expired(&self) -> bool {
