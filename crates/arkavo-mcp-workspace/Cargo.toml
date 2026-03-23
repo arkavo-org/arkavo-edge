@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-workspace"
+name = "arkavo-mcp-workspace"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

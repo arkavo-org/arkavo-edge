@@ -1,6 +1,6 @@
 feature: Configuration Transport over A2A
 module: arkavo_config_transport
-version: 0.57.2
+version: 0.67.6
 
 invariants:
   - Encrypted bundles transported via A2A agent.config.* RPC

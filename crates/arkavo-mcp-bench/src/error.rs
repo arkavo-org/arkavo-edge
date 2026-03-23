@@ -12,7 +12,7 @@ pub enum BenchError {
     EvaluationFailed(String),
 
     #[error("Workspace error: {0}")]
-    Workspace(#[from] arkavo_workspace::WorkspaceError),
+    Workspace(#[from] arkavo_mcp_workspace::WorkspaceError),
 
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),

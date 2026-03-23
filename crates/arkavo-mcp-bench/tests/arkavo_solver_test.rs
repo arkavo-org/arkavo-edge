@@ -1,4 +1,4 @@
-use arkavo_bench::{ArkavoMode, ComparisonResult, SweBenchInstance};
+use arkavo_mcp_bench::{ArkavoMode, ComparisonResult, SweBenchInstance};
 use arkavo_router::Router;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,8 +43,8 @@ async fn test_arkavo_mode_basic() {
 
 #[test]
 fn test_comparison_result_metrics() {
-    let raw_metrics = arkavo_bench::BenchMetrics::new("test-1-raw".to_string());
-    let mut arkavo_metrics = arkavo_bench::BenchMetrics::new("test-1-arkavo".to_string());
+    let raw_metrics = arkavo_mcp_bench::BenchMetrics::new("test-1-raw".to_string());
+    let mut arkavo_metrics = arkavo_mcp_bench::BenchMetrics::new("test-1-arkavo".to_string());
     arkavo_metrics.set_resolved(true);
 
     let result = ComparisonResult {
@@ -61,7 +61,7 @@ fn test_comparison_result_metrics() {
 fn test_bench_metrics_with_judgment() {
     use arkavo_router::{IssueType, JudgmentResult};
 
-    let mut metrics = arkavo_bench::BenchMetrics::new("test-2".to_string());
+    let mut metrics = arkavo_mcp_bench::BenchMetrics::new("test-2".to_string());
 
     let judgment = JudgmentResult {
         passed: true,

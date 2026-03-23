@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=../schema.json
 
 feature: Containerized Workspace Management
-module: arkavo_workspace
-version: 0.57.2
+module: arkavo_mcp_workspace
+version: 0.67.6
 
 invariants:
   - Workspaces are ephemeral and isolated
@@ -23,7 +23,7 @@ scenarios:
       - Container started
       - Resource limits applied
       - Workspace ID returned
-    refs: [crates/arkavo-workspace/src/workspace.rs]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs]
 
   - id: WORKSPACE-002
     name: Execute command in workspace
@@ -37,7 +37,7 @@ scenarios:
       - stdout/stderr captured
       - Exit code returned
       - Timeout enforced
-    refs: [crates/arkavo-workspace/src/workspace.rs]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs]
 
   - id: WORKSPACE-003
     name: Clone repository into workspace
@@ -50,7 +50,7 @@ scenarios:
       - Git clone executed
       - Code available in workspace
       - Ready for operations
-    refs: [crates/arkavo-workspace/src/workspace.rs:43-46]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs:43-46]
 
   - id: WORKSPACE-004
     name: Enforce resource quotas
@@ -64,7 +64,7 @@ scenarios:
       - Memory limit set
       - OOM killer configured
       - Processes throttled if needed
-    refs: [crates/arkavo-workspace/src/workspace.rs:51-62]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs:51-62]
 
   - id: WORKSPACE-005
     name: Cleanup workspace after use
@@ -78,7 +78,7 @@ scenarios:
       - Files removed
       - Resources freed
       - Workspace ID invalidated
-    refs: [crates/arkavo-workspace/src/workspace.rs]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs]
 
   - id: WORKSPACE-006
     name: Detect container runtime
@@ -91,7 +91,7 @@ scenarios:
       - Podman fallback
       - Runtime name returned
       - Error if neither found
-    refs: [crates/arkavo-workspace/src/workspace.rs:78-100]
+    refs: [crates/arkavo-mcp-workspace/src/workspace.rs:78-100]
     edge_cases:
       - condition: Container runtime not found
         expected: Returns WorkspaceError::ContainerRuntime

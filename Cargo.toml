@@ -31,10 +31,10 @@ members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
-    "crates/arkavo-code-search",
+    "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
-    "crates/arkavo-workspace",
-    "crates/arkavo-bench",
+    "crates/arkavo-mcp-workspace",
+    "crates/arkavo-mcp-bench",
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
@@ -105,10 +105,10 @@ default-members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
-    "crates/arkavo-code-search",
+    "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
-    "crates/arkavo-workspace",
-    "crates/arkavo-bench",
+    "crates/arkavo-mcp-workspace",
+    "crates/arkavo-mcp-bench",
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
@@ -133,7 +133,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.67.6"
+version = "0.67.7"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

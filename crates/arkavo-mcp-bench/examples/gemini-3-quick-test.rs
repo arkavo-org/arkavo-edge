@@ -8,9 +8,9 @@
 //! This example uses #[tokio::main] which internally uses Runtime::block_on.
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_bench::SweBenchTool;
 use arkavo_gemini::RestClient;
 use arkavo_mcp::Tool;
+use arkavo_mcp_bench::SweBenchTool;
 use serde_json::json;
 use std::env;
 use std::time::Instant;

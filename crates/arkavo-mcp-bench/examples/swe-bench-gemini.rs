@@ -1,6 +1,6 @@
-use arkavo_bench::SweBenchTool;
 use arkavo_gemini::RestClient;
 use arkavo_mcp::Tool;
+use arkavo_mcp_bench::SweBenchTool;
 use futures::StreamExt;
 use serde_json::json;
 use std::env;

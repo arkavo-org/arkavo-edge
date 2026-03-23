@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-code-search"
+name = "arkavo-mcp-code-search"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

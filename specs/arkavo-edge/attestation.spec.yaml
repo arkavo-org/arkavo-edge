@@ -1,6 +1,6 @@
 feature: Device Attestation and Security State
 module: arkavo_attestation
-version: 0.57.2
+version: 0.67.6
 
 invariants:
   - Platform evidence collected via attestor trait

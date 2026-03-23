@@ -1,7 +1,7 @@
 use crate::metrics::{BenchMetrics, BenchSummary};
 use crate::{BenchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
-use arkavo_workspace::WorkspaceTool;
+use arkavo_mcp_workspace::WorkspaceTool;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
