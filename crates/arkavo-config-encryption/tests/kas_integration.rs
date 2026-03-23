@@ -89,8 +89,8 @@ mod kas_tests {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
-        let decryptor = ConfigBundleDecryptor::new(identity);
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
+        let decryptor = ConfigBundleDecryptor::new(credential);
 
         // Synchronous decrypt should fail with helpful message
         let result = decryptor.decrypt_bundle(&encrypted);
@@ -163,8 +163,8 @@ mod kas_tests {
         );
         attributes.insert("environment".to_string(), "test".to_string());
 
-        let identity = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
-        let decryptor = ConfigBundleDecryptor::new(identity);
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
+        let decryptor = ConfigBundleDecryptor::new(credential);
 
         // Create KAS client
         let kas_client =

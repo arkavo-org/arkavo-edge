@@ -248,16 +248,19 @@ fn extract_delegation_entitlements(jwt: &str, agent_public_key: &[u8]) -> Result
 
     // Validate sub matches agent's did:key
     if let Some(sub) = claims.get("sub").and_then(|v| v.as_str()) {
-        // Derive did:key from the agent's public key to compare
-        if agent_public_key.len() == 32 {
-            let agent_pubkey = arkavo_crypto::AgentPublicKey::from_bytes(agent_public_key)
-                .map_err(|e| A2aError::InvalidRequest(format!("Invalid agent key: {e}")))?;
-            let agent_did = agent_pubkey.to_did_key();
-            if sub != agent_did {
-                return Err(A2aError::AuthenticationFailed(format!(
-                    "JWT sub '{sub}' does not match agent DID '{agent_did}'"
-                )));
-            }
+        // Delegation JWTs use Ed25519 did:key identifiers
+        if agent_public_key.len() != 32 {
+            return Err(A2aError::InvalidRequest(
+                "Delegation JWT only supported for Ed25519 keys".to_string(),
+            ));
+        }
+        let agent_pubkey = arkavo_crypto::AgentPublicKey::from_bytes(agent_public_key)
+            .map_err(|e| A2aError::InvalidRequest(format!("Invalid agent key: {e}")))?;
+        let agent_did = agent_pubkey.to_did_key();
+        if sub != agent_did {
+            return Err(A2aError::AuthenticationFailed(format!(
+                "JWT sub '{sub}' does not match agent DID '{agent_did}'"
+            )));
         }
     } else {
         return Err(A2aError::InvalidRequest(
@@ -1930,5 +1933,83 @@ mod tests {
             format!("{err}").contains("not found"),
             "Error should indicate challenge not found"
         );
+    }
+
+    /// Helper: build a minimal JWT from claims (no real signature)
+    fn make_test_jwt(claims: &serde_json::Value) -> String {
+        let header = general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","typ":"JWT"}"#);
+        let payload = general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).unwrap());
+        let fake_sig = general_purpose::URL_SAFE_NO_PAD.encode(b"fakesig");
+        format!("{header}.{payload}.{fake_sig}")
+    }
+
+    #[test]
+    fn test_delegation_jwt_valid_entitlements() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let claims = serde_json::json!({
+            "iss": "did:key:z6MkHuman",
+            "sub": agent_did,
+            "scope": ["action/read", "action/execute"],
+            "exp": chrono::Utc::now().timestamp() + 3600,
+        });
+        let jwt = make_test_jwt(&claims);
+        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert_eq!(result.unwrap(), vec!["action/read", "action/execute"]);
+    }
+
+    #[test]
+    fn test_delegation_jwt_sub_mismatch() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let claims = serde_json::json!({
+            "iss": "did:key:z6MkHuman",
+            "sub": "did:key:z6MkWrongAgent",
+            "scope": ["action/read"],
+            "exp": chrono::Utc::now().timestamp() + 3600,
+        });
+        let jwt = make_test_jwt(&claims);
+        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("does not match"));
+    }
+
+    #[test]
+    fn test_delegation_jwt_expired() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let claims = serde_json::json!({
+            "iss": "did:key:z6MkHuman",
+            "sub": agent_did,
+            "scope": ["action/read"],
+            "exp": chrono::Utc::now().timestamp() - 3600,
+        });
+        let jwt = make_test_jwt(&claims);
+        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("expired"));
+    }
+
+    #[test]
+    fn test_delegation_jwt_invalid_format() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let result =
+            extract_delegation_entitlements("not.a.valid.jwt", &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delegation_jwt_rejects_p256_key() {
+        let claims = serde_json::json!({
+            "iss": "did:key:z6MkHuman",
+            "sub": "did:key:z6MkAgent",
+            "scope": ["action/read"],
+            "exp": chrono::Utc::now().timestamp() + 3600,
+        });
+        let jwt = make_test_jwt(&claims);
+        // P-256 uncompressed key is 65 bytes
+        let fake_p256_key = vec![0u8; 65];
+        let result = extract_delegation_entitlements(&jwt, &fake_p256_key);
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("Ed25519"));
     }
 }
