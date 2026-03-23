@@ -28,6 +28,8 @@ pub struct Registration {
     pub public_key: Vec<u8>,
     pub verified: bool,
     pub timestamp: u64,
+    /// Entitlements from delegation JWT (empty if no delegation)
+    pub delegated_entitlements: Vec<String>,
 }
 
 pub struct RegistrationService {
@@ -167,11 +169,19 @@ impl RegistrationService {
         // The write lock is held throughout, so no race condition is possible
         challenges.remove(&request.challenge_id);
 
+        // Extract delegated entitlements from delegation JWT (if present)
+        let delegated_entitlements = if let Some(ref jwt) = request.delegation_jwt {
+            extract_delegation_entitlements(jwt, &public_key_bytes)?
+        } else {
+            vec![]
+        };
+
         let registration = Registration {
             device_id: request.device_id.clone(),
             public_key: public_key_bytes,
             verified: true,
             timestamp: current_time,
+            delegated_entitlements,
         };
 
         let mut registrations = self.registrations.write().await;
@@ -215,6 +225,77 @@ impl Default for RegistrationService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Extract delegated entitlements from a delegation JWT.
+///
+/// Validates structural claims (sub matches agent DID, not expired) without
+/// full signature verification. Signature verification requires the authnz-rs
+/// public key, which is deferred until orchestrator key distribution is implemented.
+fn extract_delegation_entitlements(jwt: &str, agent_public_key: &[u8]) -> Result<Vec<String>> {
+    // JWT format: header.payload.signature (base64url-encoded parts)
+    let parts: Vec<&str> = jwt.split('.').collect();
+    if parts.len() != 3 {
+        return Err(A2aError::InvalidRequest("Invalid JWT format".to_string()));
+    }
+
+    // Decode payload (second part)
+    let payload_bytes = base64_url_decode(parts[1])
+        .map_err(|e| A2aError::InvalidRequest(format!("Invalid JWT payload: {e}")))?;
+
+    let claims: serde_json::Value = serde_json::from_slice(&payload_bytes)
+        .map_err(|e| A2aError::InvalidRequest(format!("Invalid JWT claims: {e}")))?;
+
+    // Validate sub matches agent's did:key
+    if let Some(sub) = claims.get("sub").and_then(|v| v.as_str()) {
+        // Derive did:key from the agent's public key to compare
+        if agent_public_key.len() == 32 {
+            let agent_pubkey = arkavo_crypto::AgentPublicKey::from_bytes(agent_public_key)
+                .map_err(|e| A2aError::InvalidRequest(format!("Invalid agent key: {e}")))?;
+            let agent_did = agent_pubkey.to_did_key();
+            if sub != agent_did {
+                return Err(A2aError::AuthenticationFailed(format!(
+                    "JWT sub '{sub}' does not match agent DID '{agent_did}'"
+                )));
+            }
+        }
+    } else {
+        return Err(A2aError::InvalidRequest(
+            "JWT missing 'sub' claim".to_string(),
+        ));
+    }
+
+    // Validate expiration
+    if let Some(exp) = claims.get("exp").and_then(|v| v.as_i64()) {
+        #[allow(clippy::cast_possible_wrap)]
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        if now > exp {
+            return Err(A2aError::AuthenticationFailed(
+                "Delegation JWT expired".to_string(),
+            ));
+        }
+    }
+
+    // Extract scope as entitlements
+    let entitlements = claims
+        .get("scope")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(entitlements)
+}
+
+/// Decode base64url without padding (RFC 7515)
+fn base64_url_decode(input: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    general_purpose::URL_SAFE_NO_PAD.decode(input)
 }
 
 #[cfg(test)]
@@ -271,6 +352,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let verify_response = service.verify_challenge(verify_request).await.unwrap();
@@ -308,6 +390,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -324,6 +407,7 @@ mod tests {
             device_id: "test-device".to_string(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&[0u8; 64]),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -365,6 +449,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: general_purpose::STANDARD.encode(&public_key_bytes),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let verify_response = service.verify_challenge(verify_request).await.unwrap();
@@ -399,6 +484,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: general_purpose::STANDARD.encode(&public_key_bytes),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -451,6 +537,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // Attempt to verify - should fail with "Challenge expired"
@@ -498,6 +585,7 @@ mod tests {
             device_id: device_id_b, // Mismatched device ID
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -601,6 +689,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: bad_key,
             signature,
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -654,6 +743,7 @@ mod tests {
             device_id: registered_device.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         service.verify_challenge(verify_request).await.unwrap();
@@ -714,6 +804,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature1),
+            delegation_jwt: None,
         };
 
         let result1 = service.verify_challenge(verify_request1).await;
@@ -731,6 +822,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature2),
+            delegation_jwt: None,
         };
 
         let _result2 = service.verify_challenge(verify_request2).await;
@@ -811,6 +903,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // Successful verification
@@ -837,6 +930,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
         let result2 = service.verify_challenge(verify_request2).await;
         assert!(result2.is_err(), "Replay attack should be prevented");
@@ -903,6 +997,7 @@ mod tests {
                 device_id: device_id.clone(),
                 public_key: keypair.public_key().to_base64(),
                 signature: general_purpose::STANDARD.encode(&signature),
+                delegation_jwt: None,
             };
 
             let verify_response = service.verify_challenge(verify_request).await.unwrap();
@@ -942,6 +1037,7 @@ mod tests {
                 device_id: device_id.clone(),
                 public_key: general_purpose::STANDARD.encode(&public_key_bytes),
                 signature: general_purpose::STANDARD.encode(&signature),
+                delegation_jwt: None,
             };
 
             let verify_response = service.verify_challenge(verify_request).await.unwrap();
@@ -988,6 +1084,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1033,6 +1130,7 @@ mod tests {
             device_id,
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // Should be rejected (past TTL)
@@ -1066,6 +1164,7 @@ mod tests {
             device_id: device_id_b, // Similar but different
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1099,6 +1198,7 @@ mod tests {
                 device_id: device_id.clone(),
                 public_key: bad_key,
                 signature,
+                delegation_jwt: None,
             };
 
             let result = service.verify_challenge(verify_request).await;
@@ -1141,6 +1241,7 @@ mod tests {
                 device_id: device_id.clone(),
                 public_key: keypair.public_key().to_base64(),
                 signature: general_purpose::STANDARD.encode(&signature),
+                delegation_jwt: None,
             };
 
             service.verify_challenge(verify_request).await.unwrap();
@@ -1188,6 +1289,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1252,6 +1354,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         service.verify_challenge(verify_request).await.unwrap();
@@ -1334,6 +1437,7 @@ mod tests {
                     device_id,
                     public_key,
                     signature,
+                    delegation_jwt: None,
                 };
                 svc.verify_challenge(verify_request).await
             }));
@@ -1460,6 +1564,7 @@ mod tests {
             device_id,
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1501,6 +1606,7 @@ mod tests {
             device_id: device_b, // Wrong device
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1535,6 +1641,7 @@ mod tests {
             device_id,
             public_key: "!!!invalid-base64!!!".to_string(),
             signature: general_purpose::STANDARD.encode(&[0u8; 64]),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1572,6 +1679,7 @@ mod tests {
             device_id,
             public_key: keypair.public_key().to_base64(),
             signature: "!!!invalid-base64!!!".to_string(),
+            delegation_jwt: None,
         };
 
         let result = service.verify_challenge(verify_request).await;
@@ -1618,6 +1726,7 @@ mod tests {
                 device_id: device_id.to_string(),
                 public_key: keypair.public_key().to_base64(),
                 signature: general_purpose::STANDARD.encode(&signature),
+                delegation_jwt: None,
             };
 
             service.verify_challenge(verify_request).await.unwrap();
@@ -1663,6 +1772,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // First verification should succeed
@@ -1758,6 +1868,7 @@ mod tests {
             device_id,
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // Should be rejected (at boundary, considered expired with >= check)
@@ -1799,6 +1910,7 @@ mod tests {
             device_id: device_id.clone(),
             public_key: keypair.public_key().to_base64(),
             signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: None,
         };
 
         // First verification should succeed
