@@ -18,8 +18,8 @@ trust_chain:
       crate: arkavo-device-identity
       spec_ref: device-identity.spec.yaml
       description: Agent generates or unlocks device-bound asymmetric key pair
-      outputs: [device_public_key]
-      gate: device_public_key is non-null and stored in platform-appropriate secure storage
+      outputs: [device_public_key, device_did]
+      gate: device_public_key is non-null and stored in platform-appropriate secure storage; device_did is derived via did:key encoding of device_public_key
 
     - phase: 2
       name: Platform attestation
@@ -91,6 +91,27 @@ trust_refresh:
   shortcut_entry_phase: 2
   preserves: [device_public_key, agent_id]
   invalidates: [auth_token, active_config]
+
+# Keypair architecture
+keypair_architecture:
+  device_key:
+    algorithm: Ed25519
+    persisted: true
+    storage: platform-appropriate secure storage (Keychain, keyring, file with 0600)
+    purpose: Phase 1 identity anchor, DID derivation, attestation binding, orchestrator registration
+    crate: arkavo-device-identity (storage), arkavo-crypto (operations)
+  gossip_key:
+    algorithm: Ed25519
+    persisted: false
+    purpose: Session-scoped gossip message signing; ephemeral to limit compromise blast radius
+    crate: arkavo-server (LearningBus)
+    note: Intentionally separate from device key; attacker compromising gossip gets a throwaway key
+  tdf_key:
+    algorithm: P-256 ECDSA
+    persisted: false
+    purpose: TDF config bundle encryption/decryption, KAS key wrapping
+    crate: arkavo-config-encryption (AgentCredential)
+    note: Different algorithm (P-256) required by TDF/KAS spec and iOS Secure Enclave compatibility
 
 # Security considerations
 security:

@@ -99,12 +99,12 @@ impl ConfigBundleEncryptor {
 }
 
 pub struct ConfigBundleDecryptor {
-    agent_identity: AgentIdentity,
+    agent_credential: AgentCredential,
 }
 
 impl ConfigBundleDecryptor {
-    pub fn new(agent_identity: AgentIdentity) -> Self {
-        Self { agent_identity }
+    pub fn new(agent_credential: AgentCredential) -> Self {
+        Self { agent_credential }
     }
 
     pub fn decrypt_bundle(&self, encrypted: &EncryptedBundle) -> Result<ConfigurationBundle> {
@@ -149,7 +149,7 @@ impl ConfigBundleDecryptor {
     fn verify_attributes(&self, policy: &PolicyManifest) -> bool {
         policy.dissemination.iter().all(|required| {
             if let Some((key, value)) = required.split_once('=') {
-                self.agent_identity
+                self.agent_credential
                     .attributes
                     .get(key)
                     .map(|v| v == value)
@@ -162,7 +162,7 @@ impl ConfigBundleDecryptor {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgentIdentity {
+pub struct AgentCredential {
     pub agent_id: String,
     pub attributes: HashMap<String, String>,
     pub jwt_token: String,
@@ -170,7 +170,7 @@ pub struct AgentIdentity {
     pub public_key: PublicKey,
 }
 
-impl AgentIdentity {
+impl AgentCredential {
     pub fn new(agent_id: String, attributes: HashMap<String, String>) -> Result<Self> {
         let key_pair = KeyPair::generate()?;
         Ok(Self {
@@ -271,8 +271,8 @@ mod tests {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
-        let decryptor = ConfigBundleDecryptor::new(identity);
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
+        let decryptor = ConfigBundleDecryptor::new(credential);
 
         let result = decryptor.decrypt_bundle(&encrypted);
         assert!(result.is_err());
@@ -280,14 +280,14 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_identity_creation() {
+    fn test_agent_credential_creation() {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
 
-        assert_eq!(identity.agent_id, "test-agent-001");
-        assert!(identity.attributes.contains_key("agent.role"));
+        assert_eq!(credential.agent_id, "test-agent-001");
+        assert!(credential.attributes.contains_key("agent.role"));
     }
 
     #[test]
@@ -295,10 +295,10 @@ mod tests {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
 
         let request_data = b"test request data";
-        let signature = identity.sign_request(request_data).unwrap();
+        let signature = credential.sign_request(request_data).unwrap();
 
         assert!(!signature.is_empty());
     }
@@ -309,13 +309,13 @@ mod tests {
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
         attributes.insert("environment".to_string(), "production".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
 
-        assert!(identity.has_required_attributes(&[
+        assert!(credential.has_required_attributes(&[
             "agent.role=test-agent".to_string(),
             "environment=production".to_string()
         ]));
 
-        assert!(!identity.has_required_attributes(&["agent.role=other-agent".to_string()]));
+        assert!(!credential.has_required_attributes(&["agent.role=other-agent".to_string()]));
     }
 }

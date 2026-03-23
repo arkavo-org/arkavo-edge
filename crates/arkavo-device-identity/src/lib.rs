@@ -79,6 +79,10 @@ pub struct AgentIdentity {
     pub device_id: DeviceId,
     pub app_version: String,
     pub agent_id: Option<Uuid>,
+    /// DID:key identifier derived from the device public key.
+    /// Set by the caller after key generation via `AgentPublicKey::to_did_key()`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub did: Option<String>,
 }
 
 impl AgentIdentity {
@@ -87,6 +91,7 @@ impl AgentIdentity {
             device_id: DeviceId::new(),
             app_version,
             agent_id: Some(Uuid::new_v4()),
+            did: None,
         }
     }
 
@@ -95,6 +100,7 @@ impl AgentIdentity {
             device_id,
             app_version,
             agent_id: Some(Uuid::new_v4()),
+            did: None,
         }
     }
 
@@ -103,7 +109,14 @@ impl AgentIdentity {
             device_id,
             app_version,
             agent_id: None,
+            did: None,
         }
+    }
+
+    /// Set the DID:key identifier derived from the device public key.
+    pub fn with_did(mut self, did: String) -> Self {
+        self.did = Some(did);
+        self
     }
 }
 
@@ -140,5 +153,37 @@ mod tests {
         let display = format!("{}", device_id);
         assert!(display.len() == 36);
         assert!(display.contains('-'));
+    }
+
+    #[test]
+    fn test_agent_identity_with_did() {
+        let identity =
+            AgentIdentity::new("1.0.0".to_string()).with_did("did:key:z6MkTest123".to_string());
+        assert_eq!(identity.did, Some("did:key:z6MkTest123".to_string()));
+    }
+
+    #[test]
+    fn test_agent_identity_did_defaults_none() {
+        let identity = AgentIdentity::new("1.0.0".to_string());
+        assert_eq!(identity.did, None);
+    }
+
+    #[test]
+    fn test_agent_identity_did_serialization_roundtrip() {
+        let identity =
+            AgentIdentity::new("1.0.0".to_string()).with_did("did:key:z6MkTest123".to_string());
+        let json = serde_json::to_string(&identity).unwrap();
+        let deserialized: AgentIdentity = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.did, Some("did:key:z6MkTest123".to_string()));
+        assert_eq!(deserialized.device_id, identity.device_id);
+    }
+
+    #[test]
+    fn test_agent_identity_without_did_serialization_roundtrip() {
+        let identity = AgentIdentity::new("1.0.0".to_string());
+        let json = serde_json::to_string(&identity).unwrap();
+        assert!(!json.contains("did"));
+        let deserialized: AgentIdentity = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.did, None);
     }
 }

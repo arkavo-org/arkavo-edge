@@ -1,4 +1,4 @@
-use arkavo_config_encryption::AgentIdentity;
+use arkavo_config_encryption::AgentCredential;
 use arkavo_protocol::get_service_ip;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -1153,12 +1153,30 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    // Create AgentIdentity for TDF encryption/decryption
+    // Load or create persisted device keypair (Phase 1 identity anchor)
+    use arkavo_device_identity::keypair as device_keypair_store;
+    let device_keypair = {
+        let bytes = match device_keypair_store::get_keypair()? {
+            Some(bytes) => bytes,
+            None => {
+                let new_kp = arkavo_crypto::AgentKeypair::generate();
+                let bytes = new_kp.to_bytes();
+                device_keypair_store::store_keypair(&bytes)?;
+                bytes
+            }
+        };
+        Arc::new(
+            arkavo_crypto::AgentKeypair::from_bytes(&bytes).expect("Invalid device keypair bytes"),
+        )
+    };
+    let device_did = device_keypair.public_key().to_did_key();
+
+    // Create AgentCredential for TDF encryption/decryption
     let mut identity_attributes = HashMap::new();
     identity_attributes.insert("agent.id".to_string(), config.name.clone());
     let agent_identity = Arc::new(
-        AgentIdentity::new(config.name.clone(), identity_attributes)
-            .map_err(|e| format!("Failed to create AgentIdentity: {e}"))?,
+        AgentCredential::new(config.name.clone(), identity_attributes)
+            .map_err(|e| format!("Failed to create AgentCredential: {e}"))?,
     );
 
     // Encode public key as base64 for mDNS broadcast
@@ -1241,6 +1259,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             config.purpose.clone(),
             config.model.clone(),
             config.mode.clone(),
+            Some(device_did.clone()),
         )
         .await;
 
@@ -1423,28 +1442,15 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Generate and display QR code for registration
     if !quiet {
-        use arkavo_crypto::AgentKeypair;
-        use arkavo_device_identity::{get_or_create_device_id, keypair};
+        use arkavo_device_identity::get_or_create_device_id;
         use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
         // Get or create device ID (needed for system initialization)
         let _device_id =
             get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {e}"))?;
 
-        // Get or create agent keypair
-        let keypair_bytes = match keypair::get_keypair()? {
-            Some(bytes) => bytes,
-            None => {
-                let new_keypair = AgentKeypair::generate();
-                let bytes = new_keypair.to_bytes();
-                keypair::store_keypair(&bytes)?;
-                bytes
-            }
-        };
-
-        let agent_keypair =
-            AgentKeypair::from_bytes(&keypair_bytes).expect("Invalid keypair bytes");
-        let public_key = agent_keypair.public_key();
+        // Reuse persisted device keypair loaded at startup (Phase 1 identity)
+        let public_key = device_keypair.public_key();
 
         // Extract folder name (last part of agent name) for display
         let folder_id = config

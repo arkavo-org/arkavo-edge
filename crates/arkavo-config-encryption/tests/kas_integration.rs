@@ -10,7 +10,7 @@
 mod kas_tests {
     use arkavo_config_bundle::{AgentRole, BundleTarget, ConfigurationBundle};
     use arkavo_config_encryption::{
-        AgentIdentity, ConfigBundleDecryptor, ConfigBundleEncryptor, KasConfig, Policy,
+        AgentCredential, ConfigBundleDecryptor, ConfigBundleEncryptor, KasConfig, Policy,
         PolicyAttribute,
     };
     use std::collections::HashMap;
@@ -89,7 +89,7 @@ mod kas_tests {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
+        let identity = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
         let decryptor = ConfigBundleDecryptor::new(identity);
 
         // Synchronous decrypt should fail with helpful message
@@ -163,7 +163,7 @@ mod kas_tests {
         );
         attributes.insert("environment".to_string(), "test".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
+        let identity = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
         let decryptor = ConfigBundleDecryptor::new(identity);
 
         // Create KAS client
@@ -243,7 +243,7 @@ mod kas_tests {
         wrong_attributes.insert("environment".to_string(), "development".to_string());
 
         let wrong_identity =
-            AgentIdentity::new("wrong-agent-001".to_string(), wrong_attributes).unwrap();
+            AgentCredential::new("wrong-agent-001".to_string(), wrong_attributes).unwrap();
         let decryptor = ConfigBundleDecryptor::new(wrong_identity);
 
         let result = decryptor.decrypt_bundle(&encrypted);

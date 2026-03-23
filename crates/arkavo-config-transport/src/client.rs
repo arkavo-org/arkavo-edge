@@ -5,23 +5,23 @@
 
 use crate::{ConfigTransportEnvelope, Result, TransportError};
 use arkavo_config_bundle::ConfigurationBundle;
-use arkavo_config_encryption::{AgentIdentity, ConfigBundleDecryptor};
+use arkavo_config_encryption::{AgentCredential, ConfigBundleDecryptor};
 use arkavo_protocol::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 use chrono::Utc;
 use tracing::{debug, info, warn};
 
 /// Client for requesting configuration bundles over A2A protocol
 pub struct ConfigTransportClient {
-    agent_identity: AgentIdentity,
+    agent_credential: AgentCredential,
     decryptor: ConfigBundleDecryptor,
 }
 
 impl ConfigTransportClient {
     /// Create a new configuration transport client
-    pub fn new(agent_identity: AgentIdentity) -> Self {
-        let decryptor = ConfigBundleDecryptor::new(agent_identity.clone());
+    pub fn new(agent_credential: AgentCredential) -> Self {
+        let decryptor = ConfigBundleDecryptor::new(agent_credential.clone());
         Self {
-            agent_identity,
+            agent_credential,
             decryptor,
         }
     }
@@ -39,26 +39,26 @@ impl ConfigTransportClient {
         _decryption_key: &[u8],
     ) -> Result<ConfigurationBundle> {
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             "Requesting configuration from orchestrator"
         );
 
         // Create request data for signing
         let request_data = format!(
             "{}:{}:{}",
-            self.agent_identity.agent_id,
-            self.agent_identity.jwt_token,
+            self.agent_credential.agent_id,
+            self.agent_credential.jwt_token,
             Utc::now().timestamp()
         );
 
         // Sign request with agent's private key
         let signature = self
-            .agent_identity
+            .agent_credential
             .sign_request(request_data.as_bytes())
             .map_err(|e| TransportError::Authorization(e.to_string()))?;
 
         debug!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             signature_len = signature.len(),
             "Request signed successfully"
         );
@@ -66,7 +66,7 @@ impl ConfigTransportClient {
         // In a real implementation, this would call the A2A RPC method
         // For now, we'll simulate the response structure
         let _config_request = AgentConfigGetRequest {
-            agent_id: self.agent_identity.agent_id.clone(),
+            agent_id: self.agent_credential.agent_id.clone(),
             include_backups: false,
         };
 
@@ -84,7 +84,7 @@ impl ConfigTransportClient {
         _decryption_key: &[u8],
     ) -> Result<ConfigurationBundle> {
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             "Processing configuration response"
         );
 
@@ -106,11 +106,11 @@ impl ConfigTransportClient {
 
         // Verify agent has required attributes
         if !self
-            .agent_identity
+            .agent_credential
             .has_required_attributes(&envelope.metadata.required_attributes)
         {
             warn!(
-                agent_id = %self.agent_identity.agent_id,
+                agent_id = %self.agent_credential.agent_id,
                 required = ?envelope.metadata.required_attributes,
                 "Agent does not have required attributes"
             );
@@ -126,7 +126,7 @@ impl ConfigTransportClient {
             .map_err(|e| TransportError::Decryption(e.to_string()))?;
 
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             bundle_id = %bundle.bundle_id,
             "Configuration decrypted successfully"
         );
@@ -137,7 +137,7 @@ impl ConfigTransportClient {
     /// Acknowledge configuration receipt
     pub async fn acknowledge_configuration(&self, bundle_id: &str) -> Result<()> {
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             bundle_id = %bundle_id,
             "Acknowledging configuration receipt"
         );
@@ -147,14 +147,14 @@ impl ConfigTransportClient {
 
         // Sign acknowledgment
         let _signature = self
-            .agent_identity
+            .agent_credential
             .sign_request(ack_data.as_bytes())
             .map_err(|e| TransportError::Authorization(e.to_string()))?;
 
         // In a real implementation, this would send acknowledgment via A2A
         // For now, we just log it
         debug!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             bundle_id = %bundle_id,
             "Configuration acknowledgment prepared"
         );
@@ -165,7 +165,7 @@ impl ConfigTransportClient {
     /// Apply configuration to agent
     pub fn apply_configuration(&self, bundle: &ConfigurationBundle) -> Result<()> {
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             bundle_id = %bundle.bundle_id,
             "Applying configuration"
         );
@@ -182,7 +182,7 @@ impl ConfigTransportClient {
         // 4. Update agent capabilities
 
         info!(
-            agent_id = %self.agent_identity.agent_id,
+            agent_id = %self.agent_credential.agent_id,
             bundle_id = %bundle.bundle_id,
             settings_count = bundle.settings.len(),
             secrets_count = bundle.secrets.len(),
@@ -204,9 +204,9 @@ mod tests {
         let mut attributes = HashMap::new();
         attributes.insert("agent.role".to_string(), "test-agent".to_string());
 
-        let identity = AgentIdentity::new("test-agent-001".to_string(), attributes).unwrap();
-        let client = ConfigTransportClient::new(identity);
+        let credential = AgentCredential::new("test-agent-001".to_string(), attributes).unwrap();
+        let client = ConfigTransportClient::new(credential);
 
-        assert_eq!(client.agent_identity.agent_id, "test-agent-001");
+        assert_eq!(client.agent_credential.agent_id, "test-agent-001");
     }
 }

@@ -927,6 +927,7 @@ dependencies = [
  "keyring",
  "security-framework",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "uuid",
  "windows 0.58.0",

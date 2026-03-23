@@ -210,6 +210,7 @@ impl A2aServer {
         purpose: String,
         model: String,
         mode: arkavo_protocol::agent_config::AgentMode,
+        did: Option<String>,
     ) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.name.clone_from(&name);
@@ -217,6 +218,7 @@ impl A2aServer {
         metadata.model.clone_from(&model);
         metadata.mode = mode;
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
+        metadata.did = did;
         drop(metadata);
 
         // Always initialize router for task execution via HRM conductor
@@ -260,9 +262,9 @@ impl A2aServer {
             new_config.name, new_config.purpose, new_config.model
         );
 
-        let model_changed = {
+        let (model_changed, existing_did) = {
             let metadata = self.agent_metadata.read().await;
-            metadata.model != new_config.model
+            (metadata.model != new_config.model, metadata.did.clone())
         };
 
         self.set_agent_metadata(
@@ -270,6 +272,7 @@ impl A2aServer {
             new_config.purpose.clone(),
             new_config.model.clone(),
             new_config.mode.clone(),
+            existing_did,
         )
         .await;
 

@@ -25,6 +25,9 @@ windows = { version = "0.58", features = ["Security_Credentials"], optional = tr
 hex = "0.4"
 dirs = "5.0"
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 default = []
 linux-keyring = ["dep:keyring"]
