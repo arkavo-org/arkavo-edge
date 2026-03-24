@@ -272,6 +272,21 @@ impl ToolMemory {
             format!("{action_type}({})", params.join(","))
         }
     }
+
+    /// Snapshot for the Context Topology Matrix UI tab
+    pub fn topology_snapshot(&self) -> serde_json::Value {
+        let error_count = self.entries.iter().filter(|e| e.is_error).count();
+        let duplicate_count = self.entries.iter().filter(|e| e.is_duplicate).count();
+        serde_json::json!({
+            "entryCount": self.entries.len(),
+            "maxEntries": self.max_entries,
+            "errorCount": error_count,
+            "duplicateCount": duplicate_count,
+            "recentActionTypes": self.recent_action_types(),
+            "consecutiveSameType": self.consecutive_same_type,
+            "hasObserveData": self.last_observe_full.is_some(),
+        })
+    }
 }
 
 #[cfg(test)]

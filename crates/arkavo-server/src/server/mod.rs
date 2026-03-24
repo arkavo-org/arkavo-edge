@@ -290,6 +290,10 @@ pub trait A2aRpc {
     #[method(name = "system.metrics")]
     async fn system_metrics(&self) -> RpcResult<serde_json::Value>;
 
+    /// Context topology snapshot for the Context Topology Matrix UI tab
+    #[method(name = "context/topology")]
+    async fn context_topology(&self) -> RpcResult<serde_json::Value>;
+
     /// Push-based metrics stream — replaces polling of system.metrics + budget.compute_status
     #[subscription(name = "system.metrics.subscribe", unsubscribe = "system.metrics.unsubscribe", item = serde_json::Value)]
     async fn system_metrics_subscribe(&self) -> SubscriptionResult;
@@ -1131,6 +1135,114 @@ impl A2aRpcServer for A2aRpcImpl {
             "available_ram_mb": available_ram_mb,
             "subsystem_timing": subsystem_timing,
             "iroh_active": iroh_active,
+        }))
+    }
+
+    async fn context_topology(&self) -> RpcResult<serde_json::Value> {
+        let timer = RpcTimer::new("context/topology".to_string(), self.metrics.clone());
+
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Tool Memory snapshot
+        let tool_memory = self.agent_memory.read().await.topology_snapshot();
+
+        // Anti-patterns from learning bus policy cache
+        let anti_patterns: Vec<serde_json::Value> = if let Some(bus) = &self.learning_bus {
+            let cache = bus.policy_cache().read().await;
+            let mut patterns = Vec::new();
+            // Iterate all models we know about from the router
+            if let Some(router) = &self.router {
+                let lm = router.model_learning();
+                let all_stats = lm.get_all_stats().await;
+                for s in &all_stats {
+                    for ap in cache.anti_patterns.get_for_model(&s.agent_id) {
+                        patterns.push(serde_json::json!({
+                            "model": ap.model,
+                            "category": ap.category,
+                            "failureSignature": ap.failure_signature,
+                            "failureCount": ap.failure_count,
+                            "decayedWeight": ap.decayed_weight(),
+                            "lastSeen": ap.last_seen.to_rfc3339(),
+                        }));
+                    }
+                }
+            }
+            patterns
+        } else {
+            vec![]
+        };
+
+        // Gossip / learning bus stats
+        let gossip = if let Some(bus) = &self.learning_bus {
+            let stats = bus.stats().await;
+            serde_json::json!({
+                "eventsReceived": stats.events_received,
+                "episodesSynthesized": stats.episodes_synthesized,
+                "lessonsStored": stats.lessons_stored,
+                "gossipPeers": stats.gossip_peers,
+                "lastEventSecsAgo": stats.last_event_secs_ago,
+            })
+        } else {
+            serde_json::json!({
+                "eventsReceived": 0,
+                "episodesSynthesized": 0,
+                "lessonsStored": 0,
+                "gossipPeers": 0,
+            })
+        };
+
+        // Decision traces from router
+        let decision_traces: Vec<serde_json::Value> = if let Some(router) = &self.router {
+            router
+                .recent_decision_traces(10)
+                .into_iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "traceId": t.trace_id.to_string(),
+                        "taskCategory": t.task_category.as_str(),
+                        "selectedModel": t.selected_model,
+                        "selectionReason": format!("{:?}", t.selection_reason),
+                        "budgetUsagePct": t.budget_usage_pct,
+                        "feasibleCount": t.feasible_models.len(),
+                        "timestamp": t.timestamp.to_rfc3339(),
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // RLM stats (default config — actual manifests are ephemeral per conductor call)
+        let rlm = serde_json::json!({
+            "manifestCount": 0,
+            "totalChunks": 0,
+            "totalTokens": 0,
+            "activationThreshold": 0.7,
+        });
+
+        // Memory lifecycle defaults (agent does not track lifecycle reports directly)
+        let memory_lifecycle = serde_json::json!({
+            "promoted": 0,
+            "distilled": 0,
+            "expired": 0,
+            "demoted": 0,
+            "transientTtlDays": 7,
+            "promotionThreshold": 3,
+            "canonicalThreshold": 10,
+        });
+
+        timer.success();
+        Ok(serde_json::json!({
+            "toolMemory": tool_memory,
+            "antiPatterns": anti_patterns,
+            "gossip": gossip,
+            "decisionTraces": decision_traces,
+            "rlm": rlm,
+            "memoryLifecycle": memory_lifecycle,
         }))
     }
 
