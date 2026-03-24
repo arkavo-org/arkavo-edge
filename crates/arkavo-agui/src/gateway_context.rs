@@ -91,7 +91,7 @@ pub(crate) async fn handle_request_context_topology(
 
     // Read from the cache of pushed context_topology telemetry
     let cache = context_topology_cache.read().await;
-    for (_agent_id, resp) in cache.iter() {
+    for (cached_agent_id, resp) in cache.iter() {
         parse_tool_memory(resp, &mut tool_memory);
         parse_decision_traces(resp, &mut decision_traces);
         parse_anti_patterns(resp, &mut anti_patterns);
@@ -99,6 +99,17 @@ pub(crate) async fn handle_request_context_topology(
         parse_rlm_snapshot(resp, &mut rlm);
         parse_context_strategies(resp, &mut context_strategies);
         parse_memory_lifecycle(resp, &mut memory_lifecycle);
+
+        // Enrich agent context utilization from pushed telemetry
+        if let Some(pct) = resp.get("contextUtilizationPct").and_then(|v| v.as_f64())
+            && pct > 0.0
+        {
+            for agent in agents.iter_mut() {
+                if agent.agent_id == *cached_agent_id {
+                    agent.context_utilization_pct = Some(pct);
+                }
+            }
+        }
     }
     drop(cache);
 

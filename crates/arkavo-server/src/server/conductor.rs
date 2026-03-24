@@ -10,7 +10,12 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::types::TaskProgress;
 use arkavo_tasks::task_executor::TaskExecutor;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tracing::{debug, info, warn};
+
+/// Peak context window utilization across all conductor calls (basis points: 10000 = 100.00%)
+pub(super) static PEAK_CONTEXT_UTILIZATION_BP: std::sync::LazyLock<AtomicU64> =
+    std::sync::LazyLock::new(|| AtomicU64::new(0));
 
 /// Extract a reward signal from an MCP tool result.
 ///
@@ -462,6 +467,9 @@ pub async fn execute_with_conductor_and_learning(
         context_utilization_pct = format!("{context_utilization_pct:.1}").as_str(),
         "Context window utilization"
     );
+    // Store peak context utilization for telemetry (basis points for AtomicU64 precision)
+    let bp = (context_utilization_pct * 100.0) as u64;
+    PEAK_CONTEXT_UTILIZATION_BP.fetch_max(bp, std::sync::atomic::Ordering::Relaxed);
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;

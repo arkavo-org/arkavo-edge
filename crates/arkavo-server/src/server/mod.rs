@@ -1274,6 +1274,8 @@ impl A2aRpcServer for A2aRpcImpl {
                         "gossip": gossip_snap,
                         "antiPatterns": anti_patterns_snap,
                         "decisionTraces": traces_snap,
+                        "contextUtilizationPct": conductor::PEAK_CONTEXT_UTILIZATION_BP
+                            .load(std::sync::atomic::Ordering::Relaxed) as f64 / 100.0,
                     },
                 });
 
