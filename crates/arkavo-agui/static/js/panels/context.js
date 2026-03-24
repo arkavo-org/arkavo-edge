@@ -63,7 +63,7 @@ function renderContextPanel() {
         '<div class="context-header-bar">' +
             '<span class="context-mode-label">' + (sel ? 'Agent Drill-Down' : 'Swarm Overview') + '</span>' +
             headerSuffix +
-            (sel ? '<button class="context-deselect-btn" onclick="selectContextAgent(\'' + escapeHtml(sel) + '\')">Back to Swarm</button>' : '') +
+            (sel ? '<button class="context-deselect-btn" id="context-deselect">Back to Swarm</button>' : '') +
         '</div>' +
         '<div class="context-topology-grid">' +
             renderTopZone(ctx, sel) +
@@ -72,6 +72,19 @@ function renderContextPanel() {
             renderRightZone(ctx, sel) +
             renderBottomZone(ctx, sel) +
         '</div>';
+
+    // Bind click handlers via data attributes (CSP-safe, no inline JS)
+    container.querySelectorAll('[data-agent-id]').forEach(function(el) {
+        el.addEventListener('click', function() {
+            selectContextAgent(el.getAttribute('data-agent-id'));
+        });
+    });
+    var deselectBtn = document.getElementById('context-deselect');
+    if (deselectBtn) {
+        deselectBtn.addEventListener('click', function() {
+            selectContextAgent(AppState.selectedContextAgent);
+        });
+    }
 }
 
 // --- Center: Agent Mesh with click-to-select ---
@@ -96,7 +109,7 @@ function renderCenterZone(ctx, sel) {
                 (isSelected ? ' context-agent-selected' : '') +
                 (isDimmed ? ' context-agent-dimmed' : '');
 
-            html += '<div class="' + nodeClass + '" onclick="selectContextAgent(\'' + escapeHtml(a.agentId) + '\')"' +
+            html += '<div class="' + nodeClass + '" data-agent-id="' + escapeHtml(a.agentId) + '"' +
                 (isSelected ? ' style="border-color:' + color + ';box-shadow:0 0 12px ' + color + '40"' : '') + '>' +
                 renderContextGauge(pct, isSelected ? 72 : 56) +
                 '<div class="context-agent-label" style="color:' + color + '">' + escapeHtml(shortId) + '</div>' +
@@ -243,7 +256,7 @@ function renderBottomZone(ctx, sel) {
 
     // Filter by selected agent in drill-down mode
     if (sel) {
-        traces = traces.filter(function(t) { return t.agentId === sel || t.selectedModel === sel; });
+        traces = traces.filter(function(t) { return t.agentId === sel; });
         patterns = patterns.filter(function(p) { return p.model === sel; });
     }
 

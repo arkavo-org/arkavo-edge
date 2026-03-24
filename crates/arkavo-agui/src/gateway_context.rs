@@ -90,8 +90,14 @@ pub(crate) async fn handle_request_context_topology(
     };
 
     // Read from the cache of pushed context_topology telemetry
+    // Only include agents still in the registry (evicts disconnected agents)
+    let known_agent_ids: std::collections::HashSet<String> =
+        agents.iter().map(|a| a.agent_id.clone()).collect();
     let cache = context_topology_cache.read().await;
     for (cached_agent_id, resp) in cache.iter() {
+        if !known_agent_ids.contains(cached_agent_id) {
+            continue;
+        }
         parse_tool_memory(resp, &mut tool_memory);
         parse_decision_traces(resp, &mut decision_traces);
         parse_anti_patterns(resp, &mut anti_patterns);
@@ -100,8 +106,11 @@ pub(crate) async fn handle_request_context_topology(
         parse_context_strategies(resp, &mut context_strategies);
         parse_memory_lifecycle(resp, &mut memory_lifecycle);
 
-        // Enrich agent context utilization from pushed telemetry
-        if let Some(pct) = resp.get("contextUtilizationPct").and_then(|v| v.as_f64())
+        // Enrich agent context utilization from per-agent toolMemory snapshot
+        if let Some(pct) = resp
+            .get("toolMemory")
+            .and_then(|tm| tm.get("contextUtilizationPct"))
+            .and_then(|v| v.as_f64())
             && pct > 0.0
         {
             for agent in agents.iter_mut() {
@@ -178,33 +187,44 @@ fn parse_context_strategies(
 
 fn parse_tool_memory(resp: &serde_json::Value, tm: &mut ToolMemorySnapshot) {
     if let Some(t) = resp.get("toolMemory") {
-        tm.entry_count = t.get("entryCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        tm.max_entries = t.get("maxEntries").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-        tm.error_count = t.get("errorCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        tm.duplicate_count = t
+        tm.entry_count += t.get("entryCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        tm.max_entries += t.get("maxEntries").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        tm.error_count += t.get("errorCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        tm.duplicate_count += t
             .get("duplicateCount")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
-        tm.consecutive_same_type = t
-            .get("consecutiveSameType")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        tm.has_observe_data = t
-            .get("hasObserveData")
+        tm.consecutive_same_type = tm.consecutive_same_type.max(
+            t.get("consecutiveSameType")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize,
+        );
+        if t.get("hasObserveData")
             .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            .unwrap_or(false)
+        {
+            tm.has_observe_data = true;
+        }
         if let Some(arr) = t.get("recentActionTypes").and_then(|v| v.as_array()) {
-            tm.recent_action_types = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
+            for v in arr {
+                if let Some(s) = v.as_str()
+                    && !tm.recent_action_types.contains(&s.to_string())
+                {
+                    tm.recent_action_types.push(s.to_string());
+                }
+            }
         }
     }
 }
 
+const MAX_DECISION_TRACES: usize = 20;
+
 fn parse_decision_traces(resp: &serde_json::Value, traces: &mut Vec<DecisionTraceSnapshot>) {
     if let Some(arr) = resp.get("decisionTraces").and_then(|v| v.as_array()) {
         for t in arr {
+            if traces.len() >= MAX_DECISION_TRACES {
+                return;
+            }
             traces.push(DecisionTraceSnapshot {
                 trace_id: t
                     .get("traceId")
@@ -315,7 +335,10 @@ fn parse_gossip_snapshot(resp: &serde_json::Value, g: &mut GossipSnapshot) {
             .unwrap_or(0);
         g.gossip_peers += gs.get("gossipPeers").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         if let Some(t) = gs.get("lastEventSecsAgo").and_then(|v| v.as_u64()) {
-            g.last_event_secs_ago = Some(t);
+            g.last_event_secs_ago = Some(match g.last_event_secs_ago {
+                Some(existing) => existing.min(t),
+                None => t,
+            });
         }
     }
 }
@@ -556,7 +579,7 @@ mod tests {
         let mut tm = default_tool_memory();
         parse_tool_memory(&resp, &mut tm);
         assert_eq!(tm.entry_count, 7);
-        assert_eq!(tm.max_entries, 15);
+        assert_eq!(tm.max_entries, 25); // default 10 + 15 (accumulates across agents)
         assert_eq!(tm.error_count, 2);
         assert_eq!(tm.duplicate_count, 1);
         assert_eq!(tm.recent_action_types, vec!["search", "read", "build"]);
@@ -611,8 +634,8 @@ mod tests {
         assert_eq!(gossip.episodes_synthesized, 3);
         assert_eq!(gossip.lessons_stored, 5);
         assert_eq!(gossip.gossip_peers, 8);
-        // Last event takes the most recent write
-        assert_eq!(gossip.last_event_secs_ago, Some(12));
+        // Last event takes the minimum (most recent across agents)
+        assert_eq!(gossip.last_event_secs_ago, Some(5));
     }
 
     #[spec("AGUI-010")]

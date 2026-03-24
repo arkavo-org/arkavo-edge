@@ -14,6 +14,8 @@ pub struct ToolMemory {
     consecutive_same_type: usize,
     /// Tools that succeeded once and should not be called again (e.g., registration)
     completed_setup_tools: HashSet<String>,
+    /// Current context utilization percentage (updated per conductor call, not peak)
+    context_utilization_pct: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +40,7 @@ impl ToolMemory {
             last_action_type: None,
             consecutive_same_type: 0,
             completed_setup_tools: HashSet::new(),
+            context_utilization_pct: 0.0,
         }
     }
 
@@ -273,6 +276,11 @@ impl ToolMemory {
         }
     }
 
+    /// Update current context utilization (called after each conductor tool loop)
+    pub fn set_context_utilization(&mut self, pct: f64) {
+        self.context_utilization_pct = pct;
+    }
+
     /// Snapshot for the Context Topology Matrix UI tab
     pub fn topology_snapshot(&self) -> serde_json::Value {
         let error_count = self.entries.iter().filter(|e| e.is_error).count();
@@ -285,6 +293,7 @@ impl ToolMemory {
             "recentActionTypes": self.recent_action_types(),
             "consecutiveSameType": self.consecutive_same_type,
             "hasObserveData": self.last_observe_full.is_some(),
+            "contextUtilizationPct": self.context_utilization_pct,
         })
     }
 }
