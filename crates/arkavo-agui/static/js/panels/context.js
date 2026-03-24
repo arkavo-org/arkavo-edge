@@ -241,6 +241,12 @@ function renderBottomZone(ctx, sel) {
     var traces = ctx.decisionTraces || [];
     var patterns = ctx.antiPatterns || [];
 
+    // Filter by selected agent in drill-down mode
+    if (sel) {
+        traces = traces.filter(function(t) { return t.agentId === sel || t.selectedModel === sel; });
+        patterns = patterns.filter(function(p) { return p.model === sel; });
+    }
+
     // In swarm mode, add source agent tags; in drill-down, data is already filtered by backend
     var html = '<div class="context-zone context-bottom">' +
         '<div class="context-bottom-split">';

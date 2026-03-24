@@ -989,6 +989,8 @@ pub struct ToolMemorySnapshot {
 pub struct DecisionTraceSnapshot {
     #[serde(rename = "traceId")]
     pub trace_id: String,
+    #[serde(rename = "agentId", default, skip_serializing_if = "String::is_empty")]
+    pub agent_id: String,
     #[serde(rename = "taskCategory")]
     pub task_category: String,
     #[serde(rename = "selectedModel")]

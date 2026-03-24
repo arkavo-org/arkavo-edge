@@ -1238,9 +1238,17 @@ impl A2aRpcServer for A2aRpcImpl {
                         .map(|t| {
                             serde_json::json!({
                                 "traceId": t.trace_id.to_string(),
+                                "agentId": &agent_id,
                                 "taskCategory": t.task_category.as_str(),
                                 "selectedModel": t.selected_model,
-                                "selectionReason": format!("{:?}", t.selection_reason),
+                                "selectionReason": match &t.selection_reason {
+                                    arkavo_router::learning::SelectionReason::ThompsonSampling { score, .. } =>
+                                        format!("Thompson({score:.2})"),
+                                    arkavo_router::learning::SelectionReason::BudgetConstrained => "BudgetConstrained".to_string(),
+                                    arkavo_router::learning::SelectionReason::SingleFeasible => "SingleFeasible".to_string(),
+                                    arkavo_router::learning::SelectionReason::Probationary => "Probationary".to_string(),
+                                    arkavo_router::learning::SelectionReason::Fallback => "Fallback".to_string(),
+                                },
                                 "budgetUsagePct": t.budget_usage_pct,
                                 "feasibleCount": t.feasible_models.len(),
                                 "timestamp": t.timestamp.to_rfc3339(),

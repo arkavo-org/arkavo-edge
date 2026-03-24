@@ -200,6 +200,11 @@ fn parse_decision_traces(resp: &serde_json::Value, traces: &mut Vec<DecisionTrac
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
+                agent_id: t
+                    .get("agentId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
                 task_category: t
                     .get("taskCategory")
                     .and_then(|v| v.as_str())
@@ -367,6 +372,7 @@ mod tests {
             }],
             "decisionTraces": [{
                 "traceId": "abc123",
+                "agentId": "code-analyzer",
                 "taskCategory": "code_generation",
                 "selectedModel": "qwen-8b",
                 "selectionReason": "ThompsonSampling",

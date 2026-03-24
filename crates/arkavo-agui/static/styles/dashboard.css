@@ -661,6 +661,10 @@
     font-size: 10px;
     font-family: monospace;
     color: var(--error);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
 }
 
 .anti-pattern-count {
