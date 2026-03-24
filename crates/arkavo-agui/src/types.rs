@@ -514,6 +514,25 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Context Topology events
+    RequestContextTopology,
+    ContextTopologyUpdate {
+        rlm: RlmSnapshot,
+        #[serde(rename = "contextStrategies")]
+        context_strategies: Vec<ContextStrategySnapshot>,
+        #[serde(rename = "toolMemory")]
+        tool_memory: ToolMemorySnapshot,
+        #[serde(rename = "decisionTraces")]
+        decision_traces: Vec<DecisionTraceSnapshot>,
+        #[serde(rename = "antiPatterns")]
+        anti_patterns: Vec<AntiPatternSnapshot>,
+        #[serde(rename = "memoryLifecycle")]
+        memory_lifecycle: MemoryLifecycleSnapshot,
+        gossip: GossipSnapshot,
+        agents: Vec<AgentContextInfo>,
+        timestamp: String,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -917,4 +936,136 @@ pub enum NotificationSeverity {
     Info,
     Warning,
     Error,
+}
+
+// Context Topology snapshot types
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RlmSnapshot {
+    #[serde(rename = "manifestCount")]
+    pub manifest_count: usize,
+    #[serde(rename = "totalChunks")]
+    pub total_chunks: usize,
+    #[serde(rename = "totalTokens")]
+    pub total_tokens: usize,
+    #[serde(rename = "activationThreshold")]
+    pub activation_threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextStrategySnapshot {
+    pub strategy: String,
+    #[serde(rename = "completionRate")]
+    pub completion_rate: f64,
+    #[serde(rename = "loopAvoidanceRate")]
+    pub loop_avoidance_rate: f64,
+    #[serde(rename = "avgContextBytes")]
+    pub avg_context_bytes: usize,
+    #[serde(rename = "compositeScore")]
+    pub composite_score: f64,
+    #[serde(rename = "burstCount")]
+    pub burst_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolMemorySnapshot {
+    #[serde(rename = "entryCount")]
+    pub entry_count: usize,
+    #[serde(rename = "maxEntries")]
+    pub max_entries: usize,
+    #[serde(rename = "errorCount")]
+    pub error_count: usize,
+    #[serde(rename = "duplicateCount")]
+    pub duplicate_count: usize,
+    #[serde(rename = "recentActionTypes")]
+    pub recent_action_types: Vec<String>,
+    #[serde(rename = "consecutiveSameType")]
+    pub consecutive_same_type: usize,
+    #[serde(rename = "hasObserveData")]
+    pub has_observe_data: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionTraceSnapshot {
+    #[serde(rename = "traceId")]
+    pub trace_id: String,
+    #[serde(rename = "taskCategory")]
+    pub task_category: String,
+    #[serde(rename = "selectedModel")]
+    pub selected_model: String,
+    #[serde(rename = "selectionReason")]
+    pub selection_reason: String,
+    #[serde(rename = "budgetUsagePct")]
+    pub budget_usage_pct: f64,
+    #[serde(rename = "feasibleCount")]
+    pub feasible_count: usize,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntiPatternSnapshot {
+    pub model: String,
+    pub category: String,
+    #[serde(rename = "failureSignature")]
+    pub failure_signature: String,
+    #[serde(rename = "failureCount")]
+    pub failure_count: u32,
+    #[serde(rename = "decayedWeight")]
+    pub decayed_weight: f64,
+    #[serde(rename = "lastSeen")]
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryLifecycleSnapshot {
+    pub promoted: usize,
+    pub distilled: usize,
+    pub expired: usize,
+    pub demoted: usize,
+    #[serde(rename = "transientTtlDays")]
+    pub transient_ttl_days: u32,
+    #[serde(rename = "promotionThreshold")]
+    pub promotion_threshold: u32,
+    #[serde(rename = "canonicalThreshold")]
+    pub canonical_threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GossipSnapshot {
+    #[serde(rename = "eventsReceived")]
+    pub events_received: u64,
+    #[serde(rename = "episodesSynthesized")]
+    pub episodes_synthesized: u64,
+    #[serde(rename = "lessonsStored")]
+    pub lessons_stored: u64,
+    #[serde(rename = "gossipPeers")]
+    pub gossip_peers: usize,
+    #[serde(rename = "lastEventSecsAgo", skip_serializing_if = "Option::is_none")]
+    pub last_event_secs_ago: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentContextInfo {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(
+        rename = "contextUtilizationPct",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_utilization_pct: Option<f64>,
+    pub alpha: f64,
+    #[serde(rename = "betaParam")]
+    pub beta_param: f64,
+    #[serde(rename = "expectedValue")]
+    pub expected_value: f64,
+    #[serde(rename = "totalObservations")]
+    pub total_observations: u64,
+    #[serde(
+        rename = "categoryStats",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub category_stats: Vec<CategoryStat>,
 }

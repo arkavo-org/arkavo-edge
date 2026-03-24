@@ -31,6 +31,7 @@ var AppState = {
     optimalConfigs: [],
     metricsHistory: [],
     lastMetricsSnapshot: null,
+    contextTopology: null,
 };
 
 var MAX_TELEMETRY = 200;

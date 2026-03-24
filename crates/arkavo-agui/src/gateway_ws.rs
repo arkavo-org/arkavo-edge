@@ -318,6 +318,15 @@ async fn dispatch_event(
             )
             .await?;
         }
+        AgUiEvent::RequestContextTopology => {
+            crate::gateway_context::handle_request_context_topology(
+                learning_module,
+                agent_connections,
+                agents,
+                tx,
+            )
+            .await?;
+        }
         AgUiEvent::RequestLearningStatus => {
             let lesson_count = lesson_store.read().await.len();
             gateway_routing::handle_request_learning_status(
