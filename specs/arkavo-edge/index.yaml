@@ -552,11 +552,12 @@ components:
     module: arkavo_agui
     description: Arkavo GUI application gateway
     criticality: high
-    scenario_count: 8
+    scenario_count: 12
     invariants:
       - AgUiGateway manages connections
       - mDNS discovery for peers
       - Health and ROI metrics
+      - Context topology aggregated from pushed telemetry
 
   - name: ui-core
     file: ui-core.spec.yaml
