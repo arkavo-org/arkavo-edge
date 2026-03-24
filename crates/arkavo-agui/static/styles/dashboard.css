@@ -440,3 +440,323 @@
     gap: 8px;
     margin-bottom: 16px;
 }
+
+/* Context Topology Matrix */
+.context-topology-grid {
+    display: grid;
+    grid-template-areas:
+        "top    top    top    top"
+        "left   center center right"
+        "left   center center right"
+        "bottom bottom bottom bottom";
+    grid-template-columns: 220px 1fr 1fr 220px;
+    grid-template-rows: auto 1fr 1fr auto;
+    gap: 10px;
+    height: calc(100vh - 160px);
+    min-height: 500px;
+}
+
+.context-zone {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.context-top { grid-area: top; }
+.context-left { grid-area: left; }
+.context-center { grid-area: center; }
+.context-right { grid-area: right; }
+.context-bottom { grid-area: bottom; }
+
+.context-zone-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.context-top-split, .context-bottom-split {
+    display: flex;
+    gap: 12px;
+}
+
+.context-sub-panel {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    padding: 10px;
+}
+
+.context-sub-wide { flex: 2; }
+
+.context-agents-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 10px;
+}
+
+.context-agent-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    min-width: 100px;
+}
+
+.context-agent-label {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: monospace;
+    text-align: center;
+}
+
+.context-agent-meta {
+    font-size: 9px;
+    color: var(--text-secondary);
+    font-family: monospace;
+}
+
+.context-agent-stats {
+    display: flex;
+    gap: 8px;
+    font-size: 9px;
+    color: var(--text-secondary);
+    font-family: monospace;
+}
+
+.context-stat-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.context-stat-card {
+    flex: 1;
+    text-align: center;
+    padding: 4px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+.context-stat-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: monospace;
+}
+
+.context-stat-label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.context-empty-zone {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: center;
+    padding: 12px;
+}
+
+.context-badge {
+    font-size: 9px;
+    color: var(--accent);
+    padding: 2px 6px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    display: inline-block;
+    margin-top: 4px;
+}
+
+.context-meta {
+    font-size: 9px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-family: monospace;
+}
+
+.context-action-list { margin-top: 6px; }
+
+.context-action-item {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-secondary);
+    padding: 2px 4px;
+    border-left: 2px solid var(--accent);
+    margin-bottom: 2px;
+}
+
+.context-circuit-scroll { overflow-x: auto; }
+
+.context-antipattern-list {
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+/* Strategy bars */
+.strategy-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.strategy-bar.strategy-active .strategy-label { color: var(--accent); }
+
+.strategy-label {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-secondary);
+    width: 80px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.strategy-track {
+    flex: 1;
+    height: 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.strategy-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.strategy-score {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-secondary);
+    width: 36px;
+    text-align: right;
+}
+
+/* Anti-pattern items */
+.anti-pattern-item {
+    padding: 4px 6px;
+    margin-bottom: 4px;
+    border-left: 2px solid var(--error);
+    transition: opacity 0.3s;
+}
+
+.anti-pattern-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.anti-pattern-sig {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--error);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+}
+
+.anti-pattern-count {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.anti-pattern-bar-track {
+    height: 3px;
+    background: var(--bg-primary);
+    border-radius: 2px;
+    margin: 2px 0;
+}
+
+.anti-pattern-bar-fill {
+    height: 100%;
+    background: var(--error);
+    border-radius: 2px;
+    transition: width 0.5s;
+}
+
+.anti-pattern-meta {
+    font-size: 8px;
+    color: var(--text-secondary);
+    font-family: monospace;
+}
+
+/* Flow pulse animation */
+.context-flow-pulse {
+    stroke-dasharray: 8 4;
+    animation: flowPulse 2s linear infinite;
+}
+
+@keyframes flowPulse {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: -12; }
+}
+
+/* Context Topology: Agent selector states */
+.context-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.context-mode-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+}
+
+.context-focus-label {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.context-deselect-btn {
+    margin-left: auto;
+    padding: 2px 10px;
+    font-size: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.context-deselect-btn:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.context-agent-clickable { cursor: pointer; transition: all 0.2s ease; }
+.context-agent-clickable:hover { transform: scale(1.05); }
+.context-agent-selected { border: 2px solid; transform: scale(1.1); z-index: 1; }
+.context-agent-dimmed { opacity: 0.35; filter: grayscale(0.5); transform: scale(0.9); }
+
+.context-agent-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-family: monospace;
+    font-weight: 600;
+    padding: 1px 4px;
+    border: 1px solid;
+    border-radius: 3px;
+    vertical-align: middle;
+}

@@ -1142,6 +1142,9 @@ impl A2aRpcServer for A2aRpcImpl {
 
         let agent_metadata = self.agent_metadata.clone();
         let compute_budget = self.compute_budget.clone();
+        let agent_memory = self.agent_memory.clone();
+        let learning_bus = self.learning_bus.clone();
+        let router = self.router.clone();
         #[cfg(feature = "iroh")]
         let iroh_node = self.iroh_node.clone();
 
@@ -1186,6 +1189,76 @@ impl A2aRpcServer for A2aRpcImpl {
                 #[cfg(not(feature = "iroh"))]
                 let iroh_active = false;
 
+                // Context topology: tool memory
+                let tool_memory_snap = agent_memory.read().await.topology_snapshot();
+
+                // Context topology: gossip stats
+                let gossip_snap = if let Some(bus) = &learning_bus {
+                    let stats = bus.stats().await;
+                    serde_json::json!({
+                        "eventsReceived": stats.events_received,
+                        "episodesSynthesized": stats.episodes_synthesized,
+                        "lessonsStored": stats.lessons_stored,
+                        "gossipPeers": stats.gossip_peers,
+                        "lastEventSecsAgo": stats.last_event_secs_ago,
+                    })
+                } else {
+                    serde_json::json!(null)
+                };
+
+                // Context topology: anti-patterns
+                let anti_patterns_snap: Vec<serde_json::Value> = if let Some(bus) = &learning_bus {
+                    let cache = bus.policy_cache().read().await;
+                    let mut patterns = Vec::new();
+                    if let Some(r) = &router {
+                        let lm = r.model_learning();
+                        let all_stats = lm.get_all_stats().await;
+                        for s in &all_stats {
+                            for ap in cache.anti_patterns.get_for_model(&s.agent_id) {
+                                patterns.push(serde_json::json!({
+                                    "model": ap.model,
+                                    "category": ap.category,
+                                    "failureSignature": ap.failure_signature,
+                                    "failureCount": ap.failure_count,
+                                    "decayedWeight": ap.decayed_weight(),
+                                    "lastSeen": ap.last_seen.to_rfc3339(),
+                                }));
+                            }
+                        }
+                    }
+                    patterns
+                } else {
+                    vec![]
+                };
+
+                // Context topology: decision traces
+                let traces_snap: Vec<serde_json::Value> = if let Some(r) = &router {
+                    r.recent_decision_traces(10)
+                        .into_iter()
+                        .map(|t| {
+                            serde_json::json!({
+                                "traceId": t.trace_id.to_string(),
+                                "agentId": &agent_id,
+                                "taskCategory": t.task_category.as_str(),
+                                "selectedModel": t.selected_model,
+                                "selectionReason": match &t.selection_reason {
+                                    arkavo_router::learning::SelectionReason::ThompsonSampling { score, .. } =>
+                                        format!("Thompson({score:.2})"),
+                                    arkavo_router::learning::SelectionReason::BudgetConstrained => "BudgetConstrained".to_string(),
+                                    arkavo_router::learning::SelectionReason::SingleFeasible => "SingleFeasible".to_string(),
+                                    arkavo_router::learning::SelectionReason::Probationary => "Probationary".to_string(),
+                                    arkavo_router::learning::SelectionReason::Fallback => "Fallback".to_string(),
+                                },
+                                "budgetUsagePct": t.budget_usage_pct,
+                                "feasibleCount": t.feasible_models.len(),
+                                "timestamp": t.timestamp.to_rfc3339(),
+                            })
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
+
                 let metrics = serde_json::json!({
                     "agent_id": agent_id,
                     "rss_mb": rss_mb,
@@ -1196,6 +1269,12 @@ impl A2aRpcServer for A2aRpcImpl {
                     "subsystem_timing": subsystem_timing,
                     "iroh_active": iroh_active,
                     "compute_budget": budget_snapshot,
+                    "context_topology": {
+                        "toolMemory": tool_memory_snap,
+                        "gossip": gossip_snap,
+                        "antiPatterns": anti_patterns_snap,
+                        "decisionTraces": traces_snap,
+                    },
                 });
 
                 if let Ok(msg) = serde_json::value::to_raw_value(&metrics)

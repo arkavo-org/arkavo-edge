@@ -462,6 +462,12 @@ pub async fn execute_with_conductor_and_learning(
         context_utilization_pct = format!("{context_utilization_pct:.1}").as_str(),
         "Context window utilization"
     );
+    // Store current context utilization on the per-agent ToolMemory for telemetry
+    if let Some(tm) = tool_memory {
+        tm.write()
+            .await
+            .set_context_utilization(context_utilization_pct);
+    }
 
     // 7. Record result in Conductor
     use arkavo_router::selector_quality::compute_response_quality;

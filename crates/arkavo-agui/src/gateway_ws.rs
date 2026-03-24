@@ -28,6 +28,7 @@ pub async fn websocket_handler(
             state.routing_history,
             state.lesson_tx,
             state.lesson_store,
+            state.context_topology_cache,
         )
     })
 }
@@ -47,6 +48,7 @@ async fn handle_websocket(
     routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -103,6 +105,7 @@ async fn handle_websocket(
             &routing_history,
             &lesson_tx,
             &lesson_store,
+            &context_topology_cache,
             &tx,
         )
         .await
@@ -130,6 +133,7 @@ async fn handle_websocket(
                         &routing_history,
                         &lesson_tx,
                         &lesson_store,
+                        &context_topology_cache,
                         &tx,
                     )
                     .await
@@ -180,6 +184,7 @@ async fn dispatch_event(
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -314,6 +319,15 @@ async fn dispatch_event(
                 routing_history,
                 lesson_tx,
                 lesson_store,
+                tx,
+            )
+            .await?;
+        }
+        AgUiEvent::RequestContextTopology => {
+            crate::gateway_context::handle_request_context_topology(
+                learning_module,
+                agents,
+                context_topology_cache,
                 tx,
             )
             .await?;

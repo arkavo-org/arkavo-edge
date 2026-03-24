@@ -17,6 +17,7 @@ pub mod mdns {
         telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
         browser_connections: Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
         security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+        context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("AG-UI: mDNS daemon starting...");
 
@@ -67,6 +68,7 @@ pub mod mdns {
                     telemetry_tx.clone(),
                     browser_connections.clone(),
                     security_handler.clone(),
+                    context_topology_cache.clone(),
                 )
                 .await;
             }
@@ -87,6 +89,7 @@ pub mod mdns {
         telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
         browser_connections: Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
         security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+        context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     ) {
         let service_name = info.get_fullname();
         let port = info.get_port();
@@ -164,7 +167,6 @@ pub mod mdns {
             let endpoint = format!("{}:{}", final_host, port);
             let telemetry_tx_clone = telemetry_tx.clone();
             let agent_connections_clone = agent_connections.clone();
-
             tokio::spawn(async move {
                 println!(
                     "AG-UI: Auto-connecting to agent: {} at {}",
@@ -199,8 +201,23 @@ pub mod mdns {
                         println!("AG-UI: Metrics subscription active for {}", agent_id_clone);
                         // Forward metrics events to all browser sessions
                         let browser_conns = browser_connections.clone();
+                        let topo_cache = context_topology_cache.clone();
+                        let cache_agent_id = agent_id_clone.clone();
                         tokio::spawn(async move {
                             while let Some(event) = metrics_rx.recv().await {
+                                // Cache context topology telemetry for aggregation
+                                if let crate::types::AgUiEvent::TelemetryEvent {
+                                    ref event_type,
+                                    ref details,
+                                    ..
+                                } = event
+                                    && event_type == "context_topology"
+                                {
+                                    topo_cache
+                                        .write()
+                                        .await
+                                        .insert(cache_agent_id.clone(), details.clone());
+                                }
                                 let conns = browser_conns.read().await;
                                 for (_, ci) in conns.iter() {
                                     let _ = ci._ws_tx.send(event.clone()).await;
