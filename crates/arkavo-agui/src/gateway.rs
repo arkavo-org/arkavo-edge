@@ -61,6 +61,8 @@ pub struct AppState {
     pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     pub lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     pub lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    /// Latest context topology push from each agent (keyed by agent_id)
+    pub context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
 }
 
 pub struct AgUiGateway {
@@ -140,6 +142,9 @@ impl AgUiGateway {
         let telemetry_tx_for_mdns = self.telemetry_tx.clone();
         let browser_connections_for_mdns = self.connections.clone();
         let security_handler_for_mdns = self.security_handler.clone();
+        let context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let topo_cache_for_mdns = context_topology_cache.clone();
         tokio::spawn(async move {
             println!("AG-UI: Starting mDNS discovery...");
             match crate::gateway_mdns::run_mdns_discovery(
@@ -148,6 +153,7 @@ impl AgUiGateway {
                 telemetry_tx_for_mdns,
                 browser_connections_for_mdns,
                 security_handler_for_mdns,
+                topo_cache_for_mdns,
             )
             .await
             {
@@ -383,6 +389,7 @@ impl AgUiGateway {
             routing_history: Arc::new(RwLock::new(VecDeque::new())),
             lesson_tx: Some(lesson_tx),
             lesson_store,
+            context_topology_cache,
         };
 
         // Register learning pipeline health reporter (uses gateway shared stores)

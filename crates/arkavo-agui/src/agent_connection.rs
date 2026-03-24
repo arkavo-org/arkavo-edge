@@ -891,6 +891,17 @@ impl AgentConnection {
                     drop(sec);
                 }
 
+                // Forward context topology as telemetry event
+                if let Some(ctx) = metrics.get("context_topology") {
+                    let event = crate::types::AgUiEvent::TelemetryEvent {
+                        event_type: "context_topology".to_string(),
+                        agent_id: agent_id.clone(),
+                        details: ctx.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = tx.send(event).await;
+                }
+
                 // Forward subsystem timing
                 if let Some(timing) = metrics.get("subsystem_timing") {
                     let registry = arkavo_observability::subsystem_timing::global_timing();

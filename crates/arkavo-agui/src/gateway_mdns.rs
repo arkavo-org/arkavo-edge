@@ -10,6 +10,7 @@ pub async fn run_mdns_discovery(
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
     browser_connections: Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
     security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -19,6 +20,7 @@ pub async fn run_mdns_discovery(
             telemetry_tx,
             browser_connections,
             security_handler,
+            context_topology_cache,
         )
         .await
     }
@@ -31,6 +33,7 @@ pub async fn run_mdns_discovery(
             telemetry_tx,
             browser_connections,
             security_handler,
+            context_topology_cache,
         );
         println!("mDNS discovery not compiled in");
         loop {

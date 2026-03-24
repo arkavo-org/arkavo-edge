@@ -1,4 +1,3 @@
-use crate::agent_connection::AgentConnection;
 use crate::types::*;
 use arkavo_router::learning::LearningModule;
 use std::collections::HashMap;
@@ -6,11 +5,11 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
 /// Handle a RequestContextTopology event by aggregating context mechanism data
-/// from the local LearningModule and connected agents.
+/// from the local LearningModule and the pushed telemetry cache.
 pub(crate) async fn handle_request_context_topology(
     learning_module: &Arc<RwLock<LearningModule>>,
-    agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     agents_registry: &Arc<RwLock<Vec<serde_json::Value>>>,
+    context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Collect Thompson Sampling priors from local LearningModule
@@ -54,7 +53,7 @@ pub(crate) async fn handle_request_context_topology(
         }
     }
 
-    // Query connected agents for context topology data
+    // Aggregate context topology from pushed telemetry cache
     let mut rlm = RlmSnapshot {
         manifest_count: 0,
         total_chunks: 0,
@@ -90,42 +89,19 @@ pub(crate) async fn handle_request_context_topology(
         last_event_secs_ago: None,
     };
 
-    let conns = agent_connections.read().await;
-    for (_id, conn) in conns.iter() {
-        if !conn.is_connected().await {
-            continue;
-        }
-        match conn
-            .send_request("context/topology", serde_json::json!(null), "context-poll")
-            .await
-        {
-            Ok(resp) => {
-                parse_rlm_snapshot(&resp, &mut rlm);
-                parse_context_strategies(&resp, &mut context_strategies);
-                parse_tool_memory(&resp, &mut tool_memory);
-                parse_decision_traces(&resp, &mut decision_traces);
-                parse_anti_patterns(&resp, &mut anti_patterns);
-                parse_memory_lifecycle(&resp, &mut memory_lifecycle);
-                parse_gossip_snapshot(&resp, &mut gossip);
-            }
-            Err(_) => {
-                // Agent may not support context/topology yet — try learning/status fallback
-                if let Ok(resp) = conn
-                    .send_request(
-                        "learning/status",
-                        serde_json::json!(null),
-                        "context-fallback",
-                    )
-                    .await
-                {
-                    parse_gossip_from_learning(&resp, &mut gossip);
-                }
-            }
-        }
+    // Read from the cache of pushed context_topology telemetry
+    let cache = context_topology_cache.read().await;
+    for (_agent_id, resp) in cache.iter() {
+        parse_tool_memory(resp, &mut tool_memory);
+        parse_decision_traces(resp, &mut decision_traces);
+        parse_anti_patterns(resp, &mut anti_patterns);
+        parse_gossip_snapshot(resp, &mut gossip);
+        parse_rlm_snapshot(resp, &mut rlm);
+        parse_context_strategies(resp, &mut context_strategies);
+        parse_memory_lifecycle(resp, &mut memory_lifecycle);
     }
-    drop(conns);
+    drop(cache);
 
-    // Cap decision traces to most recent 10
     decision_traces.truncate(10);
 
     tx.send(AgUiEvent::ContextTopologyUpdate {
@@ -328,15 +304,6 @@ fn parse_gossip_snapshot(resp: &serde_json::Value, g: &mut GossipSnapshot) {
     }
 }
 
-fn parse_gossip_from_learning(resp: &serde_json::Value, g: &mut GossipSnapshot) {
-    if let Some(count) = resp.get("lessonCount").and_then(|v| v.as_u64()) {
-        g.lessons_stored += count;
-    }
-    if let Some(agents) = resp.get("agents").and_then(|v| v.as_array()) {
-        g.gossip_peers = g.gossip_peers.max(agents.len());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,90 +339,75 @@ mod tests {
     }
 
     #[test]
-    fn context_topology_update_event_serialization() {
-        let event = AgUiEvent::ContextTopologyUpdate {
-            rlm: RlmSnapshot {
-                manifest_count: 0,
-                total_chunks: 0,
-                total_tokens: 0,
-                activation_threshold: 0.7,
-            },
-            context_strategies: vec![],
-            tool_memory: ToolMemorySnapshot {
-                entry_count: 0,
-                max_entries: 10,
-                error_count: 0,
-                duplicate_count: 0,
-                recent_action_types: vec![],
-                consecutive_same_type: 0,
-                has_observe_data: false,
-            },
-            decision_traces: vec![],
-            anti_patterns: vec![],
-            memory_lifecycle: MemoryLifecycleSnapshot {
-                promoted: 0,
-                distilled: 0,
-                expired: 0,
-                demoted: 0,
-                transient_ttl_days: 7,
-                promotion_threshold: 3,
-                canonical_threshold: 10,
-            },
-            gossip: GossipSnapshot {
-                events_received: 0,
-                episodes_synthesized: 0,
-                lessons_stored: 0,
-                gossip_peers: 0,
-                last_event_secs_ago: None,
-            },
-            agents: vec![],
-            timestamp: "2026-03-23T12:00:00Z".to_string(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("contextTopologyUpdate"));
-        assert!(json.contains("activationThreshold"));
-    }
-
-    #[test]
-    fn parse_rlm_from_json() {
+    fn parse_pushed_topology_data() {
         let resp = serde_json::json!({
-            "rlm": {
-                "manifestCount": 2,
-                "totalChunks": 8,
-                "totalTokens": 2048,
-                "activationThreshold": 0.6
-            }
+            "toolMemory": {
+                "entryCount": 5,
+                "maxEntries": 10,
+                "errorCount": 1,
+                "duplicateCount": 0,
+                "recentActionTypes": ["code_search", "file_read"],
+                "consecutiveSameType": 2,
+                "hasObserveData": true
+            },
+            "gossip": {
+                "eventsReceived": 42,
+                "episodesSynthesized": 3,
+                "lessonsStored": 2,
+                "gossipPeers": 3,
+                "lastEventSecsAgo": 5
+            },
+            "antiPatterns": [{
+                "model": "qwen-8b",
+                "category": "code",
+                "failureSignature": "timeout:build",
+                "failureCount": 3,
+                "decayedWeight": 0.5,
+                "lastSeen": "2026-03-23T10:00:00Z"
+            }],
+            "decisionTraces": [{
+                "traceId": "abc123",
+                "taskCategory": "code_generation",
+                "selectedModel": "qwen-8b",
+                "selectionReason": "ThompsonSampling",
+                "budgetUsagePct": 45.0,
+                "feasibleCount": 3,
+                "timestamp": "2026-03-23T10:00:00Z"
+            }]
         });
-        let mut rlm = RlmSnapshot {
-            manifest_count: 0,
-            total_chunks: 0,
-            total_tokens: 0,
-            activation_threshold: 0.7,
+        let mut tm = ToolMemorySnapshot {
+            entry_count: 0,
+            max_entries: 10,
+            error_count: 0,
+            duplicate_count: 0,
+            recent_action_types: vec![],
+            consecutive_same_type: 0,
+            has_observe_data: false,
         };
-        parse_rlm_snapshot(&resp, &mut rlm);
-        assert_eq!(rlm.manifest_count, 2);
-        assert_eq!(rlm.total_chunks, 8);
-        assert!((rlm.activation_threshold - 0.6).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn parse_anti_patterns_from_json() {
-        let resp = serde_json::json!({
-            "antiPatterns": [
-                {
-                    "model": "qwen-8b",
-                    "category": "code",
-                    "failureSignature": "timeout:build",
-                    "failureCount": 3,
-                    "decayedWeight": 0.5,
-                    "lastSeen": "2026-03-23T10:00:00Z"
-                }
-            ]
-        });
+        let mut gossip = GossipSnapshot {
+            events_received: 0,
+            episodes_synthesized: 0,
+            lessons_stored: 0,
+            gossip_peers: 0,
+            last_event_secs_ago: None,
+        };
         let mut patterns = Vec::new();
+        let mut traces = Vec::new();
+
+        parse_tool_memory(&resp, &mut tm);
+        parse_gossip_snapshot(&resp, &mut gossip);
         parse_anti_patterns(&resp, &mut patterns);
+        parse_decision_traces(&resp, &mut traces);
+
+        assert_eq!(tm.entry_count, 5);
+        assert_eq!(tm.error_count, 1);
+        assert!(tm.has_observe_data);
+        assert_eq!(gossip.events_received, 42);
+        assert_eq!(gossip.gossip_peers, 3);
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0].failure_signature, "timeout:build");
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].selected_model, "qwen-8b");
     }
 
     #[test]
