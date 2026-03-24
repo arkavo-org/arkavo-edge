@@ -124,3 +124,64 @@ scenarios:
       - Backpressure handled
     refs: [crates/arkavo-agui/src/streaming.rs:1-50]
     changed: "2025-01-31"
+
+  - id: AGUI-009
+    name: Aggregate context topology from pushed telemetry
+    criticality: high
+    given:
+      - Agents connected via mDNS
+      - system.metrics.subscribe active
+      - context_topology data pushed every 5s
+    when: RequestContextTopology received from browser
+    then:
+      - Per-agent topology cache read
+      - ToolMemory, AntiPatterns, DecisionTraces, Gossip parsed
+      - Thompson priors from LearningModule aggregated
+      - ContextTopologyUpdate event sent to browser
+    refs: [crates/arkavo-agui/src/gateway_context.rs:10-120]
+    changed: "2026-03-24"
+
+  - id: AGUI-010
+    name: Parse pushed context topology snapshots
+    criticality: high
+    given:
+      - Agent pushes context_topology in metrics stream
+      - JSON contains toolMemory, gossip, antiPatterns, decisionTraces
+    when: Snapshot parsed by gateway
+    then:
+      - ToolMemory fields extracted (entryCount, errorCount, duplicateCount)
+      - AntiPatterns extracted with decayed weights
+      - Decision traces extracted with abbreviated selection reason
+      - Gossip stats extracted (peers, events, episodes, lessons)
+      - Empty response handled safely
+    refs: [crates/arkavo-agui/src/gateway_context.rs:120-300]
+    changed: "2026-03-24"
+
+  - id: AGUI-011
+    name: Cache context topology per agent
+    criticality: high
+    given:
+      - Agent metrics subscription active
+      - context_topology telemetry event received
+    when: Event forwarded to browser sessions
+    then:
+      - Latest snapshot cached in context_topology_cache by agent_id
+      - Each agent has its own cache entry
+      - Previous snapshot overwritten
+    refs: [crates/arkavo-agui/src/mdns_impl.rs:200-225]
+    changed: "2026-03-24"
+
+  - id: AGUI-012
+    name: Push context utilization via telemetry stream
+    criticality: high
+    given:
+      - Conductor completes tool loop
+      - Peak context tokens computed
+    when: system.metrics.subscribe pushes next sample
+    then:
+      - contextUtilizationPct included in context_topology object
+      - Value read from global PEAK_CONTEXT_UTILIZATION_BP atomic
+      - Gateway enriches AgentContextInfo from cache
+      - Ring gauges show actual context window pressure
+    refs: [crates/arkavo-server/src/server/conductor.rs:17-20, crates/arkavo-server/src/server/mod.rs:1272-1280]
+    changed: "2026-03-24"

@@ -557,6 +557,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-protocol",
  "arkavo-router",
+ "arkavo-test-macros",
  "arkavo-ui-generator",
  "arkavo-validation",
  "async-trait",

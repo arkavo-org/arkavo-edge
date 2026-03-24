@@ -65,3 +65,4 @@ tempfile = { workspace = true }
 chrono = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-router = { path = "../arkavo-router", default-features = false }
+arkavo-test-macros = { path = "../arkavo-test-macros" }

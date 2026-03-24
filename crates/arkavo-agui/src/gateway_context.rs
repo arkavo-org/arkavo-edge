@@ -323,7 +323,9 @@ fn parse_gossip_snapshot(resp: &serde_json::Value, g: &mut GossipSnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("AGUI-009")]
     #[test]
     fn snapshot_structs_serialize_roundtrip() {
         let rlm = RlmSnapshot {
@@ -338,6 +340,7 @@ mod tests {
         assert_eq!(parsed.total_chunks, 15);
     }
 
+    #[spec("AGUI-009")]
     #[test]
     fn anti_pattern_snapshot_serialization() {
         let ap = AntiPatternSnapshot {
@@ -354,6 +357,7 @@ mod tests {
         assert_eq!(parsed.failure_count, 5);
     }
 
+    #[spec("AGUI-010")]
     #[test]
     fn parse_pushed_topology_data() {
         let resp = serde_json::json!({
@@ -427,6 +431,7 @@ mod tests {
         assert_eq!(traces[0].selected_model, "qwen-8b");
     }
 
+    #[spec("AGUI-010")]
     #[test]
     fn parse_empty_response_is_safe() {
         let resp = serde_json::json!({});
