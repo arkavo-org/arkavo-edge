@@ -73,8 +73,8 @@ arkavo-memory = { path = "../arkavo-memory" }
 # LLM support for chat
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
 
-# Router for intelligent model selection
-arkavo-router = { path = "../arkavo-router" }
+# Router for intelligent model selection (skip llama-cpp C++ build; protocol doesn't need local LLM)
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "deepseek", "kimi"] }
 
 # Observability
 arkavo-observability = { path = "../arkavo-observability" }
