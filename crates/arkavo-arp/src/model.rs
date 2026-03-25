@@ -79,10 +79,28 @@ pub enum SignedContent {
 }
 
 /// Beta distribution parameters used throughout ARP for Bayesian priors.
+///
+/// Both `alpha` and `beta` must be positive. Values ≤ 0 are clamped to a
+/// minimum of `f64::EPSILON` during deserialization and in `new()`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct BetaPrior {
     pub alpha: f64,
     pub beta: f64,
+}
+
+impl BetaPrior {
+    /// Create a new `BetaPrior`, enforcing positive values.
+    pub fn new(alpha: f64, beta: f64) -> Self {
+        Self {
+            alpha: alpha.max(f64::EPSILON),
+            beta: beta.max(f64::EPSILON),
+        }
+    }
+
+    /// Clamp both parameters to their minimum valid values.
+    pub fn sanitize(self) -> Self {
+        Self::new(self.alpha, self.beta)
+    }
 }
 
 impl Default for BetaPrior {

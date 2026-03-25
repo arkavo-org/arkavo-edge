@@ -8,6 +8,7 @@ pub fn validate(doc: &ArpDocument) -> Result<(), ValidationError> {
     validate_adl_ref(doc)?;
     validate_integrity(doc)?;
     validate_decay_half_life(doc)?;
+    validate_beta_priors(doc)?;
     validate_escalation_invariants(doc)?;
     validate_quarantine_invariants(doc)?;
     validate_quality_gate_threshold(doc)?;
@@ -44,6 +45,36 @@ fn validate_decay_half_life(doc: &ArpDocument) -> Result<(), ValidationError> {
         return Err(ValidationError {
             field: "feedback_loops.short_term.policy_cache.decay_half_life_sec".into(),
             message: "decay_half_life_sec is required when decay_strategy is 'exponential'".into(),
+        });
+    }
+    // Note: decay_half_life_sec is silently ignored when decay_strategy is Linear.
+    // This is intentional — the field is only meaningful for Exponential decay.
+    Ok(())
+}
+
+fn validate_beta_priors(doc: &ArpDocument) -> Result<(), ValidationError> {
+    if let Some(cold) = &doc.adaptation.cold_start
+        && let Some(prior) = &cold.initial_prior
+        && (prior.alpha <= 0.0 || prior.beta <= 0.0)
+    {
+        return Err(ValidationError {
+            field: "adaptation.cold_start.initial_prior".into(),
+            message: format!(
+                "alpha and beta must be positive, got alpha={}, beta={}",
+                prior.alpha, prior.beta
+            ),
+        });
+    }
+    if let Some(pm) = &doc.adaptation.prior_management
+        && let Some(reset) = &pm.reset_state
+        && (reset.alpha <= 0.0 || reset.beta <= 0.0)
+    {
+        return Err(ValidationError {
+            field: "adaptation.prior_management.reset_state".into(),
+            message: format!(
+                "alpha and beta must be positive, got alpha={}, beta={}",
+                reset.alpha, reset.beta
+            ),
         });
     }
     Ok(())
@@ -119,7 +150,7 @@ mod tests {
         FeedbackLoops, ImmediateFeedback, PolicyCacheConfig, QualityFailureAction, QualityGate,
         QualityMetric, ShortTermFeedback,
     };
-    use crate::model::AdlRef;
+    use crate::model::{AdlRef, BetaPrior};
 
     fn minimal_doc() -> ArpDocument {
         ArpDocument {
@@ -253,5 +284,50 @@ mod tests {
         });
         let err = validate(&doc).unwrap_err();
         assert!(err.field.contains("sticky_requires"));
+    }
+
+    #[test]
+    fn reject_zero_alpha_in_initial_prior() {
+        use crate::adaptation::{Adaptation, AdaptationMethod, ColdStart};
+        let mut doc = minimal_doc();
+        doc.adaptation = Adaptation {
+            method: AdaptationMethod::ThompsonSampling,
+            parameters: None,
+            cold_start: Some(ColdStart {
+                strategy: None,
+                initial_prior: Some(BetaPrior {
+                    alpha: 0.0,
+                    beta: 1.0,
+                }),
+                warmup_period: None,
+                warmup_behavior: None,
+            }),
+            prior_management: None,
+            signal_separation: None,
+        };
+        let err = validate(&doc).unwrap_err();
+        assert!(err.field.contains("initial_prior"));
+    }
+
+    #[test]
+    fn reject_negative_beta_in_reset_state() {
+        use crate::adaptation::{Adaptation, AdaptationMethod, PriorManagement};
+        let mut doc = minimal_doc();
+        doc.adaptation = Adaptation {
+            method: AdaptationMethod::ThompsonSampling,
+            parameters: None,
+            cold_start: None,
+            prior_management: Some(PriorManagement {
+                version_binding: None,
+                reset_on_version_change: None,
+                reset_state: Some(BetaPrior {
+                    alpha: 1.0,
+                    beta: -0.5,
+                }),
+            }),
+            signal_separation: None,
+        };
+        let err = validate(&doc).unwrap_err();
+        assert!(err.field.contains("reset_state"));
     }
 }

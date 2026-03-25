@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use arkavo_arp::adaptation::{Adaptation, AdaptationMethod, VersionBinding};
 use arkavo_arp::model::BetaPrior;
+use rand::Rng;
+use rand_distr::{Beta, Distribution};
 
 /// An entity that can be selected by the adaptation engine (model, tool, peer).
 #[derive(Debug, Clone)]
@@ -132,9 +134,10 @@ impl AdaptationEngine {
         self.priors.entry(entity_id.to_string()).or_insert(initial)
     }
 
-    /// Thompson Sampling: sample from Beta(alpha, beta) for each entity,
-    /// pick the one with highest sample. Uses deterministic approximation
-    /// (mean + exploration bonus) to avoid requiring a random number generator.
+    /// Thompson Sampling: draw a sample from Beta(alpha, beta) for each entity,
+    /// pick the one with the highest sample. This provides natural
+    /// exploration/exploitation balance — uncertain entities have high-variance
+    /// draws that occasionally beat well-known leaders.
     fn thompson_select(&mut self, entities: &[&Entity]) -> Option<String> {
         let exploration_floor = self
             .config
@@ -143,19 +146,20 @@ impl AdaptationEngine {
             .and_then(|p| p.exploration_floor)
             .unwrap_or(0.05);
 
+        let mut rng = rand::thread_rng();
         let mut best_id = None;
         let mut best_score = f64::NEG_INFINITY;
 
         for entity in entities {
-            let prior = self.get_prior(&entity.id);
-            let mean = prior.alpha / (prior.alpha + prior.beta);
-            let variance = (prior.alpha * prior.beta)
-                / ((prior.alpha + prior.beta).powi(2) * (prior.alpha + prior.beta + 1.0));
-            // Exploration bonus: mean + sqrt(variance) ensures underexplored entities get picked
-            let score = mean + variance.sqrt() + exploration_floor;
+            let prior = self.get_prior(&entity.id).sanitize();
+            let dist = Beta::new(prior.alpha, prior.beta).unwrap_or_else(|_| {
+                // Fallback to uniform Beta(1,1) if parameters are somehow invalid
+                Beta::new(1.0, 1.0).unwrap()
+            });
+            let sample = dist.sample(&mut rng) + exploration_floor;
 
-            if score > best_score {
-                best_score = score;
+            if sample > best_score {
+                best_score = sample;
                 best_id = Some(entity.id.clone());
             }
         }
@@ -163,7 +167,8 @@ impl AdaptationEngine {
         best_id
     }
 
-    /// Epsilon-greedy: with probability epsilon, pick uniformly; otherwise pick best mean.
+    /// Epsilon-greedy: with probability epsilon, pick uniformly at random;
+    /// otherwise pick the entity with the highest mean.
     fn epsilon_greedy_select(&mut self, entities: &[&Entity]) -> Option<String> {
         let epsilon = self
             .config
@@ -172,15 +177,11 @@ impl AdaptationEngine {
             .and_then(|p| p.epsilon)
             .unwrap_or(0.1);
 
-        // Deterministic exploration: explore every 1/epsilon selections
-        let explore = self.total_selections > 0
-            && self
-                .total_selections
-                .is_multiple_of((1.0 / epsilon).max(1.0) as u64);
+        let mut rng = rand::thread_rng();
 
-        if explore {
-            // Round-robin exploration
-            let idx = (self.total_selections as usize) % entities.len();
+        if rng.r#gen::<f64>() < epsilon {
+            // Explore: uniform random selection
+            let idx = rng.r#gen_range(0..entities.len());
             return Some(entities[idx].id.clone());
         }
 
@@ -317,12 +318,15 @@ mod tests {
     #[test]
     fn thompson_sampling_selects_available_entity() {
         let mut engine = AdaptationEngine::new(thompson_config());
-        let result = engine.select(&entities());
-        assert!(result.is_some());
-        let id = result.unwrap();
-        assert!(id == "model_a" || id == "model_b");
-        // model_c is unavailable, should never be selected
-        assert_ne!(id, "model_c");
+        // Run multiple times since Thompson Sampling is stochastic
+        for _ in 0..10 {
+            let result = engine.select(&entities());
+            assert!(result.is_some());
+            let id = result.unwrap();
+            assert!(id == "model_a" || id == "model_b");
+            // model_c is unavailable, should never be selected
+            assert_ne!(id, "model_c");
+        }
     }
 
     #[test]
@@ -401,8 +405,17 @@ mod tests {
         let mean_b = prior_b.alpha / (prior_b.alpha + prior_b.beta);
         assert!(mean_a > mean_b);
 
-        let selected = engine.select(&entities()).unwrap();
-        assert_eq!(selected, "model_a");
+        // With strong evidence, model_a should win most selections
+        let mut a_count = 0;
+        for _ in 0..100 {
+            if engine.select(&entities()).unwrap() == "model_a" {
+                a_count += 1;
+            }
+        }
+        assert!(
+            a_count > 80,
+            "model_a selected {a_count}/100 times, expected >80"
+        );
     }
 
     #[test]

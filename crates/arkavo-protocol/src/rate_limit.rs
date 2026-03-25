@@ -48,10 +48,10 @@ impl RateLimitConfig {
             |g| {
                 (
                     g.requests_per_second
-                        .map(|r| r as u32)
+                        .map(|r| (r.clamp(1.0, 1_000_000.0)) as u32)
                         .unwrap_or(defaults.max_requests_per_second),
                     g.burst_size
-                        .map(|b| b as u32)
+                        .map(|b| b.min(1_000_000) as u32)
                         .unwrap_or(defaults.burst_size),
                 )
             },

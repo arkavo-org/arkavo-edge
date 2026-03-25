@@ -10,6 +10,8 @@ description = "Thompson Sampling adaptation engine for Agent Runtime Policy"
 
 [dependencies]
 arkavo-arp = { path = "../arkavo-arp" }
+rand = { workspace = true }
+rand_distr = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
