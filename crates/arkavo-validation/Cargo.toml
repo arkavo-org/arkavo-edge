@@ -9,6 +9,7 @@ description = "Centralized input validation for Arkavo Edge"
 [dependencies]
 ipnet = "2.9"
 serde_json = { workspace = true }
+arkavo-arp = { path = "../arkavo-arp" }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

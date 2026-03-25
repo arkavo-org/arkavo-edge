@@ -58,6 +58,7 @@ impl McpServer {
                     tool_name: request.tool_name,
                     result,
                     success: true,
+                    meta: None,
                 },
                 Err(e) => ToolResponse {
                     tool_name: request.tool_name,
@@ -65,6 +66,7 @@ impl McpServer {
                         "error": e.to_string()
                     }),
                     success: false,
+                    meta: None,
                 },
             },
             None => ToolResponse {
@@ -73,6 +75,7 @@ impl McpServer {
                     "error": format!("Tool '{}' not found", request.tool_name)
                 }),
                 success: false,
+                meta: None,
             },
         }
     }

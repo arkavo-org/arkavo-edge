@@ -468,13 +468,18 @@ impl Router {
         );
     }
 
-    /// Quality cooldown duration: shorter base (30s) with exponential backoff.
+    /// Quality cooldown duration: 30s base, capped at 60s.
+    ///
+    /// Quality failures (timeout, no tool calls) are transient — the purpose
+    /// of cooldown is to rotate to another model, not to exile a model.
+    /// Aggressive escalation causes a death spiral in multi-agent meshes
+    /// where all models end up cooled down simultaneously.
     fn quality_cooldown_duration_secs(consecutive: u32) -> u64 {
-        let shift = consecutive.saturating_sub(1).min(10);
+        let shift = consecutive.saturating_sub(1).min(1); // cap at 2^1 = 2x
         let multiplier = 1u64 << shift;
         MODEL_QUALITY_COOLDOWN_BASE_SECS
             .saturating_mul(multiplier)
-            .min(MODEL_COOLDOWN_MAX_SECS)
+            .min(60)
     }
 
     /// Clear cooldown for a model after a successful response.

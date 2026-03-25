@@ -16,6 +16,9 @@ pub struct McpToolResponse {
     pub success: bool,
     pub result: Value,
     pub error: Option<String>,
+    /// MCP-I identity proof and metadata
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 pub struct A2aMcpBridge {
@@ -40,6 +43,7 @@ impl A2aMcpBridge {
                     success: false,
                     result: Value::Null,
                     error: Some(format!("Tool '{}' not found", request.tool_name)),
+                    meta: None,
                 };
             }
         };
@@ -49,11 +53,13 @@ impl A2aMcpBridge {
                 success: true,
                 result,
                 error: None,
+                meta: None,
             },
             Err(e) => McpToolResponse {
                 success: false,
                 result: Value::Null,
                 error: Some(e.to_string()),
+                meta: None,
             },
         }
     }

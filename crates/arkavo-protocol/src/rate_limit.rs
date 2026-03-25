@@ -38,6 +38,39 @@ impl Default for RateLimitConfig {
     }
 }
 
+impl RateLimitConfig {
+    /// Create a config from an ARP budget rate limiting section (§13.4).
+    /// Falls back to defaults for any unspecified fields.
+    pub fn from_arp(arp: &arkavo_arp::constraints::RateLimiting) -> Self {
+        let defaults = Self::default();
+        let (rps, burst) = arp.global.map_or(
+            (defaults.max_requests_per_second, defaults.burst_size),
+            |g| {
+                (
+                    g.requests_per_second
+                        .map(|r| (r.clamp(1.0, 1_000_000.0)) as u32)
+                        .unwrap_or(defaults.max_requests_per_second),
+                    g.burst_size
+                        .map(|b| b.min(1_000_000) as u32)
+                        .unwrap_or(defaults.burst_size),
+                )
+            },
+        );
+        Self {
+            max_requests_per_second: rps,
+            burst_size: burst,
+            enabled: true,
+            max_ip_entries: arp
+                .max_tracking_entries
+                .map(|n| n as usize)
+                .unwrap_or(defaults.max_ip_entries),
+            ip_entry_ttl_seconds: arp
+                .tracking_entry_ttl_sec
+                .unwrap_or(defaults.ip_entry_ttl_seconds),
+        }
+    }
+}
+
 /// Rate limiter for A2A protocol
 pub struct RateLimiter {
     limiter: Arc<governor::DefaultDirectRateLimiter>,
@@ -396,6 +429,45 @@ mod tests {
 
         // First request from IP2 should succeed (different IP)
         assert!(limiter.check_rate_limit(ip2).is_ok());
+    }
+
+    #[test]
+    fn test_rate_limit_from_arp_defaults() {
+        let arp_rl = arkavo_arp::constraints::RateLimiting {
+            global: None,
+            per_endpoint: None,
+            per_tool: None,
+            max_tracking_entries: None,
+            tracking_entry_ttl_sec: None,
+            cleanup_interval_sec: None,
+        };
+        let config = RateLimitConfig::from_arp(&arp_rl);
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            config.max_requests_per_second,
+            defaults.max_requests_per_second
+        );
+        assert_eq!(config.burst_size, defaults.burst_size);
+    }
+
+    #[test]
+    fn test_rate_limit_from_arp_overrides() {
+        let arp_rl = arkavo_arp::constraints::RateLimiting {
+            global: Some(arkavo_arp::constraints::RateLimit {
+                requests_per_second: Some(50.0),
+                burst_size: Some(5),
+            }),
+            per_endpoint: None,
+            per_tool: None,
+            max_tracking_entries: Some(5000),
+            tracking_entry_ttl_sec: Some(1800),
+            cleanup_interval_sec: None,
+        };
+        let config = RateLimitConfig::from_arp(&arp_rl);
+        assert_eq!(config.max_requests_per_second, 50);
+        assert_eq!(config.burst_size, 5);
+        assert_eq!(config.max_ip_entries, 5000);
+        assert_eq!(config.ip_entry_ttl_seconds, 1800);
     }
 
     // Note: Eviction testing moved to integration tests to keep file under 400 lines
