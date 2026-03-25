@@ -7,15 +7,9 @@
 
 mod common;
 
-use arkavo_mcp_tools::{
-    Tool, ToolRegistry,
-    time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
-};
+use arkavo_mcp_tools::ToolRegistry;
 use arkavo_memory::MemoryStorage;
-use common::{AgentSimulator, calculate_drift_statistics, run_concurrent_operations};
-use serde_json::json;
 use std::sync::Arc;
-use std::time::Instant;
 
 async fn create_test_registry() -> ToolRegistry {
     let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));

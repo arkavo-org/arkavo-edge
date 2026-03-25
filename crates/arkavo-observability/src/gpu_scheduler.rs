@@ -84,7 +84,7 @@ impl GpuScheduler {
 
     /// Grow capacity if sustained contention warrants it.
     fn maybe_grow(&self, contentions: u32) {
-        if contentions % GROW_AFTER_CONTENTIONS != 0 {
+        if !contentions.is_multiple_of(GROW_AFTER_CONTENTIONS) {
             return;
         }
         let current = self.capacity.load(Ordering::Relaxed);
