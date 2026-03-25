@@ -75,6 +75,7 @@ members = [
     "crates/arkavo-arp",
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
+    "crates/arkavo-mcp-identity",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -132,6 +133,7 @@ default-members = [
     "crates/arkavo-arp",
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
+    "crates/arkavo-mcp-identity",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -139,7 +141,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.68.0"
+version = "0.69.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
