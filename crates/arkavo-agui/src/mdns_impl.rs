@@ -26,10 +26,15 @@ pub mod mdns {
         let receiver = mdns.browse(service_type)?;
         println!("AG-UI: mDNS browsing for {service_type}");
 
-        // Channel bridges blocking mDNS recv thread → async handler
+        // Channels bridge blocking mDNS recv thread → async handlers
         let (info_tx, mut info_rx) = mpsc::channel::<ServiceInfo>(16);
+        let (remove_tx, mut remove_rx) = mpsc::channel::<String>(16);
 
-        // Blocking thread: receive mDNS events, forward resolved services
+        // Clone Arcs for removal handler before they move into discovery handler
+        let remove_agents = agents.clone();
+        let remove_connections = agent_connections.clone();
+
+        // Blocking thread: receive mDNS events, forward resolved/removed services
         tokio::task::spawn_blocking(move || {
             loop {
                 if let Ok(event) = receiver.recv_timeout(Duration::from_secs(5)) {
@@ -37,7 +42,7 @@ pub mod mdns {
                         ServiceEvent::ServiceResolved(info) => {
                             println!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
                             if info_tx.blocking_send(info).is_err() {
-                                break; // Receiver dropped
+                                break;
                             }
                         }
                         ServiceEvent::ServiceFound(_, fullname) => {
@@ -45,6 +50,7 @@ pub mod mdns {
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             println!("AG-UI: mDNS ServiceRemoved: {fullname}");
+                            let _ = remove_tx.blocking_send(fullname);
                         }
                         ServiceEvent::SearchStarted(stype) => {
                             println!("AG-UI: mDNS SearchStarted: {stype}");
@@ -58,7 +64,7 @@ pub mod mdns {
             }
         });
 
-        // Async task: handle discovered services without blocking
+        // Async task: handle discovered services
         tokio::spawn(async move {
             while let Some(info) = info_rx.recv().await {
                 handle_service_discovered(
@@ -74,9 +80,47 @@ pub mod mdns {
             }
         });
 
+        // Async task: remove agents when mDNS service disappears
+        tokio::spawn(async move {
+            while let Some(fullname) = remove_rx.recv().await {
+                handle_service_removed(&fullname, &remove_agents, &remove_connections).await;
+            }
+        });
+
         // Keep the daemon alive (it's dropped when this future completes)
         loop {
             tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+    }
+
+    /// Remove an agent when its mDNS service disappears.
+    async fn handle_service_removed(
+        fullname: &str,
+        agents: &Arc<RwLock<Vec<serde_json::Value>>>,
+        agent_connections: &Arc<
+            RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
+        >,
+    ) {
+        // Extract agent_id: fullname is like "commander._a2a._tcp.local."
+        let agent_id = fullname
+            .split("._a2a._tcp")
+            .next()
+            .unwrap_or(fullname)
+            .to_string();
+
+        let mut agents_list = agents.write().await;
+        let before = agents_list.len();
+        agents_list.retain(|a| {
+            a.get("id")
+                .and_then(|v| v.as_str())
+                .is_none_or(|id| id != agent_id)
+        });
+        let removed = before - agents_list.len();
+
+        if removed > 0 {
+            println!("AG-UI: Removed agent from list: {agent_id}");
+            let mut connections = agent_connections.write().await;
+            connections.remove(&agent_id);
         }
     }
 
@@ -262,9 +306,6 @@ pub mod mdns {
         properties.insert("agent_id".to_string(), agent_id.to_string());
         properties.insert("purpose".to_string(), purpose.to_string());
         properties.insert("model".to_string(), model.to_string());
-
-        // Get local IP if possible
-        // Note: mdns-sd will handle IP discovery internally
 
         let service_info = ServiceInfo::new(
             service_type,

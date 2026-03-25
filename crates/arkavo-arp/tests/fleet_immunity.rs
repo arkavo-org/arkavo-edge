@@ -33,7 +33,10 @@ fn parse_rover_alpha_arp() {
 
     // PolicyCache: exponential decay, 5-minute half-life
     let cache = &doc.feedback_loops.short_term.policy_cache;
-    assert_eq!(cache.decay_strategy, arkavo_arp::feedback::DecayStrategy::Exponential);
+    assert_eq!(
+        cache.decay_strategy,
+        arkavo_arp::feedback::DecayStrategy::Exponential
+    );
     assert_eq!(cache.decay_half_life_sec, Some(300));
 
     // Gossip: quorum of 2 trusted peers

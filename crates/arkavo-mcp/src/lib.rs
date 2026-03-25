@@ -55,6 +55,9 @@ pub struct ToolResponse {
     pub result: Value,
     /// Whether the execution was successful
     pub success: bool,
+    /// MCP-I identity proof and metadata
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 /// JSON-RPC request structure
