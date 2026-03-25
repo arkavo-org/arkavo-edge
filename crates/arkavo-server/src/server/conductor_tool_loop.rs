@@ -196,7 +196,7 @@ pub(super) async fn run_tool_loop(
                                     "gpu_fault".to_string(),
                                     0,
                                 )
-                                .with_quality(0.0);
+                                .with_quality(0.3); // operational, not quality
                                 router
                                     .model_learning()
                                     .immediate_update(&model_name, &feedback)
@@ -223,20 +223,26 @@ pub(super) async fn run_tool_loop(
                     .last_routed_model()
                     .or_else(|| model_hint.map(|h| h.name().to_string()));
                 if let Some(model_name) = timed_out_model {
+                    // Operational failure: mild penalty, not full quality rejection
                     let feedback = BurstFeedback::failure(
                         uuid::Uuid::new_v4(),
                         "timeout".to_string(),
                         timeout_secs * 1000,
                     )
-                    .with_quality(0.0);
+                    .with_quality(0.3);
                     router
                         .model_learning()
                         .immediate_update(&model_name, &feedback)
                         .await;
-                    router.record_quality_cooldown(&model_name).await;
+                    // Execution timeouts (30s cap) are expected under load —
+                    // don't cooldown the model, just record feedback
+                    if !is_execution {
+                        router.record_quality_cooldown(&model_name).await;
+                    }
                     info!(
                         model = %model_name,
-                        "Timeout: recorded negative feedback and cooldown"
+                        is_execution,
+                        "Timeout: recorded negative feedback"
                     );
                 }
                 if let Some(hint) = model_hint {
