@@ -365,6 +365,7 @@ impl LlamaCppProvider {
         let (
             prompt_bytes,
             template_grammar,
+            template_grammar_lazy,
             template_triggers,
             _thinking_forced_open,
             template_stops,
@@ -396,25 +397,43 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Template grammar + triggers: log for diagnostics but
-                        // don't activate yet. The grammar rules don't include
-                        // trigger literal text (e.g., [TOOL_CALLS]), so feeding
-                        // the trigger text into the grammar via accept() empties
-                        // the stack regardless of trigger type (token or word).
-                        // The upstream fix is for the grammar to include the
-                        // trigger text as a valid production, or for the sampler
-                        // to skip accepting trigger text into the grammar.
-                        if crate::llamacpp_streaming::is_debug() && result.grammar.is_some() {
+                        // Pass the template grammar and triggers through.
+                        // Token triggers are converted to word triggers in
+                        // add_grammar_lazy_with_triggers to avoid the
+                        // token_to_piece mismatch issue.
+                        if result.grammar.is_some() {
                             eprintln!(
-                                "  template grammar available ({} bytes, {} triggers) — not activated",
+                                "  grammar: {} bytes, lazy={}, {} triggers",
                                 result.grammar.as_ref().map_or(0, |g| g.len()),
+                                result.grammar_lazy,
                                 result.grammar_triggers.len(),
                             );
+                            if let Some(ref g) = result.grammar {
+                                let preview: String = g.chars().take(200).collect();
+                                eprintln!("  grammar preview: {preview}");
+                            }
+                            for (i, t) in result.grammar_triggers.iter().enumerate() {
+                                eprintln!(
+                                    "  trigger[{i}]: type={:?} value={:?} token={}",
+                                    t.trigger_type, t.value, t.token
+                                );
+                            }
                         }
+                        // Only use the template grammar when it's lazy (trigger-activated).
+                        // Non-lazy template grammars are strict JSON that constrain from
+                        // token 0, but models emit tool-call markers (e.g., [TOOL_CALLS])
+                        // before the JSON body — the strict grammar rejects them.
+                        let (grammar, lazy, triggers) =
+                            if result.grammar_lazy && !result.grammar_triggers.is_empty() {
+                                (result.grammar, true, Some(result.grammar_triggers))
+                            } else {
+                                (None, false, None)
+                            };
                         (
                             result.prompt,
-                            None,
-                            None,
+                            grammar,
+                            lazy,
+                            triggers,
                             result.thinking_forced_open,
                             result.additional_stops,
                         )
@@ -453,6 +472,7 @@ impl LlamaCppProvider {
                                 Ok(result) => (
                                     result.prompt,
                                     None,
+                                    false,
                                     None,
                                     result.thinking_forced_open,
                                     result.additional_stops,
@@ -468,7 +488,7 @@ impl LlamaCppProvider {
                                                     "Failed to apply chat template: {e}"
                                                 ))
                                             })?;
-                                    (bytes, None, None, false, Vec::new())
+                                    (bytes, None, false, None, false, Vec::new())
                                 }
                             }
                         } else {
@@ -480,7 +500,7 @@ impl LlamaCppProvider {
                                     .map_err(|e| {
                                         Error::Config(format!("Failed to apply chat template: {e}"))
                                     })?;
-                            (bytes, None, None, false, Vec::new())
+                            (bytes, None, false, None, false, Vec::new())
                         }
                     }
                 }
@@ -489,7 +509,7 @@ impl LlamaCppProvider {
                 tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
                 let bytes = apply_chat_template_with_format(&llama_messages, true, format)
                     .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, None, false, Vec::new())
+                (bytes, None, false, None, false, Vec::new())
             }
         };
 
@@ -525,6 +545,13 @@ impl LlamaCppProvider {
 
         let additional_stops = template_stops;
 
+        // Template grammar_lazy takes precedence; fence grammar is always lazy
+        let grammar_lazy = if template_grammar_lazy {
+            true
+        } else {
+            self.config.grammar.is_some() // fence grammar is lazy by default
+        };
+
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,
@@ -534,6 +561,7 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar,
+            grammar_lazy,
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
         };
@@ -603,6 +631,7 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar: None,
+            grammar_lazy: false,
             grammar_triggers: None,
             additional_stops: Vec::new(),
         };
