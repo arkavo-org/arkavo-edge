@@ -1611,7 +1611,7 @@ impl A2aServer {
                                     peer_count,
                                 );
                                 if !data.is_empty() {
-                                    // Stage large observations on Iroh for P2P fetch
+                                    // Stage large data on Iroh for P2P fetch
                                     #[cfg(feature = "iroh")]
                                     let iroh_ticket = if data.len() > 4000 {
                                         stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
@@ -1938,7 +1938,7 @@ async fn refresh_specialist_budgets(
 ///
 /// Computes per-specialist budget allocations dynamically based on game urgency
 /// and each specialist's pending task backlog.
-/// Stage observation data on Iroh P2P network for specialist fetching.
+/// Stage data on Iroh P2P network for peer fetching.
 #[cfg(feature = "iroh")]
 async fn stage_on_iroh(
     iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
@@ -1952,7 +1952,7 @@ async fn stage_on_iroh(
             info!(
                 data_len = data.len(),
                 ticket_len = ticket_str.len(),
-                "Staged observation on Iroh for P2P fetch"
+                "Staged data on Iroh for P2P fetch"
             );
             Some(ticket_str)
         }
@@ -2002,8 +2002,8 @@ async fn broadcast_state_to_peers(
 
     let task = if let Some(ticket) = iroh_ticket {
         format!(
-            "PROACTIVE ANALYSIS — Colony state available via Iroh P2P.\n\
-             Use iroh_fetch with this ticket to get full state: {ticket}\n\n\
+            "PROACTIVE ANALYSIS — Full state available via Iroh P2P.\n\
+             Use iroh_fetch with this ticket to get full data: {ticket}\n\n\
              Summary: {compacted}\n\n\
              Respond with urgent action recommendations ONLY if you see \
              problems in your domain. If everything looks fine, respond \
