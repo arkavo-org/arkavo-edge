@@ -1593,6 +1593,8 @@ impl A2aServer {
                                 .unwrap_or_default();
                             let cmd_model = commander_model.clone();
                             let own_id = self_agent_id.clone();
+                            #[cfg(feature = "iroh")]
+                            let iroh_for_broadcast = iroh_node.clone();
                             tokio::spawn(async move {
                                 // Re-discover peers in case new specialists joined
                                 mesh.discover_peers().await;
@@ -1609,11 +1611,24 @@ impl A2aServer {
                                     peer_count,
                                 );
                                 if !data.is_empty() {
+                                    // Stage large observations on Iroh for P2P fetch
+                                    #[cfg(feature = "iroh")]
+                                    let iroh_ticket = if data.len() > 4000 {
+                                        stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
+                                    } else {
+                                        None
+                                    };
+                                    #[cfg(not(feature = "iroh"))]
+                                    let iroh_ticket: Option<
+                                        String,
+                                    > = None;
+
                                     broadcast_state_to_peers(
                                         &mesh,
                                         &data,
                                         per_agent_bytes,
                                         &own_id,
+                                        iroh_ticket.as_deref(),
                                     )
                                     .await;
                                 } else {
@@ -1923,11 +1938,37 @@ async fn refresh_specialist_budgets(
 ///
 /// Computes per-specialist budget allocations dynamically based on game urgency
 /// and each specialist's pending task backlog.
+/// Stage observation data on Iroh P2P network for specialist fetching.
+#[cfg(feature = "iroh")]
+async fn stage_on_iroh(
+    iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    data: &str,
+) -> Option<String> {
+    let node = iroh_node?;
+    let transport = arkavo_tdf_iroh::IrohTransport::new(node.clone());
+    match transport.stage_bytes(data.as_bytes()).await {
+        Ok(ticket) => {
+            let ticket_str = ticket.to_string();
+            info!(
+                data_len = data.len(),
+                ticket_len = ticket_str.len(),
+                "Staged observation on Iroh for P2P fetch"
+            );
+            Some(ticket_str)
+        }
+        Err(e) => {
+            warn!("Iroh stage failed, falling back to A2A: {e}");
+            None
+        }
+    }
+}
+
 async fn broadcast_state_to_peers(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
     observation: &str,
     per_agent_bytes: u64,
     self_agent_id: &str,
+    iroh_ticket: Option<&str>,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
@@ -1959,13 +2000,24 @@ async fn broadcast_state_to_peers(
     let urgency = detect_urgency(observation);
     let compacted = compact_observation(observation, 2000);
 
-    let task = format!(
-        "PROACTIVE ANALYSIS — Review this state update and respond \
-         with urgent action recommendations ONLY if you see problems \
-         in your domain of expertise.\n\
-         If everything looks fine, respond with 'No issues detected.'\n\n\
-         {compacted}"
-    );
+    let task = if let Some(ticket) = iroh_ticket {
+        format!(
+            "PROACTIVE ANALYSIS — Colony state available via Iroh P2P.\n\
+             Use iroh_fetch with this ticket to get full state: {ticket}\n\n\
+             Summary: {compacted}\n\n\
+             Respond with urgent action recommendations ONLY if you see \
+             problems in your domain. If everything looks fine, respond \
+             with 'No issues detected.'"
+        )
+    } else {
+        format!(
+            "PROACTIVE ANALYSIS — Review this state update and respond \
+             with urgent action recommendations ONLY if you see problems \
+             in your domain of expertise.\n\
+             If everything looks fine, respond with 'No issues detected.'\n\n\
+             {compacted}"
+        )
+    };
 
     for agent_id in &peer_ids {
         let pending = mesh_state
