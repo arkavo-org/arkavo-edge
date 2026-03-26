@@ -1341,15 +1341,12 @@ impl A2aServer {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             mesh_state.discover_peers().await;
 
-            // Specialists are passive — they only respond to message/send tasks.
-            // No autonomous tick loop. Sleep and let the RPC handler do the work.
+            // Specialists run the same tick loop as orchestrators but without MCP
+            // tools. They use mesh tools (send_task, list_agents, agent_query) to
+            // proactively query peers and offer advice. Compute budget gates their
+            // inference so they don't compete with the commander for GPU.
             if agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
-                info!("Specialist mode: waiting for tasks via message/send");
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                    // Re-discover peers periodically for gossip
-                    mesh_state.discover_peers().await;
-                }
+                info!("Specialist mode: proactive advisory loop with mesh tools");
             }
 
             let mut tick: u64 = 0;

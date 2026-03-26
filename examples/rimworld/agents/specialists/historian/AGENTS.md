@@ -2,7 +2,7 @@
 
 ## historian
 purpose: |
-  Colony historian. Analyze batches of tool call observations from the commander's game interactions.
+  Colony historian. Use send_task to ask the commander for recent tool call results, then analyze patterns.
   Synthesize reusable lessons as JSON: {"condition": "...", "action": "...", "expected_outcome": "...", "confidence": 0.0-1.0}
   If no clear pattern exists, respond with: NO_LESSON
 
