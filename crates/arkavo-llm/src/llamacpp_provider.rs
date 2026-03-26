@@ -17,7 +17,9 @@ use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
-use crate::mcp_converter::{LocalToolFormat, McpConverter};
+use crate::mcp_converter::LocalToolFormat;
+#[cfg(target_env = "musl")]
+use crate::mcp_converter::McpConverter;
 
 pub use crate::ThinkingMode;
 
@@ -396,17 +398,19 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Template grammar uses character-level GBNF rules (e.g., "<tool_call>")
-                        // but models tokenize these as single special tokens. This mismatch
-                        // causes GGML_ASSERT failures in the grammar sampler. The template
-                        // grammar is designed for llama-server's integrated grammar handler
-                        // which resolves special tokens — our standalone sampler cannot use it.
-                        // We rely on the template's prompt formatting + enable_thinking=false
-                        // to guide generation, and use our own fence grammar if configured.
+                        // Pass the template grammar through to the sampler.
+                        // The lazy grammar uses typed triggers: Token triggers activate
+                        // on single token IDs (e.g., <tool_call>), Word/Pattern triggers
+                        // activate on regex matches against generated text.
+                        let triggers = if result.grammar_triggers.is_empty() {
+                            None
+                        } else {
+                            Some(result.grammar_triggers)
+                        };
                         (
                             result.prompt,
-                            None,
-                            None,
+                            result.grammar,
+                            triggers,
                             result.thinking_forced_open,
                             result.additional_stops,
                         )
@@ -501,8 +505,19 @@ impl LlamaCppProvider {
 
         // Merge template grammar with config grammar (template takes precedence)
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
-        let grammar_triggers_merged =
-            template_triggers.or_else(|| self.config.grammar_triggers.clone());
+        // Convert string-only fence triggers to typed GrammarTrigger::Word
+        let grammar_triggers_merged = template_triggers.or_else(|| {
+            self.config.grammar_triggers.as_ref().map(|strings| {
+                strings
+                    .iter()
+                    .map(|s| arkavo_llama_cpp::GrammarTrigger {
+                        trigger_type: arkavo_llama_cpp::GrammarTriggerType::Word,
+                        value: s.clone(),
+                        token: -1,
+                    })
+                    .collect()
+            })
+        });
 
         let additional_stops = template_stops;
 
@@ -861,11 +876,20 @@ impl Provider for LlamaCppProvider {
                 tool_grammar = Some((grammar, triggers));
             }
 
-            // Use GLM-specific prompt that emphasizes tools are optional
-            if is_glm {
-                McpConverter::to_glm_prompt(&tool_infos)
-            } else {
-                McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+            // When tools will be passed to the Jinja template engine (non-musl),
+            // the template embeds tool definitions in the model's native format.
+            // Skip the fence prompt to avoid presenting tools twice.
+            #[cfg(not(target_env = "musl"))]
+            {
+                String::new()
+            }
+            #[cfg(target_env = "musl")]
+            {
+                if is_glm {
+                    McpConverter::to_glm_prompt(&tool_infos)
+                } else {
+                    McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
+                }
             }
         } else {
             String::new()

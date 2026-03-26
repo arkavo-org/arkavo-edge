@@ -746,6 +746,19 @@ pub fn apply_chat_template_with_format(
     }
 }
 
+/// Escape regex metacharacters in a string (matching sampling.cpp:210)
+#[cfg(not(target_env = "musl"))]
+fn regex_escape(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        if "\\^$.|?*+()[]{}".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 /// Grammar trigger type from llama.cpp's template engine
 #[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1499,6 +1512,79 @@ impl LlamaSampler {
             )
         };
         if !grammar_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
+    /// Add a lazy grammar sampler with both pattern and token triggers.
+    ///
+    /// Separates `GrammarTrigger` objects by type:
+    /// - Token triggers (type 0): passed as token IDs for single-token activation
+    /// - Word triggers (type 1): regex-escaped and passed as patterns
+    /// - Pattern/PatternFull triggers (type 2, 3): passed as regex patterns
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    #[cfg(not(target_env = "musl"))]
+    pub unsafe fn add_grammar_lazy_with_triggers(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+        triggers: &[GrammarTrigger],
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+
+        // Separate token triggers from pattern triggers
+        let mut token_ids: Vec<i32> = Vec::new();
+        let mut pattern_strings: Vec<String> = Vec::new();
+
+        for trigger in triggers {
+            match trigger.trigger_type {
+                GrammarTriggerType::Token => {
+                    token_ids.push(trigger.token);
+                }
+                GrammarTriggerType::Word => {
+                    // Regex-escape word triggers (matching sampling.cpp:210)
+                    let escaped = regex_escape(&trigger.value);
+                    pattern_strings.push(escaped);
+                }
+                GrammarTriggerType::Pattern => {
+                    pattern_strings.push(trigger.value.clone());
+                }
+                GrammarTriggerType::PatternFull => {
+                    // Anchor with ^ and $ (matching sampling.cpp:221-228)
+                    pattern_strings.push(format!("^{}$", trigger.value));
+                }
+            }
+        }
+
+        let pattern_cstrings: Vec<CString> = pattern_strings
+            .iter()
+            .filter_map(|p| CString::new(p.as_str()).ok())
+            .collect();
+        let mut pattern_ptrs: Vec<*const std::os::raw::c_char> =
+            pattern_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+
+        let grammar_sampler = unsafe {
+            ffi::arkavo_sampler_init_grammar_lazy_with_tokens(
+                vocab,
+                grammar_cstr.as_ptr(),
+                root_cstr.as_ptr(),
+                pattern_ptrs.as_mut_ptr(),
+                pattern_ptrs.len() as i32,
+                token_ids.as_ptr(),
+                token_ids.len() as i32,
+            )
+        };
+        if grammar_sampler.is_null() {
+            eprintln!("Grammar sampler creation failed, proceeding without grammar");
+        } else {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
         }
     }

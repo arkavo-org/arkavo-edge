@@ -204,6 +204,29 @@ struct llama_sampler *arkavo_sampler_init_grammar_lazy(
     }
 }
 
+struct llama_sampler *arkavo_sampler_init_grammar_lazy_with_tokens(
+    const struct llama_vocab *vocab,
+    const char *grammar_str,
+    const char *grammar_root,
+    const char **trigger_patterns,
+    int num_trigger_patterns,
+    const int32_t *trigger_tokens,
+    int num_trigger_tokens)
+{
+    try {
+        return llama_sampler_init_grammar_lazy_patterns(
+            vocab, grammar_str, grammar_root,
+            trigger_patterns, static_cast<size_t>(num_trigger_patterns),
+            trigger_tokens, static_cast<size_t>(num_trigger_tokens));
+    } catch (const std::exception &e) {
+        fprintf(stderr, "arkavo_sampler_init_grammar_lazy_with_tokens: %s\n", e.what());
+        return nullptr;
+    } catch (...) {
+        fprintf(stderr, "arkavo_sampler_init_grammar_lazy_with_tokens: unknown exception\n");
+        return nullptr;
+    }
+}
+
 int32_t arkavo_sampler_sample(
     struct llama_sampler *sampler,
     struct llama_context *ctx,
