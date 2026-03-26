@@ -208,24 +208,14 @@ async fn planner_track(
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
                 warn!("Planner round {plan_round} failed: {e}");
-                // Don't break — try next round with fresh context
-                continue;
+                break;
             }
             Err(_) => {
+                // Timeout means the GPU is still busy with the cancelled inference.
+                // Retrying would block on the same semaphore. Break and let the
+                // next cycle start fresh when the GPU is available.
                 warn!("Planner round {plan_round} timed out at {timeout_secs}s");
-                // Trim context for next attempt: keep only system + last user message
-                if messages.len() > 2 {
-                    let last = messages.pop().unwrap();
-                    let first = messages.remove(0);
-                    messages.clear();
-                    messages.push(first);
-                    messages.push(last);
-                    info!(
-                        "Planner: trimmed context to {} messages for retry",
-                        messages.len()
-                    );
-                }
-                continue;
+                break;
             }
         };
 
