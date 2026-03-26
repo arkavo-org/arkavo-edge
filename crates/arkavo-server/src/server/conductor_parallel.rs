@@ -272,6 +272,25 @@ async fn executor_track(
         );
 
         for tool_call in &planned.tool_calls {
+            // Skip setup tools that already succeeded (e.g., registerAgent)
+            if let Some(mem) = tool_memory
+                && mem.read().await.is_setup_complete(&tool_call.tool_name)
+            {
+                info!(
+                    "Executor: skipping {} (already completed)",
+                    tool_call.tool_name
+                );
+                let _ = result_tx
+                    .send(ExecutionResult {
+                        tool_name: tool_call.tool_name.clone(),
+                        result: "Already completed — skipped".to_string(),
+                        success: true,
+                        reward: None,
+                    })
+                    .await;
+                continue;
+            }
+
             let args = tool_call.arguments.clone();
             let start = std::time::Instant::now();
 

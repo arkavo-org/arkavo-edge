@@ -507,6 +507,21 @@ async fn execute_tool_calls(
     let mut tool_result_parts = Vec::new();
 
     for tool_call in tool_calls {
+        // Skip setup tools that already succeeded (e.g., registerAgent)
+        if let Some(mem) = tool_memory
+            && mem.read().await.is_setup_complete(&tool_call.tool_name)
+        {
+            info!(
+                "Skipping {} (already completed setup tool)",
+                tool_call.tool_name
+            );
+            tool_result_parts.push(format!(
+                "{}: Already completed — skipped",
+                tool_call.tool_name
+            ));
+            continue;
+        }
+
         let args = tool_call.arguments.clone();
         debug!(
             "Tool call: {} with args: {}",
