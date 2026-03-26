@@ -117,7 +117,7 @@ arkavo_chat_result arkavo_chat_templates_apply(
         result.prompt = strdup_safe(params.prompt);
         result.grammar = strdup_safe(params.grammar);
         result.grammar_lazy = params.grammar_lazy ? 1 : 0;
-        result.thinking_forced_open = params.thinking_forced_open ? 1 : 0;
+        result.thinking_forced_open = params.supports_thinking ? 1 : 0;
 
         // Convert grammar triggers
         if (!params.grammar_triggers.empty()) {

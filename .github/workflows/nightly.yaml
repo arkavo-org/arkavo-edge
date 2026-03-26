@@ -35,7 +35,7 @@ jobs:
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
 
       - name: Install build dependencies
         run: |
@@ -83,7 +83,7 @@ jobs:
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly

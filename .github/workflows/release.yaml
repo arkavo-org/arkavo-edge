@@ -117,7 +117,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -231,7 +231,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -299,7 +299,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
@@ -419,7 +419,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -773,7 +773,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout 1a5631bea
+          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
