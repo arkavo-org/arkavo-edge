@@ -398,19 +398,18 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Pass the template grammar through to the sampler.
-                        // The lazy grammar uses typed triggers: Token triggers activate
-                        // on single token IDs (e.g., <tool_call>), Word/Pattern triggers
-                        // activate on regex matches against generated text.
-                        let triggers = if result.grammar_triggers.is_empty() {
-                            None
-                        } else {
-                            Some(result.grammar_triggers)
-                        };
+                        // Template grammar cannot be used with our standalone sampler.
+                        // The grammar rules reference special tokens (e.g., [TOOL_CALLS],
+                        // <tool_call>) character-by-character, but models tokenize these as
+                        // single token IDs. When the grammar sampler encounters the token,
+                        // GGML_ASSERT(!stacks.empty()) fires and abort()s the process.
+                        // llama-server resolves this internally via its integrated grammar
+                        // handler. Until we can replicate that, rely on prompt formatting
+                        // and our own fence grammar (opt-in via SamplingConfig).
                         (
                             result.prompt,
-                            result.grammar,
-                            triggers,
+                            None,
+                            None,
                             result.thinking_forced_open,
                             result.additional_stops,
                         )
