@@ -17,9 +17,7 @@ use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
-use crate::mcp_converter::LocalToolFormat;
-#[cfg(target_env = "musl")]
-use crate::mcp_converter::McpConverter;
+use crate::mcp_converter::{LocalToolFormat, McpConverter};
 
 pub use crate::ThinkingMode;
 
@@ -875,20 +873,11 @@ impl Provider for LlamaCppProvider {
                 tool_grammar = Some((grammar, triggers));
             }
 
-            // When tools will be passed to the Jinja template engine (non-musl),
-            // the template embeds tool definitions in the model's native format.
-            // Skip the fence prompt to avoid presenting tools twice.
-            #[cfg(not(target_env = "musl"))]
-            {
-                String::new()
-            }
-            #[cfg(target_env = "musl")]
-            {
-                if is_glm {
-                    McpConverter::to_glm_prompt(&tool_infos)
-                } else {
-                    McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
-                }
+            // Use GLM-specific prompt that emphasizes tools are optional
+            if is_glm {
+                McpConverter::to_glm_prompt(&tool_infos)
+            } else {
+                McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
             }
         } else {
             String::new()
