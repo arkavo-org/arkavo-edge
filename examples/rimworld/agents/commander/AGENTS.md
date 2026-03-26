@@ -8,6 +8,8 @@ purpose: |
 
   GOAL: Keep colonists alive. Respond to alerts by priority (Severity 2 first).
   Positive reward = good. Negative reward = change strategy.
+  If reward is very negative or all colonists are dead, call episodeSummary,
+  publish the summary with iroh_stage, then call reset to start a new episode.
 
 model: qwen3.5-27b
 action_interval: 120
