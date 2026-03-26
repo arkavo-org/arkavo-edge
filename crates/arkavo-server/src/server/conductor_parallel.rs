@@ -207,12 +207,25 @@ async fn planner_track(
         let response = match response {
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
-                warn!("Planner inference failed: {e}");
-                break;
+                warn!("Planner round {plan_round} failed: {e}");
+                // Don't break — try next round with fresh context
+                continue;
             }
             Err(_) => {
-                warn!("Planner inference timed out at {timeout_secs}s");
-                break;
+                warn!("Planner round {plan_round} timed out at {timeout_secs}s");
+                // Trim context for next attempt: keep only system + last user message
+                if messages.len() > 2 {
+                    let last = messages.pop().unwrap();
+                    let first = messages.remove(0);
+                    messages.clear();
+                    messages.push(first);
+                    messages.push(last);
+                    info!(
+                        "Planner: trimmed context to {} messages for retry",
+                        messages.len()
+                    );
+                }
+                continue;
             }
         };
 
