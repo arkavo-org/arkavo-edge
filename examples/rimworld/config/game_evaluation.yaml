@@ -1,0 +1,110 @@
+# Game Evaluation Criteria for RimWorld
+# Maps domain-specific metrics onto the four generic rubric dimensions.
+# Read by the DomainEvaluator at session startup.
+#
+# Each criterion maps to one rubric dimension via `rubric_dimension`.
+# The `weight` field controls relative importance within the dimension
+# (weights are normalized at load time).
+
+domain: rimworld
+version: "1.0"
+
+# Rubric dimension weights (override defaults for this domain)
+rubric_weights:
+  goal_fidelity: 0.30
+  efficiency: 0.25
+  state_coherence: 0.25
+  adaptability: 0.20
+
+criteria:
+
+  # Maps to goal_fidelity: Is the colony on a better trajectory?
+  - name: survival_trajectory
+    rubric_dimension: goal_fidelity
+    weight: 1.0
+    description: >
+      Is the colony on a better survival trajectory after this action
+      than before? Consider food supply trend, shelter adequacy,
+      defense readiness, colonist health.
+    positive_signals:
+      - "food_supply_days increased"
+      - "shelter_coverage increased"
+      - "defense_coverage of approach vectors increased"
+      - "colonist count stable or growing"
+      - "total reward trending positive"
+    negative_signals:
+      - "colonist_mood_average decreased significantly"
+      - "food_supply_days < 3 with no active growing zone"
+      - "unroofed sleeping spots during cold season"
+      - "colonist died or was downed"
+      - "total reward trending negative"
+    scoring:
+      # Score from episodeSummary reward delta
+      source: reward_delta
+      baseline: 0.0
+      positive_scale: 0.1   # +0.1 reward → score 1.0
+      negative_scale: -0.1  # -0.1 reward → score 0.0
+
+  # Maps to efficiency: Were resources used wisely?
+  - name: resource_efficiency
+    rubric_dimension: efficiency
+    weight: 1.0
+    description: >
+      Did the action use resources efficiently? Wasting steel on
+      unnecessary walls while colonists lack beds is a poor trade.
+      Compare resource expenditure against colony priority queue.
+    evaluation_method: >
+      Compare action cost (materials, colonist time) against colony
+      need priority. Actions spending resources on low-priority items
+      while high-priority needs remain unmet score poorly.
+    scoring:
+      # Score based on action count relative to state change
+      source: action_efficiency
+      max_actions_per_turn: 5
+      # Fewer actions achieving the same state change = higher score
+
+  # Maps to state_coherence: Is the world state consistent?
+  - name: threat_awareness
+    rubric_dimension: state_coherence
+    weight: 1.0
+    description: >
+      Did the action account for current and near-future threats?
+      Building a research bench while a raid siren is active
+      indicates zero threat awareness.
+    temporal_window: "current_threats + 2_day_forecast"
+    scoring:
+      # Binary penalty if action ignores active alerts
+      source: alert_alignment
+      severity_threshold: 2  # Severity 2+ alerts must be addressed
+      penalty_per_ignored: 0.3
+
+  # Maps to adaptability: Does the action create future value?
+  - name: compound_value
+    rubric_dimension: adaptability
+    weight: 1.0
+    description: >
+      Does this action create compound value — setting up future
+      options, not just solving the immediate problem? Placing a
+      growing zone near the kitchen reduces future hauling. Building
+      a killbox before the first raid prevents casualties later.
+    evaluation_method: >
+      Check if action creates spatial/logistical efficiencies
+      or defensive preparations that pay off over multiple game ticks.
+    scoring:
+      source: proactive_actions
+      # Count of actions that address non-alert concerns
+      bonus_per_proactive: 0.2
+
+# Contract negotiation skip heuristic
+# When an Operator's first-round acceptance rate exceeds this threshold
+# for this domain, skip contract negotiation for that pair.
+contract_skip_threshold: 0.80
+
+# Validation session parameters
+validation:
+  target_sessions: 5
+  metrics_to_track:
+    - "contract_first_round_rate"
+    - "rubric_composite_trajectory"
+    - "thompson_sampling_convergence"
+    - "historian_degradation_test"

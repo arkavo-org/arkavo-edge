@@ -8,6 +8,7 @@ mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
 mod consolidation;
+mod contract_negotiation;
 mod curiosity;
 mod episode_buffer;
 mod event_loop;

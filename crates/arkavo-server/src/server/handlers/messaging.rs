@@ -79,6 +79,94 @@ pub async fn handle_message_send(
         Some(images)
     };
 
+    // Task Contract Protocol: extract contract data parts or auto-propose
+    let contract_context = {
+        use super::super::contract_negotiation::{
+            ContractAction, ContractNegotiator, contract_to_verification_context,
+        };
+        use arkavo_protocol::task_contract::{ContractProposal, SCHEMA_CONTRACT_PROPOSAL};
+
+        let contract_parts: Vec<(String, serde_json::Value)> = request
+            .message
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                MessagePart::Data { schema, content }
+                    if schema.starts_with("urn:arkavo:contract:") =>
+                {
+                    Some((schema.clone(), content.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let mut negotiator = ContractNegotiator::new();
+
+        if let Some((schema, content)) = contract_parts.first() {
+            // Explicit contract proposal in message
+            if schema == SCHEMA_CONTRACT_PROPOSAL {
+                if let Ok(proposal) = serde_json::from_value::<ContractProposal>(content.clone()) {
+                    let review = negotiator.review(&proposal);
+                    match negotiator.advance(proposal.contract_id, &review) {
+                        ContractAction::Approved(contract) => {
+                            info!(contract_id = %contract.contract_id, "Contract approved");
+                            let ctx = contract_to_verification_context(&contract);
+                            negotiator.cleanup(contract.contract_id);
+                            Some(ctx)
+                        }
+                        ContractAction::RequestRevision(review) => {
+                            info!(
+                                contract_id = %proposal.contract_id,
+                                round = review.round,
+                                "Contract needs revision"
+                            );
+                            None
+                        }
+                        ContractAction::Escalate {
+                            contract_id,
+                            reason,
+                        } => {
+                            info!(%contract_id, %reason, "Contract escalated");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if task_content.lines().count() > 3 {
+            // Auto-propose for complex tasks (>3 lines with structured criteria)
+            let proposal = negotiator.propose("auto", &task_content);
+            if !proposal.acceptance_criteria.is_empty() {
+                let review = negotiator.review(&proposal);
+                if review.approved {
+                    if let ContractAction::Approved(contract) =
+                        negotiator.advance(proposal.contract_id, &review)
+                    {
+                        info!(
+                            criteria = proposal.acceptance_criteria.len(),
+                            "Auto-proposed contract approved"
+                        );
+                        let ctx = contract_to_verification_context(&contract);
+                        negotiator.cleanup(contract.contract_id);
+                        Some(ctx)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+    let _ = contract_context;
+
     // Preflight moderation: reject policy-violating requests before task submission
     if let Some(router) = router
         && let Some(arkavo_router::ModerationResult::Block {

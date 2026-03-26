@@ -1,0 +1,174 @@
+# Critic Calibration Examples for RimWorld
+# Few-shot anchors that teach the rubric what 1.0 vs 0.2 looks like
+# per dimension. Used by the CriticPipeline's RubricCheck when
+# evaluating Operator output in game sessions.
+#
+# Each example maps to the four rubric dimensions:
+#   goal_fidelity:   Did the action achieve the task's actual intent?
+#   efficiency:      Was inference budget used well?
+#   state_coherence: Is the resulting state consistent?
+#   adaptability:    Did the operator handle unexpected conditions?
+#
+# Scores are 0.0-1.0 (not 1-5 as in the RFC draft; normalized here).
+
+domain: rimworld
+version: "1.0"
+
+calibration_examples:
+
+  - scenario: zone_placement_fertile_soil
+    task: "Place a rice growing zone on fertile soil near the colony"
+    operator_output: |
+      CreateGrowingZone X=125 Y=118 Width=8 Height=8 Plant=Plant_Rice
+      SetWorkPriority ColonistId=Human441 WorkType=Growing Priority=1
+    scores:
+      goal_fidelity: 0.8
+      efficiency: 1.0
+      state_coherence: 1.0
+      adaptability: 0.6
+    rationale: >
+      Zone placed correctly on fertile soil with appropriate size,
+      growing priority assigned. Efficient — two actions, no waste.
+      State is clean. Scored 0.6 on adaptability because the Operator
+      did not verify roof coverage (which blocks sunlight) or check
+      for existing zones that might overlap. A 1.0 would have called
+      observe first to confirm tile fertility and roofing.
+
+  - scenario: starvation_emergency_response
+    task: "Colony has starvation alert, no food stockpile, 3 colonists"
+    operator_output: |
+      UnforbidByType DefName=MealSurvivalPack
+      UnforbidByType DefName=Pemmican
+      DesignateHunt TargetId=Deer_7842
+      SetWorkPriority ColonistId=Human339 WorkType=Cooking Priority=1
+      CreateGrowingZone X=115 Y=112 Width=6 Height=6 Plant=Plant_Potato
+    scores:
+      goal_fidelity: 1.0
+      efficiency: 0.8
+      state_coherence: 1.0
+      adaptability: 0.9
+    rationale: >
+      Full emergency sequence executed correctly: unforbid existing food,
+      hunt for immediate protein, assign cook, start potato growing zone
+      for long-term food. Five actions is slightly more than minimum needed
+      (efficiency 0.8) but each action serves the goal. High adaptability
+      because it addressed both immediate (unforbid, hunt) and long-term
+      (growing zone) needs. A 1.0 would also have checked colonist health
+      to prioritize the hungriest colonist for meal delivery.
+
+  - scenario: colonist_rescue_during_raid
+    task: "Rescue downed colonist during active raid, 5 raiders on map"
+    operator_output: |
+      Draft ColonistId=Human441
+      Move ColonistId=Human441 X=140 Y=130
+    scores:
+      goal_fidelity: 0.4
+      efficiency: 0.6
+      state_coherence: 0.8
+      adaptability: 0.2
+    rationale: >
+      Technically attempted rescue by drafting and moving toward the
+      downed colonist, but sent the colony's only doctor directly
+      through the raider approach vector. Goal fidelity is 0.4 because
+      the colonist may be downed before reaching the target. Adaptability
+      is 0.2 because the Operator ignored active threats entirely — no
+      defensive positioning, no consideration of which colonist to send.
+      A 1.0 would have selected a non-essential fast colonist, routed
+      them behind cover, and positioned armed colonists to provide
+      suppressing fire.
+
+  - scenario: research_bench_during_raid
+    task: "Handle raid alert (5 tribals approaching from north)"
+    operator_output: |
+      PlaceBlueprint Building=SimpleResearchBench X=120 Y=115 Stuff=WoodLog
+      SelectResearch ProjectDefName=Gunsmithing
+    scores:
+      goal_fidelity: 0.0
+      efficiency: 0.2
+      state_coherence: 0.6
+      adaptability: 0.0
+    rationale: >
+      Zero threat awareness. Building a research bench during an active
+      raid wastes inference and actions on a non-urgent task. State is
+      technically valid (bench can be placed) but completely misses the
+      situation. This is a textbook case of zero goal fidelity — the
+      task was to handle the raid, and the Operator did something
+      entirely unrelated.
+
+  - scenario: killbox_construction_proactive
+    task: "Colony stable, no alerts, day 12, first raid expected soon"
+    operator_output: |
+      PlaceBlueprint Building=Sandbags X=105 Y=100 Stuff=WoodLog
+      PlaceBlueprint Building=Sandbags X=106 Y=100 Stuff=WoodLog
+      PlaceBlueprint Building=Sandbags X=107 Y=100 Stuff=WoodLog
+      PlaceBlueprint Building=Door X=106 Y=99
+      SetWorkPriority ColonistId=Human441 WorkType=Construction Priority=1
+    scores:
+      goal_fidelity: 0.7
+      efficiency: 0.7
+      state_coherence: 0.9
+      adaptability: 0.9
+    rationale: >
+      Proactive defense preparation before the first raid. Sandbag line
+      with door for colonist access shows spatial reasoning. Construction
+      priority assigned. Goal fidelity is 0.7 rather than 1.0 because
+      the task was open-ended ("colony stable") and this is one valid
+      interpretation. Adaptability is high because the Operator anticipated
+      future threats without being prompted. A 1.0 on goal_fidelity would
+      have also addressed other stable-colony priorities (beds, food
+      surplus) before focusing on defense.
+
+  - scenario: mood_management_mental_break
+    task: "Colonist Human339 mood at 15%, mental break imminent"
+    operator_output: |
+      observe
+    scores:
+      goal_fidelity: 0.2
+      efficiency: 0.3
+      state_coherence: 1.0
+      adaptability: 0.1
+    rationale: >
+      Only observed without taking any action. While observation is
+      the correct first step, stopping there when a mental break is
+      imminent wastes the action window. State is valid (observe is
+      always safe) but the Operator failed to act on urgent information.
+      A 1.0 would have observed, then immediately assigned joy activities,
+      improved room quality, or restricted the colonist to a safe area.
+
+  - scenario: efficient_bed_placement
+    task: "Three colonists sleeping on the ground, wood available"
+    operator_output: |
+      PlaceBlueprint Building=Bed X=125 Y=118 Stuff=WoodLog
+      PlaceBlueprint Building=Bed X=127 Y=118 Stuff=WoodLog
+      PlaceBlueprint Building=Bed X=129 Y=118 Stuff=WoodLog
+      SetWorkPriority ColonistId=Human441 WorkType=Construction Priority=1
+    scores:
+      goal_fidelity: 0.9
+      efficiency: 0.9
+      state_coherence: 0.9
+      adaptability: 0.5
+    rationale: >
+      Three beds placed in a row with construction priority. Goal met
+      directly and efficiently. State is coherent — beds are spaced
+      correctly (2 tiles apart for standard bed width). Adaptability
+      is only 0.5 because the Operator didn't consider placing beds
+      inside an existing structure (walls/roof for comfort bonus) or
+      checking if a bedroom already exists. A 1.0 would have placed
+      beds inside a roofed room to maximize mood bonus.
+
+  - scenario: checkpoint_save_after_progress
+    task: "Colony thriving: 5 colonists, food surplus, defenses built, reward positive"
+    operator_output: |
+      SaveCheckpoint Name=best_colony
+      episodeSummary
+    scores:
+      goal_fidelity: 0.9
+      efficiency: 1.0
+      state_coherence: 1.0
+      adaptability: 0.8
+    rationale: >
+      Correctly identified a good checkpoint moment and saved. Called
+      episodeSummary to log progress. Minimal actions, maximum value.
+      Adaptability is 0.8 because the Operator followed the learning
+      loop protocol correctly. A 1.0 would have also compared current
+      reward against the previous checkpoint's reward before overwriting.
