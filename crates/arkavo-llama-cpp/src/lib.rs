@@ -1540,17 +1540,24 @@ impl LlamaSampler {
             return;
         };
 
-        // Separate token triggers from pattern triggers
-        let mut token_ids: Vec<i32> = Vec::new();
+        // Convert ALL triggers to pattern/word type. Token triggers cause
+        // GGML_ASSERT crashes because the grammar rules don't contain the
+        // trigger literal text — the grammar starts after the trigger, but
+        // llama_grammar_accept tries to match the trigger text character-by-
+        // character against rules that expect JSON. Word/pattern triggers
+        // buffer text and match from the correct position, avoiding this.
         let mut pattern_strings: Vec<String> = Vec::new();
 
         for trigger in triggers {
             match trigger.trigger_type {
                 GrammarTriggerType::Token => {
-                    token_ids.push(trigger.token);
+                    // Convert token trigger to word trigger using the text value
+                    if !trigger.value.is_empty() {
+                        let escaped = regex_escape(&trigger.value);
+                        pattern_strings.push(escaped);
+                    }
                 }
                 GrammarTriggerType::Word => {
-                    // Regex-escape word triggers (matching sampling.cpp:210)
                     let escaped = regex_escape(&trigger.value);
                     pattern_strings.push(escaped);
                 }
@@ -1558,7 +1565,6 @@ impl LlamaSampler {
                     pattern_strings.push(trigger.value.clone());
                 }
                 GrammarTriggerType::PatternFull => {
-                    // Anchor with ^ and $ (matching sampling.cpp:221-228)
                     pattern_strings.push(format!("^{}$", trigger.value));
                 }
             }
@@ -1572,14 +1578,12 @@ impl LlamaSampler {
             pattern_cstrings.iter().map(|cs| cs.as_ptr()).collect();
 
         let grammar_sampler = unsafe {
-            ffi::arkavo_sampler_init_grammar_lazy_with_tokens(
+            ffi::arkavo_sampler_init_grammar_lazy(
                 vocab,
                 grammar_cstr.as_ptr(),
                 root_cstr.as_ptr(),
                 pattern_ptrs.as_mut_ptr(),
                 pattern_ptrs.len() as i32,
-                token_ids.as_ptr(),
-                token_ids.len() as i32,
             )
         };
         if grammar_sampler.is_null() {

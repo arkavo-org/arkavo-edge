@@ -396,14 +396,21 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Template grammar cannot be used with our standalone sampler.
-                        // The grammar rules reference special tokens (e.g., [TOOL_CALLS],
-                        // <tool_call>) character-by-character, but models tokenize these as
-                        // single token IDs. When the grammar sampler encounters the token,
-                        // GGML_ASSERT(!stacks.empty()) fires and abort()s the process.
-                        // llama-server resolves this internally via its integrated grammar
-                        // handler. Until we can replicate that, rely on prompt formatting
-                        // and our own fence grammar (opt-in via SamplingConfig).
+                        // Template grammar + triggers: log for diagnostics but
+                        // don't activate yet. The grammar rules don't include
+                        // trigger literal text (e.g., [TOOL_CALLS]), so feeding
+                        // the trigger text into the grammar via accept() empties
+                        // the stack regardless of trigger type (token or word).
+                        // The upstream fix is for the grammar to include the
+                        // trigger text as a valid production, or for the sampler
+                        // to skip accepting trigger text into the grammar.
+                        if crate::llamacpp_streaming::is_debug() && result.grammar.is_some() {
+                            eprintln!(
+                                "  template grammar available ({} bytes, {} triggers) — not activated",
+                                result.grammar.as_ref().map_or(0, |g| g.len()),
+                                result.grammar_triggers.len(),
+                            );
+                        }
                         (
                             result.prompt,
                             None,
