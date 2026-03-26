@@ -426,9 +426,9 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    // Use parallel three-track loop for orchestrators with MCP tools.
-    // Specialists and simple tasks use the sequential loop.
-    let loop_result = if has_mcp_tools {
+    // Use parallel three-track loop for all agents with tools.
+    let has_any_tools = !registry_arc.list_tools().is_empty();
+    let loop_result = if has_any_tools {
         super::conductor_parallel::run_tool_loop_parallel(
             router,
             &registry_arc,
