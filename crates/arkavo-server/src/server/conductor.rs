@@ -426,18 +426,35 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    let loop_result = super::conductor_tool_loop::run_tool_loop(
-        router,
-        &registry_arc,
-        mcp_registry,
-        &classification_content,
-        messages,
-        model_hint,
-        learning_bus,
-        tool_memory,
-        compute_budget,
-    )
-    .await?;
+    // Use parallel three-track loop for orchestrators with MCP tools.
+    // Specialists and simple tasks use the sequential loop.
+    let loop_result = if has_mcp_tools {
+        super::conductor_parallel::run_tool_loop_parallel(
+            router,
+            &registry_arc,
+            mcp_registry,
+            &classification_content,
+            messages,
+            model_hint,
+            learning_bus,
+            tool_memory,
+            compute_budget,
+        )
+        .await?
+    } else {
+        super::conductor_tool_loop::run_tool_loop(
+            router,
+            &registry_arc,
+            mcp_registry,
+            &classification_content,
+            messages,
+            model_hint,
+            learning_bus,
+            tool_memory,
+            compute_budget,
+        )
+        .await?
+    };
 
     let final_result = loop_result.final_text;
     let decision_model_name = loop_result.decision_model_name;

@@ -4,6 +4,7 @@ mod autolearn_bridge;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
+mod conductor_parallel;
 mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
