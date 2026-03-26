@@ -320,11 +320,11 @@ pub struct A2aRpcImpl {
     pub(crate) public_key: Option<String>,
     /// Budget manager for cost enforcement
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
-    /// Orchestrator tick counter (shared with orchestrator loop)
+    /// Agent cycle counter (shared with agent loop)
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
-    /// Per-agent compute budget (specialists check before each tick)
+    /// Per-agent compute budget (specialists check before each cycle)
     pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
     /// Mesh state for A2A delegation (send_task, list_agents, etc.)
     pub(crate) mesh_state: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
@@ -835,7 +835,7 @@ impl A2aRpcServer for A2aRpcImpl {
             None => {
                 timer.success();
                 return Ok(
-                    serde_json::json!({ "agents": [], "selectedModel": null, "tickCount": 0 }),
+                    serde_json::json!({ "agents": [], "selectedModel": null, "cycleCount": 0 }),
                 );
             }
         };
@@ -872,7 +872,7 @@ impl A2aRpcServer for A2aRpcImpl {
             }));
         }
 
-        let tick = self
+        let cycle_count = self
             .orchestrator_tick
             .load(std::sync::atomic::Ordering::Relaxed);
 
@@ -915,7 +915,7 @@ impl A2aRpcServer for A2aRpcImpl {
         Ok(serde_json::json!({
             "agents": agents,
             "selectedModel": router.last_routed_model(),
-            "tickCount": tick,
+            "cycleCount": cycle_count,
             "routingHistory": routing_history,
             "optimalConfigs": optimal_configs,
         }))

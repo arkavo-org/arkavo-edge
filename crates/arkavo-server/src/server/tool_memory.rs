@@ -126,6 +126,10 @@ impl ToolMemory {
             || lower.contains("setup")
     }
 
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
     pub fn format_for_prompt(&self) -> String {
         if self.entries.is_empty() && self.completed_setup_tools.is_empty() {
             return String::new();

@@ -418,7 +418,7 @@ pub async fn execute_with_conductor_and_learning(
     update_progress("Generating LLM response", 50);
 
     // Prepend agent purpose to task_content so the classifier sees domain
-    // keywords (e.g. "code quality" → CodeReview) instead of generic tick prompts.
+    // keywords (e.g. "code quality" → CodeReview) instead of generic cycle prompts.
     let classification_content = if let Some(purpose) = system_prompt {
         let hint = purpose.lines().next().unwrap_or(purpose);
         format!("[Context: {hint}] {task_content}")
