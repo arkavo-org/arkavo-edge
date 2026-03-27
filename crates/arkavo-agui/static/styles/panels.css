@@ -535,6 +535,26 @@
     line-height: 1.6;
 }
 
+.task-detail-io {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 14px;
+    margin: 0 12px 4px;
+}
+
+.task-io-text {
+    font-size: 13px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-primary);
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 0;
+    line-height: 1.6;
+}
+
 .task-detail-routing {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);

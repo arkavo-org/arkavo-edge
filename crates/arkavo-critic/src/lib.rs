@@ -38,11 +38,12 @@ pub mod features;
 mod judge;
 mod pipeline;
 pub mod response_analyzer;
+pub mod rubric;
 mod validator;
 
 pub use checks::{
     CheckResult, CircuitCheck, CodeVerificationCheck, LintCheck, PolicyCheck, PolicyId,
-    SchemaCheck, SemanticCheck, VerificationCheck, VerificationInput,
+    RubricCheck, SchemaCheck, SemanticCheck, VerificationCheck, VerificationInput,
 };
 pub use config::CriticConfig;
 pub use error::{Error, Result};
@@ -51,6 +52,7 @@ pub use features::FeatureId;
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use pipeline::{CriticPipeline, PipelineResult};
 pub use response_analyzer::{AnalysisResult, DetectedIssue, ResponseAnalyzer};
+pub use rubric::{DomainEvaluator, EvaluationRubric, RubricWeights};
 pub use validator::{ResponseValidator, ValidationError};
 
 /// Create a CriticPipeline with default checks

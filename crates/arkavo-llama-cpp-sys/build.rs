@@ -455,6 +455,8 @@ fn main() {
         // -fexceptions is GCC/Clang only; MSVC enables exceptions by default
         if !cfg!(target_os = "windows") {
             cc_build.flag("-fexceptions");
+            // Suppress warnings from vendored llama.cpp jinja headers
+            cc_build.flag("-Wno-unused-function");
         }
         cc_build
             .include(out_path.join("include"))

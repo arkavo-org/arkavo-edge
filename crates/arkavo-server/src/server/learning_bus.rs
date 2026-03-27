@@ -103,6 +103,14 @@ pub enum LearningEvent {
         /// DecisionTrace ID of the action being reinforced
         trace_id: Option<Uuid>,
     },
+    /// Contract negotiation outcome (feeds Thompson Sampling)
+    ContractOutcome {
+        contract_id: Uuid,
+        /// Which outcome: FirstRound, Revised, or Escalated
+        outcome: arkavo_router::learning::ContractOutcome,
+        /// Which model was the operator
+        model_name: Option<String>,
+    },
 }
 
 /// Behavior advice based on learned lessons

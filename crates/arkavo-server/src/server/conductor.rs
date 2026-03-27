@@ -418,7 +418,7 @@ pub async fn execute_with_conductor_and_learning(
     update_progress("Generating LLM response", 50);
 
     // Prepend agent purpose to task_content so the classifier sees domain
-    // keywords (e.g. "code quality" → CodeReview) instead of generic tick prompts.
+    // keywords (e.g. "code quality" → CodeReview) instead of generic cycle prompts.
     let classification_content = if let Some(purpose) = system_prompt {
         let hint = purpose.lines().next().unwrap_or(purpose);
         format!("[Context: {hint}] {task_content}")
@@ -426,18 +426,35 @@ pub async fn execute_with_conductor_and_learning(
         task_content.clone()
     };
 
-    let loop_result = super::conductor_tool_loop::run_tool_loop(
-        router,
-        &registry_arc,
-        mcp_registry,
-        &classification_content,
-        messages,
-        model_hint,
-        learning_bus,
-        tool_memory,
-        compute_budget,
-    )
-    .await?;
+    // Use parallel three-track loop for all agents with tools.
+    let has_any_tools = !registry_arc.list_tools().is_empty();
+    let loop_result = if has_any_tools {
+        super::conductor_parallel::run_tool_loop_parallel(
+            router,
+            &registry_arc,
+            mcp_registry,
+            &classification_content,
+            messages,
+            model_hint,
+            learning_bus,
+            tool_memory,
+            compute_budget,
+        )
+        .await?
+    } else {
+        super::conductor_tool_loop::run_tool_loop(
+            router,
+            &registry_arc,
+            mcp_registry,
+            &classification_content,
+            messages,
+            model_hint,
+            learning_bus,
+            tool_memory,
+            compute_budget,
+        )
+        .await?
+    };
 
     let final_result = loop_result.final_text;
     let decision_model_name = loop_result.decision_model_name;

@@ -98,11 +98,32 @@ pub(super) async fn run_tool_loop(
         // Formula: base covers ~500 token response + prompt eval overhead.
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
+        // Model-size-aware timeouts. Larger models are slower on all hardware;
+        // the multiplier captures relative speed without hardcoding benchmarks.
+        // Tier 1 (≤1B):  fast — base 30s exec, 90s plan
+        // Tier 2 (1-5B):  mid — base 30s exec, 90s plan
+        // Tier 3 (5-15B): slow — base 45s exec, 180s plan
+        // Tier 4 (15B+):  very slow — base 60s exec, 240s plan
+        let model_tier: u8 = match model_hint {
+            Some(h) if h.size_bytes() >= 15_000_000_000 => 4,
+            Some(h) if h.size_bytes() >= 5_000_000_000 => 3,
+            Some(h) if h.size_bytes() >= 1_000_000_000 => 2,
+            _ => 1,
+        };
         let timeout_secs = if is_execution {
-            30 // Execution tool call: stripped profile, allows for memory bandwidth contention
+            // Scale base with model tier + context size.
+            // Larger models need more time for prompt eval and generation.
+            let base = match model_tier {
+                4 => 60u64,
+                3 => 45,
+                _ => 30,
+            };
+            let context_extra = context_tokens as u64 / 500; // +1s per 500 tokens
+            (base + context_extra).clamp(30, 120)
         } else {
-            let (base_timeout, max_timeout) = match model_hint {
-                Some(h) if h.size_bytes() >= 5_000_000_000 => (180u64, 300u64),
+            let (base_timeout, max_timeout) = match model_tier {
+                4 => (240u64, 360u64),
+                3 => (180u64, 300u64),
                 _ => (90u64, 180u64),
             };
             if context_tokens <= 2000 {
@@ -486,6 +507,21 @@ async fn execute_tool_calls(
     let mut tool_result_parts = Vec::new();
 
     for tool_call in tool_calls {
+        // Skip setup tools that already succeeded (e.g., registerAgent)
+        if let Some(mem) = tool_memory
+            && mem.read().await.is_setup_complete(&tool_call.tool_name)
+        {
+            info!(
+                "Skipping {} (already completed setup tool)",
+                tool_call.tool_name
+            );
+            tool_result_parts.push(format!(
+                "{}: Already completed — skipped",
+                tool_call.tool_name
+            ));
+            continue;
+        }
+
         let args = tool_call.arguments.clone();
         debug!(
             "Tool call: {} with args: {}",

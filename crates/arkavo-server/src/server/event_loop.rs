@@ -527,6 +527,31 @@ pub async fn start_event_processing_loop(
                         tracing::info!("Human reinforcement received (trace={:?})", trace_id);
                         learning_bus.record_human_reinforcement(trace_id).await;
                     }
+                    LearningEvent::ContractOutcome {
+                        contract_id,
+                        outcome,
+                        model_name,
+                    } => {
+                        let (alpha, beta) = outcome.to_beta_update();
+                        tracing::info!(
+                            %contract_id,
+                            ?outcome,
+                            alpha,
+                            beta,
+                            "Contract negotiation outcome"
+                        );
+                        // Feed into Thompson Sampling via BurstFeedback
+                        if let Some(model) = model_name {
+                            let feedback = arkavo_router::learning::contract_outcome_to_feedback(
+                                outcome,
+                                "contract",
+                                contract_id,
+                                0,
+                            );
+                            let learning = learning_bus.learning().read().await;
+                            learning.immediate_update(&model, &feedback).await;
+                        }
+                    }
                 }
             }
             None => {

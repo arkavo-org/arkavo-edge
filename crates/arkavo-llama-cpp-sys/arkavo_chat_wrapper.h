@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -58,6 +60,18 @@ arkavo_chat_result arkavo_chat_templates_apply(
     int add_generation_prompt);
 
 void arkavo_chat_result_free(arkavo_chat_result *result);
+
+// Grammar sampler with both pattern and token triggers.
+// trigger_patterns: regex patterns matched against generated text (Word/Pattern types)
+// trigger_tokens: token IDs that activate the grammar when sampled (Token type)
+struct llama_sampler *arkavo_sampler_init_grammar_lazy_with_tokens(
+    const struct llama_vocab *vocab,
+    const char *grammar_str,
+    const char *grammar_root,
+    const char **trigger_patterns,
+    int num_trigger_patterns,
+    const int32_t *trigger_tokens,
+    int num_trigger_tokens);
 
 #ifdef __cplusplus
 }

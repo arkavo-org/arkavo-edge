@@ -131,8 +131,10 @@ pub(crate) struct StreamingConfig {
     pub model_format: ModelFormat,
     /// Optional GBNF grammar for constrained decoding (tool calling)
     pub grammar: Option<String>,
-    /// Trigger patterns for lazy grammar activation (e.g., "```")
-    pub grammar_triggers: Option<Vec<String>>,
+    /// Whether the grammar should activate lazily (on trigger) vs from the start
+    pub grammar_lazy: bool,
+    /// Typed triggers for lazy grammar activation (Token, Word, Pattern)
+    pub grammar_triggers: Option<Vec<arkavo_llama_cpp::GrammarTrigger>>,
     /// Additional stop sequences from template engine (e.g., to prevent <think> blocks)
     pub additional_stops: Vec<String>,
 }
@@ -219,10 +221,20 @@ pub(crate) async fn generate_tokens_pooled(
 
         if let Some(ref grammar_str) = config.grammar {
             let vocab = model.get_vocab();
-            if let Some(ref triggers) = config.grammar_triggers {
-                let trigger_refs: Vec<&str> = triggers.iter().map(|s| s.as_str()).collect();
-                unsafe {
-                    sampler.add_grammar_lazy(vocab, grammar_str, "root", &trigger_refs);
+            if config.grammar_lazy {
+                if let Some(ref triggers) = config.grammar_triggers {
+                    unsafe {
+                        sampler.add_grammar_lazy_with_triggers(
+                            vocab,
+                            grammar_str,
+                            "root",
+                            triggers,
+                        );
+                    }
+                } else {
+                    unsafe {
+                        sampler.add_grammar(vocab, grammar_str, "root");
+                    }
                 }
             } else {
                 unsafe {
@@ -430,12 +442,23 @@ pub(crate) async fn generate_tokens_with_context(
         // Add grammar sampler for constrained decoding of tool calls
         if let Some(ref grammar_str) = config.grammar {
             let vocab = model.get_vocab();
-            if let Some(ref triggers) = config.grammar_triggers {
-                let trigger_refs: Vec<&str> = triggers.iter().map(|s| s.as_str()).collect();
-                unsafe {
-                    sampler.add_grammar_lazy(vocab, grammar_str, "root", &trigger_refs);
+            if config.grammar_lazy {
+                if let Some(ref triggers) = config.grammar_triggers {
+                    unsafe {
+                        sampler.add_grammar_lazy_with_triggers(
+                            vocab,
+                            grammar_str,
+                            "root",
+                            triggers,
+                        );
+                    }
+                    tracing::debug!("Grammar sampler added (lazy, triggers: {triggers:?})");
+                } else {
+                    unsafe {
+                        sampler.add_grammar(vocab, grammar_str, "root");
+                    }
+                    tracing::debug!("Grammar sampler added (strict, no triggers)");
                 }
-                tracing::debug!("Grammar sampler added (lazy, triggers: {triggers:?})");
             } else {
                 unsafe {
                     sampler.add_grammar(vocab, grammar_str, "root");

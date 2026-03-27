@@ -365,6 +365,7 @@ impl LlamaCppProvider {
         let (
             prompt_bytes,
             template_grammar,
+            template_grammar_lazy,
             template_triggers,
             _thinking_forced_open,
             template_stops,
@@ -396,17 +397,43 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Template grammar uses character-level GBNF rules (e.g., "<tool_call>")
-                        // but models tokenize these as single special tokens. This mismatch
-                        // causes GGML_ASSERT failures in the grammar sampler. The template
-                        // grammar is designed for llama-server's integrated grammar handler
-                        // which resolves special tokens — our standalone sampler cannot use it.
-                        // We rely on the template's prompt formatting + enable_thinking=false
-                        // to guide generation, and use our own fence grammar if configured.
+                        // Pass the template grammar and triggers through.
+                        // Token triggers are converted to word triggers in
+                        // add_grammar_lazy_with_triggers to avoid the
+                        // token_to_piece mismatch issue.
+                        if result.grammar.is_some() {
+                            eprintln!(
+                                "  grammar: {} bytes, lazy={}, {} triggers",
+                                result.grammar.as_ref().map_or(0, |g| g.len()),
+                                result.grammar_lazy,
+                                result.grammar_triggers.len(),
+                            );
+                            if let Some(ref g) = result.grammar {
+                                let preview: String = g.chars().take(200).collect();
+                                eprintln!("  grammar preview: {preview}");
+                            }
+                            for (i, t) in result.grammar_triggers.iter().enumerate() {
+                                eprintln!(
+                                    "  trigger[{i}]: type={:?} value={:?} token={}",
+                                    t.trigger_type, t.value, t.token
+                                );
+                            }
+                        }
+                        // Only use the template grammar when it's lazy (trigger-activated).
+                        // Non-lazy template grammars are strict JSON that constrain from
+                        // token 0, but models emit tool-call markers (e.g., [TOOL_CALLS])
+                        // before the JSON body — the strict grammar rejects them.
+                        let (grammar, lazy, triggers) =
+                            if result.grammar_lazy && !result.grammar_triggers.is_empty() {
+                                (result.grammar, true, Some(result.grammar_triggers))
+                            } else {
+                                (None, false, None)
+                            };
                         (
                             result.prompt,
-                            None,
-                            None,
+                            grammar,
+                            lazy,
+                            triggers,
                             result.thinking_forced_open,
                             result.additional_stops,
                         )
@@ -445,6 +472,7 @@ impl LlamaCppProvider {
                                 Ok(result) => (
                                     result.prompt,
                                     None,
+                                    false,
                                     None,
                                     result.thinking_forced_open,
                                     result.additional_stops,
@@ -460,7 +488,7 @@ impl LlamaCppProvider {
                                                     "Failed to apply chat template: {e}"
                                                 ))
                                             })?;
-                                    (bytes, None, None, false, Vec::new())
+                                    (bytes, None, false, None, false, Vec::new())
                                 }
                             }
                         } else {
@@ -472,7 +500,7 @@ impl LlamaCppProvider {
                                     .map_err(|e| {
                                         Error::Config(format!("Failed to apply chat template: {e}"))
                                     })?;
-                            (bytes, None, None, false, Vec::new())
+                            (bytes, None, false, None, false, Vec::new())
                         }
                     }
                 }
@@ -481,7 +509,7 @@ impl LlamaCppProvider {
                 tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
                 let bytes = apply_chat_template_with_format(&llama_messages, true, format)
                     .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, None, false, Vec::new())
+                (bytes, None, false, None, false, Vec::new())
             }
         };
 
@@ -501,10 +529,28 @@ impl LlamaCppProvider {
 
         // Merge template grammar with config grammar (template takes precedence)
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
-        let grammar_triggers_merged =
-            template_triggers.or_else(|| self.config.grammar_triggers.clone());
+        // Convert string-only fence triggers to typed GrammarTrigger::Word
+        let grammar_triggers_merged = template_triggers.or_else(|| {
+            self.config.grammar_triggers.as_ref().map(|strings| {
+                strings
+                    .iter()
+                    .map(|s| arkavo_llama_cpp::GrammarTrigger {
+                        trigger_type: arkavo_llama_cpp::GrammarTriggerType::Word,
+                        value: s.clone(),
+                        token: -1,
+                    })
+                    .collect()
+            })
+        });
 
         let additional_stops = template_stops;
+
+        // Template grammar_lazy takes precedence; fence grammar is always lazy
+        let grammar_lazy = if template_grammar_lazy {
+            true
+        } else {
+            self.config.grammar.is_some() // fence grammar is lazy by default
+        };
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -515,6 +561,7 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar,
+            grammar_lazy,
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
         };
@@ -584,6 +631,7 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar: None,
+            grammar_lazy: false,
             grammar_triggers: None,
             additional_stops: Vec::new(),
         };

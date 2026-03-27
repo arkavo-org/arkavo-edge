@@ -126,6 +126,15 @@ impl ToolMemory {
             || lower.contains("setup")
     }
 
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if a setup tool has already succeeded and should be skipped.
+    pub fn is_setup_complete(&self, tool_name: &str) -> bool {
+        self.completed_setup_tools.contains(tool_name)
+    }
+
     pub fn format_for_prompt(&self) -> String {
         if self.entries.is_empty() && self.completed_setup_tools.is_empty() {
             return String::new();

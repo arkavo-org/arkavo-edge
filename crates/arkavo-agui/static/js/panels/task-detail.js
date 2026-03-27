@@ -19,10 +19,6 @@ function renderTaskDetail() {
         html += renderTaskMetrics(task);
     }
 
-    if (task.result) {
-        html += renderTaskResult(task);
-    }
-
     html += renderTaskRouting(taskId, task);
     html += renderTaskA2ATrace(taskId, task);
     html += renderTaskTelemetry(taskId, task);
@@ -69,7 +65,6 @@ function renderTaskSummary(task, taskId) {
     html += '<span class="task-detail-id">#' + escapeHtml((task.id || '').slice(0, 8)) + '</span>';
     html += '<span class="task-status ' + statusClass + '">' + status + '</span>';
     html += '</div>';
-    html += '<div class="task-detail-description">' + escapeHtml(task.description || 'Task') + '</div>';
     html += '<div class="stats-grid">';
     html += renderStatCard('Agent', agent ? escapeHtml(agent) : 'Pending', '');
     html += renderStatCard('Created', (task.created_at || task.createdAt) ? formatTime(task.created_at || task.createdAt) : '-', '');
@@ -92,6 +87,25 @@ function renderTaskSummary(task, taskId) {
     }
 
     html += '</div>';
+
+    // Input section
+    html += '<div class="detail-section-title">Input</div>';
+    html += '<div class="task-detail-io">';
+    html += '<pre class="task-io-text">' + escapeHtml(task.description || 'No input') + '</pre>';
+    html += '</div>';
+
+    // Output section
+    html += '<div class="detail-section-title">Output</div>';
+    html += '<div class="task-detail-io">';
+    if (task.result) {
+        html += '<pre class="task-io-text">' + escapeHtml(task.result) + '</pre>';
+    } else if (task.summary) {
+        html += '<pre class="task-io-text">' + escapeHtml(task.summary) + '</pre>';
+    } else {
+        html += '<div class="detail-empty">' + (task.status === 'completed' ? 'No output recorded' : 'Waiting for output...') + '</div>';
+    }
+    html += '</div>';
+
     return html;
 }
 

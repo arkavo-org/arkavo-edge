@@ -62,9 +62,9 @@ pub struct A2aServer {
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
     /// Federated memory service for ABAC-scoped cross-agent retrieval
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
-    /// Orchestrator tick counter shared with the RPC impl for learning/status
+    /// Agent cycle counter shared with the RPC impl for learning/status
     orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
-    /// Per-agent compute budget (specialists check before each tick)
+    /// Per-agent compute budget (specialists check before each cycle)
     compute_budget: arkavo_budget::SharedComputeBudget,
     /// Total system RAM detected at startup (bytes)
     total_ram_bytes: u64,
@@ -1341,26 +1341,23 @@ impl A2aServer {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             mesh_state.discover_peers().await;
 
-            // Specialists are passive — they only respond to message/send tasks.
-            // No autonomous tick loop. Sleep and let the RPC handler do the work.
+            // Specialists run the same tick loop as orchestrators but without MCP
+            // tools. They use mesh tools (send_task, list_agents, agent_query) to
+            // proactively query peers and offer advice. Compute budget gates their
+            // inference so they don't compete with the commander for GPU.
             if agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
-                info!("Specialist mode: waiting for tasks via message/send");
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                    // Re-discover peers periodically for gossip
-                    mesh_state.discover_peers().await;
-                }
+                info!("Specialist mode: proactive advisory loop with mesh tools");
             }
 
-            let mut tick: u64 = 0;
-            let mut consecutive_no_action_ticks: u32 = 0;
-            let mut last_broadcast_tick: u64 = 0;
+            let mut cycle: u64 = 0;
+            let mut consecutive_no_action_cycles: u32 = 0;
+            let mut last_broadcast_cycle: u64 = 0;
             let mut consecutive_timeouts: u32 = 0;
-            let mut last_tick_prompt_hash: u64 = 0;
+            let mut last_cycle_prompt_hash: u64 = 0;
             let mut consecutive_duplicate_prompts: u32 = 0;
             loop {
-                tick += 1;
-                orchestrator_tick.store(tick, std::sync::atomic::Ordering::Relaxed);
+                cycle += 1;
+                orchestrator_tick.store(cycle, std::sync::atomic::Ordering::Relaxed);
                 let metadata = agent_metadata.read().await;
                 let purpose = metadata.purpose.clone();
                 drop(metadata);
@@ -1394,7 +1391,15 @@ impl A2aServer {
                 let recent_actions = memory_guard.format_for_prompt();
                 let variety_warning = memory_guard.action_variety_warning();
                 let error_corrections = memory_guard.format_errors_for_prompt();
+                let memory_entry_count = memory_guard.entry_count();
                 drop(memory_guard);
+                if memory_entry_count > 0 {
+                    info!(
+                        memory_entries = memory_entry_count,
+                        recent_actions_len = recent_actions.len(),
+                        "Tool memory state for cycle {cycle}"
+                    );
+                }
 
                 // Drain gossip-pushed completions into mesh_state (zero network cost)
                 if let Some(ref bus) = learning_bus {
@@ -1454,15 +1459,15 @@ impl A2aServer {
                          Execute the recommended actions NOW.\n",
                     );
                     info!(
-                        "Injecting {} specialist response(s) into tick prompt",
+                        "Injecting {} specialist response(s) into cycle prompt",
                         completed.len()
                     );
                     ctx
                 };
 
                 // Dead-man's switch: escalating warnings when agent is stuck
-                let dead_man_warning = match consecutive_no_action_ticks {
-                    3..=4 => "\n\nWARNING: You have NOT taken any action for 3 ticks. \
+                let dead_man_warning = match consecutive_no_action_cycles {
+                    3..=4 => "\n\nWARNING: You have NOT taken any action for 3 cycles. \
                               You MUST take an action NOW. \
                               Pick the most urgent alert and act on it.\n"
                         .to_string(),
@@ -1479,7 +1484,7 @@ impl A2aServer {
                             )
                         };
                         format!(
-                            "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_ticks}+ ticks.{avoid} \
+                            "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_cycles}+ cycles.{avoid} \
                              Read the alerts and pick the MOST URGENT need. \
                              Take an action NOW.\n"
                         )
@@ -1487,56 +1492,56 @@ impl A2aServer {
                     _ => String::new(),
                 };
 
-                // Tick-specific instruction goes as User message.
+                // Cycle-specific instruction goes as User message.
                 // Purpose (AGENTS.md) goes as System message via execute_with_conductor_and_learning.
-                let tick_prompt = if tick == 1 {
+                let cycle_prompt = if cycle == 1 {
                     "Begin your startup workflow now.".to_string()
                 } else {
                     format!(
                         "{recent_actions}{variety_warning}{error_corrections}{specialist_context}{dead_man_warning}\n\n\
-                         Tick {tick}. Follow your WORKFLOW.",
+                         Cycle {cycle}. Follow your WORKFLOW.",
                     )
                 };
 
-                // Task-level deduplication: skip tick when the context hasn't
+                // Task-level deduplication: skip cycle when the context hasn't
                 // changed AND the agent hasn't taken action. Hash the content
                 // components (actions, specialist responses, warnings) but NOT
-                // the tick counter, which changes every cycle.
+                // the cycle counter, which changes every iteration.
                 let prompt_hash = {
                     use std::hash::{Hash, Hasher};
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     recent_actions.hash(&mut hasher);
                     specialist_context.hash(&mut hasher);
                     error_corrections.hash(&mut hasher);
-                    // Hash dead-man warning category (not exact text with tick count)
-                    consecutive_no_action_ticks.min(5).hash(&mut hasher);
+                    // Hash dead-man warning category (not exact text with cycle count)
+                    consecutive_no_action_cycles.min(5).hash(&mut hasher);
                     hasher.finish()
                 };
-                if prompt_hash == last_tick_prompt_hash && consecutive_no_action_ticks >= 2 {
+                if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
                     consecutive_duplicate_prompts += 1;
                     // Allow through every 5th duplicate to give the agent a chance
                     // to retry with the same context (model may produce different output)
                     if !consecutive_duplicate_prompts.is_multiple_of(5) {
                         info!(
-                            "Orchestrator tick {tick}: skipping duplicate prompt \
+                            "Agent cycle {cycle}: skipping duplicate prompt \
                              ({consecutive_duplicate_prompts} consecutive, \
-                             no action for {consecutive_no_action_ticks} ticks)"
+                             no action for {consecutive_no_action_cycles} cycles)"
                         );
-                        let tick_interval = match consecutive_timeouts {
+                        let cycle_interval = match consecutive_timeouts {
                             0 => 5,
                             1 => 15,
                             2 => 30,
                             _ => 60,
                         };
-                        tokio::time::sleep(std::time::Duration::from_secs(tick_interval)).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(cycle_interval)).await;
                         continue;
                     }
                 } else {
                     consecutive_duplicate_prompts = 0;
                 }
-                last_tick_prompt_hash = prompt_hash;
+                last_cycle_prompt_hash = prompt_hash;
 
-                info!("Orchestrator tick {tick}: executing cycle");
+                info!("Agent cycle {cycle}: executing");
                 let start = std::time::Instant::now();
 
                 // Commander (has MCP tools) never gates on compute budget —
@@ -1550,7 +1555,7 @@ impl A2aServer {
                     &conductor,
                     &router,
                     &mcp_registry,
-                    tick_prompt,
+                    cycle_prompt,
                     None,
                     None,
                     learning_bus.as_ref(),
@@ -1581,14 +1586,14 @@ impl A2aServer {
                             );
                         }
 
-                        // Check if this tick produced a meaningful action
+                        // Check if this cycle produced a meaningful action
                         let memory_guard = agent_memory.read().await;
                         let had_action = memory_guard.had_meaningful_action();
 
                         // Broadcast state + budget to specialists (rate-limited, non-blocking).
                         // Always refresh budgets every 3 ticks even without observation
                         // so specialists don't stay passive indefinitely.
-                        if tick - last_broadcast_tick >= 3 {
+                        if cycle - last_broadcast_cycle >= 3 {
                             let mesh = mesh_state.clone();
                             let data = memory_guard
                                 .last_observe_full()
@@ -1596,6 +1601,8 @@ impl A2aServer {
                                 .unwrap_or_default();
                             let cmd_model = commander_model.clone();
                             let own_id = self_agent_id.clone();
+                            #[cfg(feature = "iroh")]
+                            let iroh_for_broadcast = iroh_node.clone();
                             tokio::spawn(async move {
                                 // Re-discover peers in case new specialists joined
                                 mesh.discover_peers().await;
@@ -1612,11 +1619,24 @@ impl A2aServer {
                                     peer_count,
                                 );
                                 if !data.is_empty() {
+                                    // Stage large data on Iroh for P2P fetch
+                                    #[cfg(feature = "iroh")]
+                                    let iroh_ticket = if data.len() > 4000 {
+                                        stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
+                                    } else {
+                                        None
+                                    };
+                                    #[cfg(not(feature = "iroh"))]
+                                    let iroh_ticket: Option<
+                                        String,
+                                    > = None;
+
                                     broadcast_state_to_peers(
                                         &mesh,
                                         &data,
                                         per_agent_bytes,
                                         &own_id,
+                                        iroh_ticket.as_deref(),
                                     )
                                     .await;
                                 } else {
@@ -1625,36 +1645,36 @@ impl A2aServer {
                                         .await;
                                 }
                             });
-                            last_broadcast_tick = tick;
+                            last_broadcast_cycle = cycle;
                         }
                         drop(memory_guard);
 
                         if had_action {
-                            consecutive_no_action_ticks = 0;
+                            consecutive_no_action_cycles = 0;
                             consecutive_duplicate_prompts = 0;
                         } else {
-                            consecutive_no_action_ticks += 1;
-                            if consecutive_no_action_ticks >= 3 {
+                            consecutive_no_action_cycles += 1;
+                            if consecutive_no_action_cycles >= 3 {
                                 warn!(
                                     "Dead-man's switch: {} consecutive ticks without meaningful action",
-                                    consecutive_no_action_ticks
+                                    consecutive_no_action_cycles
                                 );
                             }
                         }
 
                         // Degenerate output detection: after 8 ticks of no meaningful
                         // action, the model's context is likely poisoned. Stop, rethink,
-                        // replan: clear short-term memory so the next tick starts fresh
+                        // replan: clear short-term memory so the next cycle starts fresh
                         // with a clean observation instead of building on garbage history.
-                        if consecutive_no_action_ticks >= 8 {
+                        if consecutive_no_action_cycles >= 8 {
                             warn!(
                                 "Context reset: {} ticks without action — clearing short-term memory",
-                                consecutive_no_action_ticks
+                                consecutive_no_action_cycles
                             );
                             let mut mem = agent_memory.write().await;
                             mem.clear();
                             drop(mem);
-                            consecutive_no_action_ticks = 0;
+                            consecutive_no_action_cycles = 0;
                             consecutive_duplicate_prompts = 0;
 
                             // Synthesize a fast-path lesson about the failure pattern
@@ -1662,7 +1682,7 @@ impl A2aServer {
                                 bus.add_fast_lesson(
                                     "orchestrator",
                                     "8 consecutive ticks produced no meaningful action. \
-                                     The conversation context may be stale. On the next tick, \
+                                     The conversation context may be stale. On the next cycle, \
                                      observe the current state first, \
                                      then pick ONE concrete action from the most urgent need.",
                                 )
@@ -1670,7 +1690,7 @@ impl A2aServer {
                             }
                         }
 
-                        // Adaptive tick interval: scale based on inference duration.
+                        // Adaptive cycle interval: scale based on inference duration.
                         // Fast ticks when GPU is responsive, back off when contended.
                         let elapsed_secs = elapsed.as_secs();
                         if elapsed_secs >= 60 {
@@ -1682,28 +1702,28 @@ impl A2aServer {
                         }
 
                         info!(
-                            "Orchestrator tick {tick} completed in {:.1}s: {} chars",
+                            "Agent cycle {cycle} completed in {:.1}s: {} chars",
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
                     }
                     Err(e) => {
-                        consecutive_no_action_ticks += 1;
+                        consecutive_no_action_cycles += 1;
                         consecutive_timeouts += 1;
-                        warn!("Orchestrator tick {tick} failed: {e}");
+                        warn!("Agent cycle {cycle} failed: {e}");
                     }
                 }
 
                 // Adaptive wait: fast (5s) when GPU is responsive, backs off
-                // on consecutive slow ticks to avoid piling up blocked inferences.
-                let tick_interval = match consecutive_timeouts {
+                // on consecutive slow cycles to avoid piling up blocked inferences.
+                let cycle_interval = match consecutive_timeouts {
                     0 => 5,
                     1 => 15,
                     2 => 30,
                     _ => 60,
                 };
-                info!(consecutive_timeouts, tick_interval, "Next tick interval");
-                tokio::time::sleep(std::time::Duration::from_secs(tick_interval)).await;
+                info!(consecutive_timeouts, cycle_interval, "Next cycle interval");
+                tokio::time::sleep(std::time::Duration::from_secs(cycle_interval)).await;
             }
         });
     }
@@ -1926,11 +1946,37 @@ async fn refresh_specialist_budgets(
 ///
 /// Computes per-specialist budget allocations dynamically based on game urgency
 /// and each specialist's pending task backlog.
+/// Stage data on Iroh P2P network for peer fetching.
+#[cfg(feature = "iroh")]
+async fn stage_on_iroh(
+    iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    data: &str,
+) -> Option<String> {
+    let node = iroh_node?;
+    let transport = arkavo_tdf_iroh::IrohTransport::new(node.clone());
+    match transport.stage_bytes(data.as_bytes()).await {
+        Ok(ticket) => {
+            let ticket_str = ticket.to_string();
+            info!(
+                data_len = data.len(),
+                ticket_len = ticket_str.len(),
+                "Staged data on Iroh for P2P fetch"
+            );
+            Some(ticket_str)
+        }
+        Err(e) => {
+            warn!("Iroh stage failed, falling back to A2A: {e}");
+            None
+        }
+    }
+}
+
 async fn broadcast_state_to_peers(
     mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
     observation: &str,
     per_agent_bytes: u64,
     self_agent_id: &str,
+    iroh_ticket: Option<&str>,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
@@ -1962,13 +2008,24 @@ async fn broadcast_state_to_peers(
     let urgency = detect_urgency(observation);
     let compacted = compact_observation(observation, 2000);
 
-    let task = format!(
-        "PROACTIVE ANALYSIS — Review this state update and respond \
-         with urgent action recommendations ONLY if you see problems \
-         in your domain of expertise.\n\
-         If everything looks fine, respond with 'No issues detected.'\n\n\
-         {compacted}"
-    );
+    let task = if let Some(ticket) = iroh_ticket {
+        format!(
+            "PROACTIVE ANALYSIS — Full state available via Iroh P2P.\n\
+             Use iroh_fetch with this ticket to get full data: {ticket}\n\n\
+             Summary: {compacted}\n\n\
+             Respond with urgent action recommendations ONLY if you see \
+             problems in your domain. If everything looks fine, respond \
+             with 'No issues detected.'"
+        )
+    } else {
+        format!(
+            "PROACTIVE ANALYSIS — Review this state update and respond \
+             with urgent action recommendations ONLY if you see problems \
+             in your domain of expertise.\n\
+             If everything looks fine, respond with 'No issues detected.'\n\n\
+             {compacted}"
+        )
+    };
 
     for agent_id in &peer_ids {
         let pending = mesh_state
@@ -2116,7 +2173,7 @@ mod broadcast_tests {
     #[tokio::test]
     async fn test_broadcast_skips_when_no_peers() {
         let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0, "self").await;
+        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0, "self", None).await;
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
@@ -2133,7 +2190,7 @@ mod broadcast_tests {
             .await
             .insert("peer-b".to_string(), "http://127.0.0.1:19998".to_string());
 
-        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0, "self").await;
+        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0, "self", None).await;
         assert!(mesh.pending_delegations.read().await.is_empty());
     }
 
@@ -2170,7 +2227,7 @@ mod dedup_tests {
     use std::hash::{Hash, Hasher};
 
     /// Hash context components the same way the orchestrator does:
-    /// actions + specialist context + errors + dead-man category (not tick number)
+    /// actions + specialist context + errors + dead-man category (not cycle number)
     fn context_hash(actions: &str, specialist: &str, errors: &str, no_action_ticks: u32) -> u64 {
         let mut hasher = DefaultHasher::new();
         actions.hash(&mut hasher);
@@ -2223,7 +2280,7 @@ mod dedup_tests {
         let consecutive_no_action: u32 = 3;
         let mut executed = Vec::new();
 
-        for tick in 1..=10 {
+        for cycle in 1..=10 {
             let hash = context_hash("action-a: status OK", "", "", consecutive_no_action);
 
             if hash == last_hash && consecutive_no_action >= 2 {
@@ -2235,12 +2292,12 @@ mod dedup_tests {
                 consecutive_dupes = 0;
             }
             last_hash = hash;
-            executed.push(tick);
+            executed.push(cycle);
         }
 
-        // Tick 1 executes (first, no previous hash)
-        // Ticks 2-5 skipped (duplicate context, no action)
-        // Tick 6 executes (every 5th allowed through)
+        // Cycle 1 executes (first, no previous hash)
+        // Cycles 2-5 skipped (duplicate context, no action)
+        // Cycle 6 executes (every 5th allowed through)
         assert_eq!(executed, vec![1, 6]);
     }
 
@@ -2275,10 +2332,10 @@ mod dedup_tests {
             executed.push(i);
         }
 
-        // tick 0: first context — executes
-        // tick 1-2: duplicate — skipped
-        // tick 3: new specialist advice — executes (reset)
-        // tick 4-5: duplicate — skipped
+        // cycle 0: first context — executes
+        // cycle 1-2: duplicate — skipped
+        // cycle 3: new specialist advice — executes (reset)
+        // cycle 4-5: duplicate — skipped
         assert_eq!(executed, vec![0, 3]);
     }
 }
