@@ -50,6 +50,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
         #[cfg(feature = "iroh")]
         None,
     )
@@ -76,6 +77,7 @@ pub async fn execute_with_conductor_and_learning(
     model_hint: Option<&arkavo_router::ModelChoice>,
     images: Option<Vec<String>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    existing_messages: Option<Vec<arkavo_llm::Message>>,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
@@ -392,24 +394,30 @@ pub async fn execute_with_conductor_and_learning(
 
     // Build messages: single System (merged) → User (task)
     // Qwen3.5 and other models require exactly one system message at the start.
-    let mut messages = Vec::new();
-    let merged_system = match (system_prompt, &rlm_system_prompt) {
-        (Some(sys), Some(rlm)) => Some(format!("{sys}\n\n{rlm}")),
-        (Some(sys), None) => Some(sys.to_string()),
-        (None, Some(rlm)) => Some(rlm.clone()),
-        (None, None) => None,
-    };
-    if let Some(sys) = merged_system {
-        messages.push(arkavo_llm::Message::system(sys));
-    }
-    if let Some(imgs) = images {
-        messages.push(arkavo_llm::Message::user_with_images(
-            augmented_content,
-            imgs,
-        ));
+    // When existing_messages is provided, skip construction and use them directly.
+    let messages = if let Some(existing) = existing_messages {
+        existing
     } else {
-        messages.push(arkavo_llm::Message::user(augmented_content));
-    }
+        let mut messages = Vec::new();
+        let merged_system = match (system_prompt, &rlm_system_prompt) {
+            (Some(sys), Some(rlm)) => Some(format!("{sys}\n\n{rlm}")),
+            (Some(sys), None) => Some(sys.to_string()),
+            (None, Some(rlm)) => Some(rlm.clone()),
+            (None, None) => None,
+        };
+        if let Some(sys) = merged_system {
+            messages.push(arkavo_llm::Message::system(sys));
+        }
+        if let Some(imgs) = images {
+            messages.push(arkavo_llm::Message::user_with_images(
+                augmented_content,
+                imgs,
+            ));
+        } else {
+            messages.push(arkavo_llm::Message::user(augmented_content));
+        }
+        messages
+    };
 
     // Transition task from Pending → Running so the dashboard shows "working"
     let _ = conductor.start_task(hrm_task.id).await;

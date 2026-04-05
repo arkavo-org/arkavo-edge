@@ -909,6 +909,7 @@ impl A2aServer {
                             model_hint.as_ref(),
                             None,
                             None,
+                            None,
                             #[cfg(feature = "iroh")]
                             notification_iroh_node.as_ref(),
                         )
@@ -1565,6 +1566,7 @@ impl A2aServer {
                     model_hint.as_ref(),
                     None,
                     tool_loop_budget,
+                    None,
                     #[cfg(feature = "iroh")]
                     iroh_node.as_ref(),
                 )

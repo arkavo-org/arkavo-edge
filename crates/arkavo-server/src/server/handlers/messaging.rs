@@ -287,6 +287,7 @@ pub async fn handle_message_send(
                         model_hint.as_ref(),
                         images,
                         Some(&compute_budget),
+                        None,
                         #[cfg(feature = "iroh")]
                         iroh_node.as_ref(),
                     )
