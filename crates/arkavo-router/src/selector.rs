@@ -155,15 +155,18 @@ impl ModelSelector {
     }
 
     /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// Ministral-3B preferred: 422ms avg, 8/8 tool accuracy.
-    /// Qwen3.5-0.8B is slower (~22s) with poor tool calling (1/8).
+    /// Gemma-4-E2B preferred: 2,229ms avg, 8/8 tool accuracy, multimodal.
+    /// Ministral-3B fallback: 690ms avg, 8/8 tool accuracy.
+    /// Qwen3.5-0.8B last resort: 525ms but poor tool calling in practice.
     pub fn fastest_local_model(&self) -> ModelChoice {
-        if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+        if Self::is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
+            ModelChoice::LocalGemma4E2B
+        } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
             ModelChoice::LocalMinistral3B
         } else if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
             ModelChoice::LocalQwen3
         } else {
-            ModelChoice::LocalMinistral3B
+            ModelChoice::LocalGemma4E2B
         }
     }
 
