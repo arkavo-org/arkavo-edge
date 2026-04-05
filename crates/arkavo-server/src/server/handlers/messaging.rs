@@ -34,6 +34,7 @@ pub async fn handle_message_send(
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
+    agent_event_tx: Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
@@ -240,142 +241,194 @@ pub async fn handle_message_send(
     // receive their AGENTS.md identity when processing delegated tasks.
     let purpose = agent_metadata.read().await.purpose.clone();
 
+    // Save metadata before submit_task consumes request.message
+    let request_metadata_ref = request.message.metadata.clone();
+
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {
             if let Some(router) = router {
-                let router = router.clone();
-                let conductor = conductor.clone();
-                let mcp_registry = mcp_registry.clone();
-                let task_executor = task_executor.clone();
-                let task_store = task_store.clone();
                 let task_id_clone = task_id;
-                let learning_bus = learning_bus.cloned();
-                let compute_budget = compute_budget.clone();
-                let mesh_state = mesh_state.cloned();
-                let agent_memory = agent_memory.clone();
-                let specialist_id = agent_metadata.read().await.name.clone();
-                let task_start = std::time::Instant::now();
-                #[cfg(feature = "iroh")]
-                let iroh_node = iroh_node.cloned();
 
-                tokio::spawn(async move {
-                    if let Err(e) = task_executor
-                        .update_task_status(&task_id_clone, TaskStatus::Working)
+                if let Some(event_tx) = agent_event_tx {
+                    // Orchestrator path: route through the agent event loop
+                    use super::super::agent_event::{AgentEvent, CorrelationId};
+
+                    let correlation_id = CorrelationId(uuid::Uuid::new_v4());
+                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+
+                    let sender_did = request_metadata_ref
+                        .as_ref()
+                        .and_then(|m| m.get("sender_did"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+
+                    let _ = event_tx
+                        .send(AgentEvent::IncomingMessage {
+                            sender: sender_did,
+                            content: task_content,
+                            task_id: task_id_clone,
+                            correlation_id,
+                            reply: reply_tx,
+                        })
+                        .await;
+
+                    tokio::spawn(async move {
+                        match tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx)
+                            .await
+                        {
+                            Ok(Ok(receipt)) => {
+                                info!(
+                                    correlation_id = %receipt.correlation_id.0,
+                                    cycle = receipt.cycle_id.0,
+                                    "Message incorporated into orchestrator cycle"
+                                );
+                            }
+                            Ok(Err(_canceled)) => {
+                                warn!("Agent loop dropped message — event channel closed");
+                            }
+                            Err(_timeout) => {
+                                warn!("Message not processed within 120s");
+                            }
+                        }
+                    });
+                } else {
+                    // Specialist path: execute directly via conductor
+                    let router = router.clone();
+                    let conductor = conductor.clone();
+                    let mcp_registry = mcp_registry.clone();
+                    let task_executor = task_executor.clone();
+                    let task_store = task_store.clone();
+                    let learning_bus = learning_bus.cloned();
+                    let compute_budget = compute_budget.clone();
+                    let mesh_state = mesh_state.cloned();
+                    let agent_memory = agent_memory.clone();
+                    let specialist_id = agent_metadata.read().await.name.clone();
+                    let task_start = std::time::Instant::now();
+                    #[cfg(feature = "iroh")]
+                    let iroh_node = iroh_node.cloned();
+
+                    tokio::spawn(async move {
+                        if let Err(e) = task_executor
+                            .update_task_status(&task_id_clone, TaskStatus::Working)
+                            .await
+                        {
+                            warn!("Failed to update task {} to Working: {}", task_id_clone, e);
+                            return;
+                        }
+
+                        info!("Executing task {} via HRM Conductor", task_id_clone);
+
+                        match execute_with_conductor_and_learning(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            task_content,
+                            Some(task_id_clone),
+                            Some(&task_executor),
+                            learning_bus.as_ref(),
+                            Some(&agent_memory),
+                            if purpose.is_empty() {
+                                None
+                            } else {
+                                Some(purpose.as_str())
+                            },
+                            mesh_state.as_ref(),
+                            model_hint.as_ref(),
+                            images,
+                            Some(&compute_budget),
+                            None,
+                            #[cfg(feature = "iroh")]
+                            iroh_node.as_ref(),
+                        )
                         .await
-                    {
-                        warn!("Failed to update task {} to Working: {}", task_id_clone, e);
-                        return;
-                    }
+                        {
+                            Ok(result_content) => {
+                                let result_for_notice = result_content.clone();
+                                let result_message = Message {
+                                    parts: vec![arkavo_protocol::types::MessagePart::Text {
+                                        content: result_content,
+                                    }],
+                                    metadata: None,
+                                };
+                                let result_value = serde_json::to_value(&result_message)
+                                    .unwrap_or(serde_json::Value::Null);
 
-                    info!("Executing task {} via HRM Conductor", task_id_clone);
+                                if let Err(e) = task_executor
+                                    .complete_task(&task_id_clone, result_value)
+                                    .await
+                                {
+                                    warn!("Failed to complete task {}: {}", task_id_clone, e);
+                                } else {
+                                    info!("Task {} completed successfully via HRM", task_id_clone);
 
-                    match execute_with_conductor_and_learning(
-                        &conductor,
-                        &router,
-                        &mcp_registry,
-                        task_content,
-                        Some(task_id_clone),
-                        Some(&task_executor),
-                        learning_bus.as_ref(),
-                        Some(&agent_memory),
-                        if purpose.is_empty() {
-                            None
-                        } else {
-                            Some(purpose.as_str())
-                        },
-                        mesh_state.as_ref(),
-                        model_hint.as_ref(),
-                        images,
-                        Some(&compute_budget),
-                        None,
-                        #[cfg(feature = "iroh")]
-                        iroh_node.as_ref(),
-                    )
-                    .await
-                    {
-                        Ok(result_content) => {
-                            let result_for_notice = result_content.clone();
-                            let result_message = Message {
-                                parts: vec![arkavo_protocol::types::MessagePart::Text {
-                                    content: result_content,
-                                }],
-                                metadata: None,
-                            };
-                            let result_value = serde_json::to_value(&result_message)
-                                .unwrap_or(serde_json::Value::Null);
+                                    // Push completion to commander via gossip
+                                    if let Some(ref bus) = learning_bus {
+                                        let snapshot = {
+                                            let b = compute_budget.read().await;
+                                            serde_json::to_value(b.snapshot()).ok()
+                                        };
+                                        let notice = arkavo_gossip::TaskCompletionNotice {
+                                            task_id: task_id_clone.to_string(),
+                                            specialist_id: specialist_id.clone(),
+                                            succeeded: true,
+                                            content: result_for_notice,
+                                            budget_snapshot: snapshot,
+                                            completion_ms: task_start.elapsed().as_millis() as u64,
+                                        };
+                                        bus.broadcast_to_peers(
+                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+                            Err(error_msg) => {
+                                let error = TaskError {
+                                    code: "HRM_EXECUTION_ERROR".to_string(),
+                                    message: error_msg.clone(),
+                                    details: None,
+                                };
 
-                            if let Err(e) = task_executor
-                                .complete_task(&task_id_clone, result_value)
-                                .await
-                            {
-                                warn!("Failed to complete task {}: {}", task_id_clone, e);
-                            } else {
-                                info!("Task {} completed successfully via HRM", task_id_clone);
+                                if let Ok(Some(mut task)) =
+                                    task_store.get_task(&task_id_clone).await
+                                {
+                                    task.error = Some(error);
+                                    let _ = task_store.create_task(task).await;
+                                }
 
-                                // Push completion to commander via gossip (no polling needed)
-                                if let Some(ref bus) = learning_bus {
-                                    let snapshot = {
-                                        let b = compute_budget.read().await;
-                                        serde_json::to_value(b.snapshot()).ok()
-                                    };
-                                    let notice = arkavo_gossip::TaskCompletionNotice {
-                                        task_id: task_id_clone.to_string(),
-                                        specialist_id: specialist_id.clone(),
-                                        succeeded: true,
-                                        content: result_for_notice,
-                                        budget_snapshot: snapshot,
-                                        completion_ms: task_start.elapsed().as_millis() as u64,
-                                    };
-                                    bus.broadcast_to_peers(
-                                        arkavo_gossip::GossipMessage::TaskCompleted(notice),
-                                    )
-                                    .await;
+                                if let Err(e) = task_executor
+                                    .update_task_status(&task_id_clone, TaskStatus::Failed)
+                                    .await
+                                {
+                                    warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
+                                } else {
+                                    warn!("Task {} failed: {}", task_id_clone, error_msg);
+
+                                    // Push failure to commander via gossip
+                                    if let Some(ref bus) = learning_bus {
+                                        let snapshot = {
+                                            let b = compute_budget.read().await;
+                                            serde_json::to_value(b.snapshot()).ok()
+                                        };
+                                        let notice = arkavo_gossip::TaskCompletionNotice {
+                                            task_id: task_id_clone.to_string(),
+                                            specialist_id: specialist_id.clone(),
+                                            succeeded: false,
+                                            content: error_msg,
+                                            budget_snapshot: snapshot,
+                                            completion_ms: task_start.elapsed().as_millis() as u64,
+                                        };
+                                        bus.broadcast_to_peers(
+                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                        )
+                                        .await;
+                                    }
                                 }
                             }
                         }
-                        Err(error_msg) => {
-                            let error = TaskError {
-                                code: "HRM_EXECUTION_ERROR".to_string(),
-                                message: error_msg.clone(),
-                                details: None,
-                            };
-
-                            if let Ok(Some(mut task)) = task_store.get_task(&task_id_clone).await {
-                                task.error = Some(error);
-                                let _ = task_store.create_task(task).await;
-                            }
-
-                            if let Err(e) = task_executor
-                                .update_task_status(&task_id_clone, TaskStatus::Failed)
-                                .await
-                            {
-                                warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
-                            } else {
-                                warn!("Task {} failed: {}", task_id_clone, error_msg);
-
-                                // Push failure to commander via gossip
-                                if let Some(ref bus) = learning_bus {
-                                    let snapshot = {
-                                        let b = compute_budget.read().await;
-                                        serde_json::to_value(b.snapshot()).ok()
-                                    };
-                                    let notice = arkavo_gossip::TaskCompletionNotice {
-                                        task_id: task_id_clone.to_string(),
-                                        specialist_id: specialist_id.clone(),
-                                        succeeded: false,
-                                        content: error_msg,
-                                        budget_snapshot: snapshot,
-                                        completion_ms: task_start.elapsed().as_millis() as u64,
-                                    };
-                                    bus.broadcast_to_peers(
-                                        arkavo_gossip::GossipMessage::TaskCompleted(notice),
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                    }
-                });
+                    });
+                }
             }
 
             let response = MessageSendResponse {

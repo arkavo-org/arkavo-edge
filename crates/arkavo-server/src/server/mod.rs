@@ -39,7 +39,7 @@ pub use agent_event::{
     AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
     PendingMessage,
 };
-pub use agent_loop::AgentLoopConfig;
+pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;
 pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
@@ -347,6 +347,8 @@ pub struct A2aRpcImpl {
     /// TDF share offer store for pending P2P offers
     #[cfg(feature = "kas")]
     pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
+    /// Event sender for injecting A2A messages into the orchestrator agent loop
+    pub(crate) agent_event_tx: Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>,
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
@@ -502,6 +504,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.mesh_state.as_ref(),
             &self.agent_metadata,
             &self.agent_memory,
+            self.agent_event_tx.clone(),
             #[cfg(feature = "iroh")]
             self.iroh_node.as_ref(),
             request,
