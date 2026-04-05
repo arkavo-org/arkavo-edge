@@ -123,26 +123,47 @@ pub trait TokenEstimator: Send + Sync {
 }
 ```
 
-### Implementation
+### Implementation: LlamaTokenEstimator (primary)
 
-Self-contained BPE tokenizer with a vendored llama-family merge table:
+Wrap the already-loaded model's tokenizer via llama.cpp FFI:
 
-- **Source**: Llama 3.1 `tokenizer.json` from HuggingFace (Apache 2.0 licensed, compatible with Vokra licensing). Contains `model.merges` array (BPE merge pairs) and `model.vocab` map.
-- **Build-time step**: Extract merges + vocab from `tokenizer.json` into a compact binary format (merge pairs as sorted byte-pair rank indices). This is a one-time offline step, not a build.rs dependency. The binary file is committed to the repo.
-- **Runtime**: Embed the binary merge table via `include_bytes!` (~800KB binary cost). Parse at startup into a `HashMap<(u32, u32), u32>` merge rank table.
-- **Algorithm**: Split text into byte tokens, greedily merge adjacent pairs according to ranked merge table, count resulting tokens. ~100 lines of implementation code.
-- **Zero external dependencies**: No `serde_json` at runtime (only for the offline extraction). No protobuf (rules out sentencepiece `.model` format). `no_std`-compatible for future Vokra WASM target.
-- **Why Llama 3.1 vocabulary**: Most traffic hits llama.cpp models. A llama-family BPE is a tighter estimate for the dominant inference path than GPT-4's cl100k_base. Still conservative enough for cloud backends due to the 30% headroom.
+```rust
+pub struct LlamaTokenEstimator {
+    model: Arc<LlamaModel>,
+}
+
+impl TokenEstimator for LlamaTokenEstimator {
+    fn estimate_token_count(&self, text: &str) -> usize {
+        // llama_tokenize() is a pure vocabulary lookup — no GPU, no inference
+        self.model.tokenize(text, false).len()
+    }
+}
+```
+
+**Construction**: At agent startup, after model loading but before the event loop starts, grab a reference to any loaded model. The tokenizer is already in memory — zero additional binary cost.
+
+**Why this works**: The original argument against querying the router was about the routing *decision* creating a circular dependency. Tokenization isn't routing. We don't need to know which model *will be selected* — we need *any* loaded model's vocabulary to count tokens, and they're all close enough for a budget gate with 30% headroom.
+
+### Implementation: MockEstimator (testing)
+
+```rust
+pub struct MockEstimator;
+
+impl TokenEstimator for MockEstimator {
+    fn estimate_token_count(&self, text: &str) -> usize {
+        text.len() / 4  // chars/4, deterministic for test assertions
+    }
+}
+```
 
 ### Design Decisions
 
-- **Not tiktoken-rs**: Pulls in Python-oriented regex crate and cl100k_base (GPT-4 vocabulary). Most traffic hits llama.cpp models -- a llama-family BPE is a tighter estimate for the dominant path.
-- **Not `tokenizers` crate**: Overkill -- ships training, normalization, and pre-tokenization strategies never needed here. Self-contained BPE is lighter.
-- **Conservative reference tokenizer, not a heuristic**: chars/4 is ~30% off for code-heavy content, non-English text, and structured tool outputs -- exactly what agents produce. A reference BPE is consistent and reasonably accurate.
+- **Not a vendored BPE merge table**: Every agent already has a tokenizer in memory via the loaded llama.cpp model. Vendoring a separate 800KB merge table duplicates what's already there.
+- **Not tiktoken-rs or `tokenizers` crate**: Unnecessary external dependency when llama.cpp's tokenizer is already linked.
 - **Budget gate, not billing meter**: Trimming decisions tolerate 5-10% estimation error because the 70% budget has 30% headroom. The actual provider token count (`n_prompt_eval` from llama.cpp) remains ground truth for `context_utilization_pct` after inference.
-- **No routing circular dependency**: ConversationWindow trims before routing. Router picks model after trimming. If tokenizer were model-specific, trim points would shift when Thompson Sampling switches models.
-- **`estimate_token_count()` method**: ConversationWindow only needs the count, never token IDs. A counting-only implementation skips allocating the token vector -- matters on the trimming hot path where every message in history is estimated.
-- **Mock estimator for tests**: `chars / 4` is fine for deterministic test assertions. Tests verify trimming behavior at boundary conditions, not exact token counts.
+- **`estimate_token_count()` method**: ConversationWindow only needs the count, never token IDs. The `LlamaTokenEstimator` counts without returning the full token vector.
+- **Mock estimator for tests**: `chars / 4` is deterministic. Tests verify trimming behavior at boundary conditions, not exact token counts.
+- **Trait preserves future WASM path**: When Vokra moves to WASM, the `LlamaTokenEstimator` won't be available. A self-contained BPE implementation can slot into the trait at that point without changing ConversationWindow.
 
 ## Module: Conversation Window (`conversation_window.rs`)
 
