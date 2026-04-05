@@ -71,6 +71,8 @@ pub use gemini_adapter::GeminiProvider;
 pub mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub use arkavo_llama_cpp::LlamaModel;
 #[cfg(all(feature = "llama-cpp", target_env = "musl"))]
 pub use context_pool::{ContextPool, PoolStats};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

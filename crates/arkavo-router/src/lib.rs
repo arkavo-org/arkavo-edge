@@ -834,6 +834,40 @@ impl Router {
         self.selector.fastest_local_model()
     }
 
+    /// Minimum context size across all currently-loaded local models.
+    /// Returns conservative default (4096) if no models are loaded.
+    /// Used by ConversationWindow to compute the history token budget.
+    #[cfg(feature = "llama-cpp")]
+    pub fn min_feasible_context_size(&self) -> usize {
+        let models = self.model_registry.model_names();
+        if models.is_empty() {
+            return 4096;
+        }
+        let mut min_ctx = usize::MAX;
+        for name in &models {
+            if let Some(model) = self.model_registry.get(name) {
+                let ctx = model.get_trained_context_size() as usize;
+                if ctx < min_ctx {
+                    min_ctx = ctx;
+                }
+            }
+        }
+        if min_ctx == usize::MAX { 4096 } else { min_ctx }
+    }
+
+    #[cfg(not(feature = "llama-cpp"))]
+    pub fn min_feasible_context_size(&self) -> usize {
+        4096
+    }
+
+    /// Get an Arc<LlamaModel> from any loaded model for token estimation.
+    /// Returns None if no models are loaded.
+    #[cfg(feature = "llama-cpp")]
+    pub fn any_loaded_model(&self) -> Option<std::sync::Arc<arkavo_llm::LlamaModel>> {
+        let names = self.model_registry.model_names();
+        names.first().and_then(|name| self.model_registry.get(name))
+    }
+
     /// Persist validated dynamic adjustments in the background.
     ///
     /// Debounced: only flushes every 10 responses or 60 seconds, whichever
@@ -941,5 +975,12 @@ mod tests {
             return;
         }
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_min_feasible_context_size_default() {
+        let router = Router::new_offline().await.unwrap();
+        let size = router.min_feasible_context_size();
+        assert_eq!(size, 4096);
     }
 }
