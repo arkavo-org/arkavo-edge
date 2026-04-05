@@ -289,16 +289,25 @@ impl ModelSelector {
             .max_memory_bytes
             .load(std::sync::atomic::Ordering::Relaxed);
 
-        // Local models
+        // Local models (smallest first)
         if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
             models.push(ModelChoice::LocalQwen3);
+        }
+        if Self::is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
+            models.push(ModelChoice::LocalGemma4E2B);
         }
         if self.gpu_available {
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 models.push(ModelChoice::LocalMinistral3B);
             }
+            if Self::is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
+                models.push(ModelChoice::LocalGemma4E4B);
+            }
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
+            }
+            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_26B) {
+                models.push(ModelChoice::LocalGemma4_26B);
             }
             if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
