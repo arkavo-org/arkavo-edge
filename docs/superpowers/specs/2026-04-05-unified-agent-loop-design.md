@@ -127,10 +127,12 @@ pub trait TokenEstimator: Send + Sync {
 
 Self-contained BPE tokenizer with a vendored llama-family merge table:
 
-- Embed the merge table via `include_bytes!` (~800KB binary cost)
-- Algorithm: split text into bytes, greedily merge adjacent pairs according to ranked merge table, count resulting tokens
-- ~100 lines of implementation code, zero external dependencies
-- `no_std`-compatible for future Vokra WASM target
+- **Source**: Llama 3.1 `tokenizer.json` from HuggingFace (Apache 2.0 licensed, compatible with Vokra licensing). Contains `model.merges` array (BPE merge pairs) and `model.vocab` map.
+- **Build-time step**: Extract merges + vocab from `tokenizer.json` into a compact binary format (merge pairs as sorted byte-pair rank indices). This is a one-time offline step, not a build.rs dependency. The binary file is committed to the repo.
+- **Runtime**: Embed the binary merge table via `include_bytes!` (~800KB binary cost). Parse at startup into a `HashMap<(u32, u32), u32>` merge rank table.
+- **Algorithm**: Split text into byte tokens, greedily merge adjacent pairs according to ranked merge table, count resulting tokens. ~100 lines of implementation code.
+- **Zero external dependencies**: No `serde_json` at runtime (only for the offline extraction). No protobuf (rules out sentencepiece `.model` format). `no_std`-compatible for future Vokra WASM target.
+- **Why Llama 3.1 vocabulary**: Most traffic hits llama.cpp models. A llama-family BPE is a tighter estimate for the dominant inference path than GPT-4's cl100k_base. Still conservative enough for cloud backends due to the 30% headroom.
 
 ### Design Decisions
 
@@ -371,7 +373,7 @@ All helpers are pure functions of their arguments -- none need `&self` on `A2aSe
 | `compact_observation()` | a2a_server.rs:1853-1874 | Prefer Delta section, truncate to 2000 chars |
 | `compute_per_agent_bytes_static()` | a2a_server.rs:1882-1895 | Memory budget per specialist |
 | `broadcast_state_to_peers()` | a2a_server.rs:1974-2061 | Proactive analysis tasks to specialists |
-| `send_advisory_task()` | a2a_server.rs:2067+ | Delegation RPC to specialist |
+| `send_advisory_task()` | a2a_server.rs:2067+ | Delegation RPC to specialist. Needs only `mesh_state` + protocol types. No `TaskExecutor`. |
 | `stage_on_iroh()` | a2a_server.rs:1951-1972 | P2P staging for large data (feature-gated) |
 | `drain_specialist_completions()` | NEW | Extract from a2a_server.rs:1404-1466 |
 | `drain_pending_messages()` | NEW | Build message block + CycleReceipts |
