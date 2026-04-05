@@ -44,7 +44,7 @@ impl TokenEstimator for LlamaTokenEstimator {
 }
 
 /// Deterministic estimator for tests. Uses chars/4.
-pub struct MockEstimator;
+pub(super) struct MockEstimator;
 
 impl TokenEstimator for MockEstimator {
     fn estimate_tokens(&self, text: &str) -> usize {

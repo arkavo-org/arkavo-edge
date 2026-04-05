@@ -5,7 +5,7 @@ use crate::server::token_estimator::TokenEstimator;
 
 /// Token-budget-aware sliding window of conversation history.
 /// Single owner — the event loop task. No Arc<RwLock>.
-pub struct ConversationWindow {
+pub(super) struct ConversationWindow {
     system_message: Option<arkavo_llm::Message>,
     history: VecDeque<arkavo_llm::Message>,
     history_tokens: usize,
@@ -16,7 +16,7 @@ pub struct ConversationWindow {
 impl ConversationWindow {
     /// `min_feasible_context`: minimum context size across currently-loaded models.
     /// History budget = 70% of that.
-    pub fn new(min_feasible_context: usize, estimator: Arc<dyn TokenEstimator>) -> Self {
+    pub(super) fn new(min_feasible_context: usize, estimator: Arc<dyn TokenEstimator>) -> Self {
         Self {
             system_message: None,
             history: VecDeque::new(),
@@ -26,13 +26,13 @@ impl ConversationWindow {
         }
     }
 
-    pub fn set_system_message(&mut self, msg: arkavo_llm::Message) {
+    pub(super) fn set_system_message(&mut self, msg: arkavo_llm::Message) {
         self.system_message = Some(msg);
     }
 
     /// Append a message and trim oldest if over budget.
     /// Keeps minimum 2 most recent messages (last user + assistant pair).
-    pub fn push(&mut self, msg: arkavo_llm::Message) {
+    pub(super) fn push(&mut self, msg: arkavo_llm::Message) {
         self.history_tokens += self.estimator.estimate_token_count(&msg.content);
         self.history.push_back(msg);
         while self.history.len() > 2 && self.history_tokens > self.max_history_tokens() {
@@ -49,7 +49,7 @@ impl ConversationWindow {
     /// Does NOT include the current cycle's user message — caller pushes
     /// that to history before calling this.
     /// Ensures alternating user/assistant roles (required by Gemma/Llama chat templates).
-    pub fn build_messages(&self, system_suffix: Option<&str>) -> Vec<arkavo_llm::Message> {
+    pub(super) fn build_messages(&self, system_suffix: Option<&str>) -> Vec<arkavo_llm::Message> {
         let mut messages = Vec::with_capacity(self.history.len() + 1);
 
         if let Some(ref sys) = self.system_message {
@@ -82,12 +82,12 @@ impl ConversationWindow {
     }
 
     /// Hard reset after degenerate output detection.
-    pub fn clear_history(&mut self) {
+    pub(super) fn clear_history(&mut self) {
         self.history.clear();
         self.history_tokens = 0;
     }
 
-    pub fn history_len(&self) -> usize {
+    pub(super) fn history_len(&self) -> usize {
         self.history.len()
     }
 
