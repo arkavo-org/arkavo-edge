@@ -8,8 +8,11 @@ pub struct CorrelationId(pub uuid::Uuid);
 
 #[derive(Debug)]
 pub enum MessageDisposition {
+    /// Included in the current cycle's prompt
     Incorporated { cycle_id: CycleId },
+    /// Queued for next cycle (current cycle was already assembling)
     Deferred,
+    /// Rejected (budget exceeded, agent shutting down, etc.)
     Rejected { reason: String },
 }
 
@@ -22,6 +25,7 @@ pub struct CycleReceipt {
 
 pub enum AgentEvent {
     IncomingMessage {
+        /// did:key of the sending agent
         sender: String,
         content: String,
         task_id: uuid::Uuid,
