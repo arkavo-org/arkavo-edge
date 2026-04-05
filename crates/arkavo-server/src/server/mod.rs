@@ -11,6 +11,7 @@ mod conductor_tool_loop;
 mod config_helpers;
 mod consolidation;
 mod contract_negotiation;
+mod conversation_window;
 mod curiosity;
 mod episode_buffer;
 mod event_loop;
