@@ -1,5 +1,6 @@
 mod a2a_server;
 mod agent_event;
+mod agent_loop;
 mod anti_pattern;
 mod autolearn_bridge;
 mod conductor;
@@ -38,6 +39,7 @@ pub use agent_event::{
     AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
     PendingMessage,
 };
+pub use agent_loop::AgentLoopConfig;
 pub use arkavo_autolearn::PainSignal;
 pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
