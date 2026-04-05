@@ -48,6 +48,7 @@ impl ConversationWindow {
     /// Returns [system + optional suffix, history].
     /// Does NOT include the current cycle's user message — caller pushes
     /// that to history before calling this.
+    /// Ensures alternating user/assistant roles (required by Gemma/Llama chat templates).
     pub fn build_messages(&self, system_suffix: Option<&str>) -> Vec<arkavo_llm::Message> {
         let mut messages = Vec::with_capacity(self.history.len() + 1);
 
@@ -61,7 +62,22 @@ impl ConversationWindow {
             messages.push(sys_msg);
         }
 
-        messages.extend(self.history.iter().cloned());
+        // Enforce alternating roles: coalesce consecutive same-role messages.
+        // This happens when error cycles push a user message without an assistant response.
+        let mut last_role: Option<arkavo_llm::Role> = None;
+        for msg in &self.history {
+            if last_role == Some(msg.role.clone()) {
+                // Same role as previous — merge into last message
+                if let Some(last) = messages.last_mut() {
+                    last.content.push_str("\n\n");
+                    last.content.push_str(&msg.content);
+                }
+            } else {
+                last_role = Some(msg.role.clone());
+                messages.push(msg.clone());
+            }
+        }
+
         messages
     }
 
@@ -182,5 +198,39 @@ mod tests {
         w.push(arkavo_llm::Message::user("hello"));
         let msgs = w.build_messages(None);
         assert_eq!(msgs.len(), 1);
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_consecutive_user_messages_coalesced() {
+        let mut w = make_window(10000);
+        w.set_system_message(arkavo_llm::Message::system("sys"));
+        // Simulate two error cycles: user pushed, no assistant response
+        w.push(arkavo_llm::Message::user("cycle 1 prompt"));
+        w.push(arkavo_llm::Message::user("cycle 2 prompt"));
+        w.push(arkavo_llm::Message::assistant("response"));
+
+        let msgs = w.build_messages(None);
+        // system + coalesced_user + assistant = 3 (not 4)
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, arkavo_llm::Role::System);
+        assert_eq!(msgs[1].role, arkavo_llm::Role::User);
+        assert!(msgs[1].content.contains("cycle 1 prompt"));
+        assert!(msgs[1].content.contains("cycle 2 prompt"));
+        assert_eq!(msgs[2].role, arkavo_llm::Role::Assistant);
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_alternating_roles_preserved() {
+        let mut w = make_window(10000);
+        w.push(arkavo_llm::Message::user("u1"));
+        w.push(arkavo_llm::Message::assistant("a1"));
+        w.push(arkavo_llm::Message::user("u2"));
+        w.push(arkavo_llm::Message::assistant("a2"));
+
+        let msgs = w.build_messages(None);
+        // Already alternating — no coalescing needed
+        assert_eq!(msgs.len(), 4);
     }
 }
