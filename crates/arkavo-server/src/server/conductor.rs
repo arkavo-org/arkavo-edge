@@ -154,8 +154,11 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map(|t| !t.is_empty())
         .unwrap_or(false);
-    let (is_complex, _) =
-        arkavo_router::classifier::Classification::detect_complexity(&task_content);
+    let is_complex = if has_mcp_tools {
+        assess_complexity_with_model(router, &task_content).await
+    } else {
+        false
+    };
     if is_complex && has_mcp_tools {
         match super::conductor_planner::execute_with_plan(
             conductor,
@@ -670,5 +673,53 @@ mod tests {
         // Reward -1.0 → quality 0.0
         let quality_min = f64::midpoint(-1.0, 1.0).clamp(0.0, 1.0);
         assert!(quality_min.abs() < 1e-6);
+    }
+}
+
+/// Use the smallest loaded model to assess whether a task needs decomposition.
+/// Falls back to the heuristic classifier on timeout or model unavailability.
+async fn assess_complexity_with_model(
+    router: &Arc<arkavo_router::Router>,
+    task_content: &str,
+) -> bool {
+    // Truncate to avoid wasting tokens on long cycle prompts
+    let snippet = if task_content.len() > 400 {
+        &task_content[..400]
+    } else {
+        task_content
+    };
+
+    let prompt = format!(
+        "Is this a single task or multiple independent tasks that need separate planning?\n\
+         Reply SINGLE or MULTI, nothing else.\n\n\
+         Task: {snippet}"
+    );
+
+    let messages = vec![arkavo_llm::Message::user(&prompt)];
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        router.route_chat(messages, None, None),
+    )
+    .await
+    {
+        Ok(Ok(response)) => {
+            let answer = response.content.to_lowercase();
+            let is_multi = answer.contains("multi");
+            debug!(
+                answer = %response.content.trim(),
+                is_multi,
+                "LLM complexity assessment"
+            );
+            is_multi
+        }
+        Ok(Err(e)) => {
+            debug!("Complexity model error, falling back to heuristic: {e}");
+            arkavo_router::classifier::Classification::detect_complexity(task_content).0
+        }
+        Err(_) => {
+            debug!("Complexity model timeout (10s), falling back to heuristic");
+            arkavo_router::classifier::Classification::detect_complexity(task_content).0
+        }
     }
 }
