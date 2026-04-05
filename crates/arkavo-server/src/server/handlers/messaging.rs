@@ -34,7 +34,11 @@ pub async fn handle_message_send(
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
-    agent_event_tx: Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
+    agent_event_tx: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
+        >,
+    >,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
@@ -249,7 +253,7 @@ pub async fn handle_message_send(
             if let Some(router) = router {
                 let task_id_clone = task_id;
 
-                if let Some(event_tx) = agent_event_tx {
+                if let Some(event_tx) = agent_event_tx.lock().await.clone() {
                     // Orchestrator path: route through the agent event loop
                     use super::super::agent_event::{AgentEvent, CorrelationId};
 

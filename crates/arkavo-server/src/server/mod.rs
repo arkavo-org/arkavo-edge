@@ -347,8 +347,10 @@ pub struct A2aRpcImpl {
     /// TDF share offer store for pending P2P offers
     #[cfg(feature = "kas")]
     pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
-    /// Event sender for injecting A2A messages into the orchestrator agent loop
-    pub(crate) agent_event_tx: Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>,
+    /// Event sender for injecting A2A messages into the orchestrator agent loop.
+    /// Shared via Arc<Mutex> so start_orchestrator_loop can set it after RPC construction.
+    pub(crate) agent_event_tx:
+        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>>>,
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,

@@ -1276,7 +1276,7 @@ impl A2aServer {
             },
             #[cfg(feature = "kas")]
             tdf_offer_store: Arc::new(super::handlers::tdf_share::TdfOfferStore::new()),
-            agent_event_tx: self.agent_event_tx.lock().await.clone(),
+            agent_event_tx: self.agent_event_tx.clone(),
             #[cfg(feature = "iroh")]
             iroh_node: self.iroh_node.read().await.clone(),
         };
