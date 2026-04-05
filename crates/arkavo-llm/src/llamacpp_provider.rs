@@ -1071,7 +1071,11 @@ impl Provider for LlamaCppProvider {
                         native_parsed = native_calls
                             .into_iter()
                             .map(|tc| crate::tool_parser::ParsedToolCall {
-                                tool_name: tc.name,
+                                tool_name: tc
+                                    .name
+                                    .strip_prefix("call:")
+                                    .unwrap_or(&tc.name)
+                                    .to_string(),
                                 arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(
                                     |_| serde_json::Value::Object(Default::default()),
                                 ),
