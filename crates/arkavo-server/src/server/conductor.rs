@@ -677,7 +677,9 @@ mod tests {
 }
 
 /// Use the smallest loaded model to assess whether a task needs decomposition.
-/// Falls back to the heuristic classifier on timeout or model unavailability.
+/// Returns true only when the model explicitly says MULTI — defaults to SINGLE
+/// on ambiguity, timeout, or error (false negatives are cheap, false positives
+/// cause 80+ second decomposition overhead).
 async fn assess_complexity_with_model(
     router: &Arc<arkavo_router::Router>,
     task_content: &str,
@@ -690,8 +692,11 @@ async fn assess_complexity_with_model(
     };
 
     let prompt = format!(
-        "Is this a single task or multiple independent tasks that need separate planning?\n\
-         Reply SINGLE or MULTI, nothing else.\n\n\
+        "Does this require breaking into SEPARATE INDEPENDENT subtasks that \
+         could be planned in isolation? A single task with multiple steps \
+         (like 'register then observe then act') is SINGLE. Only say MULTI \
+         if there are truly independent goals.\n\
+         Reply SINGLE or MULTI.\n\n\
          Task: {snippet}"
     );
 
@@ -705,21 +710,22 @@ async fn assess_complexity_with_model(
     {
         Ok(Ok(response)) => {
             let answer = response.content.to_lowercase();
-            let is_multi = answer.contains("multi");
-            debug!(
+            let is_multi = answer.contains("multi") && !answer.contains("single");
+            info!(
                 answer = %response.content.trim(),
                 is_multi,
+                task_len = task_content.len(),
                 "LLM complexity assessment"
             );
             is_multi
         }
         Ok(Err(e)) => {
-            debug!("Complexity model error, falling back to heuristic: {e}");
-            arkavo_router::classifier::Classification::detect_complexity(task_content).0
+            info!("Complexity model error, defaulting to SINGLE: {e}");
+            false
         }
         Err(_) => {
-            debug!("Complexity model timeout (10s), falling back to heuristic");
-            arkavo_router::classifier::Classification::detect_complexity(task_content).0
+            info!("Complexity model timeout (10s), defaulting to SINGLE");
+            false
         }
     }
 }
