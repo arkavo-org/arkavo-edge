@@ -29,11 +29,14 @@ pub(crate) fn detail_level_for_model(
         ModelChoice::LocalQwen3 | ModelChoice::LocalGemma270M => {
             arkavo_mcp_tools::DetailLevel::NameOnly
         }
-        ModelChoice::LocalMinistral3B
+        ModelChoice::LocalGemma4E2B
+        | ModelChoice::LocalMinistral3B
         | ModelChoice::LocalGemma4B
         | ModelChoice::LocalGemma12B
         | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
-        ModelChoice::LocalMinistral8B
+        ModelChoice::LocalGemma4E4B
+        | ModelChoice::LocalGemma4_26B
+        | ModelChoice::LocalMinistral8B
         | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalGlm47Flash

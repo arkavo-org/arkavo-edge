@@ -611,8 +611,11 @@ fn discover_cached_models() -> Vec<String> {
     // All local models in the production registry, ordered smallest → largest
     let candidates = [
         ModelChoice::LocalQwen3,
+        ModelChoice::LocalGemma4E2B,
         ModelChoice::LocalMinistral3B,
+        // ModelChoice::LocalGemma4E4B, // non-lazy grammar not supported yet (1/8)
         ModelChoice::LocalGlm47Flash,
+        ModelChoice::LocalGemma4_26B,
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_9B,
         ModelChoice::LocalQwen35_27B,

@@ -65,6 +65,11 @@ impl ModelSelector {
             ModelChoice::LocalQwen35_9B => "9B dense reasoning (4s), zero cost, good quality",
             ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
+            ModelChoice::LocalGemma4E2B => "Gemma 4 edge (1s), zero cost, vision, 2.3B active",
+            ModelChoice::LocalGemma4E4B => "Gemma 4 edge (2s), zero cost, vision, 4.5B active",
+            ModelChoice::LocalGemma4_26B => {
+                "Gemma 4 MoE (8s), zero cost, vision, 4B active/26B total, 128 experts"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",

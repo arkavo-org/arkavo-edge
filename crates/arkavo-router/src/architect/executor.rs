@@ -270,6 +270,10 @@ impl ArchitectExecutor {
             ModelChoice::LocalQwen35_9B => ModelChoice::LocalQwen35_27B,
             ModelChoice::LocalQwen35_27B => ModelChoice::LocalGlm47Flash,
             ModelChoice::LocalGlm47Flash => ModelChoice::GeminiFlash,
+            // Gemma 4 escalation path
+            ModelChoice::LocalGemma4E2B => ModelChoice::LocalGemma4E4B,
+            ModelChoice::LocalGemma4E4B => ModelChoice::LocalMinistral8B,
+            ModelChoice::LocalGemma4_26B => ModelChoice::GeminiFlash,
             // Legacy Gemma escalation path
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::GeminiFlash,

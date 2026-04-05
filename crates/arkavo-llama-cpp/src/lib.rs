@@ -60,6 +60,8 @@ static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 pub enum ModelFormat {
     /// Gemma-3 format: <start_of_turn>user\n...<end_of_turn>
     Gemma3,
+    /// Gemma-4 format: same base template as Gemma-3, tool-call extensions via GGUF Jinja
+    Gemma4,
     /// Mistral V3 format: [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] [INST]...[/INST]
     MistralV3,
     /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
@@ -78,6 +80,8 @@ pub fn detect_model_format(model_name: &str) -> ModelFormat {
         ModelFormat::Qwen3
     } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
+    } else if name_lower.contains("gemma-4") || name_lower.contains("gemma4") {
+        ModelFormat::Gemma4
     } else if name_lower.contains("gemma") {
         ModelFormat::Gemma3
     } else {
@@ -711,7 +715,7 @@ pub fn apply_chat_template_with_format(
     format: ModelFormat,
 ) -> Result<Vec<u8>, String> {
     let template = match format {
-        ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
+        ModelFormat::Gemma3 | ModelFormat::Gemma4 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
         ModelFormat::Qwen3 => QWEN3_TEMPLATE,
         ModelFormat::GLM4 => GLM4_TEMPLATE,
@@ -798,6 +802,97 @@ pub struct ChatResult {
     pub thinking_forced_open: bool,
     pub grammar_triggers: Vec<GrammarTrigger>,
     pub additional_stops: Vec<String>,
+    /// Chat format enum from llama.cpp (for output parsing)
+    pub format: i32,
+    /// Serialized PEG parser string (for output parsing)
+    pub parser_str: Option<String>,
+    /// Generation prompt for non-lazy grammar prefilling
+    pub generation_prompt: Option<String>,
+}
+
+/// Parsed tool call from llama.cpp's native output parser
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone)]
+pub struct ParsedToolCall {
+    pub name: String,
+    pub arguments: String,
+    pub id: String,
+}
+
+/// Parse model output using llama.cpp's built-in PEG parser.
+/// Supports Gemma 4, Mistral, Hermes, and other native tool-call formats.
+#[cfg(not(target_env = "musl"))]
+pub fn parse_tool_calls(
+    output: &str,
+    format: i32,
+    parser_str: Option<&str>,
+) -> (String, Option<String>, Vec<ParsedToolCall>) {
+    let c_output = CString::new(output).unwrap_or_default();
+    let c_parser = parser_str.and_then(|s| CString::new(s).ok());
+    let parser_ptr = c_parser.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+
+    let mut result = unsafe { ffi::arkavo_chat_parse(c_output.as_ptr(), format, parser_ptr, 0) };
+
+    let content = if result.content.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(result.content) }
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let reasoning = if result.reasoning_content.is_null() {
+        None
+    } else {
+        let s = unsafe { std::ffi::CStr::from_ptr(result.reasoning_content) }
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    };
+
+    let mut tool_calls = Vec::new();
+    for i in 0..result.num_tool_calls {
+        let tc = unsafe { &*result.tool_calls.add(i as usize) };
+        let name = if tc.name.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.name) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        let arguments = if tc.arguments.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.arguments) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        let id = if tc.id.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.id) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        tool_calls.push(ParsedToolCall {
+            name,
+            arguments,
+            id,
+        });
+    }
+
+    unsafe { ffi::arkavo_chat_parse_result_free(&mut result) };
+
+    (content, reasoning, tool_calls)
 }
 
 /// Tool definition for template rendering
@@ -1013,6 +1108,35 @@ impl ChatTemplates {
             }
         }
 
+        // Extract format, parser string, and generation prompt for output parsing
+        let format = result.format;
+        let parser_str = if result.parser_str.is_null() {
+            None
+        } else {
+            let s = unsafe { std::ffi::CStr::from_ptr(result.parser_str) }
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+        let generation_prompt = if result.generation_prompt.is_null() {
+            None
+        } else {
+            let s = unsafe { std::ffi::CStr::from_ptr(result.generation_prompt) }
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
         let chat_result = ChatResult {
             prompt,
             grammar,
@@ -1020,6 +1144,9 @@ impl ChatTemplates {
             thinking_forced_open: result.thinking_forced_open != 0,
             grammar_triggers,
             additional_stops,
+            format,
+            parser_str,
+            generation_prompt,
         };
 
         // Free the C-allocated result
@@ -1871,6 +1998,14 @@ mod tests {
             detect_model_format("google/gemma-3-27b-it"),
             ModelFormat::Gemma3
         );
+        assert_eq!(detect_model_format("gemma-4-E4B-it"), ModelFormat::Gemma4);
+        assert_eq!(detect_model_format("gemma-4-E2B-it"), ModelFormat::Gemma4);
+        assert_eq!(
+            detect_model_format("unsloth/gemma-4-26B-A4B-it-GGUF"),
+            ModelFormat::Gemma4
+        );
+        assert_eq!(detect_model_format("gemma-4-31B-it"), ModelFormat::Gemma4);
+        assert_eq!(detect_model_format("gemma4-e4b"), ModelFormat::Gemma4);
     }
 
     #[spec("LLAMA-006")]
