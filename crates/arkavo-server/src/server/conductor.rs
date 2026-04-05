@@ -394,8 +394,19 @@ pub async fn execute_with_conductor_and_learning(
 
     // Build messages: single System (merged) → User (task)
     // Qwen3.5 and other models require exactly one system message at the start.
-    // When existing_messages is provided, skip construction and use them directly.
-    let messages = if let Some(existing) = existing_messages {
+    // When existing_messages is provided, use them but inject learning guidance
+    // into the last user message (which is the cycle prompt).
+    let messages = if let Some(mut existing) = existing_messages {
+        // Find the last user message and augment it with learning guidance
+        if augmented_content != task_content {
+            if let Some(last_user) = existing
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == arkavo_llm::Role::User)
+            {
+                last_user.content = augmented_content;
+            }
+        }
         existing
     } else {
         let mut messages = Vec::new();

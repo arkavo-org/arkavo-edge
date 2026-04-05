@@ -21,8 +21,510 @@ pub struct AgentLoopConfig {
     pub orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     pub has_mcp_tools: bool,
     pub tool_loop_budget: Option<u32>,
+    pub total_ram_bytes: u64,
+    pub self_agent_id: String,
+    pub commander_model: String,
+    pub agent_mode: arkavo_protocol::agent_config::AgentMode,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+}
+
+// --- Pending message drain helper ---
+
+fn drain_pending_messages(
+    pending: &mut Vec<super::agent_event::PendingMessage>,
+    cycle_id: super::agent_event::CycleId,
+) -> (
+    String,
+    Vec<(
+        tokio::sync::oneshot::Sender<super::agent_event::CycleReceipt>,
+        super::agent_event::CycleReceipt,
+    )>,
+) {
+    let mut block = String::new();
+    let mut receipts = Vec::new();
+    for mut msg in pending.drain(..) {
+        if !block.is_empty() {
+            block.push('\n');
+        }
+        block.push_str(&msg.content);
+        if let Some(reply) = msg.reply.take() {
+            receipts.push((
+                reply,
+                super::agent_event::CycleReceipt {
+                    cycle_id,
+                    correlation_id: msg.correlation_id,
+                    disposition: super::agent_event::MessageDisposition::Incorporated { cycle_id },
+                },
+            ));
+        }
+    }
+    (block, receipts)
+}
+
+// --- Main event loop ---
+
+/// Runs the unified agent orchestrator loop with a `tokio::select!` event loop.
+///
+/// Replaces the inline loop body from `a2a_server.rs` with a proper event-driven
+/// architecture. A2A messages arrive via `agent_event_rx`, tick-based cycles
+/// drive the orchestrator, and conversation history persists across cycles.
+#[allow(clippy::too_many_lines)]
+pub async fn run_agent_loop(
+    config: AgentLoopConfig,
+    mut agent_event_rx: tokio::sync::mpsc::Receiver<super::agent_event::AgentEvent>,
+) {
+    use super::agent_event::{AgentEvent, CycleId, MessagePriority, PendingMessage};
+    use std::sync::atomic::Ordering::Relaxed;
+
+    // --- State initialization ---
+
+    let mut cycle: u64 = 0;
+    let mut consecutive_no_action_cycles: u32 = 0;
+    let mut last_broadcast_cycle: u64 = 0;
+    let mut consecutive_timeouts: u32 = 0;
+    let mut last_cycle_prompt_hash: u64 = 0;
+    let mut consecutive_duplicate_prompts: u32 = 0;
+
+    // Token estimator: use real tokenizer when llama.cpp is available
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    let estimator: Arc<dyn crate::server::token_estimator::TokenEstimator> = {
+        match config.router.any_loaded_model() {
+            Some(model) => Arc::new(crate::server::token_estimator::LlamaTokenEstimator::new(
+                model,
+            )),
+            None => Arc::new(crate::server::token_estimator::MockEstimator),
+        }
+    };
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    let estimator: Arc<dyn crate::server::token_estimator::TokenEstimator> =
+        Arc::new(crate::server::token_estimator::MockEstimator);
+
+    let min_context = config.router.min_feasible_context_size();
+    let mut conversation =
+        crate::server::conversation_window::ConversationWindow::new(min_context, estimator);
+    conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
+    let mut pending_messages: Vec<PendingMessage> = Vec::new();
+
+    // Adaptive tick interval
+    let mut cycle_interval_secs: u64 = 5;
+    let mut tick_interval =
+        tokio::time::interval(std::time::Duration::from_secs(cycle_interval_secs));
+    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    if config.agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
+        info!("Specialist mode: proactive advisory loop with mesh tools");
+    }
+
+    // --- Select loop ---
+
+    loop {
+        tokio::select! {
+            _ = tick_interval.tick() => {
+                // === TICK BRANCH: Execute one orchestrator cycle ===
+                cycle += 1;
+                config.orchestrator_tick.store(cycle, Relaxed);
+
+                if config.purpose.is_empty() {
+                    continue;
+                }
+
+                // 1. Budget gate (specialists only)
+                if !config.has_mcp_tools {
+                    let budget = config.compute_budget.read().await;
+                    let snapshot = budget.snapshot();
+                    if !snapshot.has_remaining {
+                        drop(budget);
+                        continue;
+                    }
+                }
+
+                // 2. Drain gossip completions into specialist_context
+                if let Some(ref bus) = config.learning_bus {
+                    for notice in bus.drain_task_completions().await {
+                        let budget_snapshot = notice
+                            .budget_snapshot
+                            .and_then(|v| serde_json::from_value(v).ok());
+                        config
+                            .mesh_state
+                            .push_completed(
+                                &notice.task_id,
+                                arkavo_mcp_mesh::CompletedDelegation {
+                                    agent_id: notice.specialist_id,
+                                    response: notice.content,
+                                    response_latency_ms: notice.completion_ms,
+                                    budget_snapshot,
+                                },
+                            )
+                            .await;
+                    }
+                }
+
+                let completed = config.mesh_state.collect_completed().await;
+
+                for c in &completed {
+                    if let Some(ref snap) = c.budget_snapshot
+                        && (snap.status == "exhausted" || snap.status == "passive")
+                    {
+                        info!(
+                            agent_id = %c.agent_id,
+                            status = %snap.status,
+                            remaining_inferences = snap.remaining_inferences,
+                            "Specialist budget {} — skipping broadcast this cycle",
+                            snap.status
+                        );
+                    }
+                }
+
+                let specialist_context = if completed.is_empty() {
+                    String::new()
+                } else {
+                    use std::fmt::Write as _;
+                    let mut ctx =
+                        String::from("\n\n## Specialist Responses (ready — EXECUTE these now)\n");
+                    for c in &completed {
+                        let _ = write!(
+                            ctx,
+                            "### From {} specialist ({}ms):\n{}\n\n",
+                            c.agent_id, c.response_latency_ms, c.response
+                        );
+                    }
+                    ctx.push_str(
+                        "IMPORTANT: The above specialist advice is ready. \
+                         Skip CONSULT/MONITOR steps and go straight to EXECUTE \
+                         Execute the recommended actions NOW.\n",
+                    );
+                    info!(
+                        "Injecting {} specialist response(s) into cycle prompt",
+                        completed.len()
+                    );
+                    ctx
+                };
+
+                // 3. Drain pending_messages into message block + send CycleReceipts
+                let (message_block, receipts) =
+                    drain_pending_messages(&mut pending_messages, CycleId(cycle));
+                for (sender, receipt) in receipts {
+                    let _ = sender.send(receipt);
+                }
+
+                // 4. Build control signals from ToolMemory (Phase 2: keep format_for_prompt)
+                let memory_guard = config.agent_memory.read().await;
+                let recent_actions = memory_guard.format_for_prompt();
+                let variety_warning = memory_guard.action_variety_warning();
+                let error_corrections = memory_guard.format_errors_for_prompt();
+                let memory_entry_count = memory_guard.entry_count();
+                drop(memory_guard);
+                if memory_entry_count > 0 {
+                    info!(
+                        memory_entries = memory_entry_count,
+                        recent_actions_len = recent_actions.len(),
+                        "Tool memory state for cycle {cycle}"
+                    );
+                }
+
+                // 5. Assemble cycle prompt
+                let dead_man_warning = match consecutive_no_action_cycles {
+                    3..=4 => "\n\nWARNING: You have NOT taken any action for 3 cycles. \
+                              You MUST take an action NOW. \
+                              Pick the most urgent alert and act on it.\n"
+                        .to_string(),
+                    5.. => {
+                        let mem_guard = config.agent_memory.read().await;
+                        let recent_types = mem_guard.recent_action_types();
+                        drop(mem_guard);
+                        let avoid = if recent_types.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " You have been repeating: {}. Try a DIFFERENT action type.",
+                                recent_types.join(", ")
+                            )
+                        };
+                        format!(
+                            "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_cycles}+ cycles.{avoid} \
+                             Read the alerts and pick the MOST URGENT need. \
+                             Take an action NOW.\n"
+                        )
+                    }
+                    _ => String::new(),
+                };
+
+                let cycle_prompt = if cycle == 1 {
+                    if message_block.is_empty() {
+                        "Begin your startup workflow now.".to_string()
+                    } else {
+                        format!("Begin your startup workflow now.\n\n{message_block}")
+                    }
+                } else {
+                    let msg_section = if message_block.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n## Incoming Messages\n{message_block}")
+                    };
+                    format!(
+                        "{recent_actions}{variety_warning}{error_corrections}\
+                         {specialist_context}{dead_man_warning}{msg_section}\n\n\
+                         Cycle {cycle}. Follow your WORKFLOW.",
+                    )
+                };
+
+                // 6. Duplicate prompt detection
+                let prompt_hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    recent_actions.hash(&mut hasher);
+                    specialist_context.hash(&mut hasher);
+                    error_corrections.hash(&mut hasher);
+                    message_block.hash(&mut hasher);
+                    consecutive_no_action_cycles.min(5).hash(&mut hasher);
+                    hasher.finish()
+                };
+                if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
+                    consecutive_duplicate_prompts += 1;
+                    if consecutive_duplicate_prompts % 5 != 0 {
+                        info!(
+                            "Agent cycle {cycle}: skipping duplicate prompt \
+                             ({consecutive_duplicate_prompts} consecutive, \
+                             no action for {consecutive_no_action_cycles} cycles)"
+                        );
+                        continue;
+                    }
+                } else {
+                    consecutive_duplicate_prompts = 0;
+                }
+                last_cycle_prompt_hash = prompt_hash;
+
+                // 7. Push user message to ConversationWindow (unconditionally)
+                conversation.push(arkavo_llm::Message::user(&cycle_prompt));
+
+                // 8. Build messages via conversation.build_messages()
+                let messages = conversation.build_messages(None);
+
+                info!(
+                    "Agent cycle {cycle}: executing (history_len={})",
+                    conversation.history_len()
+                );
+                let start = std::time::Instant::now();
+
+                // 9. Execute via conductor with Some(messages)
+                let tool_loop_budget = if config.has_mcp_tools {
+                    None
+                } else {
+                    Some(&config.compute_budget)
+                };
+                match super::conductor::execute_with_conductor_and_learning(
+                    &config.conductor,
+                    &config.router,
+                    &config.mcp_registry,
+                    cycle_prompt.clone(),
+                    None,
+                    None,
+                    config.learning_bus.as_ref(),
+                    Some(&config.agent_memory),
+                    Some(config.purpose.as_str()), // in messages too, but needed for classification_content hint
+                    Some(&config.mesh_state),
+                    config.model_hint.as_ref(),
+                    None,
+                    tool_loop_budget,
+                    Some(messages),
+                    #[cfg(feature = "iroh")]
+                    config.iroh_node.as_ref(),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        let elapsed = start.elapsed();
+
+                        // 10. Push assistant response (on success only)
+                        conversation.push(arkavo_llm::Message::assistant(&result));
+
+                        // 11. Update timeout/action tracking
+                        let memory_guard = config.agent_memory.read().await;
+                        let had_action = memory_guard.had_meaningful_action();
+
+                        // 13. State broadcast every 3 cycles
+                        if cycle - last_broadcast_cycle >= 3 {
+                            let mesh = config.mesh_state.clone();
+                            let data = memory_guard
+                                .last_observe_full()
+                                .map(|v| v.to_string())
+                                .unwrap_or_default();
+                            let cmd_model = config.commander_model.clone();
+                            let own_id = config.self_agent_id.clone();
+                            let total_ram = config.total_ram_bytes;
+                            #[cfg(feature = "iroh")]
+                            let iroh_for_broadcast = config.iroh_node.clone();
+                            tokio::spawn(async move {
+                                mesh.discover_peers().await;
+                                let peer_count = mesh.agent_addresses.read().await.len();
+                                info!(
+                                    peer_count,
+                                    data_len = data.len(),
+                                    "Broadcast check: peers={peer_count}, data_len={}",
+                                    data.len()
+                                );
+                                let per_agent_bytes = compute_per_agent_bytes_static(
+                                    total_ram,
+                                    &cmd_model,
+                                    peer_count,
+                                );
+                                if !data.is_empty() {
+                                    #[cfg(feature = "iroh")]
+                                    let iroh_ticket = if data.len() > 4000 {
+                                        stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
+                                    } else {
+                                        None
+                                    };
+                                    #[cfg(not(feature = "iroh"))]
+                                    let iroh_ticket: Option<String> = None;
+
+                                    broadcast_state_to_peers(
+                                        &mesh,
+                                        &data,
+                                        per_agent_bytes,
+                                        &own_id,
+                                        iroh_ticket.as_deref(),
+                                    )
+                                    .await;
+                                } else {
+                                    info!("No observation data — refreshing budgets only");
+                                    refresh_specialist_budgets(&mesh, per_agent_bytes, &own_id)
+                                        .await;
+                                }
+                            });
+                            last_broadcast_cycle = cycle;
+                        }
+                        drop(memory_guard);
+
+                        if had_action {
+                            consecutive_no_action_cycles = 0;
+                            consecutive_duplicate_prompts = 0;
+                        } else {
+                            consecutive_no_action_cycles += 1;
+                            if consecutive_no_action_cycles >= 3 {
+                                warn!(
+                                    "Dead-man's switch: {} consecutive ticks without meaningful action",
+                                    consecutive_no_action_cycles
+                                );
+                            }
+                        }
+
+                        // 12. Degenerate reset (8+ no-action cycles)
+                        if consecutive_no_action_cycles >= 8 {
+                            warn!(
+                                "Context reset: {} ticks without action — clearing short-term memory",
+                                consecutive_no_action_cycles
+                            );
+                            let mut mem = config.agent_memory.write().await;
+                            mem.clear();
+                            drop(mem);
+                            conversation.clear_history();
+                            conversation.set_system_message(arkavo_llm::Message::system(
+                                &config.purpose,
+                            ));
+                            consecutive_no_action_cycles = 0;
+                            consecutive_duplicate_prompts = 0;
+
+                            if let Some(ref bus) = config.learning_bus {
+                                bus.add_fast_lesson(
+                                    "orchestrator",
+                                    "8 consecutive ticks produced no meaningful action. \
+                                     The conversation context may be stale. On the next cycle, \
+                                     observe the current state first, \
+                                     then pick ONE concrete action from the most urgent need.",
+                                )
+                                .await;
+                            }
+                        }
+
+                        // Adaptive cycle interval
+                        let elapsed_secs = elapsed.as_secs();
+                        if elapsed_secs >= 60 {
+                            consecutive_timeouts += 1;
+                        } else if elapsed_secs >= 30 {
+                            consecutive_timeouts = consecutive_timeouts.saturating_sub(1);
+                        } else {
+                            consecutive_timeouts = 0;
+                        }
+
+                        info!(
+                            "Agent cycle {cycle} completed in {:.1}s: {} chars",
+                            elapsed.as_secs_f64(),
+                            result.len(),
+                        );
+                    }
+                    Err(e) => {
+                        // User msg already pushed (step 7), no assistant response
+                        consecutive_no_action_cycles += 1;
+                        consecutive_timeouts += 1;
+                        warn!("Agent cycle {cycle} failed: {e}");
+                    }
+                }
+
+                // 14. Update adaptive interval (only when changed)
+                let new_interval = match consecutive_timeouts {
+                    0 => 5,
+                    1 => 15,
+                    2 => 30,
+                    _ => 60,
+                };
+                if new_interval != cycle_interval_secs {
+                    cycle_interval_secs = new_interval;
+                    tick_interval =
+                        tokio::time::interval(std::time::Duration::from_secs(cycle_interval_secs));
+                    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                }
+                info!(consecutive_timeouts, cycle_interval_secs, "Next cycle interval");
+            }
+            Some(event) = agent_event_rx.recv() => {
+                // === EVENT BRANCH: Route incoming messages to pending_messages ===
+                match event {
+                    AgentEvent::IncomingMessage {
+                        sender,
+                        content,
+                        task_id,
+                        correlation_id,
+                        reply,
+                    } => {
+                        pending_messages.push(PendingMessage {
+                            content: format!(
+                                "[msg correlation_id={} from={}] {}",
+                                correlation_id.0, sender, content
+                            ),
+                            task_id: Some(task_id),
+                            correlation_id,
+                            reply: Some(reply),
+                            priority: MessagePriority::Normal,
+                        });
+                        tick_interval.reset();
+                    }
+                    AgentEvent::HumanOverride {
+                        instruction,
+                        correlation_id,
+                        reply,
+                    } => {
+                        pending_messages.insert(
+                            0,
+                            PendingMessage {
+                                content: format!(
+                                    "[msg correlation_id={} from=human] {}",
+                                    correlation_id.0, instruction
+                                ),
+                                task_id: None,
+                                correlation_id,
+                                reply: Some(reply),
+                                priority: MessagePriority::Override,
+                            },
+                        );
+                        tick_interval.reset();
+                    }
+                    AgentEvent::Shutdown => break,
+                }
+            }
+        }
+    }
+    info!("Agent loop exiting");
 }
 
 // --- Urgency detection ---
