@@ -830,7 +830,7 @@ pub const MAX_TOOL_CALLS_PER_INFERENCE: usize = 10;
 pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
     if calls.len() > MAX_TOOL_CALLS_PER_INFERENCE {
         eprintln!(
-            "⚠ Truncating degenerate tool call batch: {} -> {}",
+            "[WARN] Truncating degenerate tool call batch: {} -> {}",
             calls.len(),
             MAX_TOOL_CALLS_PER_INFERENCE
         );
