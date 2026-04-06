@@ -11,7 +11,7 @@ purpose: |
   If reward is very negative or all colonists are dead, call episodeSummary,
   publish the summary with iroh_stage, then call reset to start a new episode.
 
-model: qwen3.5-27b
+model: gemma-4-26b-a4b
 action_interval: 120
 listen: 0.0.0.0:8401
 mdns: true

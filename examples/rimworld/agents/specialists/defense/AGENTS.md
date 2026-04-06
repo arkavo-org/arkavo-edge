@@ -7,7 +7,7 @@ purpose: |
   Focus on threats, combat, fortification, and fire response.
 
 mode: specialist
-model: qwen3.5-9b
+model: gemma-4-26b-a4b
 listen: 0.0.0.0:8412
 mdns: true
 

@@ -7,7 +7,7 @@ purpose: |
   Focus on production, construction, research, and resource management.
 
 mode: specialist
-model: qwen3.5-9b
+model: gemma-4-26b-a4b
 listen: 0.0.0.0:8411
 mdns: true
 

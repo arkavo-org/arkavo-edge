@@ -7,7 +7,7 @@ purpose: |
   Focus on food, health, mood, temperature, and colonist wellbeing.
 
 mode: specialist
-model: qwen3.5-9b
+model: gemma-4-26b-a4b
 listen: 0.0.0.0:8410
 mdns: true
 

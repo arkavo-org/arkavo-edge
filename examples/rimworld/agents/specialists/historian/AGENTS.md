@@ -7,7 +7,7 @@ purpose: |
   If no clear pattern exists, respond with: NO_LESSON
 
 mode: specialist
-model: qwen3.5-9b
+model: gemma-4-26b-a4b
 listen: 0.0.0.0:8413
 mdns: true
 
