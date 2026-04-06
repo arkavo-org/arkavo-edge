@@ -262,16 +262,22 @@ async fn planner_track(
         .await
         {
             Ok(Some(feedback)) => {
+                // Merge feedback into a single user message to maintain
+                // alternating user/assistant roles (required by Gemma/Llama templates)
+                let mut feedback_text = String::new();
                 if !feedback.distilled_results.is_empty() {
-                    messages.push(arkavo_llm::Message::user(format!(
-                        "Previous results:\n{}",
-                        feedback.distilled_results
-                    )));
+                    feedback_text.push_str("Previous results:\n");
+                    feedback_text.push_str(&feedback.distilled_results);
                 }
                 if feedback.should_replan {
-                    messages.push(arkavo_llm::Message::user(
-                        "Previous actions had negative results. Adjust strategy.".to_string(),
-                    ));
+                    if !feedback_text.is_empty() {
+                        feedback_text.push_str("\n\n");
+                    }
+                    feedback_text
+                        .push_str("Previous actions had negative results. Adjust strategy.");
+                }
+                if !feedback_text.is_empty() {
+                    messages.push(arkavo_llm::Message::user(feedback_text));
                 }
             }
             Ok(None) => {
