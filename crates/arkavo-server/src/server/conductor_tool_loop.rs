@@ -743,29 +743,134 @@ pub(super) async fn distill_with_small_model(
 
 /// Condense a single tool result to fit within a character budget.
 ///
-/// Extracts the `"Delta"` section from the **full raw** result before truncating,
-/// so game state changes are preserved even from very large observations (e.g. 116K).
+/// First extracts actionable entities (colonist names, IDs, alerts) from the
+/// full result and prepends them as a structured preamble. Then extracts the
+/// `"Delta"` section for state changes. The model gets entity names it can
+/// use directly in subsequent tool calls without parsing raw JSON.
 pub(super) fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize) -> String {
     let prefix = format!("Tool {tool_name}: ");
     let budget = max_chars.saturating_sub(prefix.len());
+
+    // Always extract actionable entities — even small results may contain
+    // entity names in error messages that the model needs for next calls
+    let preamble = extract_entities(raw);
+
     if raw.len() <= budget {
-        return format!("{prefix}{raw}");
+        if preamble.is_empty() {
+            return format!("{prefix}{raw}");
+        }
+        return format!("{prefix}{preamble}\n{raw}");
     }
+
     // Extract Delta from the FULL raw result before any truncation
-    if let Some(delta_start) = raw.find("\"Delta\":{") {
+    let delta_section = if let Some(delta_start) = raw.find("\"Delta\":{") {
         let subset = &raw[delta_start..];
-        if let Some(end) = find_matching_brace(subset) {
-            let delta = &subset[..=end];
-            if delta.len() <= budget {
-                return format!("{prefix}{{{delta}}}");
+        find_matching_brace(subset).map(|end| format!("{{{}}}", &subset[..=end]))
+    } else {
+        None
+    };
+
+    // Build result: preamble + delta (or truncated raw)
+    let content_budget = budget.saturating_sub(preamble.len());
+    let body = if let Some(ref delta) = delta_section {
+        if delta.len() <= content_budget {
+            delta.clone()
+        } else {
+            format!(
+                "{}...(truncated)",
+                &raw[..content_budget.saturating_sub(20).min(raw.len())]
+            )
+        }
+    } else {
+        format!(
+            "{}...(truncated {} total chars)",
+            &raw[..content_budget.saturating_sub(40).min(raw.len())],
+            raw.len()
+        )
+    };
+
+    if preamble.is_empty() {
+        format!("{prefix}{body}")
+    } else {
+        format!("{prefix}{preamble}\n{body}")
+    }
+}
+
+/// Extract actionable entities from a tool result.
+/// Uses generic patterns that work across any MCP server:
+/// - Named entity lists in brackets: ['A', 'B', 'C']
+/// - Alert/label fields with severity
+/// - Reward signals
+fn extract_entities(raw: &str) -> String {
+    let mut parts = Vec::new();
+
+    // Extract entity names from bracketed lists.
+    // Handles both raw JSON (['A', 'B']) and escaped JSON ([\'A\', \'B\'])
+    // which occurs in double-encoded MCP results.
+    let unescaped;
+    let search_str = if raw.contains("\\'") || raw.contains("\\\"") {
+        unescaped = raw.replace("\\'", "'").replace("\\\"", "\"");
+        &unescaped
+    } else {
+        raw
+    };
+    if let Some(start) = search_str.find("['") {
+        if let Some(end) = search_str[start..].find(']') {
+            let names_str = &search_str[start + 1..start + end];
+            let names: Vec<&str> = names_str
+                .split(',')
+                .map(|s| s.trim().trim_matches('\'').trim_matches('"').trim())
+                .filter(|s| !s.is_empty() && s.len() > 1)
+                .collect();
+            if !names.is_empty() {
+                parts.push(format!("Available entities: {}", names.join(", ")));
             }
         }
     }
-    format!(
-        "{prefix}{}...(truncated {} total chars)",
-        &raw[..budget.saturating_sub(40).min(raw.len())],
-        raw.len()
-    )
+
+    // Extract alerts
+    let mut alerts = Vec::new();
+    let mut search = raw;
+    while let Some(pos) = search.find("\"Label\":\"") {
+        let label_start = pos + 9;
+        if let Some(label_end) = search[label_start..].find('"') {
+            let label = &search[label_start..label_start + label_end];
+            // Get severity if nearby
+            let nearby = &search[pos..search.len().min(pos + 100)];
+            let severity = if let Some(s) = nearby.find("\"Severity\":") {
+                nearby[s + 11..].chars().next().and_then(|c| c.to_digit(10))
+            } else {
+                None
+            };
+            let alert = match severity {
+                Some(s) => format!("{label} (sev {s})"),
+                None => label.to_string(),
+            };
+            if !alerts.contains(&alert) {
+                alerts.push(alert);
+            }
+            search = &search[label_start + label_end..];
+        } else {
+            break;
+        }
+    }
+    if !alerts.is_empty() {
+        parts.push(format!("Alerts: {}", alerts.join(", ")));
+    }
+
+    // Extract reward
+    if let Some(pos) = raw.find("\"Reward\":") {
+        let num_start = pos + 9;
+        let num_str: String = raw[num_start..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        if let Ok(reward) = num_str.parse::<f64>() {
+            parts.push(format!("Reward: {reward:.2}"));
+        }
+    }
+
+    parts.join(" | ")
 }
 
 /// Summarize tool results to fit within a per-tool character budget.

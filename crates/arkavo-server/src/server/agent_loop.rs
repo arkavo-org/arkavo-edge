@@ -152,6 +152,8 @@ pub async fn run_agent_loop(
         tokio::select! {
             _ = tick_interval.tick() => {
                 // === TICK BRANCH: Execute one orchestrator cycle ===
+                // Gate notifications for the entire cycle, not just the conductor call
+                config.inference_active.store(true, std::sync::atomic::Ordering::SeqCst);
                 cycle += 1;
                 config.orchestrator_tick.store(cycle, Relaxed);
 
@@ -340,7 +342,6 @@ pub async fn run_agent_loop(
                 } else {
                     Some(&config.compute_budget)
                 };
-                config.inference_active.store(true, std::sync::atomic::Ordering::SeqCst);
                 match super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,

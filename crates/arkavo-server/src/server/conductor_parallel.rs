@@ -147,7 +147,7 @@ async fn planner_track(
 
     let model_ctx = super::rlm_bridge::model_context_size(model_hint.map(|h| h.name()), false);
 
-    for plan_round in 0..3 {
+    for plan_round in 0..1 {
         // Consume any judge feedback from previous round
         while let Ok(feedback) = feedback_rx.try_recv() {
             if !feedback.distilled_results.is_empty() {
@@ -458,7 +458,8 @@ async fn judge_track(
             has_negative_reward = true;
         }
 
-        // Condense large results: try structural first (free), LLM fallback
+        // Condense results: always run through condense_tool_result for entity
+        // extraction (names, alerts, rewards), even for small results.
         let distilled = if exec_result.result.len() > 1500 {
             // Structural condensation: extracts Delta/diff sections, truncates
             let condensed = super::conductor_tool_loop::condense_tool_result(
@@ -492,7 +493,12 @@ async fn judge_track(
                 }
             }
         } else {
-            exec_result.result.clone()
+            // Small results: still run through condense for entity extraction preamble
+            super::conductor_tool_loop::condense_tool_result(
+                &exec_result.tool_name,
+                &exec_result.result,
+                800,
+            )
         };
 
         batch_results.push(format!(
