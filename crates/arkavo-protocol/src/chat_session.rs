@@ -389,6 +389,36 @@ impl ChatSessionManager {
         }
     }
 
+    /// Push a pre-built delta directly onto a session's broadcast channel.
+    /// Used for introspection responses (e.g. `@context`) that bypass LLM inference.
+    pub async fn push_system_delta(&self, session_id: &str, text: String) -> Result<()> {
+        let sessions = self.sessions.read().await;
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| A2aError::SessionNotFound(session_id.to_string()))?;
+
+        let delta = MessageDelta {
+            session_id: session_id.to_string(),
+            message_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 0,
+            delta: MessageDeltaContent::Text { text },
+            timestamp: chrono::Utc::now(),
+        };
+        let _ = state.delta_tx.send(delta);
+
+        let end = MessageDelta {
+            session_id: session_id.to_string(),
+            message_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            delta: MessageDeltaContent::StreamEnd {
+                reason: StreamEndReason::Complete,
+            },
+            timestamp: chrono::Utc::now(),
+        };
+        let _ = state.delta_tx.send(end);
+        Ok(())
+    }
+
     /// Get a receiver for session deltas
     #[instrument(skip(self), fields(session.id = %session_id))]
     pub async fn get_delta_stream(&self, session_id: &str) -> Option<mpsc::Receiver<MessageDelta>> {

@@ -27,6 +27,8 @@ pub struct AgentLoopConfig {
     pub agent_mode: arkavo_protocol::agent_config::AgentMode,
     /// Shared flag: set true during conductor inference to gate notification handler
     pub inference_active: Arc<std::sync::atomic::AtomicBool>,
+    /// Published snapshot of the ConversationWindow for @context introspection
+    pub context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
@@ -364,7 +366,32 @@ pub async fn run_agent_loop(
                         let elapsed = start.elapsed();
 
                         // 10. Push assistant response (on success only)
-                        conversation.push(arkavo_llm::Message::assistant(&result));
+                        // When the conductor returns empty text (tool-only response),
+                        // build a summary from ToolMemory so the ConversationWindow
+                        // retains what happened — enabling cross-cycle planning.
+                        let assistant_content = if result.is_empty() {
+                            let mem = config.agent_memory.read().await;
+                            mem.format_recent_for_context()
+                                .unwrap_or_default()
+                        } else {
+                            result.clone()
+                        };
+                        conversation
+                            .push(arkavo_llm::Message::assistant(&assistant_content));
+
+                        // Update context snapshot for @context introspection
+                        {
+                            let snapshot = conversation.snapshot_messages();
+                            let total_tokens = conversation.total_tokens_est();
+                            let budget_tokens = conversation.budget_tokens();
+                            let json = serde_json::json!({
+                                "cycle": cycle,
+                                "totalTokens": total_tokens,
+                                "budgetTokens": budget_tokens,
+                                "messages": snapshot,
+                            });
+                            *config.context_snapshot.write().await = Some(json);
+                        }
 
                         // 11. Update timeout/action tracking
                         let memory_guard = config.agent_memory.read().await;

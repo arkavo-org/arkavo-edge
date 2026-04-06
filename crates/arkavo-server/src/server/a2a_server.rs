@@ -76,6 +76,8 @@ pub struct A2aServer {
     /// Guard: true while the orchestrator cycle is running inference.
     /// Notification handler skips conductor calls when active to avoid GPU contention.
     inference_active: Arc<std::sync::atomic::AtomicBool>,
+    /// Published snapshot of the agent's ConversationWindow for @context introspection
+    context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     /// Shared Iroh P2P node for TDF blob transport (one per agent)
     #[cfg(feature = "iroh")]
     iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
@@ -125,6 +127,7 @@ impl A2aServer {
             mesh_state: Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
             agent_event_tx: Arc::new(tokio::sync::Mutex::new(None)),
             inference_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_snapshot: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
         }
@@ -1204,6 +1207,7 @@ impl A2aServer {
             #[cfg(feature = "kas")]
             tdf_offer_store: Arc::new(super::handlers::tdf_share::TdfOfferStore::new()),
             agent_event_tx: self.agent_event_tx.clone(),
+            context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node: self.iroh_node.read().await.clone(),
         };
@@ -1293,6 +1297,7 @@ impl A2aServer {
             commander_model,
             agent_mode,
             inference_active: self.inference_active.clone(),
+            context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
         };

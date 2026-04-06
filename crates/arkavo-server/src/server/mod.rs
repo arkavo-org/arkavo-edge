@@ -351,6 +351,8 @@ pub struct A2aRpcImpl {
     /// Shared via Arc<Mutex> so start_orchestrator_loop can set it after RPC construction.
     pub(crate) agent_event_tx:
         Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>>>,
+    /// Published snapshot of the agent's ConversationWindow for @context introspection
+    pub(crate) context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
@@ -562,6 +564,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.chat_sessions,
             self.router.as_ref(),
+            &self.context_snapshot,
             session_id,
             message,
         )
