@@ -275,8 +275,8 @@ pub async fn run_agent_loop(
                         };
                         format!(
                             "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_cycles}+ cycles.{avoid} \
-                             Read the alerts and pick the MOST URGENT need. \
-                             Take an action NOW.\n"
+                             Do NOT think or reason. Skip any thought blocks. \
+                             Immediately call ONE tool with concrete parameters.\n"
                         )
                     }
                     _ => String::new(),
@@ -290,11 +290,27 @@ pub async fn run_agent_loop(
                 let extra = format!(
                     "{specialist_context}{dead_man_warning}{msg_section}",
                 );
+                // Toolless agents are advisors — prevent circular thinking
+                let extra = if !config.has_mcp_tools && !extra.trim().is_empty() {
+                    format!("{extra}\n\nRespond in under 200 words. No reasoning preamble. Give actionable advice only.")
+                } else {
+                    extra
+                };
                 let cycle_prompt = if extra.trim().is_empty() {
                     "Continue.".to_string()
                 } else {
                     extra.trim().to_string()
                 };
+
+                // Skip empty cycles for toolless specialists — "Continue." with no
+                // new information just burns inference. Wait for incoming messages
+                // or state broadcasts from the orchestrator.
+                if !config.has_mcp_tools && cycle_prompt == "Continue." && cycle > 1 {
+                    info!(
+                        "Agent cycle {cycle}: skipping empty specialist cycle (no incoming state)"
+                    );
+                    continue;
+                }
 
                 // 6. Duplicate prompt detection
                 let prompt_hash = {
