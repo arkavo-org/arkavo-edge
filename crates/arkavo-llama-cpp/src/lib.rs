@@ -819,6 +819,25 @@ pub struct ParsedToolCall {
     pub id: String,
 }
 
+/// Maximum tool calls accepted from a single inference.
+/// Gemma4's PEG grammar allows unlimited repetition; without a cap the model
+/// can enter a degenerate loop producing 100-200 identical calls.
+#[cfg(not(target_env = "musl"))]
+pub const MAX_TOOL_CALLS_PER_INFERENCE: usize = 10;
+
+/// Truncate a tool call vec to the per-inference cap.
+#[cfg(not(target_env = "musl"))]
+pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
+    if calls.len() > MAX_TOOL_CALLS_PER_INFERENCE {
+        eprintln!(
+            "⚠ Truncating degenerate tool call batch: {} -> {}",
+            calls.len(),
+            MAX_TOOL_CALLS_PER_INFERENCE
+        );
+        calls.truncate(MAX_TOOL_CALLS_PER_INFERENCE);
+    }
+}
+
 /// Parse model output using llama.cpp's built-in PEG parser.
 /// Supports Gemma 4, Mistral, Hermes, and other native tool-call formats.
 #[cfg(not(target_env = "musl"))]
@@ -891,6 +910,8 @@ pub fn parse_tool_calls(
     }
 
     unsafe { ffi::arkavo_chat_parse_result_free(&mut result) };
+
+    cap_tool_calls(&mut tool_calls);
 
     (content, reasoning, tool_calls)
 }
@@ -2134,5 +2155,35 @@ mod tests {
         // Reset should restore to Unknown (allowing retry)
         reset_gpu_status();
         assert_eq!(gpu_status(), GpuStatus::Unknown);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn parse_tool_calls_caps_at_max() {
+        let mut calls: Vec<ParsedToolCall> = (0..50)
+            .map(|i| ParsedToolCall {
+                name: "game-rl:step".to_string(),
+                arguments: format!(r#"{{"action":"move","id":"{}"}}"#, i),
+                id: format!("call_{i}"),
+            })
+            .collect();
+
+        cap_tool_calls(&mut calls);
+        assert_eq!(calls.len(), MAX_TOOL_CALLS_PER_INFERENCE);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn parse_tool_calls_preserves_small_batch() {
+        let mut calls: Vec<ParsedToolCall> = (0..3)
+            .map(|i| ParsedToolCall {
+                name: "game-rl:step".to_string(),
+                arguments: "{}".to_string(),
+                id: format!("call_{i}"),
+            })
+            .collect();
+
+        cap_tool_calls(&mut calls);
+        assert_eq!(calls.len(), 3);
     }
 }
