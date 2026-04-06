@@ -13,6 +13,14 @@ pub(super) struct ConversationWindow {
     estimator: Arc<dyn TokenEstimator>,
 }
 
+/// Serializable snapshot of a single message in the conversation window.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MessageSnapshot {
+    pub role: String,
+    pub content: String,
+    pub tokens_est: usize,
+}
+
 impl ConversationWindow {
     /// `min_feasible_context`: minimum context size across currently-loaded models.
     /// History budget = 70% of that.
@@ -89,6 +97,47 @@ impl ConversationWindow {
 
     pub(super) fn history_len(&self) -> usize {
         self.history.len()
+    }
+
+    /// Return a serializable snapshot of the full conversation (system + history).
+    pub(super) fn snapshot_messages(&self) -> Vec<MessageSnapshot> {
+        let mut out = Vec::with_capacity(self.history.len() + 1);
+        if let Some(ref sys) = self.system_message {
+            out.push(MessageSnapshot {
+                role: "system".to_string(),
+                content: sys.content.clone(),
+                tokens_est: self.estimator.estimate_token_count(&sys.content),
+            });
+        }
+        for msg in &self.history {
+            out.push(MessageSnapshot {
+                role: match msg.role {
+                    arkavo_llm::Role::User => "user",
+                    arkavo_llm::Role::Assistant => "assistant",
+                    arkavo_llm::Role::System => "system",
+                    arkavo_llm::Role::Tool => "tool",
+                }
+                .to_string(),
+                content: msg.content.clone(),
+                tokens_est: self.estimator.estimate_token_count(&msg.content),
+            });
+        }
+        out
+    }
+
+    /// Total token estimate for the current window.
+    pub(super) fn total_tokens_est(&self) -> usize {
+        let sys_tokens = self
+            .system_message
+            .as_ref()
+            .map(|m| self.estimator.estimate_token_count(&m.content))
+            .unwrap_or(0);
+        sys_tokens + self.history_tokens
+    }
+
+    /// Max history token budget.
+    pub(super) fn budget_tokens(&self) -> usize {
+        self.max_history_tokens
     }
 
     fn max_history_tokens(&self) -> usize {
@@ -232,5 +281,39 @@ mod tests {
         let msgs = w.build_messages(None);
         // Already alternating — no coalescing needed
         assert_eq!(msgs.len(), 4);
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_snapshot_messages_returns_all() {
+        let mut w = make_window(1000);
+        w.set_system_message(arkavo_llm::Message::system("You are an agent."));
+        w.push(arkavo_llm::Message::user("hello"));
+        w.push(arkavo_llm::Message::assistant("world"));
+
+        let snapshot = w.snapshot_messages();
+        assert_eq!(snapshot.len(), 3);
+        assert_eq!(snapshot[0].role, "system");
+        assert_eq!(snapshot[0].content, "You are an agent.");
+        assert_eq!(snapshot[1].role, "user");
+        assert_eq!(snapshot[2].role, "assistant");
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_snapshot_messages_empty_window() {
+        let w = make_window(1000);
+        let snapshot = w.snapshot_messages();
+        assert!(snapshot.is_empty());
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_snapshot_messages_includes_token_estimates() {
+        let mut w = make_window(1000);
+        w.push(arkavo_llm::Message::user("hello world test msg"));
+        let snapshot = w.snapshot_messages();
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot[0].tokens_est > 0);
     }
 }
