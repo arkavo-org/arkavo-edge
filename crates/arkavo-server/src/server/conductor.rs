@@ -524,7 +524,12 @@ pub async fn execute_with_conductor_and_learning(
     } else {
         "general"
     };
-    let response_quality = compute_response_quality(&final_result, 0, quality_category);
+    let response_quality = compute_response_quality(
+        &final_result,
+        0,
+        quality_category,
+        loop_result.tool_call_count,
+    );
 
     let burst_result =
         BurstResult::success(contract.id, serde_json::json!({ "content": final_result }));
