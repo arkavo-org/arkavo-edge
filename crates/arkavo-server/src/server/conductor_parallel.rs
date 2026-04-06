@@ -146,6 +146,7 @@ async fn planner_track(
     };
 
     let model_ctx = super::rlm_bridge::model_context_size(model_hint.map(|h| h.name()), false);
+    let mut prev_degenerate = false;
 
     for plan_round in 0..2 {
         // Consume any judge feedback from previous round
@@ -170,6 +171,12 @@ async fn planner_track(
                 info!("Planner: compute budget exhausted at round {plan_round}");
                 break;
             }
+        }
+
+        if prev_degenerate {
+            messages.push(arkavo_llm::Message::user(
+                "IMPORTANT: Previous response was degenerate (too many tool calls). Use at most 3 tool calls this round.".to_string(),
+            ));
         }
 
         let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
@@ -248,6 +255,13 @@ async fn planner_track(
         }
 
         let call_count = response.tool_calls.len();
+        let batch_degenerate = is_degenerate_batch(&response.tool_calls);
+        if batch_degenerate {
+            warn!(
+                "Planner round {plan_round}: degenerate batch ({} calls), will reduce budget next round",
+                response.tool_calls.len()
+            );
+        }
         result.tool_call_count += call_count;
         info!("Planner round {plan_round}: produced {call_count} tool calls");
 
@@ -303,6 +317,8 @@ async fn planner_track(
                 break;
             }
         }
+
+        prev_degenerate = batch_degenerate;
     }
 
     // Drop sender to signal executor to stop
@@ -328,6 +344,11 @@ fn dedup_tool_calls(calls: Vec<ParsedToolCall>) -> Vec<ParsedToolCall> {
         );
     }
     deduped
+}
+
+/// A batch is degenerate if it has more than 10 tool calls (before cap/dedup).
+fn is_degenerate_batch(calls: &[ParsedToolCall]) -> bool {
+    calls.len() > 10
 }
 
 /// Executor track: runs tool calls from the planner.
@@ -618,6 +639,27 @@ mod tests {
 
         let deduped = super::dedup_tool_calls(calls);
         assert_eq!(deduped.len(), 3);
+    }
+
+    #[test]
+    fn degenerate_batch_detection() {
+        let small_batch: Vec<ParsedToolCall> = (0..3)
+            .map(|_| ParsedToolCall {
+                tool_name: "tool".to_string(),
+                arguments: serde_json::Value::Object(serde_json::Map::new()),
+                call_id: None,
+            })
+            .collect();
+        assert!(!super::is_degenerate_batch(&small_batch));
+
+        let large_batch: Vec<ParsedToolCall> = (0..25)
+            .map(|_| ParsedToolCall {
+                tool_name: "tool".to_string(),
+                arguments: serde_json::Value::Object(serde_json::Map::new()),
+                call_id: None,
+            })
+            .collect();
+        assert!(super::is_degenerate_batch(&large_batch));
     }
 
     #[test]
