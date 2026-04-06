@@ -25,6 +25,8 @@ pub struct AgentLoopConfig {
     pub self_agent_id: String,
     pub commander_model: String,
     pub agent_mode: arkavo_protocol::agent_config::AgentMode,
+    /// Shared flag: set true during conductor inference to gate notification handler
+    pub inference_active: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
@@ -310,6 +312,7 @@ pub async fn run_agent_loop(
                 } else {
                     Some(&config.compute_budget)
                 };
+                config.inference_active.store(true, std::sync::atomic::Ordering::SeqCst);
                 match super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,
@@ -459,6 +462,7 @@ pub async fn run_agent_loop(
                         warn!("Agent cycle {cycle} failed: {e}");
                     }
                 }
+                config.inference_active.store(false, std::sync::atomic::Ordering::SeqCst);
 
                 // 14. Update adaptive interval (only when changed)
                 let new_interval = match consecutive_timeouts {

@@ -5,7 +5,7 @@
 //! - Executor (mid model): executes tool calls via MCP
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
-use super::conductor_tool_loop::ToolLoopResult;
+use super::conductor_tool_loop::{ToolLoopResult, distill_with_small_model};
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
 use arkavo_llm::ParsedToolCall;
@@ -76,10 +76,11 @@ pub(super) async fn run_tool_loop_parallel(
         .await;
     });
 
-    // Spawn judge track — structural condensation only (no LLM calls).
-    // Previously used route_fast() for distillation, but on single GPU this
-    // contended with the planner and added 3-8s per tool result to the feedback loop.
-    let judge = tokio::spawn(async move { judge_track(result_rx, feedback_tx).await });
+    // Spawn judge track — structural condensation for JSON (instant, no GPU),
+    // LLM distillation for unstructured text (rare, uses synthesis_semaphore).
+    let judge_router = router.clone();
+    let judge =
+        tokio::spawn(async move { judge_track(&judge_router, result_rx, feedback_tx).await });
 
     // Run planner on current task (blocking — drives the loop)
     let plan_result = planner_track(
@@ -427,6 +428,7 @@ async fn executor_track(
 /// On single GPU, LLM distillation contended with the planner and added 3-8s
 /// per tool result to the feedback loop.
 async fn judge_track(
+    router: &Arc<arkavo_router::Router>,
     mut result_rx: mpsc::Receiver<ExecutionResult>,
     feedback_tx: mpsc::Sender<JudgeFeedback>,
 ) {
@@ -445,20 +447,39 @@ async fn judge_track(
             has_negative_reward = true;
         }
 
-        // Condense large results structurally (extracts Delta sections, truncates)
+        // Condense large results: try structural first (free), LLM fallback
         let distilled = if exec_result.result.len() > 1500 {
+            // Structural condensation: extracts Delta/diff sections, truncates
             let condensed = super::conductor_tool_loop::condense_tool_result(
                 &exec_result.tool_name,
                 &exec_result.result,
-                500,
+                800,
             );
-            info!(
-                raw_len = exec_result.result.len(),
-                condensed_len = condensed.len(),
-                "Judge: condensed {} result",
-                exec_result.tool_name
-            );
-            condensed
+
+            // If structural condensation meaningfully reduced size, use it.
+            // Otherwise fall back to LLM distillation for unstructured text.
+            if condensed.len() < exec_result.result.len() / 2 {
+                info!(
+                    raw_len = exec_result.result.len(),
+                    condensed_len = condensed.len(),
+                    "Judge: condensed {} (structural)",
+                    exec_result.tool_name
+                );
+                condensed
+            } else {
+                match distill_with_small_model(router, &exec_result.result).await {
+                    Some(summary) => {
+                        info!(
+                            raw_len = exec_result.result.len(),
+                            summary_len = summary.len(),
+                            "Judge: distilled {} (LLM)",
+                            exec_result.tool_name
+                        );
+                        summary
+                    }
+                    None => condensed, // structural is still better than nothing
+                }
+            }
         } else {
             exec_result.result.clone()
         };
@@ -466,8 +487,8 @@ async fn judge_track(
         batch_results.push(format!(
             "{}: {}",
             exec_result.tool_name,
-            if distilled.len() > 200 {
-                format!("{}...", &distilled[..200])
+            if distilled.len() > 800 {
+                format!("{}...", &distilled[..800])
             } else {
                 distilled
             }

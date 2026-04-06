@@ -73,6 +73,9 @@ pub struct A2aServer {
     /// Event sender for injecting A2A messages into the agent loop
     agent_event_tx:
         Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<super::agent_event::AgentEvent>>>>,
+    /// Guard: true while the orchestrator cycle is running inference.
+    /// Notification handler skips conductor calls when active to avoid GPU contention.
+    inference_active: Arc<std::sync::atomic::AtomicBool>,
     /// Shared Iroh P2P node for TDF blob transport (one per agent)
     #[cfg(feature = "iroh")]
     iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
@@ -121,6 +124,7 @@ impl A2aServer {
             },
             mesh_state: Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
             agent_event_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            inference_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
         }
@@ -817,6 +821,7 @@ impl A2aServer {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.read().await.clone();
         let model_hint = self.resolve_model_hint().await;
+        let inference_active = self.inference_active.clone();
         #[cfg(feature = "iroh")]
         let notification_iroh_node = self.iroh_node.read().await.clone();
 
@@ -825,6 +830,9 @@ impl A2aServer {
         }
 
         let handle = tokio::spawn(async move {
+            let mut last_conductor_call =
+                std::time::Instant::now() - std::time::Duration::from_secs(60);
+
             loop {
                 match notification_rx.recv().await {
                     Ok(notification) => {
@@ -842,6 +850,21 @@ impl A2aServer {
                             || event_str.contains("\"content\":[]")
                             || event_str.contains("\"isError\":true")
                         {
+                            continue;
+                        }
+
+                        // Skip if orchestrator cycle is actively using the GPU
+                        if inference_active.load(Ordering::SeqCst) {
+                            debug!("Notification skipped: orchestrator cycle active");
+                            continue;
+                        }
+
+                        // Debounce: skip if last conductor call was <5s ago
+                        if last_conductor_call.elapsed() < std::time::Duration::from_secs(5) {
+                            debug!(
+                                "Notification skipped: debounce ({}ms since last)",
+                                last_conductor_call.elapsed().as_millis()
+                            );
                             continue;
                         }
 
@@ -921,6 +944,7 @@ impl A2aServer {
                         .await
                         {
                             Ok(result) => {
+                                last_conductor_call = std::time::Instant::now();
                                 let latency_ms = start_time.elapsed().as_millis() as u64;
                                 eprintln!("[Notifications] LLM result: {} chars", result.len());
                                 if !result.is_empty() {
@@ -1365,6 +1389,7 @@ impl A2aServer {
             self_agent_id,
             commander_model,
             agent_mode,
+            inference_active: self.inference_active.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
         };
