@@ -274,71 +274,78 @@ async fn executor_track(
             "Executor: received action batch"
         );
 
-        for tool_call in &planned.tool_calls {
-            // Skip setup tools that already succeeded (e.g., registerAgent)
-            if let Some(mem) = tool_memory
-                && mem.read().await.is_setup_complete(&tool_call.tool_name)
-            {
-                info!(
-                    "Executor: skipping {} (already completed)",
-                    tool_call.tool_name
-                );
-                let _ = result_tx
-                    .send(ExecutionResult {
-                        tool_name: tool_call.tool_name.clone(),
-                        result: "Already completed — skipped".to_string(),
-                        success: true,
-                        reward: None,
-                    })
-                    .await;
-                continue;
-            }
+        // Execute all tool calls in the batch concurrently
+        let tool_futures: Vec<_> = planned
+            .tool_calls
+            .iter()
+            .enumerate()
+            .map(|(idx, tool_call)| {
+                let registry = registry_arc.clone();
+                let mcp = mcp_registry.clone();
+                let args = tool_call.arguments.clone();
+                let name = tool_call.tool_name.clone();
+                let mem = tool_memory.cloned();
+                async move {
+                    // Skip setup tools that already succeeded (e.g., registerAgent)
+                    if let Some(ref m) = mem {
+                        if m.read().await.is_setup_complete(&name) {
+                            return (
+                                idx,
+                                name,
+                                args,
+                                Ok::<String, String>(
+                                    "Already completed \u{2014} skipped".to_string(),
+                                ),
+                                true,
+                                None,
+                                0u64,
+                            );
+                        }
+                    }
+                    let start = std::time::Instant::now();
+                    let result = if let Some(tool) = registry.get(&name) {
+                        tool.execute(args.clone()).await.map_err(|e| e.to_string())
+                    } else {
+                        mcp.call_tool(&name, args.clone(), "hrm-parallel")
+                            .await
+                            .map_err(|e| e.to_string())
+                    };
+                    let latency = start.elapsed().as_millis() as u64;
+                    match result {
+                        Ok(val) => {
+                            let s = serde_json::to_string(&val).unwrap_or_default();
+                            let reward = super::conductor::extract_reward_from_result(&s);
+                            let success = reward.is_none_or(|r| r >= 0.0);
+                            (idx, name, args, Ok(s), success, reward, latency)
+                        }
+                        Err(e) => (idx, name, args, Err(e), false, None, latency),
+                    }
+                }
+            })
+            .collect();
 
-            let args = tool_call.arguments.clone();
-            let start = std::time::Instant::now();
+        let mut results = futures::future::join_all(tool_futures).await;
+        results.sort_by_key(|(idx, ..)| *idx);
 
-            let tool_result = if let Some(tool) = registry_arc.get(&tool_call.tool_name) {
-                tool.execute(args.clone()).await.map_err(|e| e.to_string())
-            } else {
-                mcp_registry
-                    .call_tool(&tool_call.tool_name, args.clone(), "hrm-parallel")
-                    .await
-                    .map_err(|e| e.to_string())
-            };
-
-            let latency_ms = start.elapsed().as_millis() as u64;
-
-            match tool_result {
-                Ok(result_val) => {
-                    let result_str = serde_json::to_string(&result_val).unwrap_or_default();
-                    let reward = super::conductor::extract_reward_from_result(&result_str);
-                    let success = reward.is_none_or(|r| r >= 0.0);
-
+        // Process results sequentially for deterministic ordering
+        for (_, tool_name, args, result, success, reward, latency_ms) in results {
+            match result {
+                Ok(result_str) => {
                     if let Some(r) = reward
                         && r < 0.0
                     {
-                        info!(
-                            "Executor: {} returned negative reward {:.3}",
-                            tool_call.tool_name, r
-                        );
+                        info!("Executor: {} returned negative reward {:.3}", tool_name, r);
                     }
 
-                    info!(
-                        "Executor: {} succeeded ({}ms)",
-                        tool_call.tool_name, latency_ms
-                    );
+                    info!("Executor: {} succeeded ({}ms)", tool_name, latency_ms);
 
-                    // Record in tool memory
                     if let Some(mem) = tool_memory {
-                        mem.write()
-                            .await
-                            .add(tool_call.tool_name.clone(), &args, &result_str);
+                        mem.write().await.add(tool_name.clone(), &args, &result_str);
                     }
 
-                    // Send learning event
                     if let Some(bus) = learning_bus {
                         let event = LearningEvent::ToolCall {
-                            tool_name: tool_call.tool_name.clone(),
+                            tool_name: tool_name.clone(),
                             args: args.clone(),
                             result: result_str.clone(),
                             success,
@@ -352,7 +359,7 @@ async fn executor_track(
 
                     let _ = result_tx
                         .send(ExecutionResult {
-                            tool_name: tool_call.tool_name.clone(),
+                            tool_name,
                             result: result_str,
                             success,
                             reward,
@@ -360,19 +367,17 @@ async fn executor_track(
                         .await;
                 }
                 Err(err) => {
-                    warn!("Executor: {} failed: {err}", tool_call.tool_name);
+                    warn!("Executor: {} failed: {err}", tool_name);
 
                     if let Some(mem) = tool_memory {
-                        mem.write().await.add(
-                            tool_call.tool_name.clone(),
-                            &args,
-                            &format!("Error: {err}"),
-                        );
+                        mem.write()
+                            .await
+                            .add(tool_name.clone(), &args, &format!("Error: {err}"));
                     }
 
                     let _ = result_tx
                         .send(ExecutionResult {
-                            tool_name: tool_call.tool_name.clone(),
+                            tool_name,
                             result: format!("Error: {err}"),
                             success: false,
                             reward: None,

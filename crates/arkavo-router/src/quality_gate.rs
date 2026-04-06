@@ -475,6 +475,7 @@ impl super::Router {
                 &response.content,
                 elapsed.as_millis() as u64,
                 current_decision.task_category.as_str(),
+                response.tool_calls.len(),
             );
             tracing::info!(
                 model = %current_decision.recommended_model.name(),
@@ -482,6 +483,7 @@ impl super::Router {
                 quality = format!("{quality:.3}").as_str(),
                 latency_ms = elapsed.as_millis() as u64,
                 response_len = response.content.len(),
+                tool_call_count = response.tool_calls.len(),
                 "Quality feedback recorded (positive)"
             );
             self.model_learning

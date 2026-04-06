@@ -307,7 +307,19 @@ impl ModelSelector {
 /// Heuristic quality score for a model response (0.0 to 1.0, no LLM call).
 ///
 /// Category-aware: complex task types expect longer, more detailed responses.
-pub fn compute_response_quality(response: &str, latency_ms: u64, category: &str) -> f64 {
+pub fn compute_response_quality(
+    response: &str,
+    latency_ms: u64,
+    category: &str,
+    tool_call_count: usize,
+) -> f64 {
+    // Tool-only responses (function calls, no text) are valid
+    if response.trim().is_empty() && tool_call_count > 0 {
+        let base = 0.7;
+        let bonus = (tool_call_count as f64 * 0.1).min(0.3);
+        return (base + bonus).min(1.0);
+    }
+
     if response.trim().is_empty() {
         return 0.0;
     }
@@ -532,8 +544,8 @@ mod tests {
 
     #[test]
     fn test_compute_response_quality_empty() {
-        assert_eq!(compute_response_quality("", 100, "general"), 0.0);
-        assert_eq!(compute_response_quality("   ", 100, "general"), 0.0);
+        assert_eq!(compute_response_quality("", 100, "general", 0), 0.0);
+        assert_eq!(compute_response_quality("   ", 100, "general", 0), 0.0);
     }
 
     #[test]
@@ -542,6 +554,7 @@ mod tests {
             "This is a normal response with useful content.",
             500,
             "general",
+            0,
         );
         assert!(
             quality > 0.8,
@@ -553,22 +566,22 @@ mod tests {
     fn test_compute_response_quality_loop_detection() {
         let looped =
             "same line\nsame line\nsame line\nsame line\nsame line\nsame line\nsame line\n";
-        let quality = compute_response_quality(looped, 100, "general");
+        let quality = compute_response_quality(looped, 100, "general", 0);
         assert!(quality < 0.7, "Looped response should score low: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_high_latency() {
-        let quality = compute_response_quality("A reasonable response.", 35_000, "general");
+        let quality = compute_response_quality("A reasonable response.", 35_000, "general", 0);
         assert!(quality < 1.0, "High latency should reduce score: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_category_aware() {
         let short_response = "Fixed the bug.";
-        let general_quality = compute_response_quality(short_response, 100, "general");
-        let test_gen_quality = compute_response_quality(short_response, 100, "test_generation");
-        let code_search_quality = compute_response_quality(short_response, 100, "code_search");
+        let general_quality = compute_response_quality(short_response, 100, "general", 0);
+        let test_gen_quality = compute_response_quality(short_response, 100, "test_generation", 0);
+        let code_search_quality = compute_response_quality(short_response, 100, "code_search", 0);
         assert!(
             test_gen_quality < general_quality,
             "Complex category should penalize: test_gen={test_gen_quality}, general={general_quality}"
@@ -582,7 +595,7 @@ mod tests {
     #[test]
     fn test_compute_response_quality_adequate_for_complex() {
         let response = "Here is a comprehensive test suite with multiple test cases covering edge cases, error handling, and happy paths. Each test verifies the expected behavior of the function under different conditions.";
-        let quality = compute_response_quality(response, 500, "test_generation");
+        let quality = compute_response_quality(response, 500, "test_generation", 0);
         assert!(
             quality > 0.9,
             "Adequate response should score high: {quality}"
@@ -592,22 +605,43 @@ mod tests {
     #[test]
     fn test_compute_response_quality_error_detection() {
         let error_resp = "Error: Tool execution error: Serialization error: data did not match any variant of untagged enum";
-        let quality = compute_response_quality(error_resp, 500, "general");
+        let quality = compute_response_quality(error_resp, 500, "general", 0);
         assert!(quality < 0.5, "Error response should score low: {quality}");
 
         let tool_error = "Something happened then tool execution error occurred in the process";
-        let quality2 = compute_response_quality(tool_error, 500, "general");
+        let quality2 = compute_response_quality(tool_error, 500, "general", 0);
         assert!(
             quality2 < 0.5,
             "Tool error response should score low: {quality2}"
         );
 
         let failed = "failed to execute the requested tool call";
-        let quality3 = compute_response_quality(failed, 500, "general");
+        let quality3 = compute_response_quality(failed, 500, "general", 0);
         assert!(
             quality3 < 0.5,
             "Failed execution should score low: {quality3}"
         );
+    }
+
+    #[test]
+    fn test_compute_response_quality_tool_only() {
+        // Empty text with tool calls should score well
+        let quality = compute_response_quality("", 100, "general", 3);
+        assert!(
+            quality >= 0.7,
+            "Tool-only response should score >= 0.7: {quality}"
+        );
+        assert!(quality <= 1.0);
+
+        // Single tool call: base 0.7 + bonus 0.1 = 0.8
+        let quality1 = compute_response_quality("", 100, "general", 1);
+        assert!(
+            (quality1 - 0.8).abs() < 0.01,
+            "1 tool call = 0.8: {quality1}"
+        );
+
+        // Empty text with zero tool calls still scores 0.0
+        assert_eq!(compute_response_quality("", 100, "general", 0), 0.0);
     }
 
     #[tokio::test]
