@@ -147,7 +147,7 @@ async fn planner_track(
 
     let model_ctx = super::rlm_bridge::model_context_size(model_hint.map(|h| h.name()), false);
 
-    for plan_round in 0..1 {
+    for plan_round in 0..2 {
         // Consume any judge feedback from previous round
         while let Ok(feedback) = feedback_rx.try_recv() {
             if !feedback.distilled_results.is_empty() {
@@ -194,16 +194,30 @@ async fn planner_track(
             "Planner: starting inference"
         );
 
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            router.route_with_tools_hinted(
+        let inference_fut: std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = arkavo_router::Result<arkavo_llm::ProviderResponse>,
+                    > + Send,
+            >,
+        > = if let Some(hint) = model_hint {
+            Box::pin(router.route_with_tools_override(
                 task_content,
                 messages.clone(),
                 Some(registry_arc),
-                model_hint,
-            ),
-        )
-        .await;
+                hint,
+            ))
+        } else {
+            Box::pin(router.route_with_tools_hinted(
+                task_content,
+                messages.clone(),
+                Some(registry_arc),
+                None,
+            ))
+        };
+
+        let response =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), inference_fut).await;
 
         let response = match response {
             Ok(Ok(resp)) => resp,
@@ -296,6 +310,26 @@ async fn planner_track(
     result
 }
 
+/// Collapse identical tool calls (same name + same args) in a batch.
+/// Keeps the first occurrence. Logs when duplicates are suppressed.
+fn dedup_tool_calls(calls: Vec<ParsedToolCall>) -> Vec<ParsedToolCall> {
+    let original_len = calls.len();
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<ParsedToolCall> = calls
+        .into_iter()
+        .filter(|c| seen.insert((c.tool_name.clone(), c.arguments.to_string())))
+        .collect();
+
+    if deduped.len() < original_len {
+        info!(
+            original = original_len,
+            kept = deduped.len(),
+            "Suppressed duplicate tool calls in batch"
+        );
+    }
+    deduped
+}
+
 /// Executor track: runs tool calls from the planner.
 /// Sends results to the judge for distillation and feedback.
 async fn executor_track(
@@ -310,14 +344,14 @@ async fn executor_track(
     let mut step_idx: usize = 0;
 
     while let Some(planned) = plan_rx.recv().await {
+        let tool_calls = dedup_tool_calls(planned.tool_calls);
         info!(
-            tool_count = planned.tool_calls.len(),
+            tool_count = tool_calls.len(),
             "Executor: received action batch"
         );
 
         // Execute all tool calls in the batch concurrently
-        let tool_futures: Vec<_> = planned
-            .tool_calls
+        let tool_futures: Vec<_> = tool_calls
             .iter()
             .enumerate()
             .map(|(idx, tool_call)| {
@@ -541,4 +575,68 @@ async fn judge_track(
     }
 
     info!("Judge: channel closed, shutting down");
+}
+
+#[cfg(test)]
+mod tests {
+    use arkavo_llm::ParsedToolCall;
+    use serde_json::json;
+
+    #[test]
+    fn dedup_tool_calls_collapses_identical() {
+        let calls: Vec<ParsedToolCall> = (0..10)
+            .map(|_| ParsedToolCall {
+                tool_name: "game-rl:step".to_string(),
+                arguments: json!({"action": "move"}),
+                call_id: None,
+            })
+            .collect();
+
+        let deduped = super::dedup_tool_calls(calls);
+        assert_eq!(deduped.len(), 1);
+    }
+
+    #[test]
+    fn dedup_tool_calls_preserves_distinct() {
+        let calls = vec![
+            ParsedToolCall {
+                tool_name: "game-rl:step".to_string(),
+                arguments: json!({"action": "move"}),
+                call_id: None,
+            },
+            ParsedToolCall {
+                tool_name: "game-rl:observe".to_string(),
+                arguments: json!({}),
+                call_id: None,
+            },
+            ParsedToolCall {
+                tool_name: "game-rl:step".to_string(),
+                arguments: json!({"action": "build"}),
+                call_id: None,
+            },
+        ];
+
+        let deduped = super::dedup_tool_calls(calls);
+        assert_eq!(deduped.len(), 3);
+    }
+
+    #[test]
+    fn dedup_tool_calls_keeps_first_of_duplicates() {
+        let calls = vec![
+            ParsedToolCall {
+                tool_name: "game-rl:step".to_string(),
+                arguments: json!({"action": "move"}),
+                call_id: Some("first".to_string()),
+            },
+            ParsedToolCall {
+                tool_name: "game-rl:step".to_string(),
+                arguments: json!({"action": "move"}),
+                call_id: Some("second".to_string()),
+            },
+        ];
+
+        let deduped = super::dedup_tool_calls(calls);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].call_id.as_deref(), Some("first"));
+    }
 }
