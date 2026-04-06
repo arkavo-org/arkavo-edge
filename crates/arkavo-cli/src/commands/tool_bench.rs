@@ -677,47 +677,23 @@ fn synthetic_fence_outputs() -> Vec<String> {
 /// processing tool results. Run with:
 ///   arkavo tool-bench --tool-loop --model gemma-4-26b-a4b
 async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_llm::llamacpp_provider::{LlamaCppProvider, SamplingConfig};
-    use arkavo_llm::provider::Provider;
-
     let model_name = command
         .model
         .as_deref()
         .ok_or("--model required for --tool-loop")?;
 
-    let model_path = find_model_path(model_name)?;
-    let registry = arkavo_llm::ModelRegistry::new();
-    registry
-        .load(model_name, &model_path)
-        .map_err(|e| format!("Failed to load model: {e}"))?;
+    let model_choice = arkavo_router::decision::ModelChoice::from_name(model_name)
+        .ok_or_else(|| format!("Unknown model: '{model_name}'"))?;
 
-    // Pre-warm context pool (same as production agent loop)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-    if let Ok(ctx) = registry.acquire_fresh_context(model_name) {
-        let _ = registry.release_context(model_name, ctx, true);
-        println!("Context pool pre-warmed for {model_name}");
-    }
-
-    let config = SamplingConfig::default();
-    let provider = LlamaCppProvider::new_with_registry(
-        std::sync::Arc::new(registry),
-        model_name.to_string(),
-        config,
-    )?;
-
-    let tools = test_tools();
-    let tools_json = arkavo_llm::McpConverter::to_anthropic_format_minimal(
-        &tools
-            .iter()
-            .map(|t| arkavo_mcp_tools::registry::MinimalToolInfo {
-                name: t.name.clone(),
-                category: Some(t.category.clone()),
-                description: Some(t.description.clone()),
-                schema: Some(t.schema.clone()),
-                aliases: None,
-            })
-            .collect::<Vec<_>>(),
-    );
+    // Use the production Router (same as `arkavo chat`) — handles model loading,
+    // context pool warmup, Metal shader compilation, and inference semaphore.
+    println!("Initializing Router (model loading + context warmup)...");
+    let init_start = Instant::now();
+    let router = arkavo_router::Router::new_offline()
+        .await
+        .map_err(|e| format!("Failed to initialize router: {e}"))?;
+    let router = std::sync::Arc::new(router);
+    println!("Router ready in {:.1}s", init_start.elapsed().as_secs_f64());
 
     // Scenarios: each has a prompt, expected tool call, and a synthetic result
     let loop_scenarios = [
@@ -756,36 +732,24 @@ async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn s
 
     for (name, prompt, expected_tool, synthetic_result) in &loop_scenarios {
         for _ in 0..iterations {
-            // Inference 1: prompt → tool call
+            // Inference 1: prompt → tool call (via Router, same as agent loop)
             let messages1 = vec![arkavo_llm::Message::user(prompt.to_string())];
             let start1 = Instant::now();
-            let resp1 = provider
-                .complete_with_tools(messages1, Some(tools_json.clone()), None)
+            let resp1 = router
+                .route_with_tools_override(prompt, messages1, None, &model_choice)
                 .await;
             let infer1_ms = start1.elapsed().as_millis() as u64;
 
-            let (tool_ok, _tool_name) = match &resp1 {
-                Ok(r) => {
-                    let mut calls = arkavo_router::tool_extraction::filter_and_extract_tool_calls(
-                        r.tool_calls.clone(),
-                    );
-                    if calls.is_empty() && !r.content.is_empty() {
-                        calls = arkavo_router::tool_extraction::extract_tool_calls_from_text(
-                            &r.content,
-                        );
-                    }
-                    let ok = calls.first().is_some_and(|c| c.tool_name == *expected_tool);
-                    let name = calls
-                        .first()
-                        .map(|c| c.tool_name.clone())
-                        .unwrap_or_else(|| "-".to_string());
-                    (ok, name)
-                }
-                Err(_) => (false, "ERROR".to_string()),
+            let tool_ok = match &resp1 {
+                Ok(r) => r
+                    .tool_calls
+                    .first()
+                    .is_some_and(|c| c.tool_name == *expected_tool),
+                Err(_) => false,
             };
 
             // Inference 2: tool call + result → final response
-            let mut messages2 = vec![
+            let messages2 = vec![
                 arkavo_llm::Message::user(prompt.to_string()),
                 arkavo_llm::Message::assistant(format!(
                     "I'll call {expected_tool} to get that information."
@@ -795,16 +759,15 @@ async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn s
                 )),
             ];
 
-            // Truncate result for very large payloads (mirrors production compaction)
-            if messages2.last().map(|m| m.content.len()).unwrap_or(0) > 4000 {
-                if let Some(last) = messages2.last_mut() {
-                    last.content = last.content[..4000].to_string();
-                    last.content.push_str("\n[truncated]");
-                }
-            }
-
             let start2 = Instant::now();
-            let resp2 = provider.complete_with_tools(messages2, None, None).await;
+            let resp2 = router
+                .route_with_tools_override(
+                    &format!("Process the {expected_tool} result"),
+                    messages2,
+                    None,
+                    &model_choice,
+                )
+                .await;
             let infer2_ms = start2.elapsed().as_millis() as u64;
 
             let resp_len = match &resp2 {
