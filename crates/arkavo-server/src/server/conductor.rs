@@ -52,6 +52,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         false,
+        None,
         #[cfg(feature = "iroh")]
         None,
     )
@@ -80,6 +81,7 @@ pub async fn execute_with_conductor_and_learning(
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
     existing_messages: Option<Vec<arkavo_llm::Message>>,
     skip_complexity: bool,
+    cached_registry: Option<Arc<arkavo_mcp_tools::ToolRegistry>>,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
@@ -199,83 +201,87 @@ pub async fn execute_with_conductor_and_learning(
 
     update_progress("Setting up tools", 25);
 
-    // 4. Build ToolRegistry with MCP bridge tools + optional built-in tools
-    let mut tool_registry = ToolRegistry::empty();
-
-    // Project MCP tools from external servers
-    let mcp_tools = mcp_registry
-        .list_all_tools()
-        .await
-        .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
-
-    for tool in &mcp_tools {
+    // 4. Build ToolRegistry — use cached if available (same tools every cycle)
+    let mut registry_arc = if let Some(cached) = cached_registry {
         debug!(
-            "Tool schema: {} - {} (params: {})",
-            tool.name,
-            tool.description,
-            serde_json::to_string(&tool.input_schema).unwrap_or_default()
+            "Using cached tool registry ({} tools)",
+            cached.list_tools().len()
         );
-    }
-    let has_mcp_tools = !mcp_tools.is_empty();
-    for tool in mcp_tools {
-        let tool_name = tool.name.clone();
-        let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
-        tool_registry.register(&tool_name, Box::new(bridge));
-    }
+        cached
+    } else {
+        let mut tool_registry = ToolRegistry::empty();
 
-    // Only register built-in code tools for standalone agents (no MCP servers
-    // and no mesh peers). Mesh-only agents (specialists) get only mesh tools —
-    // code tools are irrelevant for domain-specific advisory roles.
-    if !has_mcp_tools && mesh_state.is_none() {
-        tool_registry.register(
-            "filesystem_tools",
-            Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
-        );
-        tool_registry.register(
-            "git_status",
-            Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
-        );
-        tool_registry.register(
-            "git_diff",
-            Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
-        );
-        tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
-        tool_registry.register(
-            "test_run",
-            Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
-        );
-        tool_registry.register(
-            "shell_exec",
-            Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
-        );
-        tool_registry.register(
-            "code_review",
-            Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
-        );
-    }
+        let mcp_tools = mcp_registry
+            .list_all_tools()
+            .await
+            .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
 
-    // Register A2A mesh tools (list_agents, agent_query, send_task, get_task_status)
-    if let Some(state) = mesh_state {
-        arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
-        info!("Registered 4 mesh delegation tools");
-    }
+        for tool in &mcp_tools {
+            debug!(
+                "Tool schema: {} - {} (params: {})",
+                tool.name,
+                tool.description,
+                serde_json::to_string(&tool.input_schema).unwrap_or_default()
+            );
+        }
+        let has_mcp_tools_local = !mcp_tools.is_empty();
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
 
-    // Register Iroh P2P data tools (iroh_stage, iroh_fetch) for inter-agent sharing
-    #[cfg(feature = "iroh")]
-    if let Some(node) = iroh_node {
-        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
-        info!("Registered 2 Iroh P2P data tools");
-    }
+        if !has_mcp_tools_local && mesh_state.is_none() {
+            tool_registry.register(
+                "filesystem_tools",
+                Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
+            );
+            tool_registry.register(
+                "git_status",
+                Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
+            );
+            tool_registry.register(
+                "git_diff",
+                Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
+            );
+            tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
+            tool_registry.register(
+                "test_run",
+                Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
+            );
+            tool_registry.register(
+                "shell_exec",
+                Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
+            );
+            tool_registry.register(
+                "code_review",
+                Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
+            );
+        }
 
-    info!(
-        "Task has {} tools available: {:?}",
-        tool_registry.list_tools().len(),
-        tool_registry
-            .list_tools()
-            .iter()
-            .map(|t| &t.name)
-            .collect::<Vec<_>>()
-    );
+        if let Some(state) = mesh_state {
+            arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
+            info!("Registered 4 mesh delegation tools");
+        }
+
+        #[cfg(feature = "iroh")]
+        if let Some(node) = iroh_node {
+            arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
+            info!("Registered 2 Iroh P2P data tools");
+        }
+
+        info!(
+            "Task has {} tools available: {:?}",
+            tool_registry.list_tools().len(),
+            tool_registry
+                .list_tools()
+                .iter()
+                .map(|t| &t.name)
+                .collect::<Vec<_>>()
+        );
+
+        Arc::new(tool_registry)
+    };
 
     // 4.5 Check if RLM mode should activate (large context handling)
     let input_tokens = estimate_tokens(&task_content);
@@ -297,14 +303,16 @@ pub async fn execute_with_conductor_and_learning(
                         result.chunk_count, result.total_tokens, result.manifest_id
                     );
 
-                    // Add RLM tools to registry
+                    // Add RLM tools to registry (rare path — clone if needed)
                     let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
                     let context_tools = create_context_tools(rlm_ops.clone());
-                    for tool in context_tools {
-                        let schema = tool.schema();
-                        tool_registry.register(&schema.name.clone(), tool);
+                    if let Some(reg) = Arc::get_mut(&mut registry_arc) {
+                        for tool in context_tools {
+                            let schema = tool.schema();
+                            reg.register(&schema.name.clone(), tool);
+                        }
                     }
-                    info!("Added 3 RLM context tools to registry");
+                    info!("Added RLM context tools to registry");
 
                     // Generate system prompt with manifest reference
                     // Recreate bridge since we moved it into Arc
@@ -333,7 +341,6 @@ pub async fn execute_with_conductor_and_learning(
     update_progress("Generating LLM response", 40);
 
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
-    let registry_arc = Arc::new(tool_registry);
 
     // Inject learned guidance: behavior lessons + few-shot tool examples
     let augmented_content = if let Some(bus) = learning_bus {

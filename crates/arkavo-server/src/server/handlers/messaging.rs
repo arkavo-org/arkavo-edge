@@ -343,6 +343,7 @@ pub async fn handle_message_send(
                             Some(&compute_budget),
                             None,
                             false, // specialists may need complexity assessment
+                            None,  // no cached registry
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )

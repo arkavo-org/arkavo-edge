@@ -108,6 +108,34 @@ pub async fn run_agent_loop(
     conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
 
+    // Build tool registry once — same tools every cycle, no need to rebuild
+    let cached_registry = {
+        use arkavo_mcp_tools::ToolRegistry;
+        let mut registry = ToolRegistry::empty();
+
+        if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
+            for tool in mcp_tools {
+                let tool_name = tool.name.clone();
+                let bridge =
+                    super::mcp_bridge::McpBridgeTool::new(config.mcp_registry.clone(), tool);
+                registry.register(&tool_name, Box::new(bridge));
+            }
+        }
+
+        arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+
+        #[cfg(feature = "iroh")]
+        if let Some(ref node) = config.iroh_node {
+            arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
+        }
+
+        info!(
+            "Agent loop: cached {} tools for reuse across cycles",
+            registry.list_tools().len()
+        );
+        Arc::new(registry)
+    };
+
     // Adaptive tick interval
     let mut cycle_interval_secs: u64 = 5;
     let mut tick_interval =
@@ -329,6 +357,7 @@ pub async fn run_agent_loop(
                     tool_loop_budget,
                     Some(messages),
                     true, // skip complexity — orchestrator cycles are always single tasks
+                    Some(cached_registry.clone()),
                     #[cfg(feature = "iroh")]
                     config.iroh_node.as_ref(),
                 )
