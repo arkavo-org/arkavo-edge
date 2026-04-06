@@ -250,6 +250,17 @@ async fn planner_track(
         result.final_text = response.content.clone();
 
         if response.tool_calls.is_empty() {
+            if plan_round == 0 {
+                // Round 0 produced text but no tool calls. Retry on round 1
+                // with an explicit instruction to use tools.
+                warn!("Planner round 0: no tool calls, will retry with tool nudge");
+                messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+                messages.push(arkavo_llm::Message::user(
+                    "You MUST use a tool now. Pick the most appropriate tool and call it."
+                        .to_string(),
+                ));
+                continue;
+            }
             info!("Planner round {plan_round}: no tool calls, done");
             break;
         }
