@@ -419,6 +419,13 @@ async fn run_live_bench(
         .load(model_name, &model_path)
         .map_err(|e| format!("Failed to load model '{model_name}': {e}"))?;
 
+    // Pre-warm context pool (same as production agent loop)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    if let Ok(ctx) = registry.acquire_fresh_context(model_name) {
+        let _ = registry.release_context(model_name, ctx, true);
+        println!("Context pool pre-warmed for {model_name}");
+    }
+
     let provider = LlamaCppProvider::new_with_registry(
         std::sync::Arc::new(registry),
         model_name.to_string(),
@@ -683,6 +690,13 @@ async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn s
     registry
         .load(model_name, &model_path)
         .map_err(|e| format!("Failed to load model: {e}"))?;
+
+    // Pre-warm context pool (same as production agent loop)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    if let Ok(ctx) = registry.acquire_fresh_context(model_name) {
+        let _ = registry.release_context(model_name, ctx, true);
+        println!("Context pool pre-warmed for {model_name}");
+    }
 
     let config = SamplingConfig::default();
     let provider = LlamaCppProvider::new_with_registry(
