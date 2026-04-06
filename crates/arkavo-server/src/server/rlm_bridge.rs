@@ -142,10 +142,16 @@ pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
     if let Some(hint) = model_hint
         && let Some(choice) = arkavo_router::ModelChoice::from_name(hint)
     {
-        return match choice.capability() {
-            arkavo_router::PlannerTier::Small => 2_048,
-            arkavo_router::PlannerTier::Medium => 8_192,
-            arkavo_router::PlannerTier::Large => 32_768,
+        // Gemma 4 models have large native context windows
+        return match choice {
+            arkavo_router::ModelChoice::LocalGemma4_26B => 262_144, // 256K
+            arkavo_router::ModelChoice::LocalGemma4E2B
+            | arkavo_router::ModelChoice::LocalGemma4E4B => 131_072, // 128K
+            _ => match choice.capability() {
+                arkavo_router::PlannerTier::Small => 2_048,
+                arkavo_router::PlannerTier::Medium => 8_192,
+                arkavo_router::PlannerTier::Large => 32_768,
+            },
         };
     }
     // Legacy bare suffix fallback
@@ -184,6 +190,9 @@ mod tests {
         assert_eq!(model_context_size(Some("ministral-8b"), false), 32_768);
         assert_eq!(model_context_size(Some("ministral-3b"), false), 8_192);
         assert_eq!(model_context_size(Some("qwen3.5-0.8b"), false), 2_048);
+        assert_eq!(model_context_size(Some("gemma-4-26b-a4b"), false), 262_144);
+        assert_eq!(model_context_size(Some("gemma-4-e2b"), false), 131_072);
+        assert_eq!(model_context_size(Some("gemma-4-e4b"), false), 131_072);
     }
 
     #[tokio::test]

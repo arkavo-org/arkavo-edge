@@ -57,7 +57,7 @@ impl Default for SamplingConfig {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
-            max_tokens: 4096,
+            max_tokens: 16384,
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
@@ -107,6 +107,10 @@ pub struct LlamaCppProvider {
     conversation_id: Option<ConversationId>,
     /// GPU fault circuit breaker for retry/fallback logic
     gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
+    /// Template-generated format and PEG parser string, stored after generate_streaming
+    /// so complete_with_tools can pass them to the output parser.
+    /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
+    template_parse_info: std::sync::Mutex<Option<(i32, Option<String>, Option<String>)>>,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -173,6 +177,7 @@ impl LlamaCppProvider {
             mtmd_ctx,
             conversation_id: None,
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -202,6 +207,7 @@ impl LlamaCppProvider {
             mtmd_ctx: None,
             conversation_id: None,
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -229,6 +235,7 @@ impl LlamaCppProvider {
             mtmd_ctx: None,
             conversation_id: Some(conversation_id),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -379,8 +386,8 @@ impl LlamaCppProvider {
             template_triggers,
             _thinking_forced_open,
             template_stops,
-            _chat_format,
-            _chat_parser_str,
+            template_chat_format,
+            template_chat_parser_str,
             template_generation_prompt,
         ) = match model.chat_templates() {
             Ok(tmpls) => {
@@ -547,6 +554,17 @@ impl LlamaCppProvider {
         let use_dry_sampling = true;
 
         // Merge template grammar with config grammar (template takes precedence)
+        // Store template parse info for complete_with_tools to use later
+        if template_chat_format != 0 || template_chat_parser_str.is_some() {
+            if let Ok(mut guard) = self.template_parse_info.lock() {
+                *guard = Some((
+                    template_chat_format,
+                    template_chat_parser_str,
+                    template_generation_prompt.clone(),
+                ));
+            }
+        }
+
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
         // Convert string-only fence triggers to typed GrammarTrigger::Word
         let grammar_triggers_merged = template_triggers.or_else(|| {
@@ -686,6 +704,7 @@ impl LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
             &custom_provider
         } else {
@@ -806,6 +825,7 @@ impl Provider for LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
             &custom_provider
         } else {
@@ -1002,7 +1022,7 @@ impl Provider for LlamaCppProvider {
             Vec::new()
         };
 
-        let (raw_content, inference_timing) = {
+        let ((raw_content, inference_timing), template_parse_info) = {
             let mut config = self.config.clone();
             if let Some(temp) = tool_temperature {
                 config.temperature = temp;
@@ -1024,10 +1044,21 @@ impl Provider for LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
-            custom_provider
+            let result = custom_provider
                 .complete_with_timing(modified_messages, max_tokens)
-                .await?
+                .await?;
+            // Retrieve template parse info stored by generate_streaming
+            let parse_info = custom_provider
+                .template_parse_info
+                .lock()
+                .ok()
+                .and_then(|g| g.clone());
+            if parse_info.is_none() {
+                tracing::debug!("No template parse info — using format-based parser");
+            }
+            (result, parse_info)
         };
 
         // Extract thinking blocks for GLM models; also strip for sub-1B Qwen defensively
@@ -1055,17 +1086,35 @@ impl Provider for LlamaCppProvider {
 
             // Try llama.cpp's native PEG parser first (handles Gemma 4, etc.),
             // then fall back to our custom parser chain.
-            // PEG_GEMMA4 = 3 in common_chat_format enum.
-            let native_format = match format {
-                ModelFormat::Gemma4 => 3, // COMMON_CHAT_FORMAT_PEG_GEMMA4
-                _ => 0,
-            };
+            // Use template parse info if available (has PEG parser for correct arg extraction),
+            // otherwise fall back to format-based detection.
+            let (native_format, native_parser_str, gen_prompt) =
+                if let Some((fmt, ref ps, ref gp)) = template_parse_info {
+                    (fmt, ps.as_deref(), gp.clone())
+                } else {
+                    let fmt = match format {
+                        ModelFormat::Gemma4 => 3i32, // COMMON_CHAT_FORMAT_PEG_GEMMA4
+                        _ => 0,
+                    };
+                    (fmt, None, None)
+                };
             let parsed = {
                 let mut native_parsed: Vec<crate::tool_parser::ParsedToolCall> = Vec::new();
 
                 if native_format > 0 {
+                    // Prepend generation_prompt if available — the PEG parser_str grammar
+                    // expects the full output including the template-injected prefix.
+                    let parse_input = if let Some(ref gp) = gen_prompt {
+                        format!("{gp}{content}")
+                    } else {
+                        content.clone()
+                    };
                     let (native_content, _native_reasoning, native_calls) =
-                        arkavo_llama_cpp::parse_tool_calls(&content, native_format, None);
+                        arkavo_llama_cpp::parse_tool_calls(
+                            &parse_input,
+                            native_format,
+                            native_parser_str,
+                        );
                     if !native_calls.is_empty() {
                         content = native_content;
                         native_parsed = native_calls
@@ -1077,7 +1126,15 @@ impl Provider for LlamaCppProvider {
                                     .unwrap_or(&tc.name)
                                     .to_string(),
                                 arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(
-                                    |_| serde_json::Value::Object(Default::default()),
+                                    |e| {
+                                        tracing::warn!(
+                                            tool = tc.name,
+                                            args_raw = &tc.arguments[..tc.arguments.len().min(200)],
+                                            error = %e,
+                                            "Failed to parse tool call arguments, defaulting to empty"
+                                        );
+                                        serde_json::Value::Object(Default::default())
+                                    },
                                 ),
                                 call_id: if tc.id.is_empty() { None } else { Some(tc.id) },
                             })

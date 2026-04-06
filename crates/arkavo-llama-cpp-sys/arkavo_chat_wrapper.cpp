@@ -191,6 +191,10 @@ arkavo_chat_parse_result arkavo_chat_parse(
         params.format = static_cast<common_chat_format>(format);
         params.parse_tool_calls = true;
 
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            params.debug = true;
+        }
+
         common_chat_msg msg;
         if (parser_str && parser_str[0] != '\0') {
             common_peg_arena arena;
@@ -198,6 +202,17 @@ arkavo_chat_parse_result arkavo_chat_parse(
             msg = common_chat_peg_parse(arena, output_text, is_partial != 0, params);
         } else {
             msg = common_chat_parse(output_text, is_partial != 0, params);
+        }
+
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            fprintf(stderr, "[PEG-RESULT] content_len=%zu tool_calls=%zu\n",
+                    msg.content.size(), msg.tool_calls.size());
+            for (size_t i = 0; i < msg.tool_calls.size() && i < 3; i++) {
+                fprintf(stderr, "[PEG-RESULT] call[%zu] name=%s args_len=%zu args=%.100s\n",
+                        i, msg.tool_calls[i].name.c_str(),
+                        msg.tool_calls[i].arguments.size(),
+                        msg.tool_calls[i].arguments.c_str());
+            }
         }
 
         result.content = strdup_safe(msg.content);
