@@ -1165,6 +1165,7 @@ impl A2aRpcServer for A2aRpcImpl {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.clone();
         let router = self.router.clone();
+        let context_snapshot = self.context_snapshot.clone();
         #[cfg(feature = "iroh")]
         let iroh_node = self.iroh_node.clone();
 
@@ -1294,6 +1295,7 @@ impl A2aRpcServer for A2aRpcImpl {
                         "gossip": gossip_snap,
                         "antiPatterns": anti_patterns_snap,
                         "decisionTraces": traces_snap,
+                        "conversationWindow": *context_snapshot.read().await,
                     },
                 });
 

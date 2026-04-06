@@ -328,7 +328,6 @@ async fn dispatch_event(
                 learning_module,
                 agents,
                 context_topology_cache,
-                agent_connections,
                 selected_agent,
                 tx,
             )

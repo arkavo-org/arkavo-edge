@@ -771,6 +771,56 @@ impl AgentConnection {
         self.context_snapshot.read().await.clone()
     }
 
+    /// Send an introspection message (like @context) that auto-opens a session if needed.
+    /// Unlike send_user_message, does not require an active chat subscription.
+    pub async fn send_introspection(
+        &self,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get or create a chat session
+        let session_id = {
+            let sessions = self.chat_sessions.read().await;
+            sessions.get(&self.agent_id).cloned()
+        };
+        let session_id = match session_id {
+            Some(id) => id,
+            None => self.reopen_chat_session(&self.agent_id).await?,
+        };
+
+        let user_message = UserMessage {
+            content: text.to_string(),
+            attachments: None,
+            metadata: None,
+        };
+
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        match client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e) if e.to_string().contains("Session not found") => {
+                drop(client_guard);
+                let new_session_id = self.reopen_chat_session(&self.agent_id).await?;
+                let client_guard = self.client.read().await;
+                let client = client_guard.as_ref().ok_or("Not connected")?;
+                let retry_msg = UserMessage {
+                    content: text.to_string(),
+                    attachments: None,
+                    metadata: None,
+                };
+                client
+                    .request::<(), _>("chat_send", rpc_params![new_session_id, retry_msg])
+                    .await
+                    .map_err(|e| format!("Introspection send failed: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(format!("Introspection send failed: {e}").into()),
+        }
+    }
+
     /// Re-open a chat session for an agent after the previous one became stale
     async fn reopen_chat_session(
         &self,

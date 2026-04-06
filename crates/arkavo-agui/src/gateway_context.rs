@@ -10,7 +10,6 @@ pub(crate) async fn handle_request_context_topology(
     learning_module: &Arc<RwLock<LearningModule>>,
     agents_registry: &Arc<RwLock<Vec<serde_json::Value>>>,
     context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
-    agent_connections: &Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
     selected_agent: Option<String>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -122,33 +121,20 @@ pub(crate) async fn handle_request_context_topology(
             }
         }
     }
-    drop(cache);
 
-    decision_traces.truncate(10);
-
-    // Fetch conversation window for selected agent via @context introspection
+    // Read conversation window from the telemetry cache (pushed via system.metrics)
     let conversation_window = if let Some(ref agent_id) = selected_agent {
-        let conns = agent_connections.read().await;
-        if let Some(conn) = conns.get(agent_id) {
-            match conn
-                .send_user_message(agent_id, "@context".to_string())
-                .await
-            {
-                Ok(()) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    conn.get_latest_context_snapshot().await
-                }
-                Err(e) => {
-                    eprintln!("AG-UI: Failed to send @context to {agent_id}: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        }
+        cache
+            .iter()
+            .find(|(id, _)| *id == agent_id)
+            .and_then(|(_, resp)| resp.get("conversationWindow"))
+            .cloned()
     } else {
         None
     };
+    drop(cache);
+
+    decision_traces.truncate(10);
 
     tx.send(AgUiEvent::ContextTopologyUpdate {
         rlm,
