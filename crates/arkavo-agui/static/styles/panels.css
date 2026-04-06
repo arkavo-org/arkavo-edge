@@ -734,3 +734,20 @@
     flex-shrink: 0;
 }
 
+/* Context Conversation Inspector */
+.context-conversation { margin-top: 12px; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }
+.context-conversation-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.context-conversation-agent { font-weight: bold; font-size: 14px; }
+.context-conversation-meta { color: var(--text-secondary); font-size: 11px; margin-left: 8px; }
+.context-conversation-live { font-size: 10px; color: var(--success); background: rgba(78, 205, 196, 0.1); padding: 2px 8px; border-radius: 10px; }
+.context-conversation-messages { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+.context-message-card { background: var(--bg-primary); border-radius: 6px; padding: 10px 12px; border-left: 3px solid var(--border-color); }
+.context-message-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.context-message-role { font-size: 10px; font-weight: bold; text-transform: uppercase; }
+.context-message-tokens { font-size: 9px; color: var(--text-secondary); }
+.context-message-content { font-size: 11px; color: var(--text-primary); line-height: 1.4; font-family: monospace; white-space: pre-wrap; word-break: break-word; }
+.context-token-bar { margin-top: 12px; background: var(--bg-primary); border-radius: 4px; padding: 8px 12px; }
+.context-token-bar-header { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 9px; color: var(--text-secondary); }
+.context-token-bar-track { background: var(--border-color); border-radius: 2px; height: 6px; overflow: hidden; }
+.context-token-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
+
