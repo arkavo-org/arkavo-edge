@@ -323,11 +323,13 @@ async fn dispatch_event(
             )
             .await?;
         }
-        AgUiEvent::RequestContextTopology => {
+        AgUiEvent::RequestContextTopology { selected_agent } => {
             crate::gateway_context::handle_request_context_topology(
                 learning_module,
                 agents,
                 context_topology_cache,
+                agent_connections,
+                selected_agent,
                 tx,
             )
             .await?;
