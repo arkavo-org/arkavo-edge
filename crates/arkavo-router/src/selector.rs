@@ -155,18 +155,15 @@ impl ModelSelector {
     }
 
     /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// Gemma-4-E2B preferred: 2,229ms avg, 8/8 tool accuracy, multimodal.
-    /// Ministral-3B fallback: 690ms avg, 8/8 tool accuracy.
-    /// Qwen3.5-0.8B last resort: 525ms but poor tool calling in practice.
+    /// Ministral-3B preferred: 690ms avg, 8/8 tool accuracy.
+    /// Qwen3.5-0.8B fallback: 525ms but poor tool calling in practice.
     pub fn fastest_local_model(&self) -> ModelChoice {
-        if Self::is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
-            ModelChoice::LocalGemma4E2B
-        } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+        if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
             ModelChoice::LocalMinistral3B
         } else if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
             ModelChoice::LocalQwen3
         } else {
-            ModelChoice::LocalGemma4E2B
+            ModelChoice::LocalMinistral3B
         }
     }
 
@@ -340,7 +337,6 @@ impl ModelSelector {
         // Cloud models (unconstrained by memory)
         if self.availability.gemini {
             models.push(ModelChoice::GeminiFlash);
-            models.push(ModelChoice::GeminiPro);
         }
         if self.availability.anthropic {
             models.push(ModelChoice::ClaudeSonnet);
