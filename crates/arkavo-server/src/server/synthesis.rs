@@ -274,6 +274,24 @@ pub(super) fn parse_lesson_from_historian(
     Ok(Some(lesson))
 }
 
+/// Detect lessons that reinforce degenerate repetition patterns.
+fn is_degenerate_lesson_action(action: &str) -> bool {
+    let lower = action.to_lowercase();
+    let repetition_phrases = [
+        "identical tool call",
+        "same tool call",
+        "repeat the same",
+        "call 3 times",
+        "call 5 times",
+        "times in a row",
+        "maintain the sequence",
+        "execute the same action",
+        "keep calling",
+        "calling repeatedly",
+    ];
+    repetition_phrases.iter().any(|p| lower.contains(p))
+}
+
 /// Parse lesson pattern from LLM response
 fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), String> {
     // Try to extract JSON from content (may have markdown wrapping)
@@ -298,7 +316,12 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
         _ => return Err("No condition extracted — rejecting junk lesson".to_string()),
     };
     let action = match json.get("action").and_then(|v| v.as_str()) {
-        Some(a) if !a.is_empty() && a != "slow" => a.to_string(),
+        Some(a) if !a.is_empty() && a != "slow" => {
+            if is_degenerate_lesson_action(a) {
+                return Err(format!("Degenerate repetition lesson rejected: {a}"));
+            }
+            a.to_string()
+        }
         _ => return Err("No action extracted — rejecting junk lesson".to_string()),
     };
     let confidence = json
@@ -445,5 +468,34 @@ This pattern was found across all episodes."#;
         assert_eq!(result.1, "throttle requests");
         assert_eq!(result.2, 0.9);
         assert_eq!(result.3, "stable");
+    }
+
+    #[test]
+    fn rejects_degenerate_repetition_lesson() {
+        let degenerate_actions = [
+            "Maintain the sequence of 3 identical tool calls",
+            "repeat the same tool call 5 times",
+            "call send_task 3 times in a row",
+            "Keep calling observe repeatedly",
+            "Always execute the same action sequence",
+        ];
+        for action in &degenerate_actions {
+            assert!(
+                super::is_degenerate_lesson_action(action),
+                "Should reject: {action}"
+            );
+        }
+
+        let valid_actions = [
+            "Set work priority to Growing for colonists with low food skill",
+            "avoid: Missing required field AgentId",
+            "Call observe before step to get current state",
+        ];
+        for action in &valid_actions {
+            assert!(
+                !super::is_degenerate_lesson_action(action),
+                "Should accept: {action}"
+            );
+        }
     }
 }
