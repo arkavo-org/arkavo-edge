@@ -135,46 +135,72 @@ impl ToolMemory {
         self.completed_setup_tools.contains(tool_name)
     }
 
-    pub fn format_for_prompt(&self) -> String {
-        if self.entries.is_empty() && self.completed_setup_tools.is_empty() {
-            return String::new();
-        }
-        let mut output = String::new();
+    /// Emit only derived control signals — not history replay.
+    /// ConversationWindow carries the raw conversation history; ToolMemory
+    /// adds signals that aren't obvious from reading the history.
+    /// Returns None if there are no signals (common case — silent when things go well).
+    pub fn format_control_signals(&self) -> Option<String> {
+        let mut signals = Vec::new();
 
-        // Warn about one-time tools that already succeeded
+        // Setup completion state — tools the model should NOT call again
         if !self.completed_setup_tools.is_empty() {
-            output.push_str("\n\n## Already Completed (DO NOT call again)\n");
+            let mut section = String::from("## Setup State\n");
             for tool in &self.completed_setup_tools {
-                let _ = writeln!(output, "- {tool} ← succeeded, calling again is wasteful");
+                let _ = writeln!(section, "- {tool}: complete (DO NOT call again)");
             }
+            signals.push(section);
         }
 
-        if !self.entries.is_empty() {
-            output.push_str("\n\n## Recent Actions\n");
-            for (i, entry) in self.entries.iter().enumerate() {
-                let status = if entry.is_error { "FAILED" } else { "OK" };
-                let label = if !entry.action_type.is_empty() {
-                    &entry.action_type
-                } else {
-                    &entry.tool_name
-                };
-                let dup_warning = if entry.is_duplicate {
-                    " ← DUPLICATE (already done, try different params)"
-                } else {
-                    ""
-                };
+        // Deduplication warnings — same action called with same params
+        let dupes: Vec<&ToolMemoryEntry> = self.entries.iter().filter(|e| e.is_duplicate).collect();
+        if !dupes.is_empty() {
+            let mut section = String::from("## Duplicate Actions Detected\n");
+            for d in &dupes {
                 let _ = writeln!(
-                    output,
-                    "{}. {}: {}{}\n   → {}",
-                    i + 1,
-                    label,
-                    status,
-                    dup_warning,
-                    entry.result_summary
+                    section,
+                    "- `{}` with same params already called — try different params",
+                    d.tool_name,
                 );
             }
+            signals.push(section);
         }
-        output
+
+        // Action variety warning — same action type used 3+ times
+        if self.consecutive_same_type >= 3 {
+            let action_type = self.last_action_type.as_deref().unwrap_or("unknown");
+            signals.push(format!(
+                "## Action Variety\nYou have used {action_type} {} times in a row. Try a DIFFERENT action type.",
+                self.consecutive_same_type
+            ));
+        }
+
+        // Error escalation — pattern, not individual errors
+        let error_count = self.entries.iter().filter(|e| e.is_error).count();
+        if error_count >= 2 {
+            let mut error_tools: Vec<&str> = self
+                .entries
+                .iter()
+                .filter(|e| e.is_error)
+                .map(|e| e.tool_name.as_str())
+                .collect();
+            error_tools.dedup();
+            let mut section = format!(
+                "## Error Pattern\n{error_count} errors across: {}.\n",
+                error_tools.join(", "),
+            );
+            // Include the most recent error message for context
+            if let Some(last_err) = self.entries.iter().rev().find(|e| e.is_error) {
+                let _ = writeln!(section, "Latest: {}", last_err.result_summary);
+            }
+            section.push_str("Consider a different approach or corrected parameters.");
+            signals.push(section);
+        }
+
+        if signals.is_empty() {
+            None
+        } else {
+            Some(signals.join("\n\n"))
+        }
     }
 
     /// Full text of the most recent Observe result (for state broadcast to specialists)
@@ -391,9 +417,9 @@ mod tests {
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
 
-        let prompt = mem.format_for_prompt();
-        assert!(prompt.contains("DUPLICATE"));
-        assert!(prompt.contains("Build"));
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.as_ref().unwrap().contains("already called"));
     }
 
     #[spec("SRV-003")]
@@ -578,5 +604,60 @@ mod tests {
 
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
         assert!(!mem.entries.back().unwrap().is_error);
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_none_when_clean() {
+        let mem = ToolMemory::new(10);
+        assert!(mem.format_control_signals().is_none());
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_setup_state() {
+        let mut mem = ToolMemory::new(10);
+        mem.add("registerAgent".into(), &json!({}), r#"{"ok":true}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.unwrap().contains("registerAgent"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_duplicate() {
+        let mut mem = ToolMemory::new(10);
+        let args = json!({"Action": {"Type": "Build", "X": 10}});
+        mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
+        mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.unwrap().contains("already called"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_error_pattern() {
+        let mut mem = ToolMemory::new(10);
+        let args = json!({"Action": {"Type": "Build"}});
+        mem.add("tool_a".into(), &args, r#"{"Error":"fail1"}"#);
+        mem.add("tool_a".into(), &args, r#"{"Error":"fail2"}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        let text = signals.unwrap();
+        assert!(text.contains("Error Pattern"));
+        assert!(text.contains("2 errors"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_silent_on_success() {
+        let mut mem = ToolMemory::new(10);
+        // Non-setup tool, no duplicates, no errors
+        let args = json!({"Action": {"Type": "Observe"}});
+        mem.add("game-rl:observe".into(), &args, r#"{"ok":true}"#);
+        // Observe tools don't trigger setup tracking, no dupes, no errors
+        // Should be silent
+        assert!(mem.format_control_signals().is_none());
     }
 }

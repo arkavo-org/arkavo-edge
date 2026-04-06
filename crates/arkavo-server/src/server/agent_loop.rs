@@ -208,18 +208,16 @@ pub async fn run_agent_loop(
                     let _ = sender.send(receipt);
                 }
 
-                // 4. Build control signals from ToolMemory (Phase 2: keep format_for_prompt)
+                // 4. Build control signals from ToolMemory (Phase 3: control-signals-only)
                 let memory_guard = config.agent_memory.read().await;
-                let recent_actions = memory_guard.format_for_prompt();
-                let variety_warning = memory_guard.action_variety_warning();
-                let error_corrections = memory_guard.format_errors_for_prompt();
+                let control_signals = memory_guard.format_control_signals();
                 let memory_entry_count = memory_guard.entry_count();
                 drop(memory_guard);
-                if memory_entry_count > 0 {
+                if let Some(ref signals) = control_signals {
                     info!(
                         memory_entries = memory_entry_count,
-                        recent_actions_len = recent_actions.len(),
-                        "Tool memory state for cycle {cycle}"
+                        signals_len = signals.len(),
+                        "ToolMemory control signals for cycle {cycle}"
                     );
                 }
 
@@ -263,8 +261,7 @@ pub async fn run_agent_loop(
                         format!("\n\n## Incoming Messages\n{message_block}")
                     };
                     format!(
-                        "{recent_actions}{variety_warning}{error_corrections}\
-                         {specialist_context}{dead_man_warning}{msg_section}\n\n\
+                        "{specialist_context}{dead_man_warning}{msg_section}\n\n\
                          Cycle {cycle}. Follow your WORKFLOW.",
                     )
                 };
@@ -273,9 +270,8 @@ pub async fn run_agent_loop(
                 let prompt_hash = {
                     use std::hash::{Hash, Hasher};
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    recent_actions.hash(&mut hasher);
                     specialist_context.hash(&mut hasher);
-                    error_corrections.hash(&mut hasher);
+                    control_signals.hash(&mut hasher);
                     message_block.hash(&mut hasher);
                     consecutive_no_action_cycles.min(5).hash(&mut hasher);
                     hasher.finish()
@@ -299,7 +295,8 @@ pub async fn run_agent_loop(
                 conversation.push(arkavo_llm::Message::user(&cycle_prompt));
 
                 // 8. Build messages via conversation.build_messages()
-                let messages = conversation.build_messages(None);
+                let messages = conversation
+                    .build_messages(control_signals.as_deref());
 
                 info!(
                     "Agent cycle {cycle}: executing (history_len={})",

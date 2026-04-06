@@ -883,7 +883,7 @@ impl A2aServer {
                         drop(plan);
 
                         let memory = agent_memory.read().await;
-                        let memory_section = memory.format_for_prompt();
+                        let memory_section = memory.format_control_signals().unwrap_or_default();
                         drop(memory);
 
                         // Purpose goes as System message; event/goals/memory as User
@@ -1112,10 +1112,9 @@ impl A2aServer {
                         let _ = write!(ctx, "## Current Observed State\n{state}\n");
                     }
 
-                    // Include recent tool actions
-                    let actions = memory.format_for_prompt();
-                    if !actions.is_empty() {
-                        ctx.push_str(&actions);
+                    // Include control signals (dedup, errors, setup state)
+                    if let Some(signals) = memory.format_control_signals() {
+                        ctx.push_str(&signals);
                     }
 
                     drop(memory);
