@@ -280,22 +280,18 @@ pub async fn run_agent_loop(
                     _ => String::new(),
                 };
 
-                let cycle_prompt = if cycle == 1 {
-                    if message_block.is_empty() {
-                        "Begin your startup workflow now.".to_string()
-                    } else {
-                        format!("Begin your startup workflow now.\n\n{message_block}")
-                    }
+                let msg_section = if message_block.is_empty() {
+                    String::new()
                 } else {
-                    let msg_section = if message_block.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\n\n## Incoming Messages\n{message_block}")
-                    };
-                    format!(
-                        "{specialist_context}{dead_man_warning}{msg_section}\n\n\
-                         Cycle {cycle}. Follow your WORKFLOW.",
-                    )
+                    format!("\n\n## Incoming Messages\n{message_block}")
+                };
+                let extra = format!(
+                    "{specialist_context}{dead_man_warning}{msg_section}",
+                );
+                let cycle_prompt = if extra.trim().is_empty() {
+                    "Continue.".to_string()
+                } else {
+                    extra.trim().to_string()
                 };
 
                 // 6. Duplicate prompt detection
@@ -550,6 +546,20 @@ pub async fn run_agent_loop(
                             },
                         );
                         tick_interval.reset();
+                    }
+                    AgentEvent::Notification {
+                        server,
+                        event_data,
+                        correlation_id,
+                    } => {
+                        pending_messages.push(PendingMessage {
+                            content: format!("[event from={}] {}", server, event_data),
+                            task_id: None,
+                            correlation_id,
+                            reply: None,
+                            priority: MessagePriority::Normal,
+                        });
+                        // Don't reset tick — let events accumulate and coalesce
                     }
                     AgentEvent::Shutdown => break,
                 }

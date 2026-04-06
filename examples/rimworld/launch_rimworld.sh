@@ -115,9 +115,7 @@ verify_swarm() {
     print_status "INFO" "Verifying swarm connectivity..."
     local all_healthy=true
 
-    # TODO: Re-enable specialists when they have proactive mesh tool usage
-    # local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412" "historian:8413")
-    local agents=("commander:8401")
+    local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412" "historian:8413")
 
     for agent in "${agents[@]}"; do
         IFS=':' read -r name port <<< "$agent"
@@ -196,12 +194,11 @@ main() {
     echo ""
 
     # Start in dependency order: Specialists -> Commander (orchestrator)
-    # TODO: Re-enable specialists when they have proactive mesh tool usage
-    # start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
-    # start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
-    # start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
-    # start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
-    # sleep 1
+    start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
+    start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
+    start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
+    start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
+    sleep 1
 
     start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1
 

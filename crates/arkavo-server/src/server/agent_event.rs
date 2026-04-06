@@ -37,6 +37,13 @@ pub enum AgentEvent {
         correlation_id: CorrelationId,
         reply: oneshot::Sender<CycleReceipt>,
     },
+    /// MCP server push notification (game state change, etc.)
+    /// Fire-and-forget — no CycleReceipt reply needed.
+    Notification {
+        server: String,
+        event_data: String,
+        correlation_id: CorrelationId,
+    },
     Shutdown,
 }
 

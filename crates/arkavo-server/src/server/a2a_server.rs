@@ -818,21 +818,13 @@ impl A2aServer {
 
         let planning_completed = self.planning_completed.clone();
         let agent_plan = self.agent_plan.clone();
-        let agent_memory = self.agent_memory.clone();
-        let learning_bus = self.learning_bus.read().await.clone();
-        let model_hint = self.resolve_model_hint().await;
-        let inference_active = self.inference_active.clone();
-        #[cfg(feature = "iroh")]
-        let notification_iroh_node = self.iroh_node.read().await.clone();
+        let agent_event_tx = self.agent_event_tx.clone();
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
         }
 
         let handle = tokio::spawn(async move {
-            let mut last_conductor_call =
-                std::time::Instant::now() - std::time::Duration::from_secs(60);
-
             loop {
                 match notification_rx.recv().await {
                     Ok(notification) => {
@@ -854,19 +846,8 @@ impl A2aServer {
                         }
 
                         // Skip if orchestrator cycle is actively using the GPU
-                        if inference_active.load(Ordering::SeqCst) {
-                            debug!("Notification skipped: orchestrator cycle active");
-                            continue;
-                        }
-
-                        // Debounce: skip if last conductor call was <5s ago
-                        if last_conductor_call.elapsed() < std::time::Duration::from_secs(5) {
-                            debug!(
-                                "Notification skipped: debounce ({}ms since last)",
-                                last_conductor_call.elapsed().as_millis()
-                            );
-                            continue;
-                        }
+                        // inference_active gate removed — event sends are instant (no GPU).
+                        // Notifications queue in the channel and coalesce at the next cycle.
 
                         let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
                         let should_plan = !planning_completed.load(Ordering::SeqCst)
@@ -889,105 +870,26 @@ impl A2aServer {
                             eprintln!("[Planning] Agent startup planning complete");
                         }
 
-                        let plan = agent_plan.read().await;
-                        let goals_section = if !plan.goals.is_empty() {
-                            let goals_str: Vec<String> = plan
-                                .goals
-                                .iter()
-                                .enumerate()
-                                .map(|(i, g)| {
-                                    format!("{}. {} ({:?})", i + 1, g.description, g.status)
+                        // Route notification through the agent event loop instead of
+                        // spawning a separate conductor call. The event appears in the
+                        // next cycle's prompt as ## Incoming Messages.
+                        if let Some(event_tx) = agent_event_tx.lock().await.clone() {
+                            use super::agent_event::{AgentEvent, CorrelationId};
+                            let correlation_id = CorrelationId(uuid::Uuid::new_v4());
+                            let _ = event_tx
+                                .send(AgentEvent::Notification {
+                                    server: notification.server.clone(),
+                                    event_data: event_str.clone(),
+                                    correlation_id,
                                 })
-                                .collect();
-                            format!("\n\n## Active Goals\n{}", goals_str.join("\n"))
+                                .await;
+                            debug!(
+                                "Notification routed to event loop: {} ({} chars)",
+                                notification.method,
+                                event_str.len()
+                            );
                         } else {
-                            String::new()
-                        };
-                        drop(plan);
-
-                        let memory = agent_memory.read().await;
-                        let memory_section = memory.format_control_signals().unwrap_or_default();
-                        drop(memory);
-
-                        // Purpose goes as System message; event/goals/memory as User
-                        let prompt = format!(
-                            "{goals_section}{memory_section}\n\n\
-                             ## Event\nServer: {}\nData: {}\n\n\
-                             ## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
-                            notification.server, event_str
-                        );
-
-                        eprintln!(
-                            "[Notifications] Processing with LLM: {} chars",
-                            prompt.len()
-                        );
-                        let start_time = std::time::Instant::now();
-                        match super::conductor::execute_with_conductor_and_learning(
-                            &conductor,
-                            &router,
-                            &mcp_registry,
-                            prompt,
-                            None,
-                            None,
-                            None,
-                            None,
-                            Some(&system_prompt),
-                            None,
-                            model_hint.as_ref(),
-                            None,
-                            None,
-                            None,
-                            true, // skip complexity — notification events are always single tasks
-                            None, // no cached registry
-                            #[cfg(feature = "iroh")]
-                            notification_iroh_node.as_ref(),
-                        )
-                        .await
-                        {
-                            Ok(result) => {
-                                last_conductor_call = std::time::Instant::now();
-                                let latency_ms = start_time.elapsed().as_millis() as u64;
-                                eprintln!("[Notifications] LLM result: {} chars", result.len());
-                                if !result.is_empty() {
-                                    info!("Notification processed: {} chars", result.len());
-                                    debug!("Notification result: {}", result);
-                                }
-
-                                // Emit learning event for successful tool execution
-                                if let Some(bus) = &learning_bus {
-                                    let event = super::learning_bus::LearningEvent::ToolCall {
-                                        tool_name: notification.method.clone(),
-                                        args: notification.params.clone().unwrap_or_default(),
-                                        result: result.clone(),
-                                        success: true,
-                                        latency_ms,
-                                        decision_trace_id: None,
-                                        step_index: 0,
-                                        model_name: None,
-                                    };
-                                    let _ = bus.sender().send(event).await;
-                                }
-                            }
-                            Err(e) => {
-                                let latency_ms = start_time.elapsed().as_millis() as u64;
-                                eprintln!("[Notifications] Processing failed: {e}");
-                                warn!("Notification processing failed: {}", e);
-
-                                // Emit learning event for failed tool execution
-                                if let Some(bus) = &learning_bus {
-                                    let event = super::learning_bus::LearningEvent::ToolCall {
-                                        tool_name: notification.method.clone(),
-                                        args: notification.params.clone().unwrap_or_default(),
-                                        result: format!("Error: {e}"),
-                                        success: false,
-                                        latency_ms,
-                                        decision_trace_id: None,
-                                        step_index: 0,
-                                        model_name: None,
-                                    };
-                                    let _ = bus.sender().send(event).await;
-                                }
-                            }
+                            debug!("Notification dropped: no event channel");
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
