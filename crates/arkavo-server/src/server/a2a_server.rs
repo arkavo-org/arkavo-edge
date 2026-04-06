@@ -914,6 +914,7 @@ impl A2aServer {
                             None,
                             None,
                             None,
+                            true, // skip complexity — notification events are always single tasks
                             #[cfg(feature = "iroh")]
                             notification_iroh_node.as_ref(),
                         )

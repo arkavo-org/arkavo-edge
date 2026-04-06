@@ -51,6 +51,7 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        false,
         #[cfg(feature = "iroh")]
         None,
     )
@@ -78,6 +79,7 @@ pub async fn execute_with_conductor_and_learning(
     images: Option<Vec<String>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
     existing_messages: Option<Vec<arkavo_llm::Message>>,
+    skip_complexity: bool,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
@@ -154,10 +156,10 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map(|t| !t.is_empty())
         .unwrap_or(false);
-    let is_complex = if has_mcp_tools {
-        assess_complexity_with_model(router, &task_content).await
-    } else {
+    let is_complex = if skip_complexity || !has_mcp_tools {
         false
+    } else {
+        assess_complexity_with_model(router, &task_content).await
     };
     if is_complex && has_mcp_tools {
         match super::conductor_planner::execute_with_plan(

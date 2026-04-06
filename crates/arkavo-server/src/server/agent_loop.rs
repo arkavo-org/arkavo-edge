@@ -325,6 +325,7 @@ pub async fn run_agent_loop(
                     None,
                     tool_loop_budget,
                     Some(messages),
+                    true, // skip complexity — orchestrator cycles are always single tasks
                     #[cfg(feature = "iroh")]
                     config.iroh_node.as_ref(),
                 )

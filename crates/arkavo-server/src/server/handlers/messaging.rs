@@ -342,6 +342,7 @@ pub async fn handle_message_send(
                             images,
                             Some(&compute_budget),
                             None,
+                            false, // specialists may need complexity assessment
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )
