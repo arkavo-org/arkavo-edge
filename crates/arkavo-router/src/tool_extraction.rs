@@ -282,8 +282,10 @@ fn extract_curly_brace_tool_calls(content: &str) -> Option<Vec<ParsedToolCall>> 
         let args: serde_json::Value = serde_json::from_str(json_str)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
 
+        // Gemma 4 uses "call:tool_name{...}" format — strip the "call:" prefix
+        let clean_name = name.strip_prefix("call:").unwrap_or(name);
         calls.push(ParsedToolCall {
-            tool_name: name.to_string(),
+            tool_name: clean_name.to_string(),
             arguments: args,
             call_id: None,
         });

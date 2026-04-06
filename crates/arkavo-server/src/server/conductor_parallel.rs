@@ -248,6 +248,40 @@ async fn planner_track(
             warn!("Planner: executor channel closed");
             break;
         }
+
+        // Wait for executor/judge feedback before next round so tool results
+        // are injected into the conversation. Without this, the planner races
+        // ahead and generates the next inference without seeing whether the
+        // previous tool calls succeeded — causing repeated registerAgent calls
+        // and lost context.
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            feedback_rx.recv(),
+        )
+        .await
+        {
+            Ok(Some(feedback)) => {
+                if !feedback.distilled_results.is_empty() {
+                    messages.push(arkavo_llm::Message::user(format!(
+                        "Previous results:\n{}",
+                        feedback.distilled_results
+                    )));
+                }
+                if feedback.should_replan {
+                    messages.push(arkavo_llm::Message::user(
+                        "Previous actions had negative results. Adjust strategy.".to_string(),
+                    ));
+                }
+            }
+            Ok(None) => {
+                warn!("Planner: judge channel closed before feedback");
+                break;
+            }
+            Err(_) => {
+                warn!("Planner: timed out waiting for executor feedback");
+                break;
+            }
+        }
     }
 
     // Drop sender to signal executor to stop
@@ -441,8 +475,11 @@ async fn judge_track(
             }
         ));
 
-        // Send feedback after accumulating a batch or on negative reward
-        if batch_results.len() >= 3 || has_negative_reward {
+        // Send feedback after each result so the planner can proceed to
+        // the next round with tool results in context. Previously batched
+        // at 3 results, which deadlocked when the planner waited for
+        // feedback before sending the next batch.
+        {
             let feedback = JudgeFeedback {
                 distilled_results: batch_results.join("\n"),
                 should_replan: has_negative_reward,

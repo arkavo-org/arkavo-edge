@@ -100,7 +100,8 @@ impl ModelChoice {
     /// Resolve a model name string to a ModelChoice (reverse of `name()`).
     /// Used as a hint from AGENTS.md `model:` field.
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
+        let name = &name.to_lowercase();
+        match name.as_str() {
             "qwen3.5-0.8b" | "qwen3-0.6b" => Some(Self::LocalQwen3),
             "ministral-3b" => Some(Self::LocalMinistral3B),
             "ministral-8b" => Some(Self::LocalMinistral8B),
