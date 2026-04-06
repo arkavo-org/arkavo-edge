@@ -745,7 +745,7 @@ pub(super) async fn distill_with_small_model(
 ///
 /// Extracts the `"Delta"` section from the **full raw** result before truncating,
 /// so game state changes are preserved even from very large observations (e.g. 116K).
-fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize) -> String {
+pub(super) fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize) -> String {
     let prefix = format!("Tool {tool_name}: ");
     let budget = max_chars.saturating_sub(prefix.len());
     if raw.len() <= budget {

@@ -5,7 +5,7 @@
 //! - Executor (mid model): executes tool calls via MCP
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
-use super::conductor_tool_loop::{ToolLoopResult, distill_with_small_model};
+use super::conductor_tool_loop::ToolLoopResult;
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
 use arkavo_llm::ParsedToolCall;
@@ -76,10 +76,10 @@ pub(super) async fn run_tool_loop_parallel(
         .await;
     });
 
-    // Spawn judge track (0.8B model, synthesis semaphore)
-    let judge_router = router.clone();
-    let judge =
-        tokio::spawn(async move { judge_track(&judge_router, result_rx, feedback_tx).await });
+    // Spawn judge track — structural condensation only (no LLM calls).
+    // Previously used route_fast() for distillation, but on single GPU this
+    // contended with the planner and added 3-8s per tool result to the feedback loop.
+    let judge = tokio::spawn(async move { judge_track(result_rx, feedback_tx).await });
 
     // Run planner on current task (blocking — drives the loop)
     let plan_result = planner_track(
@@ -422,10 +422,11 @@ async fn executor_track(
     info!("Executor: channel closed, shutting down");
 }
 
-/// Judge track: distills execution results and provides feedback to the planner.
-/// Uses the smallest model (0.8B) via route_fast for synthesis.
+/// Judge track: condenses execution results and provides feedback to the planner.
+/// Uses structural extraction (Delta sections, truncation) — no LLM calls.
+/// On single GPU, LLM distillation contended with the planner and added 3-8s
+/// per tool result to the feedback loop.
 async fn judge_track(
-    router: &Arc<arkavo_router::Router>,
     mut result_rx: mpsc::Receiver<ExecutionResult>,
     feedback_tx: mpsc::Sender<JudgeFeedback>,
 ) {
@@ -444,23 +445,20 @@ async fn judge_track(
             has_negative_reward = true;
         }
 
-        // Distill large results
+        // Condense large results structurally (extracts Delta sections, truncates)
         let distilled = if exec_result.result.len() > 1500 {
-            match distill_with_small_model(router, &exec_result.result).await {
-                Some(summary) => {
-                    info!(
-                        raw_len = exec_result.result.len(),
-                        summary_len = summary.len(),
-                        "Judge: distilled {} result",
-                        exec_result.tool_name
-                    );
-                    summary
-                }
-                None => {
-                    // Structural fallback: first 500 chars
-                    exec_result.result.chars().take(500).collect()
-                }
-            }
+            let condensed = super::conductor_tool_loop::condense_tool_result(
+                &exec_result.tool_name,
+                &exec_result.result,
+                500,
+            );
+            info!(
+                raw_len = exec_result.result.len(),
+                condensed_len = condensed.len(),
+                "Judge: condensed {} result",
+                exec_result.tool_name
+            );
+            condensed
         } else {
             exec_result.result.clone()
         };
