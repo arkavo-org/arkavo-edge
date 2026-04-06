@@ -318,14 +318,17 @@ pub fn compute_response_quality(
     category: &str,
     tool_call_count: usize,
 ) -> f64 {
-    // Tool-only responses (function calls, no text) are valid
-    if response.trim().is_empty() && tool_call_count > 0 {
-        let base = 0.7;
-        let bonus = (tool_call_count as f64 * 0.1).min(0.3);
-        return (base + bonus).min(1.0);
-    }
-
     if response.trim().is_empty() {
+        if tool_call_count > 0 {
+            // Degenerate output: model entered a repetition loop
+            if tool_call_count > 10 {
+                return 0.0;
+            }
+            // Tool-only responses (function calls, no text) are valid
+            let base = 0.7;
+            let bonus = (tool_call_count as f64 * 0.1).min(0.3);
+            return (base + bonus).min(1.0);
+        }
         return 0.0;
     }
 
@@ -366,6 +369,11 @@ pub fn compute_response_quality(
 
     if latency_ms > 30_000 {
         score -= 0.1;
+    }
+
+    // Degenerate tool call count penalty (even with text content)
+    if tool_call_count > 10 {
+        score -= 0.8;
     }
 
     score.clamp(0.0, 1.0)
@@ -554,6 +562,21 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_response_quality_tool_only() {
+        // Tool-only responses (empty text, function calls present) should score well
+        let q1 = compute_response_quality("", 100, "general", 1);
+        assert!(q1 >= 0.7, "Single tool call should score >= 0.7: {q1}");
+
+        let q3 = compute_response_quality("", 100, "general", 3);
+        assert!(q3 >= 0.9, "Three tool calls should score >= 0.9: {q3}");
+        assert!(q3 <= 1.0, "Quality should not exceed 1.0: {q3}");
+
+        // Whitespace-only with tool calls should also score well
+        let qw = compute_response_quality("   ", 100, "general", 2);
+        assert!(qw >= 0.8, "Whitespace + 2 tool calls: {qw}");
+    }
+
+    #[test]
     fn test_compute_response_quality_normal() {
         let quality = compute_response_quality(
             "This is a normal response with useful content.",
@@ -629,24 +652,27 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_response_quality_tool_only() {
-        // Empty text with tool calls should score well
-        let quality = compute_response_quality("", 100, "general", 3);
+    fn quality_penalizes_degenerate_tool_call_count() {
+        // 125 tool calls with empty response = degenerate output loop
+        let score = compute_response_quality("", 55_000, "general", 125);
         assert!(
-            quality >= 0.7,
-            "Tool-only response should score >= 0.7: {quality}"
+            score < 0.1,
+            "125 tool calls should score near 0, got {score}"
         );
-        assert!(quality <= 1.0);
+    }
 
-        // Single tool call: base 0.7 + bonus 0.1 = 0.8
-        let quality1 = compute_response_quality("", 100, "general", 1);
-        assert!(
-            (quality1 - 0.8).abs() < 0.01,
-            "1 tool call = 0.8: {quality1}"
-        );
+    #[test]
+    fn quality_rewards_moderate_tool_call_count() {
+        // 3 tool calls = healthy batch
+        let score = compute_response_quality("", 10_000, "general", 3);
+        assert!(score >= 0.7, "3 tool calls should score >=0.7, got {score}");
+    }
 
-        // Empty text with zero tool calls still scores 0.0
-        assert_eq!(compute_response_quality("", 100, "general", 0), 0.0);
+    #[test]
+    fn quality_penalizes_borderline_tool_call_count() {
+        // 15 tool calls = suspicious but less severe
+        let score = compute_response_quality("", 20_000, "general", 15);
+        assert!(score < 0.3, "15 tool calls should score low, got {score}");
     }
 
     #[tokio::test]
