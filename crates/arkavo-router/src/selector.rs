@@ -300,9 +300,11 @@ impl ModelSelector {
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 models.push(ModelChoice::LocalMinistral3B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
-                models.push(ModelChoice::LocalGemma4E4B);
-            }
+            // Gemma-4-E4B excluded: 1/8 tool accuracy (benchmark), needs grammar-constrained
+            // generation. Re-enable when PEG output parser lands.
+            // if Self::is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
+            //     models.push(ModelChoice::LocalGemma4E4B);
+            // }
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
             }
