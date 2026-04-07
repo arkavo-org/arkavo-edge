@@ -211,10 +211,13 @@ async fn planner_track(
                     > + Send,
             >,
         > = if plan_round > 0 {
+            // Round 1+: skip tool schema injection — the model already has schemas
+            // from round 0's conversation. Re-injecting 8 tool schemas via Jinja
+            // expands 567 content tokens to 16K+ actual tokens, causing GPU faults.
             Box::pin(router.route_with_tools_execution(
                 task_content,
                 messages.clone(),
-                Some(registry_arc),
+                None,
                 model_hint,
             ))
         } else if let Some(hint) = model_hint {
