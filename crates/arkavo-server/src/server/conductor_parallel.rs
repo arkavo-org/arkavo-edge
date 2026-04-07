@@ -201,13 +201,23 @@ async fn planner_track(
             "Planner: starting inference"
         );
 
+        // Round 0: full planning profile (thinking on, full schema, 16K tokens)
+        // Round 1+: execution profile via route_with_tools_execution
+        //   (temp 0.1, thinking off, max 200 tokens — same model)
         let inference_fut: std::pin::Pin<
             Box<
                 dyn std::future::Future<
                         Output = arkavo_router::Result<arkavo_llm::ProviderResponse>,
                     > + Send,
             >,
-        > = if let Some(hint) = model_hint {
+        > = if plan_round > 0 {
+            Box::pin(router.route_with_tools_execution(
+                task_content,
+                messages.clone(),
+                Some(registry_arc),
+                model_hint,
+            ))
+        } else if let Some(hint) = model_hint {
             Box::pin(router.route_with_tools_override(
                 task_content,
                 messages.clone(),

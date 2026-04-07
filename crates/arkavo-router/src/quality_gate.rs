@@ -34,6 +34,96 @@ impl super::Router {
             .await
     }
 
+    /// Route with a model override — bypass classification, Thompson Sampling,
+    /// and quality gate retries. Use when AGENTS.md specifies `model:` and the
+    /// caller wants the exact model with minimal overhead.
+    pub async fn route_with_tools_override(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        model: &crate::ModelChoice,
+    ) -> Result<ProviderResponse> {
+        let inference_start = std::time::Instant::now();
+
+        let tools_json = match tool_registry {
+            Some(registry) => {
+                let detail_level = tool_extraction::detail_level_for_model(model);
+                let keywords = tool_extraction::extract_keywords(task_description);
+                let input_tokens = tool_extraction::estimate_tokens(task_description);
+                let tool_infos = tool_extraction::search_tools_hybrid(
+                    registry,
+                    &keywords,
+                    detail_level,
+                    Some(input_tokens),
+                )
+                .await;
+                let json = match model {
+                    crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                    }
+                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                };
+                Some(json)
+            }
+            None => None,
+        };
+
+        let provider = self.instantiate_provider(model).await?;
+        let _permit = self
+            .inference_semaphore
+            .acquire()
+            .await
+            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
+
+        let mut response = provider
+            .complete_with_tools(messages, tools_json, None)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
+
+        if response.tool_calls.is_empty() && !response.content.is_empty() {
+            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
+            if !extracted.is_empty() {
+                response.tool_calls = extracted;
+            }
+        }
+
+        let elapsed = inference_start.elapsed();
+        let quality = selector_quality::compute_response_quality(
+            &response.content,
+            elapsed.as_millis() as u64,
+            "general",
+            response.tool_calls.len(),
+        );
+        tracing::info!(
+            model = model.name(),
+            quality = format!("{quality:.3}").as_str(),
+            latency_ms = elapsed.as_millis() as u64,
+            response_len = response.content.len(),
+            tool_call_count = response.tool_calls.len(),
+            "Model override: inference completed"
+        );
+        self.model_learning
+            .immediate_update(
+                model.name(),
+                &BurstFeedback::success(
+                    uuid::Uuid::new_v4(),
+                    "general".to_string(),
+                    elapsed.as_millis() as u64,
+                )
+                .with_quality(quality),
+            )
+            .await;
+
+        if let Ok(mut guard) = self.last_routed_model.write() {
+            *guard = Some(model.name().to_string());
+        }
+
+        Ok(response)
+    }
+
     /// Route with a model hint from AGENTS.md configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
@@ -60,20 +150,21 @@ impl super::Router {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
 
-        // Execution iterations use the fastest local model for mechanical tool calls.
-        // This ensures a fast model is always available even when the planning model
-        // is cooled down, and avoids wasting large-model capacity on send_task calls.
+        // Execution iterations: when a model hint is provided (from AGENTS.md),
+        // use it with execution-mode sampling (temp 0.1, thinking off, max 200 tokens).
+        // Without a hint, fall back to the fastest local model for mechanical tool calls.
         let fast_model = self.selector.fastest_local_model();
-        let effective_hint = if execution_mode && self.is_model_available(&fast_model) {
-            tracing::debug!(
-                fast_model = fast_model.name(),
-                "Execution mode: using fastest local model"
-            );
-            current_decision.recommended_model = fast_model;
-            None // Skip hint override logic below — model already set
-        } else {
-            model_hint
-        };
+        let effective_hint =
+            if execution_mode && model_hint.is_none() && self.is_model_available(&fast_model) {
+                tracing::debug!(
+                    fast_model = fast_model.name(),
+                    "Execution mode: using fastest local model (no hint)"
+                );
+                current_decision.recommended_model = fast_model;
+                None
+            } else {
+                model_hint
+            };
 
         if let Some(hint) = effective_hint {
             let consecutive = self.get_cooldown_consecutive(hint.name()).await;
