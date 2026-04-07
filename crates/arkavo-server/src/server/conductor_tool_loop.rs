@@ -751,9 +751,14 @@ pub(super) fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize)
     let prefix = format!("Tool {tool_name}: ");
     let budget = max_chars.saturating_sub(prefix.len());
 
+    // Strip large embedded schemas (ActionSpace, ObservationSpace, etc.) that
+    // blow up context windows. Replace with a count summary so the model knows
+    // the schema exists without carrying 5KB of JSON per conversation turn.
+    let raw = strip_embedded_schemas(raw);
+
     // Always extract actionable entities — even small results may contain
     // entity names in error messages that the model needs for next calls
-    let preamble = extract_entities(raw);
+    let preamble = extract_entities(&raw);
 
     if raw.len() <= budget {
         if preamble.is_empty() {
@@ -794,6 +799,82 @@ pub(super) fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize)
     } else {
         format!("{prefix}{preamble}\n{body}")
     }
+}
+
+/// Strip large embedded schemas from tool results to prevent context blowup.
+///
+/// Registration responses often include full ActionSpace/ObservationSpace schemas
+/// (5KB+) that are useful for reference but shouldn't be in every conversation
+/// turn. Replaces them with a count summary.
+fn strip_embedded_schemas(raw: &str) -> String {
+    // Try to parse as JSON to find schema-like objects
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(raw) else {
+        // If the raw string contains escaped JSON (double-encoded), try that
+        let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
+        let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&unescaped) else {
+            return raw.to_string();
+        };
+        return strip_schemas_from_value(&mut json);
+    };
+    strip_schemas_from_value(&mut json)
+}
+
+fn strip_schemas_from_value(json: &mut serde_json::Value) -> String {
+    // Also handle double-encoded "result" field (common in MCP bridge responses)
+    if let Some(result_str) = json.get("result").and_then(|v| v.as_str()) {
+        if let Ok(mut inner) = serde_json::from_str::<serde_json::Value>(result_str) {
+            let changed = strip_schema_fields(&mut inner);
+            if changed {
+                json["result"] = serde_json::Value::String(inner.to_string());
+            }
+        }
+    }
+    strip_schema_fields(json);
+    json.to_string()
+}
+
+/// Replace large array/object fields that look like schemas with count summaries.
+/// Returns true if any modifications were made.
+fn strip_schema_fields(json: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    if let Some(obj) = json.as_object_mut() {
+        // Fields to summarize: ActionSpace, ObservationSpace, Actions array, etc.
+        let schema_keys: Vec<String> = obj
+            .iter()
+            .filter(|(_, v)| {
+                // Large arrays (like Actions with 38 entries) or large objects
+                match v {
+                    serde_json::Value::Array(a) => a.len() > 5,
+                    serde_json::Value::Object(o) => {
+                        let s = v.to_string();
+                        o.len() > 5 && s.len() > 500
+                    }
+                    _ => false,
+                }
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in &schema_keys {
+            if let Some(val) = obj.get(key) {
+                let summary = match val {
+                    serde_json::Value::Array(a) => format!("[{} items]", a.len()),
+                    serde_json::Value::Object(o) => format!("{{{} fields}}", o.len()),
+                    _ => continue,
+                };
+                obj.insert(key.clone(), serde_json::Value::String(summary));
+                changed = true;
+            }
+        }
+
+        // Recurse into remaining object values
+        for val in obj.values_mut() {
+            if strip_schema_fields(val) {
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 /// Extract actionable entities from a tool result.
@@ -1148,5 +1229,40 @@ mod tests {
         let failure = detect_semantic_failure(result);
         assert!(failure.is_some());
         assert!(failure.unwrap().contains("bad request"));
+    }
+
+    #[test]
+    fn strip_embedded_schemas_removes_large_arrays() {
+        let raw = serde_json::json!({
+            "AgentId": "player1",
+            "ActionSpace": {
+                "Actions": (0..30).map(|i| serde_json::json!({"Type": format!("Action{i}")})).collect::<Vec<_>>(),
+                "Format": "JSON"
+            },
+            "ObservationSpace": {
+                "spaces": {
+                    "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6
+                }
+            }
+        });
+        let result = super::strip_embedded_schemas(&raw.to_string());
+        // Actions array (30 items) should be replaced with summary
+        assert!(
+            result.contains("[30 items]"),
+            "Expected summary, got: {result}"
+        );
+        // Small fields preserved
+        assert!(result.contains("player1"));
+        assert!(result.contains("Format"));
+        // Should be much smaller
+        assert!(result.len() < raw.to_string().len() / 2);
+    }
+
+    #[test]
+    fn strip_embedded_schemas_preserves_small_results() {
+        let raw = r#"{"success": true, "AgentId": "player1"}"#;
+        let result = super::strip_embedded_schemas(raw);
+        assert!(result.contains("player1"));
+        assert!(result.contains("true"));
     }
 }
