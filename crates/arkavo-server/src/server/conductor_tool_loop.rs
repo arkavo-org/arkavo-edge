@@ -756,6 +756,12 @@ async fn execute_tool_calls(
                             Some(&model_name),
                         )
                         .await;
+
+                        // Fast-path lesson for transport-level errors too.
+                        // Without this, schema violations (e.g. missing "Type"
+                        // field) are lost between agent loop cycles because the
+                        // conversation is cleared.
+                        bus.add_fast_lesson(&tool_call.tool_name, &err_str).await;
                     }
                 }
 
