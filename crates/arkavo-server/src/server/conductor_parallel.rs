@@ -23,14 +23,22 @@ struct PlannedActions {
 /// Result of executing a single tool call
 struct ExecutionResult {
     tool_name: String,
+    call_id: String,
     result: String,
     success: bool,
     reward: Option<f64>,
 }
 
+/// A single condensed tool result with metadata for proper message construction
+struct CondensedToolResult {
+    tool_name: String,
+    call_id: String,
+    content: String,
+}
+
 /// Feedback from the judge to the planner
 struct JudgeFeedback {
-    distilled_results: String,
+    tool_results: Vec<CondensedToolResult>,
     should_replan: bool,
 }
 
@@ -149,13 +157,14 @@ async fn planner_track(
     let mut prev_degenerate = false;
 
     for plan_round in 0..2 {
-        // Consume any judge feedback from previous round
+        // Consume any judge feedback from previous round as proper tool result messages
         while let Ok(feedback) = feedback_rx.try_recv() {
-            if !feedback.distilled_results.is_empty() {
-                messages.push(arkavo_llm::Message::user(format!(
-                    "Previous results:\n{}",
-                    feedback.distilled_results
-                )));
+            for tr in &feedback.tool_results {
+                messages.push(arkavo_llm::Message::tool_result(
+                    &tr.content,
+                    &tr.call_id,
+                    &tr.tool_name,
+                ));
             }
             if feedback.should_replan {
                 messages.push(arkavo_llm::Message::user(
@@ -179,7 +188,60 @@ async fn planner_track(
             ));
         }
 
-        let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        // Smart context compaction: distill old messages via fast model before
+        // dropping them, preserving key insights. Same approach as tool loop.
+        let char_budget = model_ctx * 4;
+        let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        if context_chars > char_budget && messages.len() > 3 {
+            let keep_recent = 2;
+            let compactable = messages.len() - 1 - keep_recent;
+            if compactable > 0 {
+                let old_messages: Vec<String> = messages[1..1 + compactable]
+                    .iter()
+                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .collect();
+                let old_chars: usize = messages[1..1 + compactable]
+                    .iter()
+                    .map(|m| m.content.len())
+                    .sum();
+
+                let old_summary = old_messages.join("\n---\n");
+                let summary =
+                    super::conductor_tool_loop::distill_with_small_model(router, &old_summary)
+                        .await;
+
+                for _ in 0..compactable {
+                    messages.remove(1);
+                }
+
+                if let Some(distilled) = summary {
+                    info!(
+                        old_msgs = compactable,
+                        old_chars,
+                        summary_chars = distilled.len(),
+                        "Planner: context compacted via fast model"
+                    );
+                    messages.insert(
+                        1,
+                        arkavo_llm::Message::user(format!(
+                            "[Previous context summary]: {distilled}"
+                        )),
+                    );
+                } else {
+                    let structural = format!(
+                        "[Previous context: {} messages ({} chars) compacted]",
+                        compactable, old_chars
+                    );
+                    info!(
+                        old_msgs = compactable,
+                        old_chars, "Planner: context compacted (structural fallback)"
+                    );
+                    messages.insert(1, arkavo_llm::Message::user(structural));
+                }
+
+                context_chars = messages.iter().map(|m| m.content.len()).sum();
+            }
+        }
         let context_tokens = context_chars / 4;
         result.context_tokens = result.context_tokens.max(context_tokens as u32);
         if model_ctx > 0 {
@@ -211,13 +273,14 @@ async fn planner_track(
                     > + Send,
             >,
         > = if plan_round > 0 {
-            // Round 1+: skip tool schema injection — the model already has schemas
-            // from round 0's conversation. Re-injecting 8 tool schemas via Jinja
-            // expands 567 content tokens to 16K+ actual tokens, causing GPU faults.
+            // Round 1+: re-inject tools with compact schemas (no parameters).
+            // The ChatTool conversion in llamacpp_provider strips empty schemas,
+            // so the Jinja template renders tool names + descriptions only —
+            // compact enough to avoid the 16K+ token expansion from full schemas.
             Box::pin(router.route_with_tools_execution(
                 task_content,
                 messages.clone(),
-                None,
+                Some(registry_arc),
                 model_hint,
             ))
         } else if let Some(hint) = model_hint {
@@ -314,22 +377,19 @@ async fn planner_track(
         .await
         {
             Ok(Some(feedback)) => {
-                // Merge feedback into a single user message to maintain
-                // alternating user/assistant roles (required by Gemma/Llama templates)
-                let mut feedback_text = String::new();
-                if !feedback.distilled_results.is_empty() {
-                    feedback_text.push_str("Previous results:\n");
-                    feedback_text.push_str(&feedback.distilled_results);
+                // Push tool results with proper role so Jinja templates
+                // (especially Gemma 4) render <|tool_response> tokens.
+                for tr in &feedback.tool_results {
+                    messages.push(arkavo_llm::Message::tool_result(
+                        &tr.content,
+                        &tr.call_id,
+                        &tr.tool_name,
+                    ));
                 }
                 if feedback.should_replan {
-                    if !feedback_text.is_empty() {
-                        feedback_text.push_str("\n\n");
-                    }
-                    feedback_text
-                        .push_str("Previous actions had negative results. Adjust strategy.");
-                }
-                if !feedback_text.is_empty() {
-                    messages.push(arkavo_llm::Message::user(feedback_text));
+                    messages.push(arkavo_llm::Message::user(
+                        "Previous actions had negative results. Adjust strategy.".to_string(),
+                    ));
                 }
             }
             Ok(None) => {
@@ -404,6 +464,10 @@ async fn executor_track(
                 let mcp = mcp_registry.clone();
                 let args = tool_call.arguments.clone();
                 let name = tool_call.tool_name.clone();
+                let call_id = tool_call
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_{idx}"));
                 let mem = tool_memory.cloned();
                 async move {
                     // Skip setup tools that already succeeded (e.g., registerAgent)
@@ -412,6 +476,7 @@ async fn executor_track(
                             return (
                                 idx,
                                 name,
+                                call_id,
                                 args,
                                 Ok::<String, String>(
                                     "Already completed \u{2014} skipped".to_string(),
@@ -436,9 +501,9 @@ async fn executor_track(
                             let s = serde_json::to_string(&val).unwrap_or_default();
                             let reward = super::conductor::extract_reward_from_result(&s);
                             let success = reward.is_none_or(|r| r >= 0.0);
-                            (idx, name, args, Ok(s), success, reward, latency)
+                            (idx, name, call_id, args, Ok(s), success, reward, latency)
                         }
-                        Err(e) => (idx, name, args, Err(e), false, None, latency),
+                        Err(e) => (idx, name, call_id, args, Err(e), false, None, latency),
                     }
                 }
             })
@@ -448,7 +513,7 @@ async fn executor_track(
         results.sort_by_key(|(idx, ..)| *idx);
 
         // Process results sequentially for deterministic ordering
-        for (_, tool_name, args, result, success, reward, latency_ms) in results {
+        for (_, tool_name, call_id, args, result, success, reward, latency_ms) in results {
             match result {
                 Ok(result_str) => {
                     if let Some(r) = reward
@@ -480,6 +545,7 @@ async fn executor_track(
                     let _ = result_tx
                         .send(ExecutionResult {
                             tool_name,
+                            call_id,
                             result: result_str,
                             success,
                             reward,
@@ -498,6 +564,7 @@ async fn executor_track(
                     let _ = result_tx
                         .send(ExecutionResult {
                             tool_name,
+                            call_id,
                             result: format!("Error: {err}"),
                             success: false,
                             reward: None,
@@ -522,7 +589,7 @@ async fn judge_track(
     mut result_rx: mpsc::Receiver<ExecutionResult>,
     feedback_tx: mpsc::Sender<JudgeFeedback>,
 ) {
-    let mut batch_results = Vec::new();
+    let mut batch_results: Vec<CondensedToolResult> = Vec::new();
     let mut has_negative_reward = false;
 
     while let Some(exec_result) = result_rx.recv().await {
@@ -580,15 +647,17 @@ async fn judge_track(
             )
         };
 
-        batch_results.push(format!(
-            "{}: {}",
-            exec_result.tool_name,
-            if distilled.len() > 800 {
-                format!("{}...", &distilled[..800])
-            } else {
-                distilled
-            }
-        ));
+        let content = if distilled.len() > 800 {
+            format!("{}...", &distilled[..800])
+        } else {
+            distilled
+        };
+
+        batch_results.push(CondensedToolResult {
+            tool_name: exec_result.tool_name,
+            call_id: exec_result.call_id,
+            content,
+        });
 
         // Send feedback after each result so the planner can proceed to
         // the next round with tool results in context. Previously batched
@@ -596,7 +665,7 @@ async fn judge_track(
         // feedback before sending the next batch.
         {
             let feedback = JudgeFeedback {
-                distilled_results: batch_results.join("\n"),
+                tool_results: std::mem::take(&mut batch_results),
                 should_replan: has_negative_reward,
             };
 
@@ -604,7 +673,6 @@ async fn judge_track(
                 break; // planner closed
             }
 
-            batch_results.clear();
             has_negative_reward = false;
         }
     }
@@ -613,7 +681,7 @@ async fn judge_track(
     if !batch_results.is_empty() {
         let _ = feedback_tx
             .send(JudgeFeedback {
-                distilled_results: batch_results.join("\n"),
+                tool_results: batch_results,
                 should_replan: has_negative_reward,
             })
             .await;

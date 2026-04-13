@@ -285,7 +285,10 @@ pub async fn execute_with_conductor_and_learning(
 
     // 4.5 Check if RLM mode should activate (large context handling)
     let input_tokens = estimate_tokens(&task_content);
-    let context_size = model_context_size(None, router.is_anthropic_available());
+    let context_size = model_context_size(
+        model_hint.map(|h| h.name()),
+        router.is_anthropic_available(),
+    );
     let rlm_bridge = RlmBridge::with_default_manager();
 
     let (rlm_system_prompt, rlm_manifest_id) =
@@ -303,6 +306,9 @@ pub async fn execute_with_conductor_and_learning(
                         result.chunk_count, result.total_tokens, result.manifest_id
                     );
 
+                    // Generate system prompt before moving bridge into Arc
+                    let system_prompt = rlm_bridge.generate_system_prompt(&result);
+
                     // Add RLM tools to registry (rare path — clone if needed)
                     let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
                     let context_tools = create_context_tools(rlm_ops.clone());
@@ -313,11 +319,6 @@ pub async fn execute_with_conductor_and_learning(
                         }
                     }
                     info!("Added RLM context tools to registry");
-
-                    // Generate system prompt with manifest reference
-                    // Recreate bridge since we moved it into Arc
-                    let bridge_for_prompt = RlmBridge::with_default_manager();
-                    let system_prompt = bridge_for_prompt.generate_system_prompt(&result);
 
                     (Some(system_prompt), Some(result.manifest_id))
                 }
