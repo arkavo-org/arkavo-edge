@@ -725,7 +725,7 @@ impl Router {
         &self,
         task_description: &str,
         messages: Vec<Message>,
-        prefer_capable: bool,
+        #[allow(unused_variables)] prefer_capable: bool,
     ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
 
