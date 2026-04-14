@@ -618,11 +618,11 @@ impl AgentConnection {
                     delta: match ordered_delta.delta.delta {
                         MessageDeltaContent::Text { ref text } => {
                             // Detect @context introspection response
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
-                                if parsed.get("messages").is_some() && parsed.get("cycle").is_some()
-                                {
-                                    *context_snapshot_store.write().await = Some(parsed);
-                                }
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text)
+                                && parsed.get("messages").is_some()
+                                && parsed.get("cycle").is_some()
+                            {
+                                *context_snapshot_store.write().await = Some(parsed);
                             }
                             crate::types::MessageDeltaContent::Text { text: text.clone() }
                         }
