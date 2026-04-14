@@ -481,7 +481,8 @@ mod tests {
         let selector = ModelSelector::with_availability(gemini_only());
         let feasible = selector.feasible_models();
         assert!(feasible.contains(&ModelChoice::GeminiFlash));
-        assert!(feasible.contains(&ModelChoice::GeminiPro));
+        // GeminiPro removed from feasible set (Flash only) in d4227709
+        assert!(!feasible.contains(&ModelChoice::GeminiPro));
         assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
         assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
     }
