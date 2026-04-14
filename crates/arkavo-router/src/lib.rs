@@ -868,7 +868,7 @@ impl Router {
     /// Minimum context size across all currently-loaded local models.
     /// Returns conservative default (4096) if no models are loaded.
     /// Used by ConversationWindow to compute the history token budget.
-    #[cfg(feature = "llama-cpp")]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn min_feasible_context_size(&self) -> usize {
         let models = self.model_registry.model_names();
         if models.is_empty() {
@@ -886,7 +886,7 @@ impl Router {
         if min_ctx == usize::MAX { 4096 } else { min_ctx }
     }
 
-    #[cfg(not(feature = "llama-cpp"))]
+    #[cfg(any(not(feature = "llama-cpp"), target_env = "musl"))]
     pub fn min_feasible_context_size(&self) -> usize {
         4096
     }
