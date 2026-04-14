@@ -251,10 +251,10 @@ pub(crate) async fn generate_tokens_pooled(
                     let n = unsafe {
                         arkavo_llama_cpp::ffi::llama_tokenize(
                             vocab,
-                            gen_prompt.as_ptr() as *const std::os::raw::c_char,
-                            gen_prompt.len() as i32,
+                            gen_prompt.as_ptr().cast::<std::os::raw::c_char>(),
+                            i32::try_from(gen_prompt.len()).unwrap_or(i32::MAX),
                             toks.as_mut_ptr(),
-                            toks.len() as i32,
+                            i32::try_from(toks.len()).unwrap_or(i32::MAX),
                             false, // no BOS for grammar prefill
                             true,  // parse special tokens
                         )

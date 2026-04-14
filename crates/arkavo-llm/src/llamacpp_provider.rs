@@ -1148,7 +1148,7 @@ impl Provider for LlamaCppProvider {
                                             error = %e,
                                             "Failed to parse tool call arguments, defaulting to empty"
                                         );
-                                        serde_json::Value::Object(Default::default())
+                                        serde_json::Value::Object(serde_json::Map::default())
                                     },
                                 ),
                                 call_id: if tc.id.is_empty() { None } else { Some(tc.id) },
