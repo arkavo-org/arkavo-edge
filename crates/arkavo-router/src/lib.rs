@@ -893,7 +893,7 @@ impl Router {
 
     /// Get an Arc<LlamaModel> from any loaded model for token estimation.
     /// Returns None if no models are loaded.
-    #[cfg(feature = "llama-cpp")]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn any_loaded_model(&self) -> Option<std::sync::Arc<arkavo_llm::LlamaModel>> {
         let names = self.model_registry.model_names();
         names.first().and_then(|name| self.model_registry.get(name))
