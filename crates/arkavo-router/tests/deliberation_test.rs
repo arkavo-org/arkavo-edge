@@ -80,6 +80,8 @@ async fn test_deliberation_with_ministral_3b() {
         role: Role::User,
         content: task.to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     println!("\nTask: {}", task);
@@ -144,6 +146,8 @@ async fn test_deliberation_tool_error_scenario() {
         role: Role::User,
         content: task.to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     println!("\nTask: {}", task);
@@ -202,6 +206,8 @@ async fn test_qwen3_math() {
         role: Role::User,
         content: task.to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     println!("\nTask: {}", task);
@@ -254,6 +260,8 @@ async fn test_qwen3_coding() {
         role: Role::User,
         content: task.to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     println!("\nTask: {}", task);

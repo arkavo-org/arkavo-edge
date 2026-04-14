@@ -323,6 +323,26 @@ pub async fn handle_message_send(
 
                         info!("Executing task {} via HRM Conductor", task_id_clone);
 
+                        // Build a registry with mesh tools so specialists can
+                        // use send_task/list_agents to communicate with the swarm.
+                        let specialist_registry = {
+                            let mut reg = arkavo_mcp_tools::ToolRegistry::empty();
+                            if let Some(ref ms) = mesh_state {
+                                arkavo_mcp_mesh::register_tools(&mut reg, ms.clone());
+                            }
+                            if let Ok(mcp_tools) = mcp_registry.list_all_tools().await {
+                                for tool in mcp_tools {
+                                    let name = tool.name.clone();
+                                    let bridge = super::super::mcp_bridge::McpBridgeTool::new(
+                                        mcp_registry.clone(),
+                                        tool,
+                                    );
+                                    reg.register(&name, Box::new(bridge));
+                                }
+                            }
+                            Arc::new(reg)
+                        };
+
                         match execute_with_conductor_and_learning(
                             &conductor,
                             &router,
@@ -343,7 +363,7 @@ pub async fn handle_message_send(
                             Some(&compute_budget),
                             None,
                             false, // specialists may need complexity assessment
-                            None,  // no cached registry
+                            Some(specialist_registry),
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )

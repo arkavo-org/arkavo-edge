@@ -288,7 +288,19 @@ pub(crate) async fn generate_tokens_pooled(
         let eos_token = model.get_eos_token();
         process_input_tokens(&ctx, &input_tokens)?;
         let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0);
-        let max_generation = std::cmp::min(config.max_tokens, 30000);
+        // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
+        // may be much smaller than max_tokens. Without this, generation crashes
+        // with DecodeFailure when pos exceeds the KV cache boundary.
+        let trained_ctx = model.get_trained_context_size() as u32;
+        let safe_ctx = if trained_ctx <= 8192 {
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            trained_ctx / 2
+        } else {
+            (trained_ctx / 4).min(16384)
+        };
+        let available = safe_ctx.saturating_sub(input_tokens.len() as u32);
+        let max_generation = config.max_tokens.min(30000).min(available);
         let mut utf8_buffer: Vec<u8> = Vec::new();
         let mut detection_buffer = String::new();
 
@@ -522,7 +534,18 @@ pub(crate) async fn generate_tokens_with_context(
             i32::try_from(input_tokens.len()).unwrap_or(0)
         };
 
-        let max_generation = std::cmp::min(config.max_tokens, 30000);
+        // Clamp generation to KV cache capacity (same logic as pooled path)
+        let trained_ctx = model.get_trained_context_size() as u32;
+        let safe_ctx = if trained_ctx <= 8192 {
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            trained_ctx / 2
+        } else {
+            (trained_ctx / 4).min(16384)
+        };
+        let occupied = initial_pos as u32;
+        let available = safe_ctx.saturating_sub(occupied);
+        let max_generation = config.max_tokens.min(30000).min(available);
         let mut pos = initial_pos;
 
         if is_debug() {

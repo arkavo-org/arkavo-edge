@@ -1,7 +1,7 @@
 use crate::config::LlmConfig;
 use crate::error::{Error, Result};
 use crate::mcp_converter::McpConverter;
-use crate::message::Message;
+use crate::message::{Message, Role};
 use crate::provider::{Provider, ProviderResponse};
 use crate::stream::StreamResponse;
 use crate::tool_parser::ParsedToolCall;
@@ -205,17 +205,14 @@ impl Provider for GeminiProvider {
             return Err(Error::Provider("No messages provided".into()));
         }
 
-        let last_message = messages
-            .last()
-            .ok_or_else(|| Error::Provider("No messages provided".into()))?;
-
-        let prompt = &last_message.content;
-
         let tool_declarations = tools.and_then(|t| Self::convert_tools_to_declarations(&t).ok());
+
+        // Extract system instruction and convert messages to multi-turn contents
+        let (system_instruction, contents) = Self::convert_messages_to_contents(&messages);
 
         let mut gemini_stream = self
             .client
-            .stream_generate_content(prompt, tool_declarations)
+            .stream_generate_content_multi(system_instruction, contents, tool_declarations)
             .await
             .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 
@@ -259,6 +256,53 @@ impl Provider for GeminiProvider {
 }
 
 impl GeminiProvider {
+    /// Convert arkavo-llm Messages to Gemini API format.
+    /// System messages become system_instruction; user/assistant/tool become contents.
+    fn convert_messages_to_contents(
+        messages: &[Message],
+    ) -> (Option<String>, Vec<(String, String)>) {
+        let mut system_parts = Vec::new();
+        let mut contents = Vec::new();
+
+        for msg in messages {
+            match msg.role {
+                Role::System => {
+                    system_parts.push(msg.content.clone());
+                }
+                Role::User => {
+                    contents.push(("user".to_string(), msg.content.clone()));
+                }
+                Role::Assistant => {
+                    if !msg.content.is_empty() {
+                        contents.push(("model".to_string(), msg.content.clone()));
+                    }
+                }
+                Role::Tool => {
+                    // Tool results go as user messages with context
+                    let tool_text = if let Some(name) = &msg.tool_name {
+                        format!("[Tool result from {}]: {}", name, msg.content)
+                    } else {
+                        msg.content.clone()
+                    };
+                    contents.push(("user".to_string(), tool_text));
+                }
+            }
+        }
+
+        let system_instruction = if system_parts.is_empty() {
+            None
+        } else {
+            Some(system_parts.join("\n\n"))
+        };
+
+        // Gemini requires at least one content entry
+        if contents.is_empty() {
+            contents.push(("user".to_string(), "Continue.".to_string()));
+        }
+
+        (system_instruction, contents)
+    }
+
     fn convert_tools_to_declarations(tools_json: &Value) -> Result<Vec<FunctionDeclaration>> {
         let tools_array = tools_json
             .as_array()

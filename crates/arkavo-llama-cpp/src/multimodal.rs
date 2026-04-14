@@ -50,9 +50,9 @@ impl MtmdContext {
         unsafe { ffi::mtmd_support_audio(self.ptr) }
     }
 
-    pub fn decode_use_non_causal(&self) -> bool {
+    pub fn decode_use_non_causal(&self, chunk: *const ffi::mtmd_input_chunk) -> bool {
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
-        unsafe { ffi::mtmd_decode_use_non_causal(self.ptr) }
+        unsafe { ffi::mtmd_decode_use_non_causal(self.ptr, chunk) }
     }
 
     pub fn decode_use_mrope(&self) -> bool {

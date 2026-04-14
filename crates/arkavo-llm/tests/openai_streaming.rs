@@ -29,6 +29,8 @@ async fn test_openai_streaming_basic() {
         role: Role::User,
         content: "List the numbers from 1 to 5, separated by spaces.".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let mut stream = provider
@@ -87,6 +89,8 @@ async fn test_openai_streaming_performance() {
         role: Role::User,
         content: "Write a 3-sentence story about a robot.".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let start = Instant::now();
@@ -154,6 +158,8 @@ async fn test_openai_streaming_interruption() {
         role: Role::User,
         content: "Count from 1 to 100, one number per line.".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let mut stream = provider
@@ -204,11 +210,15 @@ async fn test_openai_streaming_with_system_message() {
             role: Role::System,
             content: "You are a poet. Respond only in haiku format.".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
         Message {
             role: Role::User,
             content: "Describe streaming data".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
     ];
 
@@ -277,6 +287,8 @@ async fn test_openai_streaming_concurrent() {
                 role: Role::User,
                 content: prompt_owned.clone(),
                 images: None,
+                tool_call_id: None,
+                tool_name: None,
             }];
 
             let mut stream = provider
@@ -346,6 +358,8 @@ async fn test_openai_streaming_error_handling() {
         role: Role::User,
         content: "Hello".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let result = provider.stream(messages).await;

@@ -208,6 +208,28 @@ impl ToolMemory {
         self.last_observe_full.as_deref()
     }
 
+    /// Build a summary of recent tool results for the ConversationWindow.
+    /// Called when the conductor returns empty text (tool-only responses)
+    /// so the model retains memory of what it observed/did across cycles.
+    pub fn format_recent_for_context(&self) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for entry in self.entries.iter().rev().take(3) {
+            if entry.is_observe {
+                // Include the full observe result (truncated to fit context)
+                if let Some(ref obs) = self.last_observe_full {
+                    let truncated = if obs.len() > 3000 { &obs[..3000] } else { obs };
+                    let _ = write!(out, "[Observed]: {truncated}\n");
+                }
+            } else if !entry.result_summary.is_empty() {
+                let _ = write!(out, "[{}]: {}\n", entry.tool_name, entry.result_summary);
+            }
+        }
+        if out.is_empty() { None } else { Some(out) }
+    }
+
     /// Check if any recent entry was a meaningful action (has Action.Type, not observation)
     pub fn had_meaningful_action(&self) -> bool {
         self.entries

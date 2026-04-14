@@ -18,6 +18,8 @@ pub struct RestClient {
 #[derive(Debug, Clone, Serialize)]
 struct GenerateContentRequest {
     contents: Vec<Content>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "systemInstruction")]
+    system_instruction: Option<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "generationConfig")]
@@ -106,6 +108,7 @@ impl RestClient {
                     text: prompt.into(),
                 }],
             }],
+            system_instruction: None,
             tools: tools.map(|t| {
                 vec![Tool {
                     function_declarations: t,
@@ -183,6 +186,41 @@ impl RestClient {
             .await
     }
 
+    /// Stream with multi-turn contents and optional system instruction.
+    /// This is the method that GeminiProvider should use for tool-calling conversations.
+    pub async fn stream_generate_content_multi(
+        &self,
+        system_instruction: Option<String>,
+        contents: Vec<(String, String)>, // (role, text) pairs
+        tools: Option<Vec<FunctionDeclaration>>,
+    ) -> Result<GeminiSseStream> {
+        let sys = system_instruction.map(|text| Content {
+            role: "user".to_string(), // Gemini system_instruction ignores role
+            parts: vec![Part::Text { text }],
+        });
+
+        let contents = contents
+            .into_iter()
+            .map(|(role, text)| Content {
+                role,
+                parts: vec![Part::Text { text }],
+            })
+            .collect();
+
+        let request = GenerateContentRequest {
+            contents,
+            system_instruction: sys,
+            tools: tools.map(|t| {
+                vec![Tool {
+                    function_declarations: t,
+                }]
+            }),
+            generation_config: None,
+        };
+
+        self.stream_request(request).await
+    }
+
     async fn stream_generate_content_impl(
         &self,
         prompt: impl Into<String>,
@@ -203,6 +241,7 @@ impl RestClient {
                     text: prompt.into(),
                 }],
             }],
+            system_instruction: None,
             tools: tools.map(|t| {
                 vec![Tool {
                     function_declarations: t,
@@ -211,6 +250,10 @@ impl RestClient {
             generation_config,
         };
 
+        self.stream_request(request).await
+    }
+
+    async fn stream_request(&self, request: GenerateContentRequest) -> Result<GeminiSseStream> {
         let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
         let url = format!(
             "{}/models/{}:streamGenerateContent?alt=sse&key={}",

@@ -28,6 +28,8 @@ async fn test_openai_basic_connectivity() {
         role: Role::User,
         content: "Say 'test successful' and nothing else.".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let response = provider
@@ -58,6 +60,8 @@ async fn test_openai_authentication_error() {
         role: Role::User,
         content: "Hello".to_string(),
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let result = provider.complete(messages).await;
@@ -96,6 +100,8 @@ async fn test_openai_rate_limiting() {
                 role: Role::User,
                 content: format!("Count to {i} and respond with just the numbers"),
                 images: None,
+                tool_call_id: None,
+                tool_name: None,
             }];
             provider.complete(messages).await
         });
@@ -174,11 +180,15 @@ async fn test_openai_system_message() {
             role: Role::System,
             content: "You are a pirate. Always respond in pirate speak.".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
         Message {
             role: Role::User,
             content: "Say hello".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
     ];
 
@@ -218,16 +228,22 @@ async fn test_openai_multi_turn_conversation() {
             role: Role::User,
             content: "My favorite color is blue. Remember this.".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
         Message {
             role: Role::Assistant,
             content: "I'll remember that your favorite color is blue.".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
         Message {
             role: Role::User,
             content: "What's my favorite color?".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         },
     ];
 

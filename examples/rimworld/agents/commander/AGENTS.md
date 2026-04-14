@@ -7,17 +7,29 @@ purpose: |
   Do NOT write analysis. Do NOT explain your reasoning. ONLY call tools.
 
   Cycle 1: registerAgent(AgentId="player1", AgentType="Controller")
-  Cycle 2+: step(AgentId="player1", Action={"Type":"SelectResearch","ProjectDefName":"Pemmican"}, Ticks=60)
+  Cycle 2+: step(AgentId="player1", Action={...}, Ticks=60)
 
   Pick ONE action per cycle based on alerts:
-  - "Need meal source" → step with Action={"Type":"DesignateHunt","TargetId":"<animal_id>"}
-  - "Need research project" → step with Action={"Type":"SelectResearch","ProjectDefName":"Pemmican"}
-  - "colonists idle" → step with Action={"Type":"SetWorkPriority","ColonistId":"<name>","WorkType":"Growing","Priority":1}
+  - "Starvation" or "Low food" → step with Action={"Type":"UnforbidByType","DefName":"MealSurvivalPack"}
+  - "Need colonist beds" → step with Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"MapCenter","Count":3}
+  - "Need meal source" → step with Action={"Type":"EstablishFarm","Crop":"Potato","Near":"MapCenter","Size":"Medium"}
+  - "Under attack" or threats not empty → step with Action={"Type":"Draft","ColonistId":"<name>"} for each colonist, then step with Action={"Type":"SetSpeed","Speed":0} to pause and assess
+  - "Need defenses" → step with Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"MapCenter","Count":5}
+  - "Need research project" → step with Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}
+  - "colonists idle" → step with Action={"Type":"SetWorkPriority","ColonistId":"<name>","WorkType":"Construction","Priority":1}
   - Otherwise → step with Action={"Type":"SetSpeed","Speed":2}
 
-  Colony lost detection: If colony_alive=false OR Reward < -0.5 for 3+ consecutive cycles,
-  the colony is unrecoverable. Call episodeSummary() then reset() to start a new episode.
-  After reset, re-register with registerAgent on the next cycle.
+  Other useful actions:
+  - step with Action={"Type":"EstablishStorage","Near":"MapCenter","Size":"Medium"}
+  - step with Action={"Type":"PlaceBuildingNear","Building":"ElectricStove","Near":"MapCenter","Count":1}
+  - step with Action={"Type":"PlaceBuildingNear","Building":"ResearchBench","Near":"MapCenter","Count":1}
+  - step with Action={"Type":"DesignateHunt","TargetId":"<animal_id>"}
+  - step with Action={"Type":"DesignateMiningNear","Near":"MapCenter","Radius":10}
+  - step with Action={"Type":"DesignateClearNear","Near":"MapCenter","Radius":10}
+
+  Every 10 cycles: call episodeSummary() to check total score.
+  If TotalReward is below -20, the colony is lost. Call reset(Scenario="training_base")
+  then registerAgent(AgentId="player1", AgentType="Controller") on the next cycle.
 
   NEVER call only observe. NEVER write text without a tool call.
 

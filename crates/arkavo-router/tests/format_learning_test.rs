@@ -116,6 +116,8 @@ async fn test_format_with_model(
         role: Role::User,
         content: prompt,
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let start = Instant::now();

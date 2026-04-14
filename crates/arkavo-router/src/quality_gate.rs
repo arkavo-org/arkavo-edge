@@ -25,13 +25,59 @@ impl super::Router {
     /// to emit the next tool call, not reason about it.
     pub async fn route_with_tools_execution(
         &self,
-        task_description: &str,
+        _task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
     ) -> Result<ProviderResponse> {
-        self.route_with_tools_internal(task_description, messages, tool_registry, model_hint, true)
+        // Execution mode: bypass classification and Thompson Sampling entirely.
+        // The model is already known (from the hint or fastest local fallback)
+        // and all tools should be passed with compact schemas since the model
+        // already saw full schemas in round 0.
+        let model = model_hint
+            .cloned()
+            .unwrap_or_else(|| self.selector.fastest_local_model());
+
+        let tools_json = match tool_registry {
+            Some(registry) => {
+                // Pass ALL tools with NameAndDescription detail level.
+                // Empty query returns everything — no keyword filtering needed
+                // since the model already knows which tools to call.
+                let tool_infos =
+                    registry.search_tools("", arkavo_mcp_tools::DetailLevel::NameAndDescription);
+                let json = match model {
+                    crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                    }
+                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                };
+                Some(json)
+            }
+            None => None,
+        };
+
+        let provider = self.instantiate_provider(&model).await?;
+        let _permit = self
+            .inference_semaphore
+            .acquire()
             .await
+            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
+
+        let mut response = provider
+            .complete_with_tools(messages, tools_json, None)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
+
+        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
+
+        if response.tool_calls.is_empty() && !response.content.is_empty() {
+            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
+            if !extracted.is_empty() {
+                response.tool_calls = extracted;
+            }
+        }
+
+        Ok(response)
     }
 
     /// Route with a model override — bypass classification, Thompson Sampling,
@@ -207,9 +253,13 @@ impl super::Router {
 
             let tools_json = match tool_registry {
                 Some(registry) => {
-                    let detail_level = tool_extraction::detail_level_for_model(
-                        &current_decision.recommended_model,
-                    );
+                    // Execution mode uses NameAndDescription to keep Jinja template
+                    // expansion compact — the model already saw full schemas in round 0.
+                    let detail_level = if execution_mode {
+                        arkavo_mcp_tools::DetailLevel::NameAndDescription
+                    } else {
+                        tool_extraction::detail_level_for_model(&current_decision.recommended_model)
+                    };
                     let keywords = tool_extraction::extract_keywords(task_description);
 
                     let tool_infos = tool_extraction::search_tools_hybrid(

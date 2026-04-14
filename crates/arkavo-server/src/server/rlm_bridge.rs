@@ -131,7 +131,13 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
-/// Get default model context size based on model hint.
+/// Get the effective model context size based on model hint.
+///
+/// Returns the *allocated* n_ctx, not the trained context size.
+/// Must match the safety scaling in arkavo-llama-cpp's context allocation:
+///   trained <= 8K  -> full
+///   trained <= 32K -> 50%
+///   trained > 32K  -> min(trained/4, 16384)
 ///
 /// Resolves full model names (e.g. "qwen3.5-27b") via `ModelChoice::from_name`
 /// before falling back to bare suffix matching (e.g. "7B").
@@ -142,11 +148,13 @@ pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
     if let Some(hint) = model_hint
         && let Some(choice) = arkavo_router::ModelChoice::from_name(hint)
     {
-        // Gemma 4 models have large native context windows
+        // Match llama.cpp KV cache allocation: large trained contexts get
+        // capped to prevent OOM. These values must stay in sync with the
+        // safe_ctx logic in arkavo-llama-cpp/src/lib.rs.
         return match choice {
-            arkavo_router::ModelChoice::LocalGemma4_26B => 262_144, // 256K
+            arkavo_router::ModelChoice::LocalGemma4_26B => 16_384, // trained 256K, capped
             arkavo_router::ModelChoice::LocalGemma4E2B
-            | arkavo_router::ModelChoice::LocalGemma4E4B => 131_072, // 128K
+            | arkavo_router::ModelChoice::LocalGemma4E4B => 16_384, // trained 128K, capped
             _ => match choice.capability() {
                 arkavo_router::PlannerTier::Small => 2_048,
                 arkavo_router::PlannerTier::Medium => 8_192,
@@ -190,9 +198,9 @@ mod tests {
         assert_eq!(model_context_size(Some("ministral-8b"), false), 32_768);
         assert_eq!(model_context_size(Some("ministral-3b"), false), 8_192);
         assert_eq!(model_context_size(Some("qwen3.5-0.8b"), false), 2_048);
-        assert_eq!(model_context_size(Some("gemma-4-26b-a4b"), false), 262_144);
-        assert_eq!(model_context_size(Some("gemma-4-e2b"), false), 131_072);
-        assert_eq!(model_context_size(Some("gemma-4-e4b"), false), 131_072);
+        assert_eq!(model_context_size(Some("gemma-4-26b-a4b"), false), 16_384);
+        assert_eq!(model_context_size(Some("gemma-4-e2b"), false), 16_384);
+        assert_eq!(model_context_size(Some("gemma-4-e4b"), false), 16_384);
     }
 
     #[tokio::test]

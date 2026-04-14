@@ -705,13 +705,44 @@ impl Router {
         task_description: &str,
         messages: Vec<Message>,
     ) -> Result<RouteStream> {
+        self.route_fast_with_preference(task_description, messages, false)
+            .await
+    }
+
+    /// Like `route_fast` but prefers the largest loaded model when
+    /// `prefer_capable` is true. Used for tasks like lesson synthesis
+    /// where a 0.8B/3B model can't produce structured JSON reliably.
+    pub async fn route_synthesis(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+    ) -> Result<RouteStream> {
+        self.route_fast_with_preference(task_description, messages, true)
+            .await
+    }
+
+    async fn route_fast_with_preference(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        prefer_capable: bool,
+    ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
 
         let preferred = self.selector.fastest_local_model();
         // Prefer a model already loaded in the registry to avoid ~1s reload.
         // Synthesis tasks don't need a specific model — any loaded one will do.
         #[cfg(feature = "llama-cpp")]
-        let model = if self.model_registry.is_loaded(preferred.name()) {
+        let model = if prefer_capable {
+            // Pick the largest already-loaded model for tasks needing
+            // structured output (lesson synthesis, pattern analysis).
+            crate::ModelChoice::ALL_LOCAL
+                .iter()
+                .rev()
+                .find(|m| self.model_registry.is_loaded(m.name()))
+                .cloned()
+                .unwrap_or(preferred)
+        } else if self.model_registry.is_loaded(preferred.name()) {
             preferred
         } else {
             // Use any already-loaded model, sorted by preference (smallest first)

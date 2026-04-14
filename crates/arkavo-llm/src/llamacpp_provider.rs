@@ -995,13 +995,28 @@ impl Provider for LlamaCppProvider {
             None
         };
 
-        // Convert tool definitions to ChatTool format for native template rendering
+        // Convert tool definitions to ChatTool format for native template rendering.
+        // When input_schema is a trivial empty object (from NameAndDescription detail
+        // level), omit parameters_json so the Jinja template renders compactly —
+        // preventing the 16K+ token expansion that causes GPU faults.
         let chat_tools: Vec<arkavo_llama_cpp::ChatTool> = if let Some(ref tools_value) = tools {
             tools_value
                 .as_array()
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|t| {
+                            let params = t
+                                .get("input_schema")
+                                .filter(|s| {
+                                    // Keep schema only if it has actual properties
+                                    s.get("properties")
+                                        .and_then(|p| p.as_object())
+                                        .is_some_and(|o| !o.is_empty())
+                                })
+                                .map(|s| s.to_string())
+                                // Must be valid JSON — empty string causes
+                                // json::parse("") to throw in chat.cpp
+                                .unwrap_or_else(|| "{}".to_string());
                             Some(arkavo_llama_cpp::ChatTool {
                                 name: t.get("name")?.as_str()?.to_string(),
                                 description: t
@@ -1009,10 +1024,7 @@ impl Provider for LlamaCppProvider {
                                     .and_then(|d| d.as_str())
                                     .unwrap_or("")
                                     .to_string(),
-                                parameters_json: t
-                                    .get("input_schema")
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_default(),
+                                parameters_json: params,
                             })
                         })
                         .collect()
