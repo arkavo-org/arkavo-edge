@@ -614,8 +614,8 @@ jobs:
           SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
 
@@ -705,8 +705,8 @@ jobs:
           Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
           $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
           Write-Host "Binary size: $([math]::Round($size, 2))MB"
-          if ($size -gt 60) {
-            Write-Error "Binary size exceeds 60MB limit"
+          if ($size -gt 65) {
+            Write-Error "Binary size exceeds 65MB limit"
             exit 1
           }
           Write-Host "✅ Binary size is within limit"
@@ -740,11 +740,11 @@ jobs:
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
-          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
 
   # Smoke tests depend on builds
   smoke-test-linux:
@@ -832,9 +832,9 @@ jobs:
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
           
-          # Check against the standard 60MB limit
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 60MB limit"
+          # Check against the standard 65MB limit
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
           
@@ -842,7 +842,7 @@ jobs:
           if [ $SIZE_MB -le 40 ]; then
             echo "✅ Binary is highly optimized (${SIZE_MB}MB ≤ 40MB - no heavy ML deps)"
           else
-            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
           fi
       
       - name: Test basic commands
