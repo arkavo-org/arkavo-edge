@@ -411,14 +411,13 @@ pub async fn execute_with_conductor_and_learning(
     // into the last user message (which is the cycle prompt).
     let messages = if let Some(mut existing) = existing_messages {
         // Find the last user message and augment it with learning guidance
-        if augmented_content != task_content {
-            if let Some(last_user) = existing
+        if augmented_content != task_content
+            && let Some(last_user) = existing
                 .iter_mut()
                 .rev()
                 .find(|m| m.role == arkavo_llm::Role::User)
-            {
-                last_user.content = augmented_content;
-            }
+        {
+            last_user.content = augmented_content;
         }
         existing
     } else {

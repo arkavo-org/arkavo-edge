@@ -324,7 +324,7 @@ pub async fn run_agent_loop(
                 };
                 if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
                     consecutive_duplicate_prompts += 1;
-                    if consecutive_duplicate_prompts % 5 != 0 {
+                    if !consecutive_duplicate_prompts.is_multiple_of(5) {
                         info!(
                             "Agent cycle {cycle}: skipping duplicate prompt \
                              ({consecutive_duplicate_prompts} consecutive, \
@@ -596,7 +596,7 @@ pub async fn run_agent_loop(
                         correlation_id,
                     } => {
                         pending_messages.push(PendingMessage {
-                            content: format!("[event from={}] {}", server, event_data),
+                            content: format!("[event from={server}] {event_data}"),
                             task_id: None,
                             correlation_id,
                             reply: None,

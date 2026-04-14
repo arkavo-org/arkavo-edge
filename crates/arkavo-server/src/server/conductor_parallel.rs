@@ -229,8 +229,7 @@ async fn planner_track(
                     );
                 } else {
                     let structural = format!(
-                        "[Previous context: {} messages ({} chars) compacted]",
-                        compactable, old_chars
+                        "[Previous context: {compactable} messages ({old_chars} chars) compacted]"
                     );
                     info!(
                         old_msgs = compactable,
@@ -471,21 +470,19 @@ async fn executor_track(
                 let mem = tool_memory.cloned();
                 async move {
                     // Skip setup tools that already succeeded (e.g., registerAgent)
-                    if let Some(ref m) = mem {
-                        if m.read().await.is_setup_complete(&name) {
-                            return (
-                                idx,
-                                name,
-                                call_id,
-                                args,
-                                Ok::<String, String>(
-                                    "Already completed \u{2014} skipped".to_string(),
-                                ),
-                                true,
-                                None,
-                                0u64,
-                            );
-                        }
+                    if let Some(ref m) = mem
+                        && m.read().await.is_setup_complete(&name)
+                    {
+                        return (
+                            idx,
+                            name,
+                            call_id,
+                            args,
+                            Ok::<String, String>("Already completed \u{2014} skipped".to_string()),
+                            true,
+                            None,
+                            0u64,
+                        );
                     }
                     let start = std::time::Instant::now();
                     let result = if let Some(tool) = registry.get(&name) {
