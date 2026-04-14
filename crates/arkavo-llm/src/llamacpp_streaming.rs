@@ -269,7 +269,7 @@ pub(crate) async fn generate_tokens_pooled(
                                 false,
                                 true,
                             );
-                            i32::from(first_piece.as_ref().is_some_and(|s| s.starts_with(' ')))
+                            usize::from(first_piece.is_ok_and(|s| s.starts_with(' ')))
                         } else {
                             0
                         };
