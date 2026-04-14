@@ -269,11 +269,7 @@ pub(crate) async fn generate_tokens_pooled(
                                 false,
                                 true,
                             );
-                            if first_piece.as_ref().map_or(false, |s| s.starts_with(' ')) {
-                                1
-                            } else {
-                                0
-                            }
+                            i32::from(first_piece.as_ref().is_some_and(|s| s.starts_with(' ')))
                         } else {
                             0
                         };
@@ -291,7 +287,7 @@ pub(crate) async fn generate_tokens_pooled(
         // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
         // may be much smaller than max_tokens. Without this, generation crashes
         // with DecodeFailure when pos exceeds the KV cache boundary.
-        let trained_ctx = model.get_trained_context_size() as u32;
+        let trained_ctx = model.get_trained_context_size();
         let safe_ctx = if trained_ctx <= 8192 {
             trained_ctx
         } else if trained_ctx <= 32768 {
@@ -535,7 +531,7 @@ pub(crate) async fn generate_tokens_with_context(
         };
 
         // Clamp generation to KV cache capacity (same logic as pooled path)
-        let trained_ctx = model.get_trained_context_size() as u32;
+        let trained_ctx = model.get_trained_context_size();
         let safe_ctx = if trained_ctx <= 8192 {
             trained_ctx
         } else if trained_ctx <= 32768 {
