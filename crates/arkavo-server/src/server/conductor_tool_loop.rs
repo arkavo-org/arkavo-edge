@@ -137,8 +137,7 @@ pub(super) async fn run_tool_loop(
                 } else {
                     // Fallback: structural summary when no fast model available
                     let structural = format!(
-                        "[Previous context: {} messages ({} chars) compacted]",
-                        compactable, old_chars
+                        "[Previous context: {compactable} messages ({old_chars} chars) compacted]"
                     );
                     info!(
                         old_msgs = compactable,
@@ -512,7 +511,7 @@ pub(super) async fn run_tool_loop(
             let call_id = tc
                 .call_id
                 .clone()
-                .unwrap_or_else(|| format!("call_{}", total_step_idx));
+                .unwrap_or_else(|| format!("call_{total_step_idx}"));
             messages.push(arkavo_llm::Message::tool_result(
                 format!("{result_to_append}{exploration_nudge}"),
                 call_id,
@@ -524,7 +523,7 @@ pub(super) async fn run_tool_loop(
                 let call_id = tc
                     .call_id
                     .clone()
-                    .unwrap_or_else(|| format!("call_{}_{}", total_step_idx, i));
+                    .unwrap_or_else(|| format!("call_{total_step_idx}_{i}"));
                 let part = tool_result_parts
                     .get(i)
                     .cloned()
@@ -916,12 +915,12 @@ fn strip_embedded_schemas(raw: &str) -> String {
 
 fn strip_schemas_from_value(json: &mut serde_json::Value) -> String {
     // Also handle double-encoded "result" field (common in MCP bridge responses)
-    if let Some(result_str) = json.get("result").and_then(|v| v.as_str()) {
-        if let Ok(mut inner) = serde_json::from_str::<serde_json::Value>(result_str) {
-            let changed = strip_schema_fields(&mut inner);
-            if changed {
-                json["result"] = serde_json::Value::String(inner.to_string());
-            }
+    if let Some(result_str) = json.get("result").and_then(|v| v.as_str())
+        && let Ok(mut inner) = serde_json::from_str::<serde_json::Value>(result_str)
+    {
+        let changed = strip_schema_fields(&mut inner);
+        if changed {
+            json["result"] = serde_json::Value::String(inner.to_string());
         }
     }
     strip_schema_fields(json);
@@ -1000,7 +999,7 @@ fn is_schema_shaped(v: &serde_json::Value) -> bool {
 
 /// Extract actionable entities from a tool result.
 /// Uses generic patterns that work across any MCP server:
-/// - Named entity lists in brackets: ['A', 'B', 'C']
+/// - Named entity lists in brackets: `['A', 'B', 'C']`
 /// - Alert/label fields with severity
 /// - Reward signals
 fn extract_entities(raw: &str) -> String {
@@ -1016,17 +1015,17 @@ fn extract_entities(raw: &str) -> String {
     } else {
         raw
     };
-    if let Some(start) = search_str.find("['") {
-        if let Some(end) = search_str[start..].find(']') {
-            let names_str = &search_str[start + 1..start + end];
-            let names: Vec<&str> = names_str
-                .split(',')
-                .map(|s| s.trim().trim_matches('\'').trim_matches('"').trim())
-                .filter(|s| !s.is_empty() && s.len() > 1)
-                .collect();
-            if !names.is_empty() {
-                parts.push(format!("Available entities: {}", names.join(", ")));
-            }
+    if let Some(start) = search_str.find("['")
+        && let Some(end) = search_str[start..].find(']')
+    {
+        let names_str = &search_str[start + 1..start + end];
+        let names: Vec<&str> = names_str
+            .split(',')
+            .map(|s| s.trim().trim_matches('\'').trim_matches('"').trim())
+            .filter(|s| !s.is_empty() && s.len() > 1)
+            .collect();
+        if !names.is_empty() {
+            parts.push(format!("Available entities: {}", names.join(", ")));
         }
     }
 

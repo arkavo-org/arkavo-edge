@@ -221,10 +221,10 @@ impl ToolMemory {
                 // Include the full observe result (truncated to fit context)
                 if let Some(ref obs) = self.last_observe_full {
                     let truncated = if obs.len() > 3000 { &obs[..3000] } else { obs };
-                    let _ = write!(out, "[Observed]: {truncated}\n");
+                    let _ = writeln!(out, "[Observed]: {truncated}");
                 }
             } else if !entry.result_summary.is_empty() {
-                let _ = write!(out, "[{}]: {}\n", entry.tool_name, entry.result_summary);
+                let _ = writeln!(out, "[{}]: {}", entry.tool_name, entry.result_summary);
             }
         }
         if out.is_empty() { None } else { Some(out) }

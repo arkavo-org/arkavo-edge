@@ -15,7 +15,7 @@ pub(super) struct ConversationWindow {
 
 /// Serializable snapshot of a single message in the conversation window.
 #[derive(Debug, Clone, serde::Serialize)]
-pub(crate) struct MessageSnapshot {
+pub(super) struct MessageSnapshot {
     pub(crate) role: String,
     pub(crate) content: String,
     pub(crate) tokens_est: usize,
