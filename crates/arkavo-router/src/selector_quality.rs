@@ -512,7 +512,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_select_adaptive_reasoning_contains_thompson() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        // Need both Gemini and Anthropic so feasible set has >1 model
+        // (single-model path skips Thompson Sampling)
+        let selector = ModelSelector::with_availability(ProviderAvailability {
+            gemini: true,
+            anthropic: true,
+            deepseek: false,
+            kimi: false,
+        });
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
