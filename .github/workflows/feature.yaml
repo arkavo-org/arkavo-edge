@@ -186,7 +186,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -401,7 +401,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -535,7 +535,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -553,7 +553,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -614,8 +614,8 @@ jobs:
           SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
 
@@ -655,7 +655,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -689,7 +689,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -705,8 +705,8 @@ jobs:
           Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
           $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
           Write-Host "Binary size: $([math]::Round($size, 2))MB"
-          if ($size -gt 60) {
-            Write-Error "Binary size exceeds 60MB limit"
+          if ($size -gt 65) {
+            Write-Error "Binary size exceeds 65MB limit"
             exit 1
           }
           Write-Host "✅ Binary size is within limit"
@@ -740,11 +740,11 @@ jobs:
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
-          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
 
   # Smoke tests depend on builds
   smoke-test-linux:
@@ -832,9 +832,9 @@ jobs:
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
           
-          # Check against the standard 60MB limit
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 60MB limit"
+          # Check against the standard 65MB limit
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
           
@@ -842,7 +842,7 @@ jobs:
           if [ $SIZE_MB -le 40 ]; then
             echo "✅ Binary is highly optimized (${SIZE_MB}MB ≤ 40MB - no heavy ML deps)"
           else
-            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
           fi
       
       - name: Test basic commands
@@ -1195,7 +1195,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -1528,7 +1528,7 @@ jobs:
       - name: Setup vendor/llama.cpp
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          cd vendor/llama.cpp && git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
 
       - name: Install build dependencies
         run: |

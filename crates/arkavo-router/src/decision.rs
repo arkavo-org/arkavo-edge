@@ -32,6 +32,14 @@ pub enum ModelChoice {
     LocalQwen35_27B,
     /// GLM-4.7-Flash - 30B MoE reasoning model, requires 32GB+ RAM
     LocalGlm47Flash,
+    /// Gemma-4-E2B - 2.3B active (5.1B total with PLE), multimodal edge model
+    LocalGemma4E2B,
+    /// Gemma-4-E4B - 4.5B active (8B total with PLE), multimodal edge model
+    LocalGemma4E4B,
+    /// Gemma-4-26B-A4B - MoE 4B active/26B total, 128 experts
+    LocalGemma4_26B,
+    /// Gemma-4-31B - Dense 31B, stronger per-token reasoning than MoE
+    LocalGemma4_31B,
     /// Legacy: Gemma-3-270M (if cached)
     LocalGemma270M,
     /// Legacy: Gemma-3-4B (if cached)
@@ -60,6 +68,10 @@ impl ModelChoice {
             Self::LocalQwen35_9B => "qwen3.5-9b",
             Self::LocalQwen35_27B => "qwen3.5-27b",
             Self::LocalGlm47Flash => "glm-4.7-flash",
+            Self::LocalGemma4E2B => "gemma-4-e2b",
+            Self::LocalGemma4E4B => "gemma-4-e4b",
+            Self::LocalGemma4_26B => "gemma-4-26b-a4b",
+            Self::LocalGemma4_31B => "gemma-4-31b",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
@@ -75,7 +87,13 @@ impl ModelChoice {
             Self::LocalQwen3 | Self::LocalQwen35_9B | Self::LocalQwen35_27B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
             Self::LocalGlm47Flash => "glm",
-            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "gemma",
+            Self::LocalGemma4E2B
+            | Self::LocalGemma4E4B
+            | Self::LocalGemma4_26B
+            | Self::LocalGemma4_31B
+            | Self::LocalGemma270M
+            | Self::LocalGemma4B
+            | Self::LocalGemma12B => "gemma",
             Self::LocalDeepSeekCoder | Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::GeminiFlash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
@@ -86,13 +104,18 @@ impl ModelChoice {
     /// Resolve a model name string to a ModelChoice (reverse of `name()`).
     /// Used as a hint from AGENTS.md `model:` field.
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
+        let name = &name.to_lowercase();
+        match name.as_str() {
             "qwen3.5-0.8b" | "qwen3-0.6b" => Some(Self::LocalQwen3),
             "ministral-3b" => Some(Self::LocalMinistral3B),
             "ministral-8b" => Some(Self::LocalMinistral8B),
             "qwen3.5-9b" => Some(Self::LocalQwen35_9B),
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
             "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
+            "gemma-4-e2b" => Some(Self::LocalGemma4E2B),
+            "gemma-4-e4b" => Some(Self::LocalGemma4E4B),
+            "gemma-4-26b-a4b" => Some(Self::LocalGemma4_26B),
+            "gemma-4-31b" => Some(Self::LocalGemma4_31B),
             "gemma-3-270m-it" => Some(Self::LocalGemma270M),
             "gemma-3-4b-it" => Some(Self::LocalGemma4B),
             "gemma-3-12b-it" => Some(Self::LocalGemma12B),
@@ -116,6 +139,10 @@ impl ModelChoice {
                 | Self::LocalQwen35_9B
                 | Self::LocalQwen35_27B
                 | Self::LocalGlm47Flash
+                | Self::LocalGemma4E2B
+                | Self::LocalGemma4E4B
+                | Self::LocalGemma4_26B
+                | Self::LocalGemma4_31B
                 | Self::LocalGemma270M
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
@@ -131,14 +158,18 @@ impl ModelChoice {
     pub const ALL_LOCAL: &[Self] = &[
         Self::LocalGemma270M,
         Self::LocalQwen3,
+        Self::LocalGemma4E2B,
         Self::LocalMinistral3B,
         Self::LocalGemma4B,
+        Self::LocalGemma4E4B,
         Self::LocalMinistral8B,
         Self::LocalQwen35_9B,
         Self::LocalGemma12B,
         Self::LocalDeepSeekCoder,
+        Self::LocalGemma4_26B,
         Self::LocalQwen35_27B,
         Self::LocalGlm47Flash,
+        Self::LocalGemma4_31B,
     ];
 
     pub fn is_anthropic(&self) -> bool {
@@ -167,7 +198,13 @@ impl ModelChoice {
             Self::LocalQwen3 | Self::LocalQwen35_9B | Self::LocalQwen35_27B => "local-qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
             Self::LocalGlm47Flash => "local-glm",
-            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
+            Self::LocalGemma4E2B
+            | Self::LocalGemma4E4B
+            | Self::LocalGemma4_26B
+            | Self::LocalGemma4_31B
+            | Self::LocalGemma270M
+            | Self::LocalGemma4B
+            | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
@@ -180,9 +217,14 @@ impl ModelChoice {
             // Small: < 2B parameters
             Self::LocalQwen3 | Self::LocalGemma270M => PlannerTier::Small,
             // Medium: 2-7B parameters
-            Self::LocalMinistral3B | Self::LocalGemma4B => PlannerTier::Medium,
+            Self::LocalGemma4E2B
+            | Self::LocalMinistral3B
+            | Self::LocalGemma4B
+            | Self::LocalGemma4E4B => PlannerTier::Medium,
             // Large: > 7B parameters or cloud models
-            Self::LocalMinistral8B
+            Self::LocalGemma4_26B
+            | Self::LocalGemma4_31B
+            | Self::LocalMinistral8B
             | Self::LocalQwen35_9B
             | Self::LocalQwen35_27B
             | Self::LocalGlm47Flash
@@ -207,6 +249,10 @@ impl ModelChoice {
             Self::LocalQwen35_9B => Some("unsloth/Qwen3.5-9B-GGUF"),
             Self::LocalQwen35_27B => Some("unsloth/Qwen3.5-27B-GGUF"),
             Self::LocalGlm47Flash => Some("unsloth/GLM-4.7-Flash-GGUF"),
+            Self::LocalGemma4E2B => Some("unsloth/gemma-4-E2B-it-GGUF"),
+            Self::LocalGemma4E4B => Some("ggml-org/gemma-4-E4B-it-GGUF"),
+            Self::LocalGemma4_26B => Some("ggml-org/gemma-4-26B-A4B-it-GGUF"),
+            Self::LocalGemma4_31B => Some("ggml-org/gemma-4-31B-it-GGUF"),
             Self::LocalGemma270M => Some("unsloth/gemma-3-270m-it-GGUF"),
             Self::LocalGemma4B => Some("unsloth/gemma-3-4b-it-GGUF"),
             Self::LocalGemma12B => Some("unsloth/gemma-3-12b-it-GGUF"),
@@ -224,6 +270,10 @@ impl ModelChoice {
             Self::LocalQwen35_9B => Some("Qwen3.5-9B-Q4_K_M.gguf"),
             Self::LocalQwen35_27B => Some("Qwen3.5-27B-UD-Q6_K_XL.gguf"),
             Self::LocalGlm47Flash => Some("GLM-4.7-Flash-Q4_K_M.gguf"),
+            Self::LocalGemma4E2B => Some("gemma-4-E2B-it-Q4_K_M.gguf"),
+            Self::LocalGemma4E4B => Some("gemma-4-e4b-it-Q4_K_M.gguf"),
+            Self::LocalGemma4_26B => Some("gemma-4-26B-A4B-it-Q4_K_M.gguf"),
+            Self::LocalGemma4_31B => Some("gemma-4-31B-it-Q4_K_M.gguf"),
             Self::LocalGemma270M => Some("gemma-3-270m-it-Q4_0.gguf"),
             Self::LocalGemma4B => Some("gemma-3-4b-it-Q4_0.gguf"),
             Self::LocalGemma12B => Some("gemma-3-12b-it-Q4_0.gguf"),
@@ -255,6 +305,10 @@ impl ModelChoice {
             Self::LocalQwen35_9B => 6_000_000_000,
             Self::LocalQwen35_27B => 23_000_000_000,
             Self::LocalGlm47Flash => 20_000_000_000,
+            Self::LocalGemma4E2B => 3_000_000_000,
+            Self::LocalGemma4E4B => 5_000_000_000,
+            Self::LocalGemma4_26B => 17_000_000_000,
+            Self::LocalGemma4_31B => 20_000_000_000,
             Self::LocalGemma270M => 200_000_000,
             Self::LocalGemma4B => 2_500_000_000,
             Self::LocalGemma12B => 7_000_000_000,
@@ -278,6 +332,13 @@ impl ModelChoice {
             Self::LocalQwen35_9B => Some((0.7, 0.9, ThinkingMode::On)),
             Self::LocalGlm47Flash => Some((0.9, 1.0, ThinkingMode::On)),
             Self::LocalQwen35_27B => Some((0.1, 0.8, ThinkingMode::On)),
+            // Gemma-4 MoE: thinking burns KV cache tokens at 14 tok/s,
+            // making tool loops unacceptably slow. Disable thinking so
+            // the model produces tool calls directly.
+            Self::LocalGemma4_26B => Some((0.7, 0.9, ThinkingMode::Off)),
+            Self::LocalGemma4_31B => Some((0.7, 0.9, ThinkingMode::Off)),
+            Self::LocalGemma4E2B => Some((0.7, 0.9, ThinkingMode::Off)),
+            Self::LocalGemma4E4B => Some((0.7, 0.9, ThinkingMode::Off)),
             _ => None,
         }
     }
@@ -287,6 +348,10 @@ impl ModelChoice {
             self,
             Self::LocalQwen35_9B
                 | Self::LocalQwen35_27B
+                | Self::LocalGemma4E2B
+                | Self::LocalGemma4E4B
+                | Self::LocalGemma4_26B
+                | Self::LocalGemma4_31B
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
                 | Self::LocalMinistral8B
@@ -308,8 +373,10 @@ impl ModelChoice {
             Self::LocalGemma12B,
             Self::LocalQwen35_9B,
             Self::LocalMinistral8B,
+            Self::LocalGemma4E4B,
             Self::LocalMinistral3B,
             Self::LocalGemma4B,
+            Self::LocalGemma4E2B,
             Self::LocalQwen3,
             Self::LocalGemma270M,
         ];
@@ -333,6 +400,10 @@ impl ModelChoice {
             Self::LocalQwen35_9B => "Qwen3.5 9B",
             Self::LocalQwen35_27B => "Qwen3.5 27B",
             Self::LocalGlm47Flash => "GLM-4.7-Flash",
+            Self::LocalGemma4E2B => "Gemma 4 E2B",
+            Self::LocalGemma4E4B => "Gemma 4 E4B",
+            Self::LocalGemma4_26B => "Gemma 4 26B-A4B",
+            Self::LocalGemma4_31B => "Gemma 4 31B",
             Self::LocalGemma270M => "Gemma 270M",
             Self::LocalGemma4B => "Gemma 4B",
             Self::LocalGemma12B => "Gemma 12B",
@@ -527,6 +598,10 @@ impl RoutingDecision {
             | ModelChoice::LocalQwen35_9B
             | ModelChoice::LocalQwen35_27B
             | ModelChoice::LocalGlm47Flash
+            | ModelChoice::LocalGemma4E2B
+            | ModelChoice::LocalGemma4E4B
+            | ModelChoice::LocalGemma4_26B
+            | ModelChoice::LocalGemma4_31B
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
@@ -546,6 +621,10 @@ impl RoutingDecision {
             ModelChoice::LocalQwen35_9B => Duration::from_secs(4),
             ModelChoice::LocalQwen35_27B => Duration::from_secs(10),
             ModelChoice::LocalGlm47Flash => Duration::from_secs(8),
+            ModelChoice::LocalGemma4E2B => Duration::from_secs(1),
+            ModelChoice::LocalGemma4E4B => Duration::from_secs(2),
+            ModelChoice::LocalGemma4_26B => Duration::from_secs(8),
+            ModelChoice::LocalGemma4_31B => Duration::from_secs(12),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),

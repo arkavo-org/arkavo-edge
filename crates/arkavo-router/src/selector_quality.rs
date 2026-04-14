@@ -65,6 +65,14 @@ impl ModelSelector {
             ModelChoice::LocalQwen35_9B => "9B dense reasoning (4s), zero cost, good quality",
             ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
+            ModelChoice::LocalGemma4E2B => "Gemma 4 edge (1s), zero cost, vision, 2.3B active",
+            ModelChoice::LocalGemma4E4B => "Gemma 4 edge (2s), zero cost, vision, 4.5B active",
+            ModelChoice::LocalGemma4_26B => {
+                "Gemma 4 MoE (8s), zero cost, vision, 4B active/26B total, 128 experts"
+            }
+            ModelChoice::LocalGemma4_31B => {
+                "Gemma 4 dense (12s), zero cost, vision, 31B params, strong reasoning"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -307,8 +315,23 @@ impl ModelSelector {
 /// Heuristic quality score for a model response (0.0 to 1.0, no LLM call).
 ///
 /// Category-aware: complex task types expect longer, more detailed responses.
-pub fn compute_response_quality(response: &str, latency_ms: u64, category: &str) -> f64 {
+pub fn compute_response_quality(
+    response: &str,
+    latency_ms: u64,
+    category: &str,
+    tool_call_count: usize,
+) -> f64 {
     if response.trim().is_empty() {
+        if tool_call_count > 0 {
+            // Degenerate output: model entered a repetition loop
+            if tool_call_count > 10 {
+                return 0.0;
+            }
+            // Tool-only responses (function calls, no text) are valid
+            let base = 0.7;
+            let bonus = (tool_call_count as f64 * 0.1).min(0.3);
+            return (base + bonus).min(1.0);
+        }
         return 0.0;
     }
 
@@ -349,6 +372,11 @@ pub fn compute_response_quality(response: &str, latency_ms: u64, category: &str)
 
     if latency_ms > 30_000 {
         score -= 0.1;
+    }
+
+    // Degenerate tool call count penalty (even with text content)
+    if tool_call_count > 10 {
+        score -= 0.8;
     }
 
     score.clamp(0.0, 1.0)
@@ -484,7 +512,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_select_adaptive_reasoning_contains_thompson() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        // Need both Gemini and Anthropic so feasible set has >1 model
+        // (single-model path skips Thompson Sampling)
+        let selector = ModelSelector::with_availability(ProviderAvailability {
+            gemini: true,
+            anthropic: true,
+            deepseek: false,
+            kimi: false,
+        });
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
@@ -532,8 +567,23 @@ mod tests {
 
     #[test]
     fn test_compute_response_quality_empty() {
-        assert_eq!(compute_response_quality("", 100, "general"), 0.0);
-        assert_eq!(compute_response_quality("   ", 100, "general"), 0.0);
+        assert_eq!(compute_response_quality("", 100, "general", 0), 0.0);
+        assert_eq!(compute_response_quality("   ", 100, "general", 0), 0.0);
+    }
+
+    #[test]
+    fn test_compute_response_quality_tool_only() {
+        // Tool-only responses (empty text, function calls present) should score well
+        let q1 = compute_response_quality("", 100, "general", 1);
+        assert!(q1 >= 0.7, "Single tool call should score >= 0.7: {q1}");
+
+        let q3 = compute_response_quality("", 100, "general", 3);
+        assert!(q3 >= 0.9, "Three tool calls should score >= 0.9: {q3}");
+        assert!(q3 <= 1.0, "Quality should not exceed 1.0: {q3}");
+
+        // Whitespace-only with tool calls should also score well
+        let qw = compute_response_quality("   ", 100, "general", 2);
+        assert!(qw >= 0.8, "Whitespace + 2 tool calls: {qw}");
     }
 
     #[test]
@@ -542,6 +592,7 @@ mod tests {
             "This is a normal response with useful content.",
             500,
             "general",
+            0,
         );
         assert!(
             quality > 0.8,
@@ -553,22 +604,22 @@ mod tests {
     fn test_compute_response_quality_loop_detection() {
         let looped =
             "same line\nsame line\nsame line\nsame line\nsame line\nsame line\nsame line\n";
-        let quality = compute_response_quality(looped, 100, "general");
+        let quality = compute_response_quality(looped, 100, "general", 0);
         assert!(quality < 0.7, "Looped response should score low: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_high_latency() {
-        let quality = compute_response_quality("A reasonable response.", 35_000, "general");
+        let quality = compute_response_quality("A reasonable response.", 35_000, "general", 0);
         assert!(quality < 1.0, "High latency should reduce score: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_category_aware() {
         let short_response = "Fixed the bug.";
-        let general_quality = compute_response_quality(short_response, 100, "general");
-        let test_gen_quality = compute_response_quality(short_response, 100, "test_generation");
-        let code_search_quality = compute_response_quality(short_response, 100, "code_search");
+        let general_quality = compute_response_quality(short_response, 100, "general", 0);
+        let test_gen_quality = compute_response_quality(short_response, 100, "test_generation", 0);
+        let code_search_quality = compute_response_quality(short_response, 100, "code_search", 0);
         assert!(
             test_gen_quality < general_quality,
             "Complex category should penalize: test_gen={test_gen_quality}, general={general_quality}"
@@ -582,7 +633,7 @@ mod tests {
     #[test]
     fn test_compute_response_quality_adequate_for_complex() {
         let response = "Here is a comprehensive test suite with multiple test cases covering edge cases, error handling, and happy paths. Each test verifies the expected behavior of the function under different conditions.";
-        let quality = compute_response_quality(response, 500, "test_generation");
+        let quality = compute_response_quality(response, 500, "test_generation", 0);
         assert!(
             quality > 0.9,
             "Adequate response should score high: {quality}"
@@ -592,22 +643,46 @@ mod tests {
     #[test]
     fn test_compute_response_quality_error_detection() {
         let error_resp = "Error: Tool execution error: Serialization error: data did not match any variant of untagged enum";
-        let quality = compute_response_quality(error_resp, 500, "general");
+        let quality = compute_response_quality(error_resp, 500, "general", 0);
         assert!(quality < 0.5, "Error response should score low: {quality}");
 
         let tool_error = "Something happened then tool execution error occurred in the process";
-        let quality2 = compute_response_quality(tool_error, 500, "general");
+        let quality2 = compute_response_quality(tool_error, 500, "general", 0);
         assert!(
             quality2 < 0.5,
             "Tool error response should score low: {quality2}"
         );
 
         let failed = "failed to execute the requested tool call";
-        let quality3 = compute_response_quality(failed, 500, "general");
+        let quality3 = compute_response_quality(failed, 500, "general", 0);
         assert!(
             quality3 < 0.5,
             "Failed execution should score low: {quality3}"
         );
+    }
+
+    #[test]
+    fn quality_penalizes_degenerate_tool_call_count() {
+        // 125 tool calls with empty response = degenerate output loop
+        let score = compute_response_quality("", 55_000, "general", 125);
+        assert!(
+            score < 0.1,
+            "125 tool calls should score near 0, got {score}"
+        );
+    }
+
+    #[test]
+    fn quality_rewards_moderate_tool_call_count() {
+        // 3 tool calls = healthy batch
+        let score = compute_response_quality("", 10_000, "general", 3);
+        assert!(score >= 0.7, "3 tool calls should score >=0.7, got {score}");
+    }
+
+    #[test]
+    fn quality_penalizes_borderline_tool_call_count() {
+        // 15 tool calls = suspicious but less severe
+        let score = compute_response_quality("", 20_000, "general", 15);
+        assert!(score < 0.3, "15 tool calls should score low, got {score}");
     }
 
     #[tokio::test]

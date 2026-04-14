@@ -20,6 +20,9 @@ ignore = [
     { id = "RUSTSEC-2024-0388", reason = "derivative in alloy-primitives transitive deps" },
     # fastembed -> hf-hub -> indicatif -> number_prefix
     { id = "RUSTSEC-2025-0119", reason = "number_prefix in fastembed transitive deps" },
+    # rand unsoundness when log + thread_rng + custom logger accesses ThreadRng — not applicable,
+    # we don't use a custom logger that calls rand::rng() inside the log handler
+    { id = "RUSTSEC-2026-0097", reason = "rand unsoundness requires custom logger accessing ThreadRng; not applicable" },
 ]
 
 [bans]

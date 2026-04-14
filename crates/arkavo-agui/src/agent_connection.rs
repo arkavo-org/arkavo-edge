@@ -25,6 +25,7 @@ pub struct AgentConnection {
     active_subscriptions: Arc<RwLock<HashMap<String, SubscriptionHandle>>>,
     chat_sessions: Arc<RwLock<HashMap<String, String>>>, // agent_id -> session_id
     chat_broadcasts: Arc<RwLock<HashMap<String, broadcast::Sender<OrderedMessageDelta>>>>,
+    context_snapshot: Arc<RwLock<Option<serde_json::Value>>>,
     _stream_ordering: Arc<StreamOrdering>,
     _latency_tracker: Arc<LatencyTracker>,
 }
@@ -96,6 +97,7 @@ impl AgentConnection {
             active_subscriptions: Arc::new(RwLock::new(HashMap::new())),
             chat_sessions: Arc::new(RwLock::new(HashMap::new())),
             chat_broadcasts: Arc::new(RwLock::new(HashMap::new())),
+            context_snapshot: Arc::new(RwLock::new(None)),
             _stream_ordering: Arc::new(StreamOrdering::new()),
             _latency_tracker: Arc::new(LatencyTracker::new()),
         }
@@ -567,6 +569,7 @@ impl AgentConnection {
         // Spawn task to forward broadcasts to this specific UI
         let ui_tx_clone = ui_tx.clone();
         let agent_id_for_forward = agent_id.clone();
+        let context_snapshot_store = self.context_snapshot.clone();
         tokio::spawn(async move {
             while let Ok(ordered_delta) = broadcast_rx.recv().await {
                 // Intercept Metadata deltas — convert to UI events instead of forwarding
@@ -613,8 +616,15 @@ impl AgentConnection {
                     agent_id: agent_id_for_forward.clone(),
                     message_id: ordered_delta.delta.message_id,
                     delta: match ordered_delta.delta.delta {
-                        MessageDeltaContent::Text { text } => {
-                            crate::types::MessageDeltaContent::Text { text }
+                        MessageDeltaContent::Text { ref text } => {
+                            // Detect @context introspection response
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text)
+                                && parsed.get("messages").is_some()
+                                && parsed.get("cycle").is_some()
+                            {
+                                *context_snapshot_store.write().await = Some(parsed);
+                            }
+                            crate::types::MessageDeltaContent::Text { text: text.clone() }
                         }
                         MessageDeltaContent::ToolCall {
                             tool_call_id,
@@ -753,6 +763,61 @@ impl AgentConnection {
                 Ok(())
             }
             Err(e) => Err(format!("Failed to send message: {e}").into()),
+        }
+    }
+
+    /// Return the latest stored @context introspection snapshot
+    pub async fn get_latest_context_snapshot(&self) -> Option<serde_json::Value> {
+        self.context_snapshot.read().await.clone()
+    }
+
+    /// Send an introspection message (like @context) that auto-opens a session if needed.
+    /// Unlike send_user_message, does not require an active chat subscription.
+    pub async fn send_introspection(
+        &self,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get or create a chat session
+        let session_id = {
+            let sessions = self.chat_sessions.read().await;
+            sessions.get(&self.agent_id).cloned()
+        };
+        let session_id = match session_id {
+            Some(id) => id,
+            None => self.reopen_chat_session(&self.agent_id).await?,
+        };
+
+        let user_message = UserMessage {
+            content: text.to_string(),
+            attachments: None,
+            metadata: None,
+        };
+
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        match client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e) if e.to_string().contains("Session not found") => {
+                drop(client_guard);
+                let new_session_id = self.reopen_chat_session(&self.agent_id).await?;
+                let client_guard = self.client.read().await;
+                let client = client_guard.as_ref().ok_or("Not connected")?;
+                let retry_msg = UserMessage {
+                    content: text.to_string(),
+                    attachments: None,
+                    metadata: None,
+                };
+                client
+                    .request::<(), _>("chat_send", rpc_params![new_session_id, retry_msg])
+                    .await
+                    .map_err(|e| format!("Introspection send failed: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(format!("Introspection send failed: {e}").into()),
         }
     }
 

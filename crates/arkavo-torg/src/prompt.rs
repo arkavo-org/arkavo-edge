@@ -52,8 +52,8 @@ pub fn format_prompt(policy: &str, format: ModelFormat) -> String {
                  [INST] {policy} [/INST]"
             )
         }
-        ModelFormat::Gemma3 => {
-            // Gemma 3 format
+        ModelFormat::Gemma3 | ModelFormat::Gemma4 => {
+            // Gemma 3/4 format (same turn markers)
             format!(
                 "<start_of_turn>user\n{TORG_SYSTEM_PROMPT}\n\n{policy}<end_of_turn>\n\
                  <start_of_turn>model\n"

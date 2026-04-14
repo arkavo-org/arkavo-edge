@@ -705,13 +705,44 @@ impl Router {
         task_description: &str,
         messages: Vec<Message>,
     ) -> Result<RouteStream> {
+        self.route_fast_with_preference(task_description, messages, false)
+            .await
+    }
+
+    /// Like `route_fast` but prefers the largest loaded model when
+    /// `prefer_capable` is true. Used for tasks like lesson synthesis
+    /// where a 0.8B/3B model can't produce structured JSON reliably.
+    pub async fn route_synthesis(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+    ) -> Result<RouteStream> {
+        self.route_fast_with_preference(task_description, messages, true)
+            .await
+    }
+
+    async fn route_fast_with_preference(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        #[allow(unused_variables)] prefer_capable: bool,
+    ) -> Result<RouteStream> {
         use crate::stream::{RouteResponse, RouteStream};
 
         let preferred = self.selector.fastest_local_model();
         // Prefer a model already loaded in the registry to avoid ~1s reload.
         // Synthesis tasks don't need a specific model — any loaded one will do.
         #[cfg(feature = "llama-cpp")]
-        let model = if self.model_registry.is_loaded(preferred.name()) {
+        let model = if prefer_capable {
+            // Pick the largest already-loaded model for tasks needing
+            // structured output (lesson synthesis, pattern analysis).
+            crate::ModelChoice::ALL_LOCAL
+                .iter()
+                .rev()
+                .find(|m| self.model_registry.is_loaded(m.name()))
+                .cloned()
+                .unwrap_or(preferred)
+        } else if self.model_registry.is_loaded(preferred.name()) {
             preferred
         } else {
             // Use any already-loaded model, sorted by preference (smallest first)
@@ -834,6 +865,40 @@ impl Router {
         self.selector.fastest_local_model()
     }
 
+    /// Minimum context size across all currently-loaded local models.
+    /// Returns conservative default (4096) if no models are loaded.
+    /// Used by ConversationWindow to compute the history token budget.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn min_feasible_context_size(&self) -> usize {
+        let models = self.model_registry.model_names();
+        if models.is_empty() {
+            return 4096;
+        }
+        let mut min_ctx = usize::MAX;
+        for name in &models {
+            if let Some(model) = self.model_registry.get(name) {
+                let ctx = model.get_trained_context_size() as usize;
+                if ctx < min_ctx {
+                    min_ctx = ctx;
+                }
+            }
+        }
+        if min_ctx == usize::MAX { 4096 } else { min_ctx }
+    }
+
+    #[cfg(any(not(feature = "llama-cpp"), target_env = "musl"))]
+    pub fn min_feasible_context_size(&self) -> usize {
+        4096
+    }
+
+    /// Get an Arc<LlamaModel> from any loaded model for token estimation.
+    /// Returns None if no models are loaded.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn any_loaded_model(&self) -> Option<std::sync::Arc<arkavo_llm::LlamaModel>> {
+        let names = self.model_registry.model_names();
+        names.first().and_then(|name| self.model_registry.get(name))
+    }
+
     /// Persist validated dynamic adjustments in the background.
     ///
     /// Debounced: only flushes every 10 responses or 60 seconds, whichever
@@ -941,5 +1006,18 @@ mod tests {
             return;
         }
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_min_feasible_context_size_default() {
+        let router = match Router::new_offline().await {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("Skipping test: Router::new_offline requires llama-cpp");
+                return;
+            }
+        };
+        let size = router.min_feasible_context_size();
+        assert_eq!(size, 4096);
     }
 }

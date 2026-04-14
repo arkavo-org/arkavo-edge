@@ -99,7 +99,7 @@ fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
 fn stop_sequences_for_format(format: ModelFormat) -> &'static [&'static str] {
     match format {
         ModelFormat::Qwen3 => &["<|im_start|>user"],
-        ModelFormat::Gemma3 => &["<start_of_turn>user"],
+        ModelFormat::Gemma3 | ModelFormat::Gemma4 => &["<start_of_turn>user"],
         ModelFormat::MistralV3 => &["[INST]"],
         ModelFormat::GLM4 => &["<|user|>"],
     }
@@ -137,6 +137,8 @@ pub(crate) struct StreamingConfig {
     pub grammar_triggers: Option<Vec<arkavo_llama_cpp::GrammarTrigger>>,
     /// Additional stop sequences from template engine (e.g., to prevent <think> blocks)
     pub additional_stops: Vec<String>,
+    /// Generation prompt for non-lazy grammar prefilling (from Jinja template)
+    pub generation_prompt: Option<String>,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -240,13 +242,61 @@ pub(crate) async fn generate_tokens_pooled(
                 unsafe {
                     sampler.add_grammar(vocab, grammar_str, "root");
                 }
+                // Prefill non-lazy grammar with generation_prompt tokens
+                // so the grammar advances past the template-injected prefix.
+                // This matches llama-server's sampling.cpp: common_tokenize(vocab, gen_prompt, false, true)
+                if let Some(ref gen_prompt) = config.generation_prompt {
+                    let vocab = model.get_vocab();
+                    let mut toks = vec![0i32; gen_prompt.len() + 8];
+                    let n = unsafe {
+                        arkavo_llama_cpp::ffi::llama_tokenize(
+                            vocab,
+                            gen_prompt.as_ptr().cast::<std::os::raw::c_char>(),
+                            i32::try_from(gen_prompt.len()).unwrap_or(i32::MAX),
+                            toks.as_mut_ptr(),
+                            i32::try_from(toks.len()).unwrap_or(i32::MAX),
+                            false, // no BOS for grammar prefill
+                            true,  // parse special tokens
+                        )
+                    };
+                    if n > 0 {
+                        let prefill_tokens = &toks[..n as usize];
+                        // Strip leading space token if generation_prompt doesn't start with space
+                        let start = if !prefill_tokens.is_empty() && !gen_prompt.starts_with(' ') {
+                            let first_piece = arkavo_llama_cpp::detokenize(
+                                vocab,
+                                &[prefill_tokens[0]],
+                                false,
+                                true,
+                            );
+                            usize::from(first_piece.is_ok_and(|s| s.starts_with(' ')))
+                        } else {
+                            0
+                        };
+                        for token in &prefill_tokens[start..] {
+                            sampler.accept(*token);
+                        }
+                    }
+                }
             }
         }
 
         let eos_token = model.get_eos_token();
         process_input_tokens(&ctx, &input_tokens)?;
         let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0);
-        let max_generation = std::cmp::min(config.max_tokens, 30000);
+        // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
+        // may be much smaller than max_tokens. Without this, generation crashes
+        // with DecodeFailure when pos exceeds the KV cache boundary.
+        let trained_ctx = model.get_trained_context_size();
+        let safe_ctx = if trained_ctx <= 8192 {
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            trained_ctx / 2
+        } else {
+            (trained_ctx / 4).min(16384)
+        };
+        let available = safe_ctx.saturating_sub(input_tokens.len() as u32);
+        let max_generation = config.max_tokens.min(30000).min(available);
         let mut utf8_buffer: Vec<u8> = Vec::new();
         let mut detection_buffer = String::new();
 
@@ -480,7 +530,18 @@ pub(crate) async fn generate_tokens_with_context(
             i32::try_from(input_tokens.len()).unwrap_or(0)
         };
 
-        let max_generation = std::cmp::min(config.max_tokens, 30000);
+        // Clamp generation to KV cache capacity (same logic as pooled path)
+        let trained_ctx = model.get_trained_context_size();
+        let safe_ctx = if trained_ctx <= 8192 {
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            trained_ctx / 2
+        } else {
+            (trained_ctx / 4).min(16384)
+        };
+        let occupied = initial_pos as u32;
+        let available = safe_ctx.saturating_sub(occupied);
+        let max_generation = config.max_tokens.min(30000).min(available);
         let mut pos = initial_pos;
 
         if is_debug() {

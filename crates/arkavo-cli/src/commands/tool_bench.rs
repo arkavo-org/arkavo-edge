@@ -27,6 +27,10 @@ pub struct ToolBenchCommand {
     /// Save results to JSON file
     #[arg(long)]
     pub output: Option<String>,
+
+    /// Run tool-loop benchmark: measures full round-trip (call → result → response)
+    #[arg(long)]
+    pub tool_loop: bool,
 }
 
 /// A standardized tool calling scenario for benchmarking.
@@ -203,6 +207,10 @@ struct ModelReport {
 ///
 /// This validates the prompt → parse pipeline offline using synthetic model outputs.
 pub async fn run(command: &ToolBenchCommand) -> Result<(), Box<dyn std::error::Error>> {
+    if command.tool_loop {
+        return run_tool_loop_bench(command).await;
+    }
+
     let tools = test_tools();
     let scenarios = test_scenarios();
     let format = match command.format.as_str() {
@@ -411,6 +419,13 @@ async fn run_live_bench(
         .load(model_name, &model_path)
         .map_err(|e| format!("Failed to load model '{model_name}': {e}"))?;
 
+    // Pre-warm context pool (same as production agent loop)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    if let Ok(ctx) = registry.acquire_fresh_context(model_name) {
+        let _ = registry.release_context(model_name, ctx, true);
+        println!("Context pool pre-warmed for {model_name}");
+    }
+
     let provider = LlamaCppProvider::new_with_registry(
         std::sync::Arc::new(registry),
         model_name.to_string(),
@@ -611,8 +626,11 @@ fn discover_cached_models() -> Vec<String> {
     // All local models in the production registry, ordered smallest → largest
     let candidates = [
         ModelChoice::LocalQwen3,
+        ModelChoice::LocalGemma4E2B,
         ModelChoice::LocalMinistral3B,
+        // ModelChoice::LocalGemma4E4B, // non-lazy grammar not supported yet (1/8)
         ModelChoice::LocalGlm47Flash,
+        ModelChoice::LocalGemma4_26B,
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_9B,
         ModelChoice::LocalQwen35_27B,
@@ -650,6 +668,152 @@ fn synthetic_fence_outputs() -> Vec<String> {
         // multi_param_types
         "```search\nquery: error handling\nlimit: 10\ncase_sensitive: true\n```".to_string(),
     ]
+}
+
+/// Tool-loop benchmark: measures the full round-trip of
+/// inference1 (tool call) → synthetic result → inference2 (response).
+///
+/// This reproduces the 62s second-inference bottleneck observed with large models
+/// processing tool results. Run with:
+///   arkavo tool-bench --tool-loop --model gemma-4-26b-a4b
+async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn std::error::Error>> {
+    let model_name = command
+        .model
+        .as_deref()
+        .ok_or("--model required for --tool-loop")?;
+
+    let model_choice = arkavo_router::decision::ModelChoice::from_name(model_name)
+        .ok_or_else(|| format!("Unknown model: '{model_name}'"))?;
+
+    // Use the production Router (same as `arkavo chat`) — handles model loading,
+    // context pool warmup, Metal shader compilation, and inference semaphore.
+    println!("Initializing Router (model loading + context warmup)...");
+    let init_start = Instant::now();
+    let router = arkavo_router::Router::new_offline()
+        .await
+        .map_err(|e| format!("Failed to initialize router: {e}"))?;
+    let router = std::sync::Arc::new(router);
+    println!("Router ready in {:.1}s", init_start.elapsed().as_secs_f64());
+
+    // Scenarios: each has a prompt, expected tool call, and a synthetic result
+    let loop_scenarios = [
+        (
+            "weather_loop",
+            "What's the weather in Tokyo?",
+            "get_weather",
+            r#"{"temperature": 22, "condition": "Partly cloudy", "humidity": 65, "wind": "12 km/h NE"}"#,
+        ),
+        (
+            "search_loop",
+            "Search for 'rust error handling' with limit 5",
+            "search",
+            r#"{"results": [{"title": "Error Handling in Rust", "url": "https://doc.rust-lang.org/book/ch09-00-error-handling.html"}, {"title": "anyhow crate", "url": "https://docs.rs/anyhow"}, {"title": "thiserror", "url": "https://docs.rs/thiserror"}, {"title": "Custom Error Types", "url": "https://blog.rust-lang.org/errors"}, {"title": "? operator guide", "url": "https://doc.rust-lang.org/reference/expressions/operator-expr.html"}], "total": 5}"#,
+        ),
+        (
+            "command_loop",
+            "Run the command 'ls -la /tmp'",
+            "run_command",
+            "total 48\ndrwxrwxrwt  12 root  wheel  384 Apr  6 12:00 .\ndrwxr-xr-x  20 root  wheel  640 Mar 15 08:30 ..\n-rw-r--r--   1 user  wheel  1024 Apr  6 11:55 test.txt\n-rw-r--r--   1 user  wheel  2048 Apr  6 10:30 data.json",
+        ),
+    ];
+
+    println!("Tool-Loop Bench — Model: {model_name}");
+    println!("Measures: prompt → tool call → synthetic result → response");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!(
+        "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10}",
+        "Scenario", "Tool OK", "Infer1 ms", "Infer2 ms", "Total ms", "Resp len"
+    );
+    println!("{}", "─".repeat(76));
+
+    let iterations = command.iterations;
+    let mut total_infer1 = 0u64;
+    let mut total_infer2 = 0u64;
+
+    for (name, prompt, expected_tool, synthetic_result) in &loop_scenarios {
+        for _ in 0..iterations {
+            // Inference 1: prompt → tool call (via Router, same as agent loop)
+            let messages1 = vec![arkavo_llm::Message::user(prompt.to_string())];
+            let start1 = Instant::now();
+            let resp1 = router
+                .route_with_tools_override(prompt, messages1, None, &model_choice)
+                .await;
+            let infer1_ms = start1.elapsed().as_millis() as u64;
+
+            let tool_ok = match &resp1 {
+                Ok(r) => r
+                    .tool_calls
+                    .first()
+                    .is_some_and(|c| c.tool_name == *expected_tool),
+                Err(_) => false,
+            };
+
+            // Inference 2: tool call + result → final response
+            let messages2 = vec![
+                arkavo_llm::Message::user(prompt.to_string()),
+                arkavo_llm::Message::assistant(format!(
+                    "I'll call {expected_tool} to get that information."
+                )),
+                arkavo_llm::Message::user(format!(
+                    "Tool {expected_tool} returned:\n{synthetic_result}"
+                )),
+            ];
+
+            let start2 = Instant::now();
+            let resp2 = router
+                .route_with_tools_override(
+                    &format!("Process the {expected_tool} result"),
+                    messages2,
+                    None,
+                    &model_choice,
+                )
+                .await;
+            let infer2_ms = start2.elapsed().as_millis() as u64;
+
+            let resp_len = match &resp2 {
+                Ok(r) => r.content.len(),
+                Err(_) => 0,
+            };
+
+            total_infer1 += infer1_ms;
+            total_infer2 += infer2_ms;
+
+            println!(
+                "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10}",
+                name,
+                if tool_ok { "ok" } else { "FAIL" },
+                format!("{infer1_ms}ms"),
+                format!("{infer2_ms}ms"),
+                format!("{}ms", infer1_ms + infer2_ms),
+                format!("{resp_len}ch"),
+            );
+        }
+    }
+
+    let n = loop_scenarios.len() as u64 * iterations as u64;
+    println!("{}", "─".repeat(76));
+    println!(
+        "Average: infer1={:.0}ms  infer2={:.0}ms  total={:.0}ms",
+        total_infer1 as f64 / n as f64,
+        total_infer2 as f64 / n as f64,
+        (total_infer1 + total_infer2) as f64 / n as f64,
+    );
+
+    if let Some(ref path) = command.output {
+        let report = json!({
+            "model": model_name,
+            "mode": "tool-loop",
+            "scenarios": loop_scenarios.len(),
+            "iterations": iterations,
+            "avg_infer1_ms": total_infer1 as f64 / n as f64,
+            "avg_infer2_ms": total_infer2 as f64 / n as f64,
+            "avg_total_ms": (total_infer1 + total_infer2) as f64 / n as f64,
+        });
+        std::fs::write(path, serde_json::to_string_pretty(&report)?)?;
+        println!("Results saved to {path}");
+    }
+
+    Ok(())
 }
 
 use arkavo_llm::provider::Provider;

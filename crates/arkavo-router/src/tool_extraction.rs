@@ -29,11 +29,15 @@ pub(crate) fn detail_level_for_model(
         ModelChoice::LocalQwen3 | ModelChoice::LocalGemma270M => {
             arkavo_mcp_tools::DetailLevel::NameOnly
         }
-        ModelChoice::LocalMinistral3B
+        ModelChoice::LocalGemma4E2B
+        | ModelChoice::LocalMinistral3B
         | ModelChoice::LocalGemma4B
         | ModelChoice::LocalGemma12B
         | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
-        ModelChoice::LocalMinistral8B
+        ModelChoice::LocalGemma4E4B
+        | ModelChoice::LocalGemma4_26B
+        | ModelChoice::LocalGemma4_31B
+        | ModelChoice::LocalMinistral8B
         | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalGlm47Flash
@@ -279,8 +283,10 @@ fn extract_curly_brace_tool_calls(content: &str) -> Option<Vec<ParsedToolCall>> 
         let args: serde_json::Value = serde_json::from_str(json_str)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
 
+        // Gemma 4 uses "call:tool_name{...}" format — strip the "call:" prefix
+        let clean_name = name.strip_prefix("call:").unwrap_or(name);
         calls.push(ParsedToolCall {
-            tool_name: name.to_string(),
+            tool_name: clean_name.to_string(),
             arguments: args,
             call_id: None,
         });

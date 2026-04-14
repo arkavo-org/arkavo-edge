@@ -228,11 +228,11 @@ impl Classification {
         // Sentence count
         let sentence_count = task.matches(". ").count() + task.matches("? ").count() + 1;
 
-        // Determine if multi-step
-        let is_multi_step = step_count >= 2
-            || has_complexity_keyword
-            || (verb_count >= 3 && sentence_count >= 3)
-            || task.len() > 300;
+        // Determine if multi-step — require strong signal, not just length.
+        // Agent cycle prompts contain ToolMemory output and specialist context
+        // that routinely exceed 300 chars without being multi-step tasks.
+        let is_multi_step =
+            step_count >= 2 || has_complexity_keyword || (verb_count >= 3 && sentence_count >= 3);
 
         // Estimate subtasks
         let estimated_subtasks = if is_multi_step {
@@ -944,10 +944,12 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_complexity_long_task() {
-        let task = "a ".repeat(200); // 400 chars > 300 threshold
+    fn test_detect_complexity_long_task_not_complex() {
+        // Length alone should not trigger complexity — agent cycle prompts
+        // routinely exceed 300 chars with ToolMemory output.
+        let task = "a ".repeat(200); // 400 chars of repetitive text
         let (is_complex, _) = Classification::detect_complexity(&task);
-        assert!(is_complex);
+        assert!(!is_complex);
     }
 
     #[test]

@@ -90,8 +90,8 @@ start_agent() {
 
     cd "$dir"
     # Enable debug logging for chat/swarm interactions
-    local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info,arkavo_server=info}"
-    nohup env ARKAVO_DEBUG=1 RUST_LOG="$log_level" "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
+    local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info,arkavo_server=info,arkavo_llm=info}"
+    nohup env ARKAVO_DEBUG=1 ARKAVO_DEBUG_PEG=1 RUST_LOG="$log_level" ${GEMINI_API_KEY:+GEMINI_API_KEY="$GEMINI_API_KEY"} ${ANTHROPIC_API_KEY:+ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"} "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
     cd "$SCRIPT_DIR"
@@ -115,7 +115,8 @@ verify_swarm() {
     print_status "INFO" "Verifying swarm connectivity..."
     local all_healthy=true
 
-    local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412" "historian:8413")
+    local agents=("commander:8401" "survival:8410")
+    # local agents=("commander:8401" "survival:8410" "industry:8411" "defense:8412" "historian:8413")
 
     for agent in "${agents[@]}"; do
         IFS=':' read -r name port <<< "$agent"
@@ -195,9 +196,9 @@ main() {
 
     # Start in dependency order: Specialists -> Commander (orchestrator)
     start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
-    start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
-    start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
-    start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
+    #start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
+    #start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
+    #start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
     sleep 1
 
     start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1

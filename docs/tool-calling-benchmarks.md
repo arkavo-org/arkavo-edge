@@ -2,7 +2,7 @@
 
 Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-param, multi-param, no-param, enum, file path, command execution, should-not-call, and multi-type params. Five test tools registered (get_weather, read_file, search, get_time, run_command).
 
-## Results (2026-03-09)
+## Results (2026-04-04)
 
 | Model | Size | Parse | Tool Name | Params | Avg Latency |
 |-------|------|-------|-----------|--------|-------------|
@@ -10,14 +10,21 @@ Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-para
 | **Ministral-3-3B** | **3B** | **8/8** | **8/8** | **8/8** | **690ms** |
 | Ministral-3-8B | 8B | 8/8 | 8/8 | 8/8 | 1,409ms |
 | Qwen3.5-9B | 9B | 8/8 | 8/8 | 8/8 | 1,905ms |
-| GLM-4.7-Flash | 4.7B | 8/8 | 8/8 | 8/8 | 2,698ms |
+| Gemma-4-E2B | 2.3B (5.1B w/ PLE) | 8/8 | 8/8 | 8/8 | 2,229ms |
+| GLM-4.7-Flash | 4.7B (30B MoE) | 8/8 | 8/8 | 8/8 | 2,698ms |
+| Gemma-4-E4B | 4.5B (8B w/ PLE) | 1/8 | 1/8 | 1/8 | 1,298ms |
+| Gemma-4-26B-A4B | 4B active (26B MoE) | 8/8 | 8/8 | 8/8 | 7,410ms |
 | Qwen3.5-27B | 27B | 7/8 | 7/8 | 7/8 | 41,634ms |
 
 ## Key Findings
 
+**Gemma-4-E2B achieves perfect 8/8 at 2,276ms.** The smallest Gemma 4 variant (2.3B active params, 5.1B total with PLE) uses llama.cpp's native Gemma 4 Jinja template with `<|tool_call>` format. All 8 scenarios pass via the text-extraction fallback chain. Slower than Ministral-3B but notable as the first Gemma family model to achieve 8/8 tool calling.
+
+**Gemma-4-E4B scores 1/8 — needs non-lazy grammar sampler integration.** The E4B (4.5B active) Jinja template produces a non-lazy GBNF grammar (`grammar_lazy=false`) with generation_prompt prefill (`<|turn>model\n`). llama-server handles this via its full sampler pipeline (grammar init → prefill with generation_prompt tokens → constrained generation), but our standalone grammar sampler cannot replicate this state management — the grammar stack underflows when encountering `<|tool_call>` transitions. Without grammar-constrained generation, E4B generates text responses instead of tool calls. The native PEG output parser (PR #21418) is wired up and ready — the blocker is grammar-constrained generation only.
+
 **Qwen3.5-0.8B fixed: 1/8 → 8/8.** Previously broken due to missing parser support for Qwen's native `<parameter=key>value</parameter>` format. With the named-parameter parser and production text-extraction fallbacks now wired into the bench, all 8 scenarios pass at 525ms average.
 
-**All models up to 9B achieve perfect 8/8.** Qwen3.5-0.8B, Ministral-3B, Ministral-8B, Qwen3.5-9B, and GLM-4.7-Flash all produce correct tool calls with correct parameters on every scenario.
+**All models up to 9B achieve perfect 8/8** (except Gemma-4-E4B). Qwen3.5-0.8B, Ministral-3B, Ministral-8B, Qwen3.5-9B, Gemma-4-E2B, and GLM-4.7-Flash all produce correct tool calls.
 
 **Ministral-3-3B remains the recommended default.** Perfect 8/8 at 690ms — the best latency/accuracy tradeoff for 3B+ models. Qwen3.5-0.8B is faster (525ms) but uses the native `<tool_call>` format requiring text-extraction fallback rather than direct fence parsing.
 

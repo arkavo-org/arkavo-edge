@@ -155,8 +155,8 @@ impl ModelSelector {
     }
 
     /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// Ministral-3B preferred: 422ms avg, 8/8 tool accuracy.
-    /// Qwen3.5-0.8B is slower (~22s) with poor tool calling (1/8).
+    /// Ministral-3B preferred: 690ms avg, 8/8 tool accuracy.
+    /// Qwen3.5-0.8B fallback: 525ms but poor tool calling in practice.
     pub fn fastest_local_model(&self) -> ModelChoice {
         if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
             ModelChoice::LocalMinistral3B
@@ -286,16 +286,30 @@ impl ModelSelector {
             .max_memory_bytes
             .load(std::sync::atomic::Ordering::Relaxed);
 
-        // Local models
+        // Local models (smallest first)
         if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
             models.push(ModelChoice::LocalQwen3);
+        }
+        if Self::is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
+            models.push(ModelChoice::LocalGemma4E2B);
         }
         if self.gpu_available {
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 models.push(ModelChoice::LocalMinistral3B);
             }
+            // Gemma-4-E4B excluded: 1/8 tool accuracy (benchmark), needs grammar-constrained
+            // generation. Re-enable when PEG output parser lands.
+            // if Self::is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
+            //     models.push(ModelChoice::LocalGemma4E4B);
+            // }
             if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
+            }
+            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_26B) {
+                models.push(ModelChoice::LocalGemma4_26B);
+            }
+            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_31B) {
+                models.push(ModelChoice::LocalGemma4_31B);
             }
             if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
@@ -326,7 +340,6 @@ impl ModelSelector {
         // Cloud models (unconstrained by memory)
         if self.availability.gemini {
             models.push(ModelChoice::GeminiFlash);
-            models.push(ModelChoice::GeminiPro);
         }
         if self.availability.anthropic {
             models.push(ModelChoice::ClaudeSonnet);
@@ -468,7 +481,8 @@ mod tests {
         let selector = ModelSelector::with_availability(gemini_only());
         let feasible = selector.feasible_models();
         assert!(feasible.contains(&ModelChoice::GeminiFlash));
-        assert!(feasible.contains(&ModelChoice::GeminiPro));
+        // GeminiPro removed from feasible set (Flash only) in d4227709
+        assert!(!feasible.contains(&ModelChoice::GeminiPro));
         assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
         assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
     }

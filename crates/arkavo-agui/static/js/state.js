@@ -33,6 +33,7 @@ var AppState = {
     lastMetricsSnapshot: null,
     contextTopology: null,
     selectedContextAgent: null,
+    conversationWindow: null,
 };
 
 var MAX_TELEMETRY = 200;

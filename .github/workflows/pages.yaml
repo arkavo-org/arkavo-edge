@@ -29,7 +29,7 @@ jobs:
       - name: Setup vendor/llama.cpp
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout dc8d14c5821c4244800fbdf2baf84b0c801d6487
+          cd vendor/llama.cpp && git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
 
       - name: Install build dependencies
         run: |

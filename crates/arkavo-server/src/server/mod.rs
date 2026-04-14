@@ -1,4 +1,6 @@
 mod a2a_server;
+mod agent_event;
+mod agent_loop;
 mod anti_pattern;
 mod autolearn_bridge;
 mod conductor;
@@ -10,6 +12,7 @@ mod conductor_tool_loop;
 mod config_helpers;
 mod consolidation;
 mod contract_negotiation;
+mod conversation_window;
 mod curiosity;
 mod episode_buffer;
 mod event_loop;
@@ -25,12 +28,18 @@ mod policy_cache;
 mod rlm_bridge;
 mod startup;
 mod synthesis;
+mod token_estimator;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
 mod well_known;
 
 pub use a2a_server::A2aServer;
+pub use agent_event::{
+    AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
+    PendingMessage,
+};
+pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;
 pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
@@ -50,6 +59,7 @@ pub use mcp_bridge::McpBridgeTool;
 pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
+pub use token_estimator::TokenEstimator;
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
 pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
@@ -337,6 +347,12 @@ pub struct A2aRpcImpl {
     /// TDF share offer store for pending P2P offers
     #[cfg(feature = "kas")]
     pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
+    /// Event sender for injecting A2A messages into the orchestrator agent loop.
+    /// Shared via Arc<Mutex> so start_orchestrator_loop can set it after RPC construction.
+    pub(crate) agent_event_tx:
+        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>>>,
+    /// Published snapshot of the agent's ConversationWindow for @context introspection
+    pub(crate) context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
@@ -492,6 +508,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.mesh_state.as_ref(),
             &self.agent_metadata,
             &self.agent_memory,
+            self.agent_event_tx.clone(),
             #[cfg(feature = "iroh")]
             self.iroh_node.as_ref(),
             request,
@@ -547,6 +564,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.chat_sessions,
             self.router.as_ref(),
+            &self.context_snapshot,
             session_id,
             message,
         )
@@ -1147,6 +1165,7 @@ impl A2aRpcServer for A2aRpcImpl {
         let agent_memory = self.agent_memory.clone();
         let learning_bus = self.learning_bus.clone();
         let router = self.router.clone();
+        let context_snapshot = self.context_snapshot.clone();
         #[cfg(feature = "iroh")]
         let iroh_node = self.iroh_node.clone();
 
@@ -1276,6 +1295,7 @@ impl A2aRpcServer for A2aRpcImpl {
                         "gossip": gossip_snap,
                         "antiPatterns": anti_patterns_snap,
                         "decisionTraces": traces_snap,
+                        "conversationWindow": *context_snapshot.read().await,
                     },
                 });
 

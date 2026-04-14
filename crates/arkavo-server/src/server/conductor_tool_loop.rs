@@ -93,10 +93,66 @@ pub(super) async fn run_tool_loop(
             force_planning = false;
         }
 
+        // Smart context compaction: when messages exceed budget, distill old
+        // messages into a compact summary using the fast model, then drop them.
+        // Preserves key insights instead of losing context entirely.
+        let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        if context_chars > char_budget && messages.len() > 3 {
+            // Collect oldest non-system messages to compact (keep system + 2 recent)
+            let keep_recent = 2;
+            let compactable = messages.len() - 1 - keep_recent; // exclude system
+            if compactable > 0 {
+                let old_messages: Vec<String> = messages[1..=compactable]
+                    .iter()
+                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .collect();
+                let old_chars: usize = messages[1..=compactable]
+                    .iter()
+                    .map(|m| m.content.len())
+                    .sum();
+
+                // Distill via fast model — same pattern as tool result distillation
+                let old_summary = old_messages.join("\n---\n");
+                let summary = distill_with_small_model(router, &old_summary).await;
+
+                // Remove the old messages
+                for _ in 0..compactable {
+                    messages.remove(1);
+                }
+
+                // Insert compact summary as context preamble (after system)
+                if let Some(distilled) = summary {
+                    info!(
+                        old_msgs = compactable,
+                        old_chars,
+                        summary_chars = distilled.len(),
+                        "Context compacted: distilled old messages via fast model"
+                    );
+                    messages.insert(
+                        1,
+                        arkavo_llm::Message::user(format!(
+                            "[Previous context summary]: {distilled}"
+                        )),
+                    );
+                } else {
+                    // Fallback: structural summary when no fast model available
+                    let structural = format!(
+                        "[Previous context: {compactable} messages ({old_chars} chars) compacted]"
+                    );
+                    info!(
+                        old_msgs = compactable,
+                        old_chars, "Context compacted: structural fallback (no fast model)"
+                    );
+                    messages.insert(1, arkavo_llm::Message::user(structural));
+                }
+
+                context_chars = messages.iter().map(|m| m.content.len()).sum();
+            }
+        }
+
         // Context-aware timeout scaled by model generation speed.
         // Benchmarked TG speeds: 0.8B=170t/s, 3B=136t/s, 9B=50t/s, 27B=14t/s.
         // Formula: base covers ~500 token response + prompt eval overhead.
-        let context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let context_tokens = context_chars / 4;
         // Model-size-aware timeouts. Larger models are slower on all hardware;
         // the multiplier captures relative speed without hardcoding benchmarks.
@@ -447,9 +503,41 @@ pub(super) async fn run_tool_loop(
             String::new()
         };
 
-        messages.push(arkavo_llm::Message::user(format!(
-            "Tool results:\n{result_to_append}{exploration_nudge}\n\nContinue your workflow. What is the next step?"
-        )));
+        // Push tool results as proper tool-role messages so Jinja templates
+        // (especially Gemma 4) generate the correct token structure.
+        // Falls back to user-role for models without native tool response support.
+        if response.tool_calls.len() == 1 {
+            let tc = &response.tool_calls[0];
+            let call_id = tc
+                .call_id
+                .clone()
+                .unwrap_or_else(|| format!("call_{total_step_idx}"));
+            messages.push(arkavo_llm::Message::tool_result(
+                format!("{result_to_append}{exploration_nudge}"),
+                call_id,
+                &tc.tool_name,
+            ));
+        } else {
+            // Multiple tool calls: push one tool_result per call
+            for (i, tc) in response.tool_calls.iter().enumerate() {
+                let call_id = tc
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_{total_step_idx}_{i}"));
+                let part = tool_result_parts
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| "ok".to_string());
+                messages.push(arkavo_llm::Message::tool_result(
+                    part,
+                    call_id,
+                    &tc.tool_name,
+                ));
+            }
+            if !exploration_nudge.is_empty() {
+                messages.push(arkavo_llm::Message::user(exploration_nudge));
+            }
+        }
     }
 
     // Synthesize a minimal summary when the LLM's last turn was a tool call
@@ -667,6 +755,12 @@ async fn execute_tool_calls(
                             Some(&model_name),
                         )
                         .await;
+
+                        // Fast-path lesson for transport-level errors too.
+                        // Without this, schema violations (e.g. missing "Type"
+                        // field) are lost between agent loop cycles because the
+                        // conversation is cleared.
+                        bus.add_fast_lesson(&tool_call.tool_name, &err_str).await;
                     }
                 }
 
@@ -743,29 +837,241 @@ pub(super) async fn distill_with_small_model(
 
 /// Condense a single tool result to fit within a character budget.
 ///
-/// Extracts the `"Delta"` section from the **full raw** result before truncating,
-/// so game state changes are preserved even from very large observations (e.g. 116K).
-fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize) -> String {
+/// First extracts actionable entities (colonist names, IDs, alerts) from the
+/// full result and prepends them as a structured preamble. Then extracts the
+/// `"Delta"` section for state changes. The model gets entity names it can
+/// use directly in subsequent tool calls without parsing raw JSON.
+pub(super) fn condense_tool_result(tool_name: &str, raw: &str, max_chars: usize) -> String {
     let prefix = format!("Tool {tool_name}: ");
     let budget = max_chars.saturating_sub(prefix.len());
+
+    // Strip large embedded schemas (ActionSpace, ObservationSpace, etc.) that
+    // blow up context windows. Replace with a count summary so the model knows
+    // the schema exists without carrying 5KB of JSON per conversation turn.
+    let raw = strip_embedded_schemas(raw);
+
+    // Always extract actionable entities — even small results may contain
+    // entity names in error messages that the model needs for next calls
+    let preamble = extract_entities(&raw);
+
     if raw.len() <= budget {
-        return format!("{prefix}{raw}");
+        if preamble.is_empty() {
+            return format!("{prefix}{raw}");
+        }
+        return format!("{prefix}{preamble}\n{raw}");
     }
+
     // Extract Delta from the FULL raw result before any truncation
-    if let Some(delta_start) = raw.find("\"Delta\":{") {
+    let delta_section = if let Some(delta_start) = raw.find("\"Delta\":{") {
         let subset = &raw[delta_start..];
-        if let Some(end) = find_matching_brace(subset) {
-            let delta = &subset[..=end];
-            if delta.len() <= budget {
-                return format!("{prefix}{{{delta}}}");
+        find_matching_brace(subset).map(|end| format!("{{{}}}", &subset[..=end]))
+    } else {
+        None
+    };
+
+    // Build result: preamble + delta (or truncated raw)
+    let content_budget = budget.saturating_sub(preamble.len());
+    let body = if let Some(ref delta) = delta_section {
+        if delta.len() <= content_budget {
+            delta.clone()
+        } else {
+            format!(
+                "{}...(truncated)",
+                &raw[..content_budget.saturating_sub(20).min(raw.len())]
+            )
+        }
+    } else {
+        format!(
+            "{}...(truncated {} total chars)",
+            &raw[..content_budget.saturating_sub(40).min(raw.len())],
+            raw.len()
+        )
+    };
+
+    if preamble.is_empty() {
+        format!("{prefix}{body}")
+    } else {
+        format!("{prefix}{preamble}\n{body}")
+    }
+}
+
+/// Strip large embedded schemas from tool results to prevent context blowup.
+///
+/// Registration responses often include full ActionSpace/ObservationSpace schemas
+/// (5KB+) that are useful for reference but shouldn't be in every conversation
+/// turn. Replaces them with a count summary.
+fn strip_embedded_schemas(raw: &str) -> String {
+    // Try to parse as JSON to find schema-like objects
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(raw) else {
+        // If the raw string contains escaped JSON (double-encoded), try that
+        let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
+        let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&unescaped) else {
+            return raw.to_string();
+        };
+        return strip_schemas_from_value(&mut json);
+    };
+    strip_schemas_from_value(&mut json)
+}
+
+fn strip_schemas_from_value(json: &mut serde_json::Value) -> String {
+    // Also handle double-encoded "result" field (common in MCP bridge responses)
+    if let Some(result_str) = json.get("result").and_then(|v| v.as_str())
+        && let Ok(mut inner) = serde_json::from_str::<serde_json::Value>(result_str)
+    {
+        let changed = strip_schema_fields(&mut inner);
+        if changed {
+            json["result"] = serde_json::Value::String(inner.to_string());
+        }
+    }
+    strip_schema_fields(json);
+    json.to_string()
+}
+
+/// Replace large schema-shaped fields with count summaries.
+///
+/// A field is schema-shaped if it's a large array of objects where each
+/// element contains "type" or "description" subfields (JSON Schema pattern).
+/// This catches tool/action/parameter definitions without hardcoding
+/// domain-specific key names.
+/// Returns true if any modifications were made.
+fn strip_schema_fields(json: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    if let Some(obj) = json.as_object_mut() {
+        let schema_keys: Vec<String> = obj
+            .iter()
+            .filter(|(_, v)| is_schema_shaped(v))
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in &schema_keys {
+            if let Some(val) = obj.get(key) {
+                let summary = match val {
+                    serde_json::Value::Array(a) => format!("[{} items]", a.len()),
+                    serde_json::Value::Object(o) => format!("{{{} fields}}", o.len()),
+                    _ => continue,
+                };
+                obj.insert(key.clone(), serde_json::Value::String(summary));
+                changed = true;
+            }
+        }
+
+        // Recurse into remaining object values
+        for val in obj.values_mut() {
+            if strip_schema_fields(val) {
+                changed = true;
             }
         }
     }
-    format!(
-        "{prefix}{}...(truncated {} total chars)",
-        &raw[..budget.saturating_sub(40).min(raw.len())],
-        raw.len()
-    )
+    changed
+}
+
+/// Returns true if a value looks like a schema definition rather than runtime data.
+///
+/// Detects arrays of objects with "type"/"description" fields (JSON Schema pattern)
+/// and objects whose children are mostly schema-shaped (like an ObservationSpace).
+fn is_schema_shaped(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Array(a) if a.len() > 5 => {
+            // Array of objects where most have "Type"/"type" + "Description"/"description"
+            let schema_count = a
+                .iter()
+                .filter(|item| {
+                    item.get("type").or_else(|| item.get("Type")).is_some()
+                        && item
+                            .get("description")
+                            .or_else(|| item.get("Description"))
+                            .is_some()
+                })
+                .count();
+            schema_count > a.len() / 2
+        }
+        serde_json::Value::Object(o) if o.len() > 5 => {
+            // Object where most children have a "type" subfield (schema definition)
+            let schema_count = o
+                .values()
+                .filter(|child| child.get("type").is_some() && child.as_object().is_some())
+                .count();
+            schema_count > o.len() / 2
+        }
+        _ => false,
+    }
+}
+
+/// Extract actionable entities from a tool result.
+/// Uses generic patterns that work across any MCP server:
+/// - Named entity lists in brackets: `['A', 'B', 'C']`
+/// - Alert/label fields with severity
+/// - Reward signals
+fn extract_entities(raw: &str) -> String {
+    let mut parts = Vec::new();
+
+    // Extract entity names from bracketed lists.
+    // Handles both raw JSON (['A', 'B']) and escaped JSON ([\'A\', \'B\'])
+    // which occurs in double-encoded MCP results.
+    let unescaped;
+    let search_str = if raw.contains("\\'") || raw.contains("\\\"") {
+        unescaped = raw.replace("\\'", "'").replace("\\\"", "\"");
+        &unescaped
+    } else {
+        raw
+    };
+    if let Some(start) = search_str.find("['")
+        && let Some(end) = search_str[start..].find(']')
+    {
+        let names_str = &search_str[start + 1..start + end];
+        let names: Vec<&str> = names_str
+            .split(',')
+            .map(|s| s.trim().trim_matches('\'').trim_matches('"').trim())
+            .filter(|s| !s.is_empty() && s.len() > 1)
+            .collect();
+        if !names.is_empty() {
+            parts.push(format!("Available entities: {}", names.join(", ")));
+        }
+    }
+
+    // Extract alerts
+    let mut alerts = Vec::new();
+    let mut search = raw;
+    while let Some(pos) = search.find("\"Label\":\"") {
+        let label_start = pos + 9;
+        if let Some(label_end) = search[label_start..].find('"') {
+            let label = &search[label_start..label_start + label_end];
+            // Get severity if nearby
+            let nearby = &search[pos..search.len().min(pos + 100)];
+            let severity = if let Some(s) = nearby.find("\"Severity\":") {
+                nearby[s + 11..].chars().next().and_then(|c| c.to_digit(10))
+            } else {
+                None
+            };
+            let alert = match severity {
+                Some(s) => format!("{label} (sev {s})"),
+                None => label.to_string(),
+            };
+            if !alerts.contains(&alert) {
+                alerts.push(alert);
+            }
+            search = &search[label_start + label_end..];
+        } else {
+            break;
+        }
+    }
+    if !alerts.is_empty() {
+        parts.push(format!("Alerts: {}", alerts.join(", ")));
+    }
+
+    // Extract reward
+    if let Some(pos) = raw.find("\"Reward\":") {
+        let num_start = pos + 9;
+        let num_str: String = raw[num_start..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        if let Ok(reward) = num_str.parse::<f64>() {
+            parts.push(format!("Reward: {reward:.2}"));
+        }
+    }
+
+    parts.join(" | ")
 }
 
 /// Summarize tool results to fit within a per-tool character budget.
@@ -1043,5 +1349,74 @@ mod tests {
         let failure = detect_semantic_failure(result);
         assert!(failure.is_some());
         assert!(failure.unwrap().contains("bad request"));
+    }
+
+    #[test]
+    fn strip_embedded_schemas_removes_schema_arrays() {
+        // Arrays of objects with "Type" + "Description" are schema-shaped
+        let raw = serde_json::json!({
+            "AgentId": "player1",
+            "ActionSpace": {
+                "Actions": (0..30).map(|i| serde_json::json!({
+                    "Type": format!("Action{i}"),
+                    "Description": format!("Does thing {i}")
+                })).collect::<Vec<_>>(),
+                "Format": "JSON"
+            }
+        });
+        let result = super::strip_embedded_schemas(&raw.to_string());
+        assert!(
+            result.contains("[30 items]"),
+            "Expected schema array stripped, got: {result}"
+        );
+        assert!(result.contains("player1"));
+        assert!(result.contains("Format"));
+        assert!(result.len() < raw.to_string().len() / 2);
+    }
+
+    #[test]
+    fn strip_embedded_schemas_preserves_small_results() {
+        let raw = r#"{"success": true, "AgentId": "player1"}"#;
+        let result = super::strip_embedded_schemas(raw);
+        assert!(result.contains("player1"));
+        assert!(result.contains("true"));
+    }
+
+    #[test]
+    fn strip_embedded_schemas_preserves_observation_data() {
+        // Observation objects with runtime data (colonists, resources) must survive
+        // even when they have many fields — they are NOT schemas.
+        let raw = serde_json::json!({
+            "result": serde_json::json!({
+                "AgentId": "default",
+                "Observation": {
+                    "Tick": 34907,
+                    "ColonistCount": 3,
+                    "Colonists": [
+                        {"Name": "Blas", "Health": 1.0, "Mood": 0.54, "CurrentJob": "Skygaze"},
+                        {"Name": "Fernanda", "Health": 1.0, "Mood": 0.54, "CurrentJob": "Skygaze"},
+                        {"Name": "Penny", "Health": 1.0, "Mood": 0.57, "CurrentJob": "Skygaze"}
+                    ],
+                    "Alerts": [{"Label": "Need beds", "Severity": 2}],
+                    "Resources": {"Silver": 800, "Steel": 1170, "WoodLog": 300},
+                    "Season": "PermanentSummer",
+                    "Temperature": 28.3,
+                    "Weather": "Clear",
+                    "Hour": 19,
+                    "IdleColonists": 0,
+                    "ValidActions": ["SetSpeed", "Draft", "SetWorkPriority"],
+                    "Research": {"Available": [{"Cost": 500, "DefName": "Pemmican", "Label": "pemmican"}]}
+                }
+            }).to_string()
+        });
+        let result = super::strip_embedded_schemas(&raw.to_string());
+        // All colonist names must survive — planner needs them for step commands
+        assert!(result.contains("Blas"), "Lost colonist name: {result}");
+        assert!(result.contains("Fernanda"), "Lost colonist name: {result}");
+        assert!(result.contains("Penny"), "Lost colonist name: {result}");
+        // Resources must survive
+        assert!(result.contains("1170"), "Lost resource data: {result}");
+        // Alerts must survive
+        assert!(result.contains("Need beds"), "Lost alert: {result}");
     }
 }

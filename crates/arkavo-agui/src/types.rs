@@ -515,7 +515,11 @@ pub enum AgUiEvent {
     },
 
     // Context Topology events
-    RequestContextTopology,
+    RequestContextTopology {
+        #[serde(rename = "selectedAgent")]
+        #[serde(default)]
+        selected_agent: Option<String>,
+    },
     ContextTopologyUpdate {
         rlm: RlmSnapshot,
         #[serde(rename = "contextStrategies")]
@@ -530,6 +534,9 @@ pub enum AgUiEvent {
         memory_lifecycle: MemoryLifecycleSnapshot,
         gossip: GossipSnapshot,
         agents: Vec<AgentContextInfo>,
+        #[serde(rename = "conversationWindow")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conversation_window: Option<serde_json::Value>,
         timestamp: String,
     },
 

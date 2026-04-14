@@ -50,6 +50,9 @@ pub async fn execute_with_conductor(
         None,
         None,
         None,
+        None,
+        false,
+        None,
         #[cfg(feature = "iroh")]
         None,
     )
@@ -76,6 +79,9 @@ pub async fn execute_with_conductor_and_learning(
     model_hint: Option<&arkavo_router::ModelChoice>,
     images: Option<Vec<String>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    existing_messages: Option<Vec<arkavo_llm::Message>>,
+    skip_complexity: bool,
+    cached_registry: Option<Arc<arkavo_mcp_tools::ToolRegistry>>,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
@@ -152,8 +158,11 @@ pub async fn execute_with_conductor_and_learning(
         .await
         .map(|t| !t.is_empty())
         .unwrap_or(false);
-    let (is_complex, _) =
-        arkavo_router::classifier::Classification::detect_complexity(&task_content);
+    let is_complex = if skip_complexity || !has_mcp_tools {
+        false
+    } else {
+        assess_complexity_with_model(router, &task_content).await
+    };
     if is_complex && has_mcp_tools {
         match super::conductor_planner::execute_with_plan(
             conductor,
@@ -192,87 +201,94 @@ pub async fn execute_with_conductor_and_learning(
 
     update_progress("Setting up tools", 25);
 
-    // 4. Build ToolRegistry with MCP bridge tools + optional built-in tools
-    let mut tool_registry = ToolRegistry::empty();
-
-    // Project MCP tools from external servers
-    let mcp_tools = mcp_registry
-        .list_all_tools()
-        .await
-        .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
-
-    for tool in &mcp_tools {
+    // 4. Build ToolRegistry — use cached if available (same tools every cycle)
+    let mut registry_arc = if let Some(cached) = cached_registry {
         debug!(
-            "Tool schema: {} - {} (params: {})",
-            tool.name,
-            tool.description,
-            serde_json::to_string(&tool.input_schema).unwrap_or_default()
+            "Using cached tool registry ({} tools)",
+            cached.list_tools().len()
         );
-    }
-    let has_mcp_tools = !mcp_tools.is_empty();
-    for tool in mcp_tools {
-        let tool_name = tool.name.clone();
-        let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
-        tool_registry.register(&tool_name, Box::new(bridge));
-    }
+        cached
+    } else {
+        let mut tool_registry = ToolRegistry::empty();
 
-    // Only register built-in code tools for standalone agents (no MCP servers
-    // and no mesh peers). Mesh-only agents (specialists) get only mesh tools —
-    // code tools are irrelevant for domain-specific advisory roles.
-    if !has_mcp_tools && mesh_state.is_none() {
-        tool_registry.register(
-            "filesystem_tools",
-            Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
-        );
-        tool_registry.register(
-            "git_status",
-            Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
-        );
-        tool_registry.register(
-            "git_diff",
-            Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
-        );
-        tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
-        tool_registry.register(
-            "test_run",
-            Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
-        );
-        tool_registry.register(
-            "shell_exec",
-            Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
-        );
-        tool_registry.register(
-            "code_review",
-            Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
-        );
-    }
+        let mcp_tools = mcp_registry
+            .list_all_tools()
+            .await
+            .map_err(|e| format!("Failed to list MCP tools: {e}"))?;
 
-    // Register A2A mesh tools (list_agents, agent_query, send_task, get_task_status)
-    if let Some(state) = mesh_state {
-        arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
-        info!("Registered 4 mesh delegation tools");
-    }
+        for tool in &mcp_tools {
+            debug!(
+                "Tool schema: {} - {} (params: {})",
+                tool.name,
+                tool.description,
+                serde_json::to_string(&tool.input_schema).unwrap_or_default()
+            );
+        }
+        let has_mcp_tools_local = !mcp_tools.is_empty();
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = McpBridgeTool::new(mcp_registry.clone(), tool);
+            tool_registry.register(&tool_name, Box::new(bridge));
+        }
 
-    // Register Iroh P2P data tools (iroh_stage, iroh_fetch) for inter-agent sharing
-    #[cfg(feature = "iroh")]
-    if let Some(node) = iroh_node {
-        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
-        info!("Registered 2 Iroh P2P data tools");
-    }
+        if !has_mcp_tools_local && mesh_state.is_none() {
+            tool_registry.register(
+                "filesystem_tools",
+                Box::new(arkavo_mcp_tools::filesystem::FileSystemKit::new()),
+            );
+            tool_registry.register(
+                "git_status",
+                Box::new(arkavo_mcp_tools::git::GitStatusKit::new()),
+            );
+            tool_registry.register(
+                "git_diff",
+                Box::new(arkavo_mcp_tools::git::GitDiffKit::new()),
+            );
+            tool_registry.register("git_log", Box::new(arkavo_mcp_tools::git::GitLogKit::new()));
+            tool_registry.register(
+                "test_run",
+                Box::new(arkavo_mcp_tools::test_runner::TestRunnerTool::new()),
+            );
+            tool_registry.register(
+                "shell_exec",
+                Box::new(arkavo_mcp_tools::shell_exec::ShellExecTool::new()),
+            );
+            tool_registry.register(
+                "code_review",
+                Box::new(arkavo_mcp_tools::code_review::CodeReviewTool::new()),
+            );
+        }
 
-    info!(
-        "Task has {} tools available: {:?}",
-        tool_registry.list_tools().len(),
-        tool_registry
-            .list_tools()
-            .iter()
-            .map(|t| &t.name)
-            .collect::<Vec<_>>()
-    );
+        if let Some(state) = mesh_state {
+            arkavo_mcp_mesh::register_tools(&mut tool_registry, state.clone());
+            info!("Registered 4 mesh delegation tools");
+        }
+
+        #[cfg(feature = "iroh")]
+        if let Some(node) = iroh_node {
+            arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut tool_registry, node.clone());
+            info!("Registered 2 Iroh P2P data tools");
+        }
+
+        info!(
+            "Task has {} tools available: {:?}",
+            tool_registry.list_tools().len(),
+            tool_registry
+                .list_tools()
+                .iter()
+                .map(|t| &t.name)
+                .collect::<Vec<_>>()
+        );
+
+        Arc::new(tool_registry)
+    };
 
     // 4.5 Check if RLM mode should activate (large context handling)
     let input_tokens = estimate_tokens(&task_content);
-    let context_size = model_context_size(None, router.is_anthropic_available());
+    let context_size = model_context_size(
+        model_hint.map(|h| h.name()),
+        router.is_anthropic_available(),
+    );
     let rlm_bridge = RlmBridge::with_default_manager();
 
     let (rlm_system_prompt, rlm_manifest_id) =
@@ -290,19 +306,19 @@ pub async fn execute_with_conductor_and_learning(
                         result.chunk_count, result.total_tokens, result.manifest_id
                     );
 
-                    // Add RLM tools to registry
+                    // Generate system prompt before moving bridge into Arc
+                    let system_prompt = rlm_bridge.generate_system_prompt(&result);
+
+                    // Add RLM tools to registry (rare path — clone if needed)
                     let rlm_ops: SharedRlmOps = Arc::new(rlm_bridge);
                     let context_tools = create_context_tools(rlm_ops.clone());
-                    for tool in context_tools {
-                        let schema = tool.schema();
-                        tool_registry.register(&schema.name.clone(), tool);
+                    if let Some(reg) = Arc::get_mut(&mut registry_arc) {
+                        for tool in context_tools {
+                            let schema = tool.schema();
+                            reg.register(&schema.name.clone(), tool);
+                        }
                     }
-                    info!("Added 3 RLM context tools to registry");
-
-                    // Generate system prompt with manifest reference
-                    // Recreate bridge since we moved it into Arc
-                    let bridge_for_prompt = RlmBridge::with_default_manager();
-                    let system_prompt = bridge_for_prompt.generate_system_prompt(&result);
+                    info!("Added RLM context tools to registry");
 
                     (Some(system_prompt), Some(result.manifest_id))
                 }
@@ -326,7 +342,6 @@ pub async fn execute_with_conductor_and_learning(
     update_progress("Generating LLM response", 40);
 
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
-    let registry_arc = Arc::new(tool_registry);
 
     // Inject learned guidance: behavior lessons + few-shot tool examples
     let augmented_content = if let Some(bus) = learning_bus {
@@ -392,24 +407,40 @@ pub async fn execute_with_conductor_and_learning(
 
     // Build messages: single System (merged) → User (task)
     // Qwen3.5 and other models require exactly one system message at the start.
-    let mut messages = Vec::new();
-    let merged_system = match (system_prompt, &rlm_system_prompt) {
-        (Some(sys), Some(rlm)) => Some(format!("{sys}\n\n{rlm}")),
-        (Some(sys), None) => Some(sys.to_string()),
-        (None, Some(rlm)) => Some(rlm.clone()),
-        (None, None) => None,
-    };
-    if let Some(sys) = merged_system {
-        messages.push(arkavo_llm::Message::system(sys));
-    }
-    if let Some(imgs) = images {
-        messages.push(arkavo_llm::Message::user_with_images(
-            augmented_content,
-            imgs,
-        ));
+    // When existing_messages is provided, use them but inject learning guidance
+    // into the last user message (which is the cycle prompt).
+    let messages = if let Some(mut existing) = existing_messages {
+        // Find the last user message and augment it with learning guidance
+        if augmented_content != task_content
+            && let Some(last_user) = existing
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == arkavo_llm::Role::User)
+        {
+            last_user.content = augmented_content;
+        }
+        existing
     } else {
-        messages.push(arkavo_llm::Message::user(augmented_content));
-    }
+        let mut messages = Vec::new();
+        let merged_system = match (system_prompt, &rlm_system_prompt) {
+            (Some(sys), Some(rlm)) => Some(format!("{sys}\n\n{rlm}")),
+            (Some(sys), None) => Some(sys.to_string()),
+            (None, Some(rlm)) => Some(rlm.clone()),
+            (None, None) => None,
+        };
+        if let Some(sys) = merged_system {
+            messages.push(arkavo_llm::Message::system(sys));
+        }
+        if let Some(imgs) = images {
+            messages.push(arkavo_llm::Message::user_with_images(
+                augmented_content,
+                imgs,
+            ));
+        } else {
+            messages.push(arkavo_llm::Message::user(augmented_content));
+        }
+        messages
+    };
 
     // Transition task from Pending → Running so the dashboard shows "working"
     let _ = conductor.start_task(hrm_task.id).await;
@@ -493,7 +524,12 @@ pub async fn execute_with_conductor_and_learning(
     } else {
         "general"
     };
-    let response_quality = compute_response_quality(&final_result, 0, quality_category);
+    let response_quality = compute_response_quality(
+        &final_result,
+        0,
+        quality_category,
+        loop_result.tool_call_count,
+    );
 
     let burst_result =
         BurstResult::success(contract.id, serde_json::json!({ "content": final_result }));
@@ -651,5 +687,59 @@ mod tests {
         // Reward -1.0 → quality 0.0
         let quality_min = f64::midpoint(-1.0, 1.0).clamp(0.0, 1.0);
         assert!(quality_min.abs() < 1e-6);
+    }
+}
+
+/// Use the smallest loaded model to assess whether a task needs decomposition.
+/// Returns true only when the model explicitly says MULTI — defaults to SINGLE
+/// on ambiguity, timeout, or error (false negatives are cheap, false positives
+/// cause 80+ second decomposition overhead).
+async fn assess_complexity_with_model(
+    router: &Arc<arkavo_router::Router>,
+    task_content: &str,
+) -> bool {
+    // Truncate to avoid wasting tokens on long cycle prompts
+    let snippet = if task_content.len() > 400 {
+        &task_content[..400]
+    } else {
+        task_content
+    };
+
+    let prompt = format!(
+        "Does this require breaking into SEPARATE INDEPENDENT subtasks that \
+         could be planned in isolation? A single task with multiple steps \
+         (like 'register then observe then act') is SINGLE. Only say MULTI \
+         if there are truly independent goals.\n\
+         Reply SINGLE or MULTI.\n\n\
+         Task: {snippet}"
+    );
+
+    let messages = vec![arkavo_llm::Message::user(&prompt)];
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        router.route_chat(messages, None, None),
+    )
+    .await
+    {
+        Ok(Ok(response)) => {
+            let answer = response.content.to_lowercase();
+            let is_multi = answer.contains("multi") && !answer.contains("single");
+            info!(
+                answer = %response.content.trim(),
+                is_multi,
+                task_len = task_content.len(),
+                "LLM complexity assessment"
+            );
+            is_multi
+        }
+        Ok(Err(e)) => {
+            info!("Complexity model error, defaulting to SINGLE: {e}");
+            false
+        }
+        Err(_) => {
+            info!("Complexity model timeout (10s), defaulting to SINGLE");
+            false
+        }
     }
 }

@@ -21,13 +21,17 @@ function agentTag(agentId) {
 
 function startContextPolling() {
     stopContextPolling();
+    var interval = AppState.selectedContextAgent ? 5000 : 10000;
     contextPollInterval = setInterval(function() {
         if (AppState.activeView === 'context') {
-            wsSend({ type: 'requestContextTopology' });
+            wsSend({
+                type: 'requestContextTopology',
+                selectedAgent: AppState.selectedContextAgent || undefined
+            });
         } else {
             stopContextPolling();
         }
-    }, 10000);
+    }, interval);
 }
 
 function stopContextPolling() {
@@ -39,11 +43,18 @@ function stopContextPolling() {
 
 function handleContextTopologyUpdate(event) {
     AppState.contextTopology = event;
+    AppState.conversationWindow = event.conversationWindow || null;
     renderContextPanel();
 }
 
 function selectContextAgent(agentId) {
     AppState.selectedContextAgent = (AppState.selectedContextAgent === agentId) ? null : agentId;
+    AppState.conversationWindow = null;
+    startContextPolling();
+    wsSend({
+        type: 'requestContextTopology',
+        selectedAgent: AppState.selectedContextAgent || undefined
+    });
     renderContextPanel();
 }
 
@@ -71,7 +82,8 @@ function renderContextPanel() {
             renderCenterZone(ctx, sel) +
             renderRightZone(ctx, sel) +
             renderBottomZone(ctx, sel) +
-        '</div>';
+        '</div>' +
+        renderConversationZone(sel);
 
     // Bind click handlers via data attributes (CSP-safe, no inline JS)
     container.querySelectorAll('[data-agent-id]').forEach(function(el) {
@@ -287,6 +299,64 @@ function renderBottomZone(ctx, sel) {
     html += '</div></div>';
 
     html += '</div></div>';
+    return html;
+}
+
+function renderConversationZone(sel) {
+    if (!sel) return '';
+    var cw = AppState.conversationWindow;
+    if (!cw || !cw.messages || cw.messages.length === 0) {
+        return '<div class="context-zone context-conversation">' +
+            '<div class="context-zone-title">Conversation Window</div>' +
+            '<div class="context-empty-zone">Waiting for context snapshot...</div>' +
+            '</div>';
+    }
+
+    var color = agentColor(sel);
+    var pct = cw.budgetTokens > 0 ? (cw.totalTokens / cw.budgetTokens * 100) : 0;
+    var barColor = pct > 85 ? 'var(--error)' : pct > 60 ? 'var(--warning)' : 'var(--accent)';
+
+    var html = '<div class="context-zone context-conversation">' +
+        '<div class="context-conversation-header">' +
+            '<div>' +
+                '<span class="context-conversation-agent" style="color:' + color + '">' + escapeHtml(sel) + '</span>' +
+                '<span class="context-conversation-meta">cycle ' + (cw.cycle || '?') +
+                ' \u00b7 ' + cw.messages.length + ' messages \u00b7 ' +
+                (cw.totalTokens || 0) + ' / ' + (cw.budgetTokens || 0) + ' tokens</span>' +
+            '</div>' +
+            '<span class="context-conversation-live">\u25cf live \u00b7 5s</span>' +
+        '</div>';
+
+    html += '<div class="context-conversation-messages">';
+    var roleColors = { system: '#4ecdc4', user: '#ff6b6b', assistant: '#a78bfa' };
+    for (var i = 0; i < cw.messages.length; i++) {
+        var m = cw.messages[i];
+        var rc = roleColors[m.role] || 'var(--text-secondary)';
+        html += '<div class="context-message-card" style="border-left-color:' + rc + '">' +
+            '<div class="context-message-header">' +
+                '<span class="context-message-role" style="color:' + rc + '">' +
+                    escapeHtml((m.role || 'unknown').toUpperCase()) + '</span>' +
+                '<span class="context-message-tokens">' +
+                    escapeHtml(String(m.tokensEst || m.tokens_est || '?')) + ' tokens</span>' +
+            '</div>' +
+            '<div class="context-message-content">' + escapeHtml(m.content) + '</div>' +
+            '</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="context-token-bar">' +
+        '<div class="context-token-bar-header">' +
+            '<span>Context utilization</span>' +
+            '<span>' + escapeHtml(String(cw.totalTokens || 0)) + ' / ' +
+                escapeHtml(String(cw.budgetTokens || 0)) + ' tokens (' +
+                escapeHtml(pct.toFixed(1)) + '%)</span>' +
+        '</div>' +
+        '<div class="context-token-bar-track">' +
+            '<div class="context-token-bar-fill" style="width:' + Math.min(pct, 100) + '%;background:' + barColor + '"></div>' +
+        '</div>' +
+        '</div>';
+
+    html += '</div>';
     return html;
 }
 

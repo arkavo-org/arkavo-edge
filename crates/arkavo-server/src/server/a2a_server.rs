@@ -70,6 +70,14 @@ pub struct A2aServer {
     total_ram_bytes: u64,
     /// Mesh state for A2A peer delegation (shared between orchestrator and RPC)
     mesh_state: Arc<arkavo_mcp_mesh::MeshToolsState>,
+    /// Event sender for injecting A2A messages into the agent loop
+    agent_event_tx:
+        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<super::agent_event::AgentEvent>>>>,
+    /// Guard: true while the orchestrator cycle is running inference.
+    /// Notification handler skips conductor calls when active to avoid GPU contention.
+    inference_active: Arc<std::sync::atomic::AtomicBool>,
+    /// Published snapshot of the agent's ConversationWindow for @context introspection
+    context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     /// Shared Iroh P2P node for TDF blob transport (one per agent)
     #[cfg(feature = "iroh")]
     iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
@@ -117,6 +125,9 @@ impl A2aServer {
                 sys.total_memory()
             },
             mesh_state: Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
+            agent_event_tx: Arc::new(tokio::sync::Mutex::new(None)),
+            inference_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_snapshot: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
         }
@@ -810,11 +821,7 @@ impl A2aServer {
 
         let planning_completed = self.planning_completed.clone();
         let agent_plan = self.agent_plan.clone();
-        let agent_memory = self.agent_memory.clone();
-        let learning_bus = self.learning_bus.read().await.clone();
-        let model_hint = self.resolve_model_hint().await;
-        #[cfg(feature = "iroh")]
-        let notification_iroh_node = self.iroh_node.read().await.clone();
+        let agent_event_tx = self.agent_event_tx.clone();
 
         if std::env::var("ARKAVO_DEBUG").is_ok() {
             eprintln!("[Notifications] Starting push-based notification handler");
@@ -841,6 +848,10 @@ impl A2aServer {
                             continue;
                         }
 
+                        // Skip if orchestrator cycle is actively using the GPU
+                        // inference_active gate removed — event sends are instant (no GPU).
+                        // Notifications queue in the channel and coalesce at the next cycle.
+
                         let tools = mcp_registry.list_all_tools().await.unwrap_or_default();
                         let should_plan = !planning_completed.load(Ordering::SeqCst)
                             && !system_prompt.is_empty()
@@ -862,101 +873,26 @@ impl A2aServer {
                             eprintln!("[Planning] Agent startup planning complete");
                         }
 
-                        let plan = agent_plan.read().await;
-                        let goals_section = if !plan.goals.is_empty() {
-                            let goals_str: Vec<String> = plan
-                                .goals
-                                .iter()
-                                .enumerate()
-                                .map(|(i, g)| {
-                                    format!("{}. {} ({:?})", i + 1, g.description, g.status)
+                        // Route notification through the agent event loop instead of
+                        // spawning a separate conductor call. The event appears in the
+                        // next cycle's prompt as ## Incoming Messages.
+                        if let Some(event_tx) = agent_event_tx.lock().await.clone() {
+                            use super::agent_event::{AgentEvent, CorrelationId};
+                            let correlation_id = CorrelationId(uuid::Uuid::new_v4());
+                            let _ = event_tx
+                                .send(AgentEvent::Notification {
+                                    server: notification.server.clone(),
+                                    event_data: event_str.clone(),
+                                    correlation_id,
                                 })
-                                .collect();
-                            format!("\n\n## Active Goals\n{}", goals_str.join("\n"))
+                                .await;
+                            debug!(
+                                "Notification routed to event loop: {} ({} chars)",
+                                notification.method,
+                                event_str.len()
+                            );
                         } else {
-                            String::new()
-                        };
-                        drop(plan);
-
-                        let memory = agent_memory.read().await;
-                        let memory_section = memory.format_for_prompt();
-                        drop(memory);
-
-                        // Purpose goes as System message; event/goals/memory as User
-                        let prompt = format!(
-                            "{goals_section}{memory_section}\n\n\
-                             ## Event\nServer: {}\nData: {}\n\n\
-                             ## Instructions\nConsider your active goals and recent actions when responding. Use tools to take action.",
-                            notification.server, event_str
-                        );
-
-                        eprintln!(
-                            "[Notifications] Processing with LLM: {} chars",
-                            prompt.len()
-                        );
-                        let start_time = std::time::Instant::now();
-                        match super::conductor::execute_with_conductor_and_learning(
-                            &conductor,
-                            &router,
-                            &mcp_registry,
-                            prompt,
-                            None,
-                            None,
-                            None,
-                            None,
-                            Some(&system_prompt),
-                            None,
-                            model_hint.as_ref(),
-                            None,
-                            None,
-                            #[cfg(feature = "iroh")]
-                            notification_iroh_node.as_ref(),
-                        )
-                        .await
-                        {
-                            Ok(result) => {
-                                let latency_ms = start_time.elapsed().as_millis() as u64;
-                                eprintln!("[Notifications] LLM result: {} chars", result.len());
-                                if !result.is_empty() {
-                                    info!("Notification processed: {} chars", result.len());
-                                    debug!("Notification result: {}", result);
-                                }
-
-                                // Emit learning event for successful tool execution
-                                if let Some(bus) = &learning_bus {
-                                    let event = super::learning_bus::LearningEvent::ToolCall {
-                                        tool_name: notification.method.clone(),
-                                        args: notification.params.clone().unwrap_or_default(),
-                                        result: result.clone(),
-                                        success: true,
-                                        latency_ms,
-                                        decision_trace_id: None,
-                                        step_index: 0,
-                                        model_name: None,
-                                    };
-                                    let _ = bus.sender().send(event).await;
-                                }
-                            }
-                            Err(e) => {
-                                let latency_ms = start_time.elapsed().as_millis() as u64;
-                                eprintln!("[Notifications] Processing failed: {e}");
-                                warn!("Notification processing failed: {}", e);
-
-                                // Emit learning event for failed tool execution
-                                if let Some(bus) = &learning_bus {
-                                    let event = super::learning_bus::LearningEvent::ToolCall {
-                                        tool_name: notification.method.clone(),
-                                        args: notification.params.clone().unwrap_or_default(),
-                                        result: format!("Error: {e}"),
-                                        success: false,
-                                        latency_ms,
-                                        decision_trace_id: None,
-                                        step_index: 0,
-                                        model_name: None,
-                                    };
-                                    let _ = bus.sender().send(event).await;
-                                }
-                            }
+                            debug!("Notification dropped: no event channel");
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -1107,10 +1043,9 @@ impl A2aServer {
                         let _ = write!(ctx, "## Current Observed State\n{state}\n");
                     }
 
-                    // Include recent tool actions
-                    let actions = memory.format_for_prompt();
-                    if !actions.is_empty() {
-                        ctx.push_str(&actions);
+                    // Include control signals (dedup, errors, setup state)
+                    if let Some(signals) = memory.format_control_signals() {
+                        ctx.push_str(&signals);
                     }
 
                     drop(memory);
@@ -1271,6 +1206,8 @@ impl A2aServer {
             },
             #[cfg(feature = "kas")]
             tdf_offer_store: Arc::new(super::handlers::tdf_share::TdfOfferStore::new()),
+            agent_event_tx: self.agent_event_tx.clone(),
+            context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node: self.iroh_node.read().await.clone(),
         };
@@ -1307,424 +1244,68 @@ impl A2aServer {
         };
         drop(router_guard);
 
-        let mcp_registry = self.mcp_registry.clone();
         let conductor = self.conductor.read().await.clone();
-        let agent_metadata = self.agent_metadata.clone();
-        let learning_bus = self.learning_bus.read().await.clone();
+        let mcp_registry = self.mcp_registry.clone();
         let agent_memory = self.agent_memory.clone();
-        let orchestrator_tick = self.orchestrator_tick.clone();
+        let learning_bus = self.learning_bus.read().await.clone();
         let mesh_state = self.mesh_state.clone();
-        let model_hint = self.resolve_model_hint().await;
         let compute_budget = self.compute_budget.clone();
+        let model_hint = self.resolve_model_hint().await;
+        let orchestrator_tick = self.orchestrator_tick.clone();
         let has_mcp_tools = self
             .mcp_registry
             .list_all_tools()
             .await
             .map(|tools| !tools.is_empty())
             .unwrap_or(false);
-        let loop_metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
         let total_ram_bytes = self.total_ram_bytes;
-        let self_agent_id = self.agent_metadata.read().await.name.clone();
-        let commander_model = self.agent_metadata.read().await.model.clone();
+        let metadata = self.agent_metadata.read().await;
+        let self_agent_id = metadata.name.clone();
+        let commander_model = metadata.model.clone();
+        let purpose = metadata.purpose.clone();
+        let agent_mode = metadata.mode.clone();
+        drop(metadata);
 
         #[cfg(feature = "iroh")]
         let iroh_node = self.iroh_node.read().await.clone();
 
-        let agent_mode = self.agent_metadata.read().await.mode.clone();
         info!(
             mode = ?agent_mode,
             "Starting agent loop"
         );
 
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel::<super::agent_event::AgentEvent>(32);
+
+        // Store the event sender so the message handler can inject A2A messages
+        *self.agent_event_tx.lock().await = Some(event_tx);
+
+        let config = super::agent_loop::AgentLoopConfig {
+            conductor,
+            router,
+            mcp_registry,
+            agent_memory,
+            learning_bus,
+            mesh_state,
+            compute_budget,
+            model_hint,
+            purpose,
+            orchestrator_tick,
+            has_mcp_tools,
+            tool_loop_budget: None,
+            total_ram_bytes,
+            self_agent_id,
+            commander_model,
+            agent_mode,
+            inference_active: self.inference_active.clone(),
+            context_snapshot: self.context_snapshot.clone(),
+            #[cfg(feature = "iroh")]
+            iroh_node,
+        };
+
         tokio::spawn(async move {
-            // Wait for MCP server to be ready, then discover peers
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            mesh_state.discover_peers().await;
-
-            // Specialists run the same tick loop as orchestrators but without MCP
-            // tools. They use mesh tools (send_task, list_agents, agent_query) to
-            // proactively query peers and offer advice. Compute budget gates their
-            // inference so they don't compete with the commander for GPU.
-            if agent_mode == arkavo_protocol::agent_config::AgentMode::Specialist {
-                info!("Specialist mode: proactive advisory loop with mesh tools");
-            }
-
-            let mut cycle: u64 = 0;
-            let mut consecutive_no_action_cycles: u32 = 0;
-            let mut last_broadcast_cycle: u64 = 0;
-            let mut consecutive_timeouts: u32 = 0;
-            let mut last_cycle_prompt_hash: u64 = 0;
-            let mut consecutive_duplicate_prompts: u32 = 0;
-            loop {
-                cycle += 1;
-                orchestrator_tick.store(cycle, std::sync::atomic::Ordering::Relaxed);
-                let metadata = agent_metadata.read().await;
-                let purpose = metadata.purpose.clone();
-                drop(metadata);
-
-                if purpose.is_empty() {
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
-                }
-
-                // Budget gate: orchestrators with no MCP tools check before each tick.
-                if !has_mcp_tools {
-                    let budget = compute_budget.read().await;
-                    let snapshot = budget.snapshot();
-                    loop_metrics.record_compute_budget_state(
-                        &snapshot.status,
-                        snapshot.remaining_inferences,
-                        snapshot.remaining_tokens,
-                    );
-                    if !snapshot.has_remaining {
-                        drop(budget);
-                        loop_metrics.record_compute_budget_passive();
-                        // Short sleep so specialists pick up budget refreshes quickly
-                        // from commander broadcasts (every 3 ticks ≈ 15-45s).
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                }
-
-                // Read short-term memory (recent tool calls from previous ticks)
-                let memory_guard = agent_memory.read().await;
-                let recent_actions = memory_guard.format_for_prompt();
-                let variety_warning = memory_guard.action_variety_warning();
-                let error_corrections = memory_guard.format_errors_for_prompt();
-                let memory_entry_count = memory_guard.entry_count();
-                drop(memory_guard);
-                if memory_entry_count > 0 {
-                    info!(
-                        memory_entries = memory_entry_count,
-                        recent_actions_len = recent_actions.len(),
-                        "Tool memory state for cycle {cycle}"
-                    );
-                }
-
-                // Drain gossip-pushed completions into mesh_state (zero network cost)
-                if let Some(ref bus) = learning_bus {
-                    for notice in bus.drain_task_completions().await {
-                        let budget_snapshot = notice
-                            .budget_snapshot
-                            .and_then(|v| serde_json::from_value(v).ok());
-                        mesh_state
-                            .push_completed(
-                                &notice.task_id,
-                                arkavo_mcp_mesh::CompletedDelegation {
-                                    agent_id: notice.specialist_id,
-                                    response: notice.content,
-                                    response_latency_ms: notice.completion_ms,
-                                    budget_snapshot,
-                                },
-                            )
-                            .await;
-                    }
-                }
-
-                // Collect completions: push-delivered first, then poll fallback
-                // for any remaining pending delegations.
-                let completed = mesh_state.collect_completed().await;
-
-                // Use budget feedback from specialists to detect overload
-                for c in &completed {
-                    if let Some(ref snap) = c.budget_snapshot
-                        && (snap.status == "exhausted" || snap.status == "passive")
-                    {
-                        info!(
-                            agent_id = %c.agent_id,
-                            status = %snap.status,
-                            remaining_inferences = snap.remaining_inferences,
-                            "Specialist budget {} — skipping broadcast this cycle",
-                            snap.status
-                        );
-                    }
-                }
-
-                let specialist_context = if completed.is_empty() {
-                    String::new()
-                } else {
-                    use std::fmt::Write as _;
-                    let mut ctx =
-                        String::from("\n\n## Specialist Responses (ready — EXECUTE these now)\n");
-                    for c in &completed {
-                        let _ = write!(
-                            ctx,
-                            "### From {} specialist ({}ms):\n{}\n\n",
-                            c.agent_id, c.response_latency_ms, c.response
-                        );
-                    }
-                    ctx.push_str(
-                        "IMPORTANT: The above specialist advice is ready. \
-                         Skip CONSULT/MONITOR steps and go straight to EXECUTE \
-                         Execute the recommended actions NOW.\n",
-                    );
-                    info!(
-                        "Injecting {} specialist response(s) into cycle prompt",
-                        completed.len()
-                    );
-                    ctx
-                };
-
-                // Dead-man's switch: escalating warnings when agent is stuck
-                let dead_man_warning = match consecutive_no_action_cycles {
-                    3..=4 => "\n\nWARNING: You have NOT taken any action for 3 cycles. \
-                              You MUST take an action NOW. \
-                              Pick the most urgent alert and act on it.\n"
-                        .to_string(),
-                    5.. => {
-                        let mem_guard = agent_memory.read().await;
-                        let recent_types = mem_guard.recent_action_types();
-                        drop(mem_guard);
-                        let avoid = if recent_types.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                " You have been repeating: {}. Try a DIFFERENT action type.",
-                                recent_types.join(", ")
-                            )
-                        };
-                        format!(
-                            "\n\nCRITICAL: You have NOT acted for {consecutive_no_action_cycles}+ cycles.{avoid} \
-                             Read the alerts and pick the MOST URGENT need. \
-                             Take an action NOW.\n"
-                        )
-                    }
-                    _ => String::new(),
-                };
-
-                // Cycle-specific instruction goes as User message.
-                // Purpose (AGENTS.md) goes as System message via execute_with_conductor_and_learning.
-                let cycle_prompt = if cycle == 1 {
-                    "Begin your startup workflow now.".to_string()
-                } else {
-                    format!(
-                        "{recent_actions}{variety_warning}{error_corrections}{specialist_context}{dead_man_warning}\n\n\
-                         Cycle {cycle}. Follow your WORKFLOW.",
-                    )
-                };
-
-                // Task-level deduplication: skip cycle when the context hasn't
-                // changed AND the agent hasn't taken action. Hash the content
-                // components (actions, specialist responses, warnings) but NOT
-                // the cycle counter, which changes every iteration.
-                let prompt_hash = {
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    recent_actions.hash(&mut hasher);
-                    specialist_context.hash(&mut hasher);
-                    error_corrections.hash(&mut hasher);
-                    // Hash dead-man warning category (not exact text with cycle count)
-                    consecutive_no_action_cycles.min(5).hash(&mut hasher);
-                    hasher.finish()
-                };
-                if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
-                    consecutive_duplicate_prompts += 1;
-                    // Allow through every 5th duplicate to give the agent a chance
-                    // to retry with the same context (model may produce different output)
-                    if !consecutive_duplicate_prompts.is_multiple_of(5) {
-                        info!(
-                            "Agent cycle {cycle}: skipping duplicate prompt \
-                             ({consecutive_duplicate_prompts} consecutive, \
-                             no action for {consecutive_no_action_cycles} cycles)"
-                        );
-                        let cycle_interval = match consecutive_timeouts {
-                            0 => 5,
-                            1 => 15,
-                            2 => 30,
-                            _ => 60,
-                        };
-                        tokio::time::sleep(std::time::Duration::from_secs(cycle_interval)).await;
-                        continue;
-                    }
-                } else {
-                    consecutive_duplicate_prompts = 0;
-                }
-                last_cycle_prompt_hash = prompt_hash;
-
-                info!("Agent cycle {cycle}: executing");
-                let start = std::time::Instant::now();
-
-                // Commander (has MCP tools) never gates on compute budget —
-                // it allocates budgets to others. Specialists gate via messaging handler.
-                let tool_loop_budget = if has_mcp_tools {
-                    None
-                } else {
-                    Some(&compute_budget)
-                };
-                match super::conductor::execute_with_conductor_and_learning(
-                    &conductor,
-                    &router,
-                    &mcp_registry,
-                    cycle_prompt,
-                    None,
-                    None,
-                    learning_bus.as_ref(),
-                    Some(&agent_memory),
-                    Some(&purpose),
-                    Some(&mesh_state),
-                    model_hint.as_ref(),
-                    None,
-                    tool_loop_budget,
-                    #[cfg(feature = "iroh")]
-                    iroh_node.as_ref(),
-                )
-                .await
-                {
-                    Ok(result) => {
-                        let elapsed = start.elapsed();
-
-                        // Report budget state after inference.
-                        // Consumption happens per-iteration inside the tool loop
-                        // via consume_inference() so multi-step loops are counted.
-                        {
-                            let budget = compute_budget.read().await;
-                            let snapshot = budget.snapshot();
-                            loop_metrics.record_compute_budget_state(
-                                &snapshot.status,
-                                snapshot.remaining_inferences,
-                                snapshot.remaining_tokens,
-                            );
-                        }
-
-                        // Check if this cycle produced a meaningful action
-                        let memory_guard = agent_memory.read().await;
-                        let had_action = memory_guard.had_meaningful_action();
-
-                        // Broadcast state + budget to specialists (rate-limited, non-blocking).
-                        // Always refresh budgets every 3 ticks even without observation
-                        // so specialists don't stay passive indefinitely.
-                        if cycle - last_broadcast_cycle >= 3 {
-                            let mesh = mesh_state.clone();
-                            let data = memory_guard
-                                .last_observe_full()
-                                .map(|v| v.to_string())
-                                .unwrap_or_default();
-                            let cmd_model = commander_model.clone();
-                            let own_id = self_agent_id.clone();
-                            #[cfg(feature = "iroh")]
-                            let iroh_for_broadcast = iroh_node.clone();
-                            tokio::spawn(async move {
-                                // Re-discover peers in case new specialists joined
-                                mesh.discover_peers().await;
-                                let peer_count = mesh.agent_addresses.read().await.len();
-                                info!(
-                                    peer_count,
-                                    data_len = data.len(),
-                                    "Broadcast check: peers={peer_count}, data_len={}",
-                                    data.len()
-                                );
-                                let per_agent_bytes = compute_per_agent_bytes_static(
-                                    total_ram_bytes,
-                                    &cmd_model,
-                                    peer_count,
-                                );
-                                if !data.is_empty() {
-                                    // Stage large data on Iroh for P2P fetch
-                                    #[cfg(feature = "iroh")]
-                                    let iroh_ticket = if data.len() > 4000 {
-                                        stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
-                                    } else {
-                                        None
-                                    };
-                                    #[cfg(not(feature = "iroh"))]
-                                    let iroh_ticket: Option<
-                                        String,
-                                    > = None;
-
-                                    broadcast_state_to_peers(
-                                        &mesh,
-                                        &data,
-                                        per_agent_bytes,
-                                        &own_id,
-                                        iroh_ticket.as_deref(),
-                                    )
-                                    .await;
-                                } else {
-                                    info!("No observation data — refreshing budgets only");
-                                    refresh_specialist_budgets(&mesh, per_agent_bytes, &own_id)
-                                        .await;
-                                }
-                            });
-                            last_broadcast_cycle = cycle;
-                        }
-                        drop(memory_guard);
-
-                        if had_action {
-                            consecutive_no_action_cycles = 0;
-                            consecutive_duplicate_prompts = 0;
-                        } else {
-                            consecutive_no_action_cycles += 1;
-                            if consecutive_no_action_cycles >= 3 {
-                                warn!(
-                                    "Dead-man's switch: {} consecutive ticks without meaningful action",
-                                    consecutive_no_action_cycles
-                                );
-                            }
-                        }
-
-                        // Degenerate output detection: after 8 ticks of no meaningful
-                        // action, the model's context is likely poisoned. Stop, rethink,
-                        // replan: clear short-term memory so the next cycle starts fresh
-                        // with a clean observation instead of building on garbage history.
-                        if consecutive_no_action_cycles >= 8 {
-                            warn!(
-                                "Context reset: {} ticks without action — clearing short-term memory",
-                                consecutive_no_action_cycles
-                            );
-                            let mut mem = agent_memory.write().await;
-                            mem.clear();
-                            drop(mem);
-                            consecutive_no_action_cycles = 0;
-                            consecutive_duplicate_prompts = 0;
-
-                            // Synthesize a fast-path lesson about the failure pattern
-                            if let Some(ref bus) = learning_bus {
-                                bus.add_fast_lesson(
-                                    "orchestrator",
-                                    "8 consecutive ticks produced no meaningful action. \
-                                     The conversation context may be stale. On the next cycle, \
-                                     observe the current state first, \
-                                     then pick ONE concrete action from the most urgent need.",
-                                )
-                                .await;
-                            }
-                        }
-
-                        // Adaptive cycle interval: scale based on inference duration.
-                        // Fast ticks when GPU is responsive, back off when contended.
-                        let elapsed_secs = elapsed.as_secs();
-                        if elapsed_secs >= 60 {
-                            consecutive_timeouts += 1;
-                        } else if elapsed_secs >= 30 {
-                            consecutive_timeouts = consecutive_timeouts.saturating_sub(1);
-                        } else {
-                            consecutive_timeouts = 0;
-                        }
-
-                        info!(
-                            "Agent cycle {cycle} completed in {:.1}s: {} chars",
-                            elapsed.as_secs_f64(),
-                            result.len(),
-                        );
-                    }
-                    Err(e) => {
-                        consecutive_no_action_cycles += 1;
-                        consecutive_timeouts += 1;
-                        warn!("Agent cycle {cycle} failed: {e}");
-                    }
-                }
-
-                // Adaptive wait: fast (5s) when GPU is responsive, backs off
-                // on consecutive slow cycles to avoid piling up blocked inferences.
-                let cycle_interval = match consecutive_timeouts {
-                    0 => 5,
-                    1 => 15,
-                    2 => 30,
-                    _ => 60,
-                };
-                info!(consecutive_timeouts, cycle_interval, "Next cycle interval");
-                tokio::time::sleep(std::time::Duration::from_secs(cycle_interval)).await;
-            }
+            config.mesh_state.discover_peers().await;
+            super::agent_loop::run_agent_loop(config, event_rx).await;
         });
     }
 
@@ -1808,416 +1389,6 @@ fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget:
     }
 
     config
-}
-
-// --- Urgency detection ---
-
-/// Detect urgency level from game state observation text.
-///
-/// Tries structured JSON first (looks for an `alerts` array), then falls back
-/// to keyword frequency scanning for threat-related terms.
-fn detect_urgency(observe_data: &str) -> arkavo_budget::UrgencyLevel {
-    use arkavo_budget::UrgencyLevel;
-
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(observe_data)
-        && let Some(alerts) = v.pointer("/alerts").and_then(|a| a.as_array())
-    {
-        return match alerts.len() {
-            0..=1 => UrgencyLevel::Low,
-            2..=4 => UrgencyLevel::Medium,
-            5..=9 => UrgencyLevel::High,
-            _ => UrgencyLevel::Critical,
-        };
-    }
-
-    let lower = observe_data.to_lowercase();
-    let count: usize = [
-        "raid", "attack", "threat", "alert", "fire", "bleed", "danger",
-    ]
-    .iter()
-    .map(|kw| lower.matches(kw).count())
-    .sum();
-    match count {
-        0..=1 => UrgencyLevel::Low,
-        2..=4 => UrgencyLevel::Medium,
-        5..=9 => UrgencyLevel::High,
-        _ => UrgencyLevel::Critical,
-    }
-}
-
-/// Compact a large observation for broadcast to peers.
-///
-/// Generic strategy: if the JSON has a "Delta" key (changes since last state),
-/// extract only that. Otherwise truncate to `max_chars`. Domain-specific
-/// filtering is the specialist's job via its own system prompt.
-fn compact_observation(obs: &str, max_chars: usize) -> String {
-    if obs.len() <= max_chars {
-        return obs.to_string();
-    }
-    // Prefer the Delta section — it contains only what changed
-    if let Some(delta_start) = obs.find("\"Delta\":{") {
-        let subset = &obs[delta_start..];
-        if let Some(end) = super::conductor_tool_loop::find_matching_brace(subset) {
-            let delta = &subset[..=end];
-            if delta.len() <= max_chars {
-                return format!("{{{delta}}}");
-            }
-        }
-    }
-    // Fallback: truncate with a note
-    let cut = max_chars.saturating_sub(30);
-    format!(
-        "{}...(truncated {} bytes)",
-        &obs[..cut.min(obs.len())],
-        obs.len()
-    )
-}
-
-// --- Peer state broadcast ---
-
-/// Compute per-agent memory budget from total system RAM.
-///
-/// Reserves 8GB for the OS and subtracts the commander's model weight,
-/// then divides evenly among specialists. Returns at least 512MB.
-fn compute_per_agent_bytes_static(total_ram: u64, commander_model: &str, count: usize) -> u64 {
-    const OS_RESERVE: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
-    const FLOOR: u64 = 512 * 1024 * 1024; // 512 MB min
-    let commander_bytes = arkavo_router::ModelChoice::from_name(commander_model)
-        .map(|m| m.size_bytes())
-        .unwrap_or(0);
-    let available = total_ram
-        .saturating_sub(OS_RESERVE)
-        .saturating_sub(commander_bytes);
-    if count == 0 {
-        return available.max(FLOOR);
-    }
-    (available / count as u64).max(FLOOR)
-}
-
-/// Refresh specialist budgets without sending observation data.
-///
-/// Called when the commander hasn't produced a game observation yet but specialists
-/// need their budgets refreshed to avoid staying passive indefinitely.
-async fn refresh_specialist_budgets(
-    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
-    per_agent_bytes: u64,
-    self_agent_id: &str,
-) {
-    let peer_ids: Vec<String> = mesh_state
-        .agent_addresses
-        .read()
-        .await
-        .keys()
-        .filter(|id| id.as_str() != self_agent_id)
-        .cloned()
-        .collect();
-
-    if peer_ids.is_empty() {
-        return;
-    }
-
-    for agent_id in &peer_ids {
-        let pending = mesh_state
-            .pending_delegations
-            .read()
-            .await
-            .iter()
-            .filter(|d| d.agent_id == *agent_id)
-            .count() as u32;
-        let allocation = arkavo_budget::BudgetPolicy::allocate(
-            arkavo_budget::UrgencyLevel::Low,
-            pending,
-            per_agent_bytes,
-        );
-        // Only propagate budget allocation — no LLM work needed when no game state exists
-        match send_advisory_task(mesh_state, agent_id, "", Some(&allocation)).await {
-            Ok(_) => info!(
-                max_inferences = allocation.max_inferences,
-                max_memory_mb = allocation.max_memory_bytes / (1024 * 1024),
-                per_agent_bytes,
-                "Budget refreshed for {agent_id}"
-            ),
-            Err(e) => warn!("Could not reach {agent_id}: {e}"),
-        }
-    }
-}
-
-/// Broadcast observation state to all discovered peer agents for proactive analysis.
-///
-/// Computes per-specialist budget allocations dynamically based on game urgency
-/// and each specialist's pending task backlog.
-/// Stage data on Iroh P2P network for peer fetching.
-#[cfg(feature = "iroh")]
-async fn stage_on_iroh(
-    iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
-    data: &str,
-) -> Option<String> {
-    let node = iroh_node?;
-    let transport = arkavo_tdf_iroh::IrohTransport::new(node.clone());
-    match transport.stage_bytes(data.as_bytes()).await {
-        Ok(ticket) => {
-            let ticket_str = ticket.to_string();
-            info!(
-                data_len = data.len(),
-                ticket_len = ticket_str.len(),
-                "Staged data on Iroh for P2P fetch"
-            );
-            Some(ticket_str)
-        }
-        Err(e) => {
-            warn!("Iroh stage failed, falling back to A2A: {e}");
-            None
-        }
-    }
-}
-
-async fn broadcast_state_to_peers(
-    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
-    observation: &str,
-    per_agent_bytes: u64,
-    self_agent_id: &str,
-    iroh_ticket: Option<&str>,
-) {
-    let peer_ids: Vec<String> = mesh_state
-        .agent_addresses
-        .read()
-        .await
-        .keys()
-        .filter(|id| id.as_str() != self_agent_id)
-        .cloned()
-        .collect();
-
-    if peer_ids.is_empty() {
-        let all_ids: Vec<String> = mesh_state
-            .agent_addresses
-            .read()
-            .await
-            .keys()
-            .cloned()
-            .collect();
-        warn!(
-            self_id = %self_agent_id,
-            all_agents = ?all_ids,
-            "No peers to broadcast to (all filtered as self)"
-        );
-        return;
-    }
-
-    info!(peer_count = peer_ids.len(), peers = ?peer_ids, "Broadcasting state to specialists");
-
-    let urgency = detect_urgency(observation);
-    let compacted = compact_observation(observation, 2000);
-
-    let task = if let Some(ticket) = iroh_ticket {
-        format!(
-            "PROACTIVE ANALYSIS — Full state available via Iroh P2P.\n\
-             Use iroh_fetch with this ticket to get full data: {ticket}\n\n\
-             Summary: {compacted}\n\n\
-             Respond with urgent action recommendations ONLY if you see \
-             problems in your domain. If everything looks fine, respond \
-             with 'No issues detected.'"
-        )
-    } else {
-        format!(
-            "PROACTIVE ANALYSIS — Review this state update and respond \
-             with urgent action recommendations ONLY if you see problems \
-             in your domain of expertise.\n\
-             If everything looks fine, respond with 'No issues detected.'\n\n\
-             {compacted}"
-        )
-    };
-
-    for agent_id in &peer_ids {
-        let pending = mesh_state
-            .pending_delegations
-            .read()
-            .await
-            .iter()
-            .filter(|d| d.agent_id == *agent_id)
-            .count() as u32;
-
-        // Back off if specialist already has pending work — don't pile on tasks
-        if pending >= 2 {
-            info!(
-                agent_id = %agent_id,
-                pending,
-                "Skipping broadcast to {agent_id} — already has {pending} pending tasks"
-            );
-            continue;
-        }
-
-        let allocation = arkavo_budget::BudgetPolicy::allocate(urgency, pending, per_agent_bytes);
-        match send_advisory_task(mesh_state, agent_id, &task, Some(&allocation)).await {
-            Ok(_) => info!(
-                ?urgency,
-                pending,
-                max_inferences = allocation.max_inferences,
-                ttl_secs = allocation.ttl_secs,
-                "Budget allocated to {agent_id}"
-            ),
-            Err(e) => warn!("Could not reach {agent_id}: {e}"),
-        }
-    }
-}
-
-/// Send an advisory task to a specialist via message/send RPC.
-///
-/// Lightweight — short timeout, no retries. Tracks PendingDelegation
-/// so `collect_completed()` picks up the response.
-async fn send_advisory_task(
-    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
-    agent_id: &str,
-    task: &str,
-    budget_allocation: Option<&arkavo_budget::BudgetAllocation>,
-) -> std::result::Result<(), String> {
-    use arkavo_protocol::transport::TlsConfig;
-    use arkavo_protocol::types::{Message, MessagePart, MessageSendRequest, MessageSendResponse};
-    use arkavo_protocol::{
-        A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
-    };
-
-    // Empty task = budget-only refresh. Skip the RPC call that would trigger
-    // idle LLM inference on the specialist side.
-    if task.is_empty() {
-        debug!(agent_id, "Budget-only refresh — no task content to send");
-        return Ok(());
-    }
-
-    let address = {
-        let addrs = mesh_state.agent_addresses.read().await;
-        addrs.get(agent_id).cloned()
-    };
-    let address = match address {
-        Some(a) => a,
-        None => return Err(format!("Agent {agent_id} not discovered")),
-    };
-
-    let transport_config = TransportConfig {
-        timeout_ms: 10000,
-        max_retries: 0,
-        tls_config: TlsConfig {
-            require_tls: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let transport = Arc::new(HttpTransport::new(transport_config).map_err(|e| e.to_string())?);
-
-    let endpoint = A2aEndpoint {
-        url: address.clone(),
-        agent_id: agent_id.to_string(),
-        public_key: None,
-    };
-
-    transport
-        .connect(&endpoint)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut meta = serde_json::json!({
-        "source": "state_broadcast",
-        "task_type": "advisory"
-    });
-    if let Some(alloc) = budget_allocation {
-        meta["budget_allocation"] = serde_json::to_value(alloc).unwrap_or_default();
-    }
-
-    let message = Message {
-        parts: vec![MessagePart::Text {
-            content: task.to_string(),
-        }],
-        metadata: Some(meta),
-    };
-
-    let send_request = MessageSendRequest {
-        message,
-        task_id: None,
-    };
-
-    let rpc_request = A2aRequest::new("message/send", serde_json::json!([send_request]));
-
-    let response = transport
-        .send_request(rpc_request)
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = transport.close().await;
-
-    match response {
-        A2aResponse::Success { result, .. } => {
-            let send_response: MessageSendResponse =
-                serde_json::from_value(result).map_err(|e| e.to_string())?;
-
-            if !send_response.task_id.is_empty() {
-                mesh_state.pending_delegations.write().await.push(
-                    arkavo_mcp_mesh::PendingDelegation {
-                        task_id: send_response.task_id,
-                        agent_id: agent_id.to_string(),
-                        address,
-                        sent_at: std::time::Instant::now(),
-                    },
-                );
-            }
-            Ok(())
-        }
-        A2aResponse::Error { error, .. } => Err(format!("{}: {}", error.code, error.message)),
-    }
-}
-
-#[cfg(test)]
-mod broadcast_tests {
-    use super::*;
-    use arkavo_test_macros::spec;
-
-    #[spec("SRV-005")]
-    #[tokio::test]
-    async fn test_broadcast_skips_when_no_peers() {
-        let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        broadcast_state_to_peers(&mesh, r#"{"data":"test"}"#, 0, "self", None).await;
-        assert!(mesh.pending_delegations.read().await.is_empty());
-    }
-
-    #[spec("SRV-005")]
-    #[tokio::test]
-    async fn test_broadcast_creates_task_per_peer() {
-        let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
-        mesh.agent_addresses
-            .write()
-            .await
-            .insert("peer-a".to_string(), "http://127.0.0.1:19999".to_string());
-        mesh.agent_addresses
-            .write()
-            .await
-            .insert("peer-b".to_string(), "http://127.0.0.1:19998".to_string());
-
-        broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0, "self", None).await;
-        assert!(mesh.pending_delegations.read().await.is_empty());
-    }
-
-    #[spec("SRV-001")]
-    #[test]
-    fn test_dynamic_memory_128gb_3_specialists() {
-        let total_ram = 128 * 1024 * 1024 * 1024_u64; // 128 GB
-        let commander_size = arkavo_router::ModelChoice::from_name("glm-4.7-flash")
-            .unwrap()
-            .size_bytes(); // ~20 billion bytes
-        let per_agent = compute_per_agent_bytes_static(total_ram, "glm-4.7-flash", 3);
-        let os_reserve = 8 * 1024 * 1024 * 1024_u64;
-        let expected = (total_ram - os_reserve - commander_size) / 3;
-        assert_eq!(per_agent, expected);
-        // Must be well above the 512MB floor (~37 GB)
-        assert!(per_agent > 30 * 1024 * 1024 * 1024);
-    }
-
-    #[spec("SRV-001")]
-    #[test]
-    fn test_dynamic_memory_floor_enforced() {
-        // Tiny system: 4 GB total, large commander model, many specialists
-        let total_ram = 4 * 1024 * 1024 * 1024_u64;
-        let per_agent = compute_per_agent_bytes_static(total_ram, "glm-4.7-flash", 10);
-        // Should hit the 512MB floor
-        assert_eq!(per_agent, 512 * 1024 * 1024);
-    }
 }
 
 #[cfg(test)]
@@ -2337,69 +1508,5 @@ mod dedup_tests {
         // cycle 3: new specialist advice — executes (reset)
         // cycle 4-5: duplicate — skipped
         assert_eq!(executed, vec![0, 3]);
-    }
-}
-
-#[cfg(test)]
-mod urgency_tests {
-    use super::*;
-    use arkavo_budget::UrgencyLevel;
-    use arkavo_test_macros::spec;
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_json_alerts_low() {
-        let data = r#"{"alerts":[],"colonists":[{"name":"Jess"}]}"#;
-        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_json_alerts_medium() {
-        let data = r#"{"alerts":["cold snap","food shortage","crop blight"]}"#;
-        assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_json_alerts_high() {
-        let data = r#"{"alerts":["a","b","c","d","e","f","g"]}"#;
-        assert_eq!(detect_urgency(data), UrgencyLevel::High);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_json_alerts_critical() {
-        let alerts: Vec<String> = (0..12).map(|i| format!("alert_{i}")).collect();
-        let data = serde_json::json!({"alerts": alerts}).to_string();
-        assert_eq!(detect_urgency(&data), UrgencyLevel::Critical);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_keyword_fallback() {
-        let data = "Colony is under raid! Attack from the north. Fire in storage.";
-        assert_eq!(detect_urgency(data), UrgencyLevel::Medium);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_no_threats() {
-        let data = "All colonists are happy. Resources are plentiful.";
-        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_keyword_critical() {
-        let data = "raid attack threat alert fire bleed danger raid attack threat alert";
-        assert_eq!(detect_urgency(data), UrgencyLevel::Critical);
-    }
-
-    #[spec("SRV-009")]
-    #[test]
-    fn test_detect_urgency_json_without_alerts_key() {
-        let data = r#"{"colonists":3,"resources":{"wood":50}}"#;
-        assert_eq!(detect_urgency(data), UrgencyLevel::Low);
     }
 }

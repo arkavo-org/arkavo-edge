@@ -69,7 +69,13 @@ impl McpConverter {
     /// - Strip out non-JSON-Schema fields that may leak from MCP ToolSchema
     pub fn make_gemini_compatible(schema: &Value) -> Value {
         // Invalid fields that may leak from MCP ToolSchema into parameters
-        const INVALID_FIELDS: &[&str] = &["name", "aliases", "parameters", "category"];
+        const INVALID_FIELDS: &[&str] = &[
+            "name",
+            "aliases",
+            "parameters",
+            "category",
+            "additionalProperties",
+        ];
 
         match schema {
             Value::Object(map) => {

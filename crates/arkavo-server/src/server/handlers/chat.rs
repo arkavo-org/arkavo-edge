@@ -49,6 +49,7 @@ pub async fn handle_chat_send(
     rate_limiter: &RateLimiter,
     chat_sessions: &Arc<ChatSessionManager>,
     router: Option<&Arc<arkavo_router::Router>>,
+    context_snapshot: &Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     session_id: String,
     message: UserMessage,
 ) -> Result<(), ErrorObjectOwned> {
@@ -60,6 +61,20 @@ pub async fn handle_chat_send(
         metrics.record_rate_limit_blocked(None);
         timer.error();
         return Err(e);
+    }
+
+    // Introspection: @context returns conversation window snapshot
+    if message.content.trim() == "@context" {
+        let text = if let Some(ref snapshot) = *context_snapshot.read().await {
+            snapshot.to_string()
+        } else {
+            r#"{"error":"no context snapshot available yet"}"#.to_string()
+        };
+        if let Err(e) = chat_sessions.push_system_delta(&session_id, text).await {
+            warn!(session.id = %session_id, error = %e, "@context delta push failed");
+        }
+        timer.success();
+        return Ok(());
     }
 
     // Preflight moderation: reject policy-violating messages before processing

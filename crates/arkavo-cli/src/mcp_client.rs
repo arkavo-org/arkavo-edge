@@ -437,10 +437,22 @@ impl McpClient {
                 "Tool response: {}",
                 serde_json::to_string(&result).unwrap_or_default()
             ));
+
+            // Check MCP-level isError (distinct from JSON-RPC errors).
+            // Many MCP servers return isError: true with error details in content.
+            let is_tool_error = result
+                .get("isError")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             if let Some(content_array) = result.get("content").and_then(|c| c.as_array())
                 && let Some(first_content) = content_array.first()
                 && let Some(text) = first_content.get("text").and_then(|t| t.as_str())
             {
+                if is_tool_error {
+                    log_mcp(&format!("Tool returned isError: {text}"));
+                    return Err(format!("Tool error: {text}").into());
+                }
                 return Ok(json!({ "result": text }));
             }
             Ok(result)
@@ -932,10 +944,19 @@ impl HttpMcpClient {
         }
 
         if let Some(result) = response.result {
+            let is_tool_error = result
+                .get("isError")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             if let Some(content_array) = result.get("content").and_then(|c| c.as_array())
                 && let Some(first_content) = content_array.first()
                 && let Some(text) = first_content.get("text").and_then(|t| t.as_str())
             {
+                if is_tool_error {
+                    log_mcp(&format!("HTTP MCP tool returned isError: {text}"));
+                    return Err(format!("Tool error: {text}").into());
+                }
                 return Ok(json!({ "result": text }));
             }
             Ok(result)

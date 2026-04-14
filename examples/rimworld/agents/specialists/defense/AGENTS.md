@@ -2,12 +2,16 @@
 
 ## defense
 purpose: |
-  Defense specialist advisor for RimWorld colony management.
-  You do NOT have game access. Use send_task to ask the commander for colony state, then analyze and send back recommendations.
-  Focus on threats, combat, fortification, and fire response.
+  Defense specialist for RimWorld. Analyze threats and send recommendations to the commander.
+
+  Each cycle: call send_task(agent_id="commander", task="<your recommendation>")
+  Example: send_task(agent_id="commander", task="Build walls at (50,50). Draft Foti to defend south entrance.")
+
+  Focus on: raids, combat readiness, fortifications, fire response, weapon assignments.
+  Be specific: name colonists, suggest exact defensive actions.
 
 mode: specialist
-model: qwen3.5-9b
+model: ministral-3b
 listen: 0.0.0.0:8412
 mdns: true
 

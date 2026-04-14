@@ -10,6 +10,7 @@ pub(crate) async fn handle_request_context_topology(
     learning_module: &Arc<RwLock<LearningModule>>,
     agents_registry: &Arc<RwLock<Vec<serde_json::Value>>>,
     context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    selected_agent: Option<String>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Collect Thompson Sampling priors from local LearningModule
@@ -120,6 +121,17 @@ pub(crate) async fn handle_request_context_topology(
             }
         }
     }
+
+    // Read conversation window from the telemetry cache (pushed via system.metrics)
+    let conversation_window = if let Some(ref agent_id) = selected_agent {
+        cache
+            .iter()
+            .find(|(id, _)| *id == agent_id)
+            .and_then(|(_, resp)| resp.get("conversationWindow"))
+            .cloned()
+    } else {
+        None
+    };
     drop(cache);
 
     decision_traces.truncate(10);
@@ -133,6 +145,7 @@ pub(crate) async fn handle_request_context_topology(
         memory_lifecycle,
         gossip,
         agents,
+        conversation_window,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
     .await?;
@@ -556,6 +569,7 @@ mod tests {
             memory_lifecycle: default_lifecycle(),
             gossip: default_gossip(),
             agents: vec![],
+            conversation_window: None,
             timestamp: "2026-03-24T12:00:00Z".into(),
         };
         let json = serde_json::to_string(&event).unwrap();

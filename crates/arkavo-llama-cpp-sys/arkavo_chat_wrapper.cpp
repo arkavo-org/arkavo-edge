@@ -5,6 +5,7 @@
 #include "arkavo_chat_wrapper.h"
 #include "llama.h"
 #include "chat.h"
+#include "peg-parser.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -118,6 +119,10 @@ arkavo_chat_result arkavo_chat_templates_apply(
         result.grammar = strdup_safe(params.grammar);
         result.grammar_lazy = params.grammar_lazy ? 1 : 0;
         result.thinking_forced_open = params.supports_thinking ? 1 : 0;
+        result.format = static_cast<int>(params.format);
+        // Serialize the PEG parser so Rust can pass it back for output parsing
+        result.parser_str = strdup_safe(params.parser);
+        result.generation_prompt = strdup_safe(params.generation_prompt);
 
         // Convert grammar triggers
         if (!params.grammar_triggers.empty()) {
@@ -156,6 +161,8 @@ void arkavo_chat_result_free(arkavo_chat_result *result) {
     }
     free(result->prompt);
     free(result->grammar);
+    free(result->parser_str);
+    free(result->generation_prompt);
     for (int i = 0; i < result->num_triggers; i++) {
         free(const_cast<char *>(result->triggers[i].value));
     }
@@ -164,6 +171,84 @@ void arkavo_chat_result_free(arkavo_chat_result *result) {
         free(result->additional_stops[i]);
     }
     free(result->additional_stops);
+    *result = {};
+}
+
+arkavo_chat_parse_result arkavo_chat_parse(
+    const char *output_text,
+    int format,
+    const char *parser_str,
+    int is_partial)
+{
+    arkavo_chat_parse_result result = {};
+
+    if (!output_text) {
+        return result;
+    }
+
+    try {
+        common_chat_parser_params params;
+        params.format = static_cast<common_chat_format>(format);
+        params.parse_tool_calls = true;
+
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            params.debug = true;
+        }
+
+        common_chat_msg msg;
+        if (parser_str && parser_str[0] != '\0') {
+            common_peg_arena arena;
+            arena.load(parser_str);
+            msg = common_chat_peg_parse(arena, output_text, is_partial != 0, params);
+        } else {
+            msg = common_chat_parse(output_text, is_partial != 0, params);
+        }
+
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            fprintf(stderr, "[PEG-RESULT] content_len=%zu tool_calls=%zu\n",
+                    msg.content.size(), msg.tool_calls.size());
+            for (size_t i = 0; i < msg.tool_calls.size() && i < 3; i++) {
+                fprintf(stderr, "[PEG-RESULT] call[%zu] name=%s args_len=%zu args=%.100s\n",
+                        i, msg.tool_calls[i].name.c_str(),
+                        msg.tool_calls[i].arguments.size(),
+                        msg.tool_calls[i].arguments.c_str());
+            }
+        }
+
+        result.content = strdup_safe(msg.content);
+        result.reasoning_content = strdup_safe(msg.reasoning_content);
+
+        if (!msg.tool_calls.empty()) {
+            result.num_tool_calls = static_cast<int>(msg.tool_calls.size());
+            result.tool_calls = static_cast<arkavo_tool_call *>(
+                calloc(result.num_tool_calls, sizeof(arkavo_tool_call)));
+            for (int i = 0; i < result.num_tool_calls; i++) {
+                result.tool_calls[i].name = strdup_safe(msg.tool_calls[i].name);
+                result.tool_calls[i].arguments = strdup_safe(msg.tool_calls[i].arguments);
+                result.tool_calls[i].id = strdup_safe(msg.tool_calls[i].id);
+            }
+        }
+    } catch (const std::exception &e) {
+        fprintf(stderr, "arkavo_chat_parse: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "arkavo_chat_parse: unknown exception\n");
+    }
+
+    return result;
+}
+
+void arkavo_chat_parse_result_free(arkavo_chat_parse_result *result) {
+    if (!result) {
+        return;
+    }
+    free(result->content);
+    free(result->reasoning_content);
+    for (int i = 0; i < result->num_tool_calls; i++) {
+        free(const_cast<char *>(result->tool_calls[i].name));
+        free(const_cast<char *>(result->tool_calls[i].arguments));
+        free(const_cast<char *>(result->tool_calls[i].id));
+    }
+    free(result->tool_calls);
     *result = {};
 }
 
