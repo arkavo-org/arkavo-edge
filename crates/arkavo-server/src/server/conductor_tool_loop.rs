@@ -102,11 +102,11 @@ pub(super) async fn run_tool_loop(
             let keep_recent = 2;
             let compactable = messages.len() - 1 - keep_recent; // exclude system
             if compactable > 0 {
-                let old_messages: Vec<String> = messages[1..1 + compactable]
+                let old_messages: Vec<String> = messages[1..=compactable]
                     .iter()
                     .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
                     .collect();
-                let old_chars: usize = messages[1..1 + compactable]
+                let old_chars: usize = messages[1..=compactable]
                     .iter()
                     .map(|m| m.content.len())
                     .sum();
