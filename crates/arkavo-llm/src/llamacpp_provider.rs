@@ -1,6 +1,9 @@
 use crate::gpu_fault::GpuCircuitBreaker;
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
+
+/// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
+type TemplateParseTuple = (i32, Option<String>, Option<String>);
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -110,7 +113,7 @@ pub struct LlamaCppProvider {
     /// Template-generated format and PEG parser string, stored after generate_streaming
     /// so complete_with_tools can pass them to the output parser.
     /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
-    template_parse_info: std::sync::Mutex<Option<(i32, Option<String>, Option<String>)>>,
+    template_parse_info: std::sync::Mutex<Option<TemplateParseTuple>>,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -555,14 +558,14 @@ impl LlamaCppProvider {
 
         // Merge template grammar with config grammar (template takes precedence)
         // Store template parse info for complete_with_tools to use later
-        if template_chat_format != 0 || template_chat_parser_str.is_some() {
-            if let Ok(mut guard) = self.template_parse_info.lock() {
-                *guard = Some((
-                    template_chat_format,
-                    template_chat_parser_str,
-                    template_generation_prompt.clone(),
-                ));
-            }
+        if (template_chat_format != 0 || template_chat_parser_str.is_some())
+            && let Ok(mut guard) = self.template_parse_info.lock()
+        {
+            *guard = Some((
+                template_chat_format,
+                template_chat_parser_str,
+                template_generation_prompt.clone(),
+            ));
         }
 
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
