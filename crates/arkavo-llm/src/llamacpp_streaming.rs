@@ -283,7 +283,7 @@ pub(crate) async fn generate_tokens_pooled(
 
         let eos_token = model.get_eos_token();
         process_input_tokens(&ctx, &input_tokens)?;
-        let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0);
+        let start_pos = i32::try_from(input_tokens.len()).unwrap_or(0);
         // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
         // may be much smaller than max_tokens. Without this, generation crashes
         // with DecodeFailure when pos exceeds the KV cache boundary.
@@ -300,7 +300,9 @@ pub(crate) async fn generate_tokens_pooled(
         let mut utf8_buffer: Vec<u8> = Vec::new();
         let mut detection_buffer = String::new();
 
-        for _ in 0..max_generation {
+        let mut pos = start_pos;
+        let end_pos = start_pos.saturating_add(i32::try_from(max_generation).unwrap_or(i32::MAX));
+        while pos < end_pos {
             validate_logits(&ctx)?;
             let token = sampler.sample(&ctx, -1);
 
@@ -556,7 +558,8 @@ pub(crate) async fn generate_tokens_with_context(
         // Detection buffer: decodes with special=true so template markers are visible
         let mut detection_buffer = String::new();
 
-        for _ in 0..max_generation {
+        let end_pos = initial_pos.saturating_add(i32::try_from(max_generation).unwrap_or(i32::MAX));
+        while pos < end_pos {
             validate_logits(&ctx)?;
 
             let token = sampler.sample(&ctx, -1);

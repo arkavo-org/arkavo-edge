@@ -37,7 +37,7 @@ fn test_basic_generation() {
         !graph.outputs.is_empty(),
         "Generated graph should have at least one output"
     );
-    eprintln!("Generated graph: {:?}", graph);
+    eprintln!("Generated graph: {graph:?}");
 }
 
 /// Test 1: Access Control - Two inputs ORed together
@@ -91,7 +91,7 @@ fn test_content_moderation_generation() {
 
     // Verify we got a valid graph
     assert!(!graph.outputs.is_empty(), "Should have at least one output");
-    eprintln!("Generated graph: {:?}", graph);
+    eprintln!("Generated graph: {graph:?}");
 }
 
 /// Test 3: Agent Routing - XOR operation
@@ -110,7 +110,7 @@ fn test_agent_routing_generation() {
 
     // Verify we got a valid graph
     assert!(!graph.outputs.is_empty(), "Should have at least one output");
-    eprintln!("Generated graph: {:?}", graph);
+    eprintln!("Generated graph: {graph:?}");
 
     // Skip semantic verification if we don't have 2 inputs
     if graph.inputs.len() < 2 {
@@ -141,7 +141,7 @@ fn test_majority_vote_generation() {
 
     // Verify we got a valid graph
     assert!(!graph.outputs.is_empty(), "Should have at least one output");
-    eprintln!("Generated graph: {:?}", graph);
+    eprintln!("Generated graph: {graph:?}");
 }
 
 /// Test 5: Prompt Variations - Different prompts all produce valid graphs
@@ -168,7 +168,7 @@ fn test_prompt_variations() {
             !graph.outputs.is_empty(),
             "Prompt '{prompt}': Should have at least one output"
         );
-        eprintln!("Prompt '{}' -> {:?}", prompt, graph);
+        eprintln!("Prompt '{prompt}' -> {graph:?}");
     }
 }
 

@@ -58,7 +58,7 @@ async fn test_deliberation_with_ministral_3b() {
         }
     };
 
-    println!("Loading Ministral 3B model from: {}", model_path);
+    println!("Loading Ministral 3B model from: {model_path}");
     let provider = LlamaCppProvider::new("ministral-3b".to_string(), model_path)
         .expect("Failed to load Ministral 3B model");
 
@@ -84,7 +84,7 @@ async fn test_deliberation_with_ministral_3b() {
         tool_name: None,
     }];
 
-    println!("\nTask: {}", task);
+    println!("\nTask: {task}");
     println!("Running deliberation...\n");
 
     let result = deliberator
@@ -96,10 +96,10 @@ async fn test_deliberation_with_ministral_3b() {
     println!("Iterations: {}", result.iterations);
     println!("Confidence: {:.2}", result.confidence);
     if let Some(ref thinking) = result.thinking {
-        println!("\nThinking: {}", thinking);
+        println!("\nThinking: {thinking}");
     }
     if let Some(ref critique) = result.critique {
-        println!("\nCritique: {}", critique);
+        println!("\nCritique: {critique}");
     }
     println!("\nFinal Response:\n{}", result.final_response);
     println!("===========================\n");
@@ -123,7 +123,7 @@ async fn test_deliberation_tool_error_scenario() {
         }
     };
 
-    println!("Loading Ministral 3B model from: {}", model_path);
+    println!("Loading Ministral 3B model from: {model_path}");
     let provider = LlamaCppProvider::new("ministral-3b".to_string(), model_path)
         .expect("Failed to load Ministral 3B model");
 
@@ -150,7 +150,7 @@ async fn test_deliberation_tool_error_scenario() {
         tool_name: None,
     }];
 
-    println!("\nTask: {}", task);
+    println!("\nTask: {task}");
     println!("Running deliberation...\n");
 
     let result = deliberator
@@ -186,7 +186,7 @@ async fn test_qwen3_math() {
         }
     };
 
-    println!("Loading Qwen3-0.6B model from: {}", model_path);
+    println!("Loading Qwen3-0.6B model from: {model_path}");
     let provider = LlamaCppProvider::new("qwen3.5-0.8b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
@@ -210,7 +210,7 @@ async fn test_qwen3_math() {
         tool_name: None,
     }];
 
-    println!("\nTask: {}", task);
+    println!("\nTask: {task}");
     println!("Running with Qwen3-0.6B...\n");
 
     let result = deliberator
@@ -240,7 +240,7 @@ async fn test_qwen3_coding() {
         }
     };
 
-    println!("Loading Qwen3-0.6B model from: {}", model_path);
+    println!("Loading Qwen3-0.6B model from: {model_path}");
     let provider = LlamaCppProvider::new("qwen3.5-0.8b".to_string(), model_path)
         .expect("Failed to load Qwen3 model");
 
@@ -264,7 +264,7 @@ async fn test_qwen3_coding() {
         tool_name: None,
     }];
 
-    println!("\nTask: {}", task);
+    println!("\nTask: {task}");
     println!("Running with Qwen3-0.6B...\n");
 
     let result = deliberator

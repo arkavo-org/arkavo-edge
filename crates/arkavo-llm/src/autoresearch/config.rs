@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn test_default_search_space_size() {
         let space = SearchSpace::default();
-        assert_eq!(space.config_count(), 2 * 6 * 4 * 4 * 1);
+        assert_eq!(space.config_count(), (2 * 6 * 4 * 4));
     }
 
     #[test]

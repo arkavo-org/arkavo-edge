@@ -65,14 +65,13 @@ async fn test_feedback_must_have_message_type_byte() {
             );
         }
         Err(e) => {
-            eprintln!("[TEST CLIENT] Got expected error: {}", e);
+            eprintln!("[TEST CLIENT] Got expected error: {e}");
             // Success - the protocol correctly rejected the malformed message
             assert!(
                 e.to_string().contains("Unknown message type")
                     || e.to_string().contains("Protocol")
                     || e.to_string().contains("message type"),
-                "Expected protocol error about message type, got: {}",
-                e
+                "Expected protocol error about message type, got: {e}"
             );
         }
     }

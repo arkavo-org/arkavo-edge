@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_load_from_json() {
-        let json = serde_json::to_value(&sample_entries()).unwrap();
+        let json = serde_json::to_value(sample_entries()).unwrap();
         let mut pricing = ProviderPricing::new();
         let count = pricing.load_from_json(&json).unwrap();
         assert_eq!(count, 3);

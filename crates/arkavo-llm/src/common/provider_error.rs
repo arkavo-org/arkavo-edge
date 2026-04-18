@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn test_error_categorization() {
         let rate_limit = ProviderError::RateLimited {
-            retry_after: Some(Duration::from_secs(60)),
+            retry_after: Some(Duration::from_mins(1)),
             message: Some("Too many requests".to_string()),
         };
         assert!(rate_limit.is_retryable());
@@ -226,10 +226,10 @@ mod tests {
     #[test]
     fn test_retry_delays() {
         let rate_limit = ProviderError::RateLimited {
-            retry_after: Some(Duration::from_secs(120)),
+            retry_after: Some(Duration::from_mins(2)),
             message: None,
         };
-        assert_eq!(rate_limit.retry_delay(), Some(Duration::from_secs(120)));
+        assert_eq!(rate_limit.retry_delay(), Some(Duration::from_mins(2)));
 
         let network_error = ProviderError::NetworkError {
             message: "Connection reset".to_string(),

@@ -77,8 +77,8 @@ mod tests {
     #[test]
     fn preserves_small_numbers() {
         let key = normalize_for_dedup("priority 1 too low", "set to 3");
-        assert!(key.contains("1"), "Should keep small numbers");
-        assert!(key.contains("3"), "Should keep small numbers");
+        assert!(key.contains('1'), "Should keep small numbers");
+        assert!(key.contains('3'), "Should keep small numbers");
     }
 
     #[test]

@@ -198,7 +198,9 @@ mod tests {
         cb.record_fault();
         cb.record_fault();
         // Simulate time passing by manipulating faults directly
-        let old = Instant::now() - Duration::from_millis(200);
+        let old = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .unwrap();
         cb.faults = vec![old, old];
         let tripped = cb.record_fault();
         assert!(!tripped, "old faults should have been pruned");

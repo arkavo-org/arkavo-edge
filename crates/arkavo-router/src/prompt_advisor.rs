@@ -659,7 +659,7 @@ mod tests {
             advisor.learn(
                 "test-family",
                 AdvisorIssue::OutputLoop,
-                format!("This is a very long adjustment text number {} that should eventually cause the total to exceed the 800 character limit when combined with other adjustments. Adding more text to make it longer and more realistic.", i),
+                format!("This is a very long adjustment text number {i} that should eventually cause the total to exceed the 800 character limit when combined with other adjustments. Adding more text to make it longer and more realistic."),
             );
         }
         if let Some(advice) = advisor.advise("test-family", false) {

@@ -252,7 +252,7 @@ mod tests {
             anomaly_id: Uuid::nil(),
             description: "Test".to_string(),
             severity: 0.5,
-            timestamp: DateTime::from_timestamp(0, 0).unwrap().into(),
+            timestamp: DateTime::from_timestamp(0, 0).unwrap(),
         };
 
         let patchlet = Patchlet::new(graph, trigger.clone(), GenerationMethod::Manual);

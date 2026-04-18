@@ -1,14 +1,9 @@
 #![allow(clippy::disallowed_methods, clippy::significant_drop_tightening)]
 
-use arkavo_mcp_tools::{
-    Tool,
-    time_sync::{GetAgentTimeTool, SyncAgentTimeTool},
-};
+use arkavo_mcp_tools::{Tool, time_sync::GetAgentTimeTool};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Semaphore;
 
 #[cfg(feature = "ntp-server")]
 use arkavo_mcp_tools::ntp_server::NtpServer;

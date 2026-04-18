@@ -751,8 +751,7 @@ mod tests {
             assert_eq!(
                 ModelChoice::from_name(model.name()),
                 Some(model.clone()),
-                "Round-trip failed for {:?}",
-                model
+                "Round-trip failed for {model:?}"
             );
         }
     }

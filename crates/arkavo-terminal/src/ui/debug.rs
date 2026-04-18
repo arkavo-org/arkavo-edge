@@ -91,17 +91,13 @@ impl DebugView {
         if let AppEvent::KeyPress(key) = event {
             use crossterm::event::KeyCode;
             match key.code {
-                KeyCode::Up => {
-                    if self.scroll_offset < self.logs.len() as u16 {
-                        self.scroll_offset += 1;
-                        self.needs_redraw = true;
-                    }
+                KeyCode::Up if self.scroll_offset < self.logs.len() as u16 => {
+                    self.scroll_offset += 1;
+                    self.needs_redraw = true;
                 }
-                KeyCode::Down => {
-                    if self.scroll_offset > 0 {
-                        self.scroll_offset -= 1;
-                        self.needs_redraw = true;
-                    }
+                KeyCode::Down if self.scroll_offset > 0 => {
+                    self.scroll_offset -= 1;
+                    self.needs_redraw = true;
                 }
                 KeyCode::PageUp => {
                     self.scroll_offset = (self.scroll_offset + 10).min(self.logs.len() as u16);

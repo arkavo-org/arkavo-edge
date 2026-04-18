@@ -344,7 +344,7 @@ fn autoresearch_burst() {
         let avg_tok_per_sec = round_tok_per_sec_sum / round_count as f64;
 
         // Update Thompson Sampling prior for this config
-        let prior = priors.entry(config_idx).or_insert_with(BetaPrior::new);
+        let prior = priors.entry(config_idx).or_default();
         // Normalize weighted quality to [0, 1] for Beta update
         let normalized = (avg_weighted / 0.1).clamp(0.0, 1.0);
         prior.update(normalized);

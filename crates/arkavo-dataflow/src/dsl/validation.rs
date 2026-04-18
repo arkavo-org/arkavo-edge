@@ -56,20 +56,15 @@ impl BlueprintValidator {
 
         // Check for node type constraints
         for node in &blueprint.nodes {
-            match node.kind {
-                crate::dsl::NodeKind::Source => {
-                    // Sources shouldn't have incoming connections
-                    if blueprint.links.iter().any(|l| l.to == node.id) {
-                        errors.push(ValidationError::SourceWithIncoming(node.id.clone()));
-                    }
-                }
-                crate::dsl::NodeKind::Sink => {
-                    // Sinks shouldn't have outgoing connections
-                    if blueprint.links.iter().any(|l| l.from == node.id) {
-                        errors.push(ValidationError::SinkWithOutgoing(node.id.clone()));
-                    }
-                }
-                _ => {}
+            if matches!(node.kind, crate::dsl::NodeKind::Source)
+                && blueprint.links.iter().any(|l| l.to == node.id)
+            {
+                errors.push(ValidationError::SourceWithIncoming(node.id.clone()));
+            }
+            if matches!(node.kind, crate::dsl::NodeKind::Sink)
+                && blueprint.links.iter().any(|l| l.from == node.id)
+            {
+                errors.push(ValidationError::SinkWithOutgoing(node.id.clone()));
             }
         }
 
@@ -78,13 +73,12 @@ impl BlueprintValidator {
             let has_incoming = blueprint.links.iter().any(|l| l.to == node.id);
             let has_outgoing = blueprint.links.iter().any(|l| l.from == node.id);
 
-            match node.kind {
-                crate::dsl::NodeKind::Transform | crate::dsl::NodeKind::Router => {
-                    if !has_incoming || !has_outgoing {
-                        errors.push(ValidationError::IsolatedNode(node.id.clone()));
-                    }
-                }
-                _ => {}
+            if matches!(
+                node.kind,
+                crate::dsl::NodeKind::Transform | crate::dsl::NodeKind::Router
+            ) && (!has_incoming || !has_outgoing)
+            {
+                errors.push(ValidationError::IsolatedNode(node.id.clone()));
             }
         }
 

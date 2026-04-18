@@ -51,10 +51,10 @@ fn find_any_gguf_sync() -> Option<PathBuf> {
     // Check preferred repos first
     for repo_name in &preferred_repos {
         let repo_path = cache.join(repo_name);
-        if repo_path.exists() {
-            if let Some(gguf) = find_gguf_in_dir(&repo_path) {
-                return Some(gguf);
-            }
+        if repo_path.exists()
+            && let Some(gguf) = find_gguf_in_dir(&repo_path)
+        {
+            return Some(gguf);
         }
     }
 
@@ -62,10 +62,11 @@ fn find_any_gguf_sync() -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && path.file_name()?.to_str()?.starts_with("models--") {
-                if let Some(gguf) = find_gguf_in_dir(&path) {
-                    return Some(gguf);
-                }
+            if path.is_dir()
+                && path.file_name()?.to_str()?.starts_with("models--")
+                && let Some(gguf) = find_gguf_in_dir(&path)
+            {
+                return Some(gguf);
             }
         }
     }
@@ -91,10 +92,10 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
                 return Some(path);
-            } else if path.is_dir() {
-                if let Some(found) = find_gguf_in_dir(&path) {
-                    return Some(found);
-                }
+            } else if path.is_dir()
+                && let Some(found) = find_gguf_in_dir(&path)
+            {
+                return Some(found);
             }
         }
     }
@@ -203,7 +204,7 @@ pub fn generate_with_constraints(
     let model_path = model_path();
     let model_name = model_path.to_string_lossy();
     let format = detect_model_format(&model_name);
-    eprintln!("Detected model format: {:?}", format);
+    eprintln!("Detected model format: {format:?}");
 
     // Build token mapping appropriate for this model
     let (mapping, vocab_size) =
@@ -274,12 +275,9 @@ pub fn generate_with_constraints(
 
         // Feed token to TØR-G state machine
         let token_str = arkavo_llama_cpp::token_to_piece(vocab, token, true).unwrap_or_default();
-        eprintln!(
-            "Feeding token {} '{}' to TØR-G (allowed: {})",
-            token, token_str, is_allowed
-        );
+        eprintln!("Feeding token {token} '{token_str}' to TØR-G (allowed: {is_allowed})");
         if let Err(e) = torg_sampler.feed_token(token as u32) {
-            eprintln!("feed_token failed: {:?}", e);
+            eprintln!("feed_token failed: {e:?}");
             return Err(e.into());
         }
 

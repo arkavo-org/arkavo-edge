@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             println!("  ✓ Token found: {}", masked);
 
-            let kas_with_token = KasConfig::production().with_token(token);
+            let _kas_with_token = KasConfig::production().with_token(token);
             println!("  ✓ KAS configured with token");
             println!();
 
