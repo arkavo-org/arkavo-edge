@@ -233,7 +233,7 @@ impl MetricsSampler {
             })
             .collect();
 
-        errors.sort_by(|a, b| b.count.cmp(&a.count));
+        errors.sort_by_key(|e| std::cmp::Reverse(e.count));
         errors.truncate(self.config.max_error_types);
         errors
     }
