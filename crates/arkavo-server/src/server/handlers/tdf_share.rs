@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 const MAX_OFFERS: usize = 1000;
-const OFFER_TTL: Duration = Duration::from_secs(3600); // 1 hour
+const OFFER_TTL: Duration = Duration::from_hours(1);
 
 /// In-memory store for pending TDF share offers with capacity and TTL limits.
 #[derive(Debug)]

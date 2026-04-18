@@ -46,7 +46,7 @@ impl Default for GossipConfig {
             fanout: DEFAULT_FANOUT,
             quorum: QuorumConfig::default(),
             anti_entropy_interval: DEFAULT_ANTI_ENTROPY_INTERVAL,
-            max_message_age: Duration::from_secs(300),
+            max_message_age: Duration::from_mins(5),
         }
     }
 }
@@ -88,7 +88,7 @@ const MAX_SEEN_SIZE: usize = 10000;
 const DEFAULT_MAX_MESSAGES_PER_PEER: usize = 100;
 
 /// Default rate limit window
-const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_mins(1);
 
 /// The gossip protocol handler
 pub struct GossipProtocol {

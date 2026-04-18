@@ -28,7 +28,7 @@ impl Default for LifecycleConfig {
             promotion_threshold: 3,
             canonical_threshold: 10,
             transient_ttl_days: 7,
-            lifecycle_interval: Duration::from_secs(3600),
+            lifecycle_interval: Duration::from_hours(1),
         }
     }
 }

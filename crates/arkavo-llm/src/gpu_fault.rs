@@ -72,7 +72,7 @@ pub struct GpuCircuitBreaker {
 
 impl Default for GpuCircuitBreaker {
     fn default() -> Self {
-        Self::new(3, Duration::from_secs(60), 3)
+        Self::new(3, Duration::from_mins(1), 3)
     }
 }
 

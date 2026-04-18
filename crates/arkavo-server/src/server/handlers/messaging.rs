@@ -278,7 +278,7 @@ pub async fn handle_message_send(
                         .await;
 
                     tokio::spawn(async move {
-                        match tokio::time::timeout(std::time::Duration::from_secs(120), reply_rx)
+                        match tokio::time::timeout(std::time::Duration::from_mins(2), reply_rx)
                             .await
                         {
                             Ok(Ok(receipt)) => {

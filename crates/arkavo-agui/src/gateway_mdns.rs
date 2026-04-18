@@ -37,7 +37,7 @@ pub async fn run_mdns_discovery(
         );
         println!("mDNS discovery not compiled in");
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(tokio::time::Duration::from_mins(1)).await;
         }
     }
 }

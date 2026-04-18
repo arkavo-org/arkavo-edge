@@ -23,9 +23,9 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            absolute_timeout: Duration::from_secs(3600), // 1 hour
-            idle_timeout: Duration::from_secs(900),      // 15 minutes
-            check_interval: Duration::from_secs(60),     // 1 minute
+            absolute_timeout: Duration::from_hours(1),
+            idle_timeout: Duration::from_mins(15),
+            check_interval: Duration::from_mins(1),
         }
     }
 }

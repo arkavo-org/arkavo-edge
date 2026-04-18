@@ -95,7 +95,7 @@ impl Default for SearchSpace {
             kernel_variants: 1,
             seeds: vec![42, 137, 2718, 31415, 65537],
             experiment_timeout: Duration::from_secs(10),
-            total_budget: Duration::from_secs(300),
+            total_budget: Duration::from_mins(5),
             max_rounds: 100,
         }
     }
