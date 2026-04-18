@@ -405,10 +405,23 @@ async fn run_live_bench(
     iterations: usize,
 ) -> Result<ModelReport, Box<dyn std::error::Error>> {
     use arkavo_llm::llamacpp_provider::{LlamaCppProvider, SamplingConfig};
+    use arkavo_router::decision::ModelChoice;
 
-    let config = SamplingConfig {
-        tool_format: format,
-        ..SamplingConfig::default()
+    let config = if let Some((temp, top_p, thinking)) =
+        ModelChoice::from_name(model_name).and_then(|m| m.optimal_sampling())
+    {
+        SamplingConfig {
+            temperature: temp,
+            top_p,
+            thinking_mode: Some(thinking),
+            tool_format: format,
+            ..SamplingConfig::default()
+        }
+    } else {
+        SamplingConfig {
+            tool_format: format,
+            ..SamplingConfig::default()
+        }
     };
 
     let registry = arkavo_llm::ModelRegistry::new();
@@ -634,6 +647,7 @@ fn discover_cached_models() -> Vec<String> {
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_9B,
         ModelChoice::LocalQwen35_27B,
+        ModelChoice::LocalQwen36A3B,
     ];
 
     candidates

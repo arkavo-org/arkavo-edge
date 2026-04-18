@@ -64,6 +64,9 @@ impl ModelSelector {
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
             ModelChoice::LocalQwen35_9B => "9B dense reasoning (4s), zero cost, good quality",
             ModelChoice::LocalQwen35_27B => "27B dense reasoning (10s), zero cost, high quality",
+            ModelChoice::LocalQwen36A3B => {
+                "35B MoE (6s), zero cost, vision, 3B active, 262K context"
+            }
             ModelChoice::LocalGlm47Flash => "30B MoE reasoning (8s), zero cost, excellent quality",
             ModelChoice::LocalGemma4E2B => "Gemma 4 edge (1s), zero cost, vision, 2.3B active",
             ModelChoice::LocalGemma4E4B => "Gemma 4 edge (2s), zero cost, vision, 4.5B active",
@@ -410,6 +413,19 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
             ("test_generation", 4.0, 2.0),
             ("refactoring", 4.0, 2.0),
         ],
+        // Qwen 3.6 uses qwen3_coder tool-call format (XML); Fence prompt causes
+        // hybrid output (fence open + XML params) that breaks parsing (6/8 vs 8/8).
+        // All four formats seeded so sample_format doesn't fall back to the
+        // cold-start Beta(2,1) prior for json/python and outsample XML.
+        ModelChoice::LocalQwen36A3B => vec![
+            ("format:xml", 20.0, 1.0),
+            ("format:fence", 1.0, 10.0),
+            ("format:json", 1.0, 5.0),
+            ("format:python_call", 1.0, 5.0),
+            ("general", 5.0, 2.0),
+            ("code_generation", 5.0, 2.0),
+            ("vision_analysis", 4.0, 2.0),
+        ],
         ModelChoice::DeepSeekV32 => {
             vec![("code_generation", 5.0, 2.0), ("backend_api", 4.0, 2.0)]
         }
@@ -683,6 +699,30 @@ mod tests {
         // 15 tool calls = suspicious but less severe
         let score = compute_response_quality("", 20_000, "general", 15);
         assert!(score < 0.3, "15 tool calls should score low, got {score}");
+    }
+
+    #[tokio::test]
+    async fn test_qwen36_format_prior_prefers_xml() {
+        use crate::learning::ToolCallFormat;
+
+        let learning = LearningModule::new();
+        let agent = ModelChoice::LocalQwen36A3B.name();
+        let priors = static_model_priors(&ModelChoice::LocalQwen36A3B);
+        let prior_pairs: Vec<(&str, f64, f64)> =
+            priors.iter().map(|(k, a, b)| (*k, *a, *b)).collect();
+        learning.seed_priors(agent, &prior_pairs).await;
+
+        let mut xml_wins = 0;
+        for _ in 0..60 {
+            let (format, _) = learning.sample_format(agent).await;
+            if format == ToolCallFormat::Xml {
+                xml_wins += 1;
+            }
+        }
+        assert!(
+            xml_wins >= 40,
+            "XML should dominate format sampling for Qwen 3.6 (got {xml_wins}/60)"
+        );
     }
 
     #[tokio::test]
