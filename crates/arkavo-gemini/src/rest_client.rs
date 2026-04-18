@@ -85,7 +85,7 @@ struct Candidate {
 impl RestClient {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_mins(2))
             .build()
             .unwrap_or_else(|_| Client::new());
 

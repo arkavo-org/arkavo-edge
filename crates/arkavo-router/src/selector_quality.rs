@@ -421,7 +421,7 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
             ("format:xml", 20.0, 1.0),
             ("format:fence", 1.0, 10.0),
             ("format:json", 1.0, 5.0),
-            ("format:python_call", 1.0, 5.0),
+            ("format:python", 1.0, 5.0),
             ("general", 5.0, 2.0),
             ("code_generation", 5.0, 2.0),
             ("vision_analysis", 4.0, 2.0),
@@ -723,6 +723,21 @@ mod tests {
             xml_wins >= 40,
             "XML should dominate format sampling for Qwen 3.6 (got {xml_wins}/60)"
         );
+    }
+
+    #[test]
+    fn test_all_seeded_format_priors_parse() {
+        use crate::learning::ToolCallFormat;
+        for model in ModelChoice::ALL_LOCAL {
+            for (key, _, _) in static_model_priors(model) {
+                if key.starts_with("format:") {
+                    assert!(
+                        ToolCallFormat::from_category_key(key).is_some(),
+                        "Invalid format category key {key:?} seeded for {model:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]

@@ -175,10 +175,10 @@ impl ModelChoice {
         Self::LocalGemma12B,
         Self::LocalDeepSeekCoder,
         Self::LocalGemma4_26B,
-        Self::LocalQwen35_27B,
         Self::LocalGlm47Flash,
-        Self::LocalQwen36A3B,
         Self::LocalGemma4_31B,
+        Self::LocalQwen36A3B,
+        Self::LocalQwen35_27B,
     ];
 
     pub fn is_anthropic(&self) -> bool {
@@ -387,9 +387,9 @@ impl ModelChoice {
 
         // Local models sorted by size descending — pick the largest that fits
         let candidates = [
+            Self::LocalQwen35_27B,
             Self::LocalQwen36A3B,
             Self::LocalGlm47Flash,
-            Self::LocalQwen35_27B,
             Self::LocalDeepSeekCoder,
             Self::LocalGemma12B,
             Self::LocalQwen35_9B,
