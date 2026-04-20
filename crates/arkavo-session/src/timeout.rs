@@ -85,7 +85,7 @@ impl TimeoutConfig {
         Ok(Self {
             absolute_timeout: Duration::from_secs(absolute_timeout_secs),
             idle_timeout: Duration::from_secs(idle_timeout_secs),
-            check_interval: Duration::from_secs(60),
+            check_interval: Duration::from_mins(1),
         })
     }
 }
