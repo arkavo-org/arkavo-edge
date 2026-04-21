@@ -481,7 +481,7 @@ impl MeshTaskStrategy {
         ui.section("Monitoring Task Progress");
 
         let start = std::time::Instant::now();
-        let timeout = Duration::from_secs(300); // 5 minutes
+        let timeout = Duration::from_mins(5);
 
         loop {
             if start.elapsed() > timeout {

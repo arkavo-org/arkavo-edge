@@ -469,7 +469,7 @@ mod tests {
 
         // But blended sample should never drop below the exploration floor
         let samples: Vec<f64> = (0..1000).map(|_| utility.sample_blended(None)).collect();
-        let min_sample = samples.iter().cloned().fold(f64::INFINITY, f64::min);
+        let min_sample = samples.iter().copied().fold(f64::INFINITY, f64::min);
 
         assert!(
             min_sample >= AgentUtility::EXPLORATION_FLOOR,

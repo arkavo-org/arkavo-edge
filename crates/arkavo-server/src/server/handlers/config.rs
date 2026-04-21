@@ -123,7 +123,7 @@ async fn list_backups() -> Vec<ConfigBackup> {
         }
     }
 
-    backup_list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    backup_list.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
     backup_list
 }
 

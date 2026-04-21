@@ -28,7 +28,7 @@ impl Default for AuthorizationConfig {
             audience: env::var("AUD").ok(),
             timeout: Duration::from_secs(5),
             max_retries: 3,
-            cache_ttl: Duration::from_secs(60),
+            cache_ttl: Duration::from_mins(1),
             fail_closed: true,
             safe_diagnostic_tools: vec![
                 "status".to_string(),

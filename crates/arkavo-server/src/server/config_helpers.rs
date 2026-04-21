@@ -199,7 +199,7 @@ pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count
         }
 
         // Sort by modification time, newest first
-        backups.sort_by(|a, b| b.1.cmp(&a.1));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Remove old backups
         for (path, _) in backups.iter().skip(keep_count) {

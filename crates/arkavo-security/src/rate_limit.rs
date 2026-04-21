@@ -288,7 +288,7 @@ pub fn spawn_cleanup_task(
     metrics_callback: Option<MetricsCallback>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut cleanup_interval = interval(Duration::from_secs(60)); // Run every minute
+        let mut cleanup_interval = interval(Duration::from_mins(1));
         cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {

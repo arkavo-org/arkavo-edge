@@ -13,6 +13,7 @@ Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-para
 | Gemma-4-E2B | 2.3B (5.1B w/ PLE) | 8/8 | 8/8 | 8/8 | 2,229ms |
 | GLM-4.7-Flash | 4.7B (30B MoE) | 8/8 | 8/8 | 8/8 | 2,698ms |
 | Gemma-4-E4B | 4.5B (8B w/ PLE) | 1/8 | 1/8 | 1/8 | 1,298ms |
+| Qwen3.6-35B-A3B | 3B active (35B MoE) | 8/8 | 8/8 | 8/8 | 3,722ms |
 | Gemma-4-26B-A4B | 4B active (26B MoE) | 8/8 | 8/8 | 8/8 | 7,410ms |
 | Qwen3.5-27B | 27B | 7/8 | 7/8 | 7/8 | 41,634ms |
 
@@ -31,6 +32,8 @@ Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-para
 **GLM-4.7-Flash is slower than Ministral-8B** (2,698ms vs 1,409ms) despite MoE architecture. The 30B total parameter count negates MoE efficiency on memory-bandwidth-bound Apple Silicon. Requires 32GB RAM.
 
 **Qwen3.5-27B degrades under load.** 7/8 accuracy with one scenario (command_execution) taking 269s — likely hitting generation length limits or think-block runaway. Suitable for batch/offline tasks only.
+
+**Qwen3.6-35B-A3B requires XML format.** The MoE (3B active of 35B total) was trained on the `qwen3_coder` tool-call format — `<function=name><parameter=key>value</parameter></function>`. Under Fence format the model emits hybrid output (fence opener + XML parameter closers) that breaks parsing (6/8 with thinking off, 7/8 with thinking on). Under XML format with thinking off, all 8 scenarios pass at 3,722ms — 11× faster than Qwen3.5-27B with equal or better accuracy. The format preference is seeded in `static_model_priors` so production picks XML from the first episode. Thinking mode is forced off because Qwen 3.6 removed the `/think` `/nothink` soft-switch; letting it think causes grammar root parse failures.
 
 ### Bench Uses Production Code Path
 

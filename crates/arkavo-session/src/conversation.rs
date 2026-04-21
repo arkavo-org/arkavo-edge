@@ -383,7 +383,7 @@ impl ConversationManager {
             .collect();
 
         // Sort by timestamp
-        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        messages.sort_by_key(|m| m.timestamp);
 
         // Apply sliding window
         let mut context_messages = Vec::new();
@@ -600,7 +600,7 @@ impl ConversationManager {
             })
             .collect();
 
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         Ok(sessions)
     }
 

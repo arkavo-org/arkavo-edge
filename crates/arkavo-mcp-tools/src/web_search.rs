@@ -83,7 +83,7 @@ impl RateLimiter {
 
     fn check(&mut self) -> bool {
         let now = Instant::now();
-        if now.duration_since(self.window_start) > Duration::from_secs(60) {
+        if now.duration_since(self.window_start) > Duration::from_mins(1) {
             self.window_start = now;
             self.request_count = 0;
         }
@@ -288,7 +288,7 @@ impl WebSearchTool {
         let cached = cache.get(cache_key)?;
 
         // 15-minute TTL
-        let results = if cached.timestamp.elapsed() < Duration::from_secs(15 * 60) {
+        let results = if cached.timestamp.elapsed() < Duration::from_mins(15) {
             Some(cached.results.clone())
         } else {
             None
@@ -305,7 +305,7 @@ impl WebSearchTool {
                 // Remove oldest entries
                 let oldest: Vec<String> = cache
                     .iter()
-                    .filter(|(_, v)| v.timestamp.elapsed() > Duration::from_secs(10 * 60))
+                    .filter(|(_, v)| v.timestamp.elapsed() > Duration::from_mins(10))
                     .map(|(k, _)| k.clone())
                     .collect();
                 for key in oldest {

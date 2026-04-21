@@ -286,7 +286,7 @@ impl AuthorizationClient {
         // Parse JWT to get expiration
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
-            return Duration::from_secs(60);
+            return Duration::from_mins(1);
         }
 
         if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1])
@@ -296,7 +296,7 @@ impl AuthorizationClient {
             return DecisionCache::calculate_ttl_from_token(Some(exp));
         }
 
-        Duration::from_secs(60)
+        Duration::from_mins(1)
     }
 
     pub fn clear_cache(&self) {

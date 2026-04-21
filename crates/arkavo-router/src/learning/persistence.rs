@@ -469,7 +469,7 @@ mod tests {
             "agent".to_string(),
             "swarm".to_string(),
             "cat".to_string(),
-            pattern.clone(),
+            pattern,
             0.8,
             3,
         );

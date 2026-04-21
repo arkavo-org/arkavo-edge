@@ -1182,7 +1182,7 @@ impl ChatSessionManager {
 
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
-                                        std::time::Duration::from_secs(120),
+                                        std::time::Duration::from_mins(2),
                                         router.route_chat(conversation_context.clone(), None, model_override.as_ref()),
                                     )
                                     .await;
@@ -1293,7 +1293,7 @@ impl ChatSessionManager {
 
                                         // Retry with tool hints
                                         let hint_result = tokio::time::timeout(
-                                            std::time::Duration::from_secs(120),
+                                            std::time::Duration::from_mins(2),
                                             router.route_with_tools(
                                                 &user_message.content,
                                                 conversation_context.clone(),

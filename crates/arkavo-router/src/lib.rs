@@ -908,7 +908,7 @@ impl Router {
         use std::sync::atomic::Ordering;
 
         const FLUSH_EVERY_N: u64 = 10;
-        const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+        const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
         let count = self.advisor_persist_count.fetch_add(1, Ordering::Relaxed) + 1;
         let timed_out = self

@@ -26,7 +26,7 @@ impl SseTransport {
         headers: HashMap<String, String>,
     ) -> Result<Self, TransportError> {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_mins(1))
             .build()
             .map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
 

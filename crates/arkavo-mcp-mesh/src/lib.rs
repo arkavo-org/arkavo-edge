@@ -141,7 +141,7 @@ impl MeshToolsState {
 
         for delegation in pending.drain(..) {
             // Expire delegations older than 5 minutes
-            if delegation.sent_at.elapsed() > Duration::from_secs(300) {
+            if delegation.sent_at.elapsed() > Duration::from_mins(5) {
                 tracing::warn!(
                     agent_id = %delegation.agent_id,
                     task_id = %delegation.task_id,

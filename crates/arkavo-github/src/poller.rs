@@ -32,7 +32,7 @@ pub struct OrgPollerConfig {
 impl Default for OrgPollerConfig {
     fn default() -> Self {
         Self {
-            poll_interval: Duration::from_secs(300),
+            poll_interval: Duration::from_mins(5),
             max_concurrent_repos: DEFAULT_MAX_CONCURRENT_REPOS,
             discovery_interval: Duration::from_secs(DEFAULT_DISCOVERY_INTERVAL_SECS),
             repo_include_pattern: None,

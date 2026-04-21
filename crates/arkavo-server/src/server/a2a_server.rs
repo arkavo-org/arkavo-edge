@@ -746,40 +746,47 @@ impl A2aServer {
                     Ok(Ok(Event {
                         kind: EventKind::Modify(_),
                         ..
-                    })) => {
-                        if last_reload.elapsed() > Duration::from_secs(1) {
-                            info!("AGENTS.md modified, triggering hot-reload");
+                    })) if last_reload.elapsed() > Duration::from_secs(1) => {
+                        info!("AGENTS.md modified, triggering hot-reload");
 
-                            let agent_metadata_clone = agent_metadata.clone();
-                            let mcp_registry_clone = mcp_registry.clone();
+                        let agent_metadata_clone = agent_metadata.clone();
+                        let mcp_registry_clone = mcp_registry.clone();
 
-                            #[allow(clippy::disallowed_methods)]
-                            rt.block_on(async move {
-                                let config_content = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+                        #[allow(clippy::disallowed_methods)]
+                        rt.block_on(async move {
+                            let config_content =
+                                if std::path::Path::new(".arkavo/AGENTS.md").exists() {
                                     tokio::fs::read_to_string(".arkavo/AGENTS.md").await
                                 } else {
                                     tokio::fs::read_to_string("AGENTS.md").await
                                 };
 
-                                match config_content {
-                                    Ok(content) => {
-                                        match reload_configuration_for_watcher(
-                                            &content,
-                                            agent_metadata_clone,
-                                            mcp_registry_clone,
-                                        ).await {
-                                            Ok(_) => info!("Configuration hot-reload completed successfully"),
-                                            Err(e) => {
-                                                error!("Configuration hot-reload failed: {}", e);
-                                                error!("Agent will continue with existing configuration");
-                                            }
+                            match config_content {
+                                Ok(content) => {
+                                    match reload_configuration_for_watcher(
+                                        &content,
+                                        agent_metadata_clone,
+                                        mcp_registry_clone,
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            info!(
+                                                "Configuration hot-reload completed successfully"
+                                            );
+                                        }
+                                        Err(e) => {
+                                            error!("Configuration hot-reload failed: {}", e);
+                                            error!(
+                                                "Agent will continue with existing configuration"
+                                            );
                                         }
                                     }
-                                    Err(e) => error!("Failed to read AGENTS.md for hot-reload: {}", e),
                                 }
-                            });
-                            last_reload = std::time::Instant::now();
-                        }
+                                Err(e) => error!("Failed to read AGENTS.md for hot-reload: {}", e),
+                            }
+                        });
+                        last_reload = std::time::Instant::now();
                     }
                     Ok(Err(e)) => warn!("File watcher error: {}", e),
                     Err(_) => {}

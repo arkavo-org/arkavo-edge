@@ -86,13 +86,13 @@ async fn test_event_arrives_during_feedback_wait() {
             assert_eq!(event.value, "user clicked");
         }
         Ok(Some(other)) => {
-            panic!("Expected Event, got: {:?}", other);
+            panic!("Expected Event, got: {other:?}");
         }
         Ok(None) => {
             panic!("Event should have been queued by recv_feedback(), but got None");
         }
         Err(e) => {
-            panic!("Error receiving queued event: {}", e);
+            panic!("Error receiving queued event: {e}");
         }
     }
 
@@ -128,9 +128,9 @@ async fn test_multiple_events_during_feedback_wait() {
 
         // Send 3 events rapidly (simulating impatient user clicking multiple times)
         for i in 1..=3 {
-            let event_data = create_event_message("submit", "#input", &format!("click {}", i));
+            let event_data = create_event_message("submit", "#input", &format!("click {i}"));
             stream.write_all(&event_data).await.unwrap();
-            eprintln!("[TEST SERVER MULTI] Sent event #{}", i);
+            eprintln!("[TEST SERVER MULTI] Sent event #{i}");
         }
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -160,9 +160,9 @@ async fn test_multiple_events_during_feedback_wait() {
                 eprintln!("[TEST CLIENT MULTI] Got event #{}: {}", i, event.value);
                 events_received.push(event.value.clone());
             }
-            Ok(Some(_)) => panic!("Expected Event #{}", i),
-            Ok(None) => panic!("Event #{} should be queued", i),
-            Err(e) => panic!("Error receiving event #{}: {}", i, e),
+            Ok(Some(_)) => panic!("Expected Event #{i}"),
+            Ok(None) => panic!("Event #{i} should be queued"),
+            Err(e) => panic!("Error receiving event #{i}: {e}"),
         }
     }
 

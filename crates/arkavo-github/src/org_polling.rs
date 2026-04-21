@@ -58,7 +58,7 @@ pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
     let poller_config = OrgPollerConfig {
         poll_interval: Duration::from_secs(config.poll_interval_secs),
         max_concurrent_repos: config.max_concurrent_repos,
-        discovery_interval: Duration::from_secs(300),
+        discovery_interval: Duration::from_mins(5),
         repo_include_pattern: config.repo_include_pattern,
         repo_exclude_pattern: config.repo_exclude_pattern,
         include_archived: config.include_archived,

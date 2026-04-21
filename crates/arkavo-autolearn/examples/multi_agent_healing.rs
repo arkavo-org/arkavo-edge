@@ -193,10 +193,9 @@ async fn initialize_agents(
             agent.short_key()
         );
         println!(
-            "[{:<6}] Registering on mDNS: {}.{}",
+            "[{:<6}] Registering on mDNS: {}._a2a._tcp.local.",
             name,
-            name.to_lowercase(),
-            "_a2a._tcp.local."
+            name.to_lowercase()
         );
 
         agents.push(Arc::new(RwLock::new(agent)));
