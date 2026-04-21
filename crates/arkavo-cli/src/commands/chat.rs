@@ -97,11 +97,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--prompt" | "--print" => {
-                if i + 1 < args.len() {
-                    prompt = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--prompt" | "--print" if i + 1 < args.len() => {
+                prompt = Some(args[i + 1].clone());
+                i += 1;
             }
             "--agent-id" => {
                 if i + 1 < args.len() {

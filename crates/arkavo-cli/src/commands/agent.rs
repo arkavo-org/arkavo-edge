@@ -1541,7 +1541,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Start advisor adjustment broadcast loop (60s interval)
         let learning_bus_adv = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            start_advisor_broadcast_loop(learning_bus_adv, Duration::from_secs(60)).await;
+            start_advisor_broadcast_loop(learning_bus_adv, Duration::from_mins(1)).await;
         }));
 
         // Start lesson application loop (processes approved lessons, adds to policy cache)

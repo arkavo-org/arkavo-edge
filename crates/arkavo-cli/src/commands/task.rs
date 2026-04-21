@@ -572,7 +572,7 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         println!("=== Monitoring Task Progress ===\n");
 
         let start = std::time::Instant::now();
-        let timeout = Duration::from_secs(300); // 5 minute timeout
+        let timeout = Duration::from_mins(5);
 
         loop {
             if start.elapsed() > timeout {
