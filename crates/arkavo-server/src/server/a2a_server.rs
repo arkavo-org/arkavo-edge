@@ -771,7 +771,9 @@ impl A2aServer {
                                     .await
                                     {
                                         Ok(_) => {
-                                            info!("Configuration hot-reload completed successfully")
+                                            info!(
+                                                "Configuration hot-reload completed successfully"
+                                            );
                                         }
                                         Err(e) => {
                                             error!("Configuration hot-reload failed: {}", e);
