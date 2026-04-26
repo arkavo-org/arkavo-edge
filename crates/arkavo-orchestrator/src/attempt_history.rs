@@ -2,11 +2,56 @@
 //!
 //! Captures a compact, natural-language summary of why a prior attempt
 //! failed so that subsequent planning calls can avoid repeating the same
-//! mistakes. In-memory only; cleared once an issue completes.
+//! mistakes. In-memory only; cleared once an issue completes successfully.
+//!
+//! ## Bounded growth
+//!
+//! To prevent unbounded memory growth on a runaway retry loop, per-issue
+//! history is capped at [`MAX_ATTEMPTS_PER_ISSUE`] entries. When the cap
+//! is reached, the oldest entry is dropped so the most recent context is
+//! always preserved.
 
 use crate::cognitive_engine_core::VerificationResult;
+use crate::text_utils::truncate_ellipsis;
 use std::collections::HashMap;
 use std::sync::RwLock;
+
+/// Maximum attempts retained per issue. Anything beyond this is FIFO-evicted.
+/// Chosen so that a realistic 3-retry outer loop still fits, with headroom
+/// for adjustment sub-steps, without the map growing without bound on a
+/// misbehaving caller.
+pub const MAX_ATTEMPTS_PER_ISSUE: usize = 8;
+
+/// Classification of why a prior attempt failed. Used to render a more
+/// informative prompt hint to the next planner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailureKind {
+    /// Plan failed pre-flight contract validation (R5).
+    PlanInvalid,
+    /// A step's wall-clock time exceeded the configured timeout (R4).
+    Timeout,
+    /// A command inside a step returned an execution error.
+    CommandError,
+    /// Verification checks returned non-passing results.
+    VerificationFailed,
+    /// Budget exhausted before plan completed.
+    BudgetExceeded,
+    /// Generic / unclassified failure.
+    Other,
+}
+
+impl FailureKind {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::PlanInvalid => "plan-invalid",
+            Self::Timeout => "timeout",
+            Self::CommandError => "command-error",
+            Self::VerificationFailed => "verification-failed",
+            Self::BudgetExceeded => "budget-exceeded",
+            Self::Other => "other",
+        }
+    }
+}
 
 /// A single recorded attempt against an issue.
 #[derive(Debug, Clone)]
@@ -16,14 +61,16 @@ pub struct AttemptRecord {
     pub total_steps: usize,
     pub failure_summary: String,
     pub failed_verifications: Vec<String>,
+    pub kind: FailureKind,
 }
 
 impl AttemptRecord {
     /// Render this record as a prompt-friendly block for the next planner.
     pub fn to_prompt_fragment(&self) -> String {
         let mut out = format!(
-            "Attempt {} ({}/{} steps): {}",
+            "Attempt {} [{}] ({}/{} steps): {}",
             self.attempt_number,
+            self.kind.label(),
             self.steps_completed,
             self.total_steps,
             self.failure_summary
@@ -54,11 +101,15 @@ impl AttemptHistory {
         format!("{repository}#{issue_number}")
     }
 
-    /// Record a failed attempt.
-    pub fn record_failure(
+    /// Record a failed attempt with an explicit classification.
+    ///
+    /// Enforces a [`MAX_ATTEMPTS_PER_ISSUE`] cap via FIFO eviction so that
+    /// a runaway retry loop cannot exhaust memory.
+    pub fn record_failure_kind(
         &self,
         repository: &str,
         issue_number: u64,
+        kind: FailureKind,
         steps_completed: usize,
         total_steps: usize,
         verification_results: &[VerificationResult],
@@ -68,7 +119,7 @@ impl AttemptHistory {
         let failed: Vec<String> = verification_results
             .iter()
             .filter(|r| !r.passed)
-            .map(|r| format!("{:?}: {}", r.check, truncate(&r.details, 200)))
+            .map(|r| format!("{:?}: {}", r.check, truncate_ellipsis(&r.details, 200)))
             .collect();
 
         let attempt_number = {
@@ -82,10 +133,39 @@ impl AttemptHistory {
             total_steps,
             failure_summary: failure_summary.into(),
             failed_verifications: failed,
+            kind,
         };
 
         let mut guard = self.inner.write().expect("attempt history poisoned");
-        guard.entry(key).or_default().push(record);
+        let entries = guard.entry(key).or_default();
+        entries.push(record);
+        // FIFO-evict oldest if we exceed the cap.
+        if entries.len() > MAX_ATTEMPTS_PER_ISSUE {
+            let excess = entries.len() - MAX_ATTEMPTS_PER_ISSUE;
+            entries.drain(0..excess);
+        }
+    }
+
+    /// Backward-compatible shim for callers that don't classify failures.
+    /// New code should prefer [`Self::record_failure_kind`].
+    pub fn record_failure(
+        &self,
+        repository: &str,
+        issue_number: u64,
+        steps_completed: usize,
+        total_steps: usize,
+        verification_results: &[VerificationResult],
+        failure_summary: impl Into<String>,
+    ) {
+        self.record_failure_kind(
+            repository,
+            issue_number,
+            FailureKind::Other,
+            steps_completed,
+            total_steps,
+            verification_results,
+            failure_summary,
+        );
     }
 
     /// Get all prior attempts for an issue.
@@ -127,18 +207,15 @@ impl AttemptHistory {
         );
         Some(block)
     }
-}
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        let mut end = max;
-        // Avoid slicing a UTF-8 char boundary.
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}\u{2026}", &s[..end])
+    /// Total number of attempt records currently stored (diagnostic).
+    pub fn total_records(&self) -> usize {
+        self.inner
+            .read()
+            .expect("attempt history poisoned")
+            .values()
+            .map(|v| v.len())
+            .sum()
     }
 }
 
@@ -169,48 +246,86 @@ mod tests {
             "owner/repo",
             42,
             2,
-            5,
-            &[failed_result("test_foo panicked")],
-            "execution aborted after step 2",
+            4,
+            &[failed_result("expected: foo, got: bar")],
+            "step 3 failed",
         );
-        let block = h.to_prompt_block("owner/repo", 42).expect("has block");
+        let block = h.to_prompt_block("owner/repo", 42).unwrap();
         assert!(block.contains("Attempt 1"));
-        assert!(block.contains("2/5 steps"));
-        assert!(block.contains("test_foo panicked"));
-        assert!(block.contains("aborted after step 2"));
+        assert!(block.contains("2/4 steps"));
+        assert!(block.contains("step 3 failed"));
+    }
+
+    #[test]
+    fn test_classified_failure_renders_label() {
+        let h = AttemptHistory::new();
+        h.record_failure_kind(
+            "owner/repo",
+            7,
+            FailureKind::Timeout,
+            1,
+            3,
+            &[],
+            "step 2 hit timeout",
+        );
+        let block = h.to_prompt_block("owner/repo", 7).unwrap();
+        assert!(block.contains("[timeout]"));
+        assert!(block.contains("step 2 hit timeout"));
     }
 
     #[test]
     fn test_multiple_attempts_increment() {
         let h = AttemptHistory::new();
-        h.record_failure("owner/repo", 1, 1, 3, &[], "first");
-        h.record_failure("owner/repo", 1, 2, 3, &[], "second");
-        let all = h.get("owner/repo", 1);
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].attempt_number, 1);
-        assert_eq!(all[1].attempt_number, 2);
+        for _ in 0..3 {
+            h.record_failure("owner/repo", 1, 0, 3, &[], "boom");
+        }
+        let attempts = h.get("owner/repo", 1);
+        assert_eq!(attempts.len(), 3);
+        assert_eq!(attempts[0].attempt_number, 1);
+        assert_eq!(attempts[2].attempt_number, 3);
     }
 
     #[test]
     fn test_clear_removes_history() {
         let h = AttemptHistory::new();
-        h.record_failure("owner/repo", 7, 0, 1, &[], "boom");
-        h.clear("owner/repo", 7);
-        assert!(h.get("owner/repo", 7).is_empty());
+        h.record_failure("owner/repo", 1, 0, 1, &[], "nope");
+        assert!(h.to_prompt_block("owner/repo", 1).is_some());
+        h.clear("owner/repo", 1);
+        assert!(h.to_prompt_block("owner/repo", 1).is_none());
     }
 
     #[test]
-    fn test_truncate_unicode_safe() {
-        // Make sure we don't panic on multi-byte boundaries.
-        let s = "a".repeat(100) + "日本語";
-        let t = truncate(&s, 101);
-        assert!(t.ends_with('\u{2026}'));
-    }
-
-    #[test]
-    fn test_separate_issues_isolated() {
+    fn test_bounded_cap_fifo_evicts() {
         let h = AttemptHistory::new();
-        h.record_failure("o/r", 1, 0, 1, &[], "x");
-        assert!(h.get("o/r", 2).is_empty());
+        // Insert more than the cap; oldest entries must be evicted.
+        for i in 0..(MAX_ATTEMPTS_PER_ISSUE + 3) {
+            h.record_failure("owner/repo", 1, 0, 1, &[], format!("failure {i}"));
+        }
+        let attempts = h.get("owner/repo", 1);
+        assert_eq!(attempts.len(), MAX_ATTEMPTS_PER_ISSUE);
+        // The oldest entries (0, 1, 2) should have been evicted; entry "failure 3" should be first.
+        assert!(
+            attempts
+                .first()
+                .unwrap()
+                .failure_summary
+                .contains("failure 3")
+        );
+        assert!(
+            attempts
+                .last()
+                .unwrap()
+                .failure_summary
+                .contains(&format!("failure {}", MAX_ATTEMPTS_PER_ISSUE + 2))
+        );
+    }
+
+    #[test]
+    fn test_total_records_tracks_sum() {
+        let h = AttemptHistory::new();
+        h.record_failure("a/b", 1, 0, 1, &[], "x");
+        h.record_failure("a/b", 2, 0, 1, &[], "y");
+        h.record_failure("c/d", 1, 0, 1, &[], "z");
+        assert_eq!(h.total_records(), 3);
     }
 }

@@ -23,6 +23,11 @@ pub fn estimate_tokens(text: &str) -> u32 {
         return 0;
     }
     let char_estimate = (text.len() as f32 / CHARS_PER_TOKEN).ceil() as u32;
+    // Word estimate: one token per word, plus one extra token for every
+    // ~6 bytes of word length to approximate BPE splitting of long/rare
+    // identifiers (e.g., snake_case_identifiers, URLs). The 6-byte step is
+    // calibrated against cl100k/Qwen tokenizers on a corpus of mixed
+    // English + source code.
     let word_estimate = text
         .split_whitespace()
         .map(|w| 1 + (w.len() / 6) as u32)

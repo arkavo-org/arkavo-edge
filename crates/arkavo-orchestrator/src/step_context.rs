@@ -64,14 +64,14 @@ impl StepTrace {
         );
         for (i, e) in self.entries.iter().enumerate() {
             let line = format!(
-                "{}. `{}` \u2192 {} tool call(s); {}\n",
+                "{}. `{}` \u{2192} {} tool call(s); {}\n",
                 i + 1,
                 e.command,
                 e.tool_calls,
                 e.summary
             );
             if out.len() + line.len() > MAX_TRACE_CHARS {
-                out.push_str("\u2026 (older entries elided)\n");
+                out.push_str("\u{2026} (older entries elided)\n");
                 break;
             }
             out.push_str(&line);
@@ -89,7 +89,7 @@ impl StepTrace {
     }
 }
 
-/// Build a short (1\u20132 line) textual summary of what the provider returned.
+/// Build a short (1-2 line) textual summary of what the provider returned.
 fn summarize_response(response: &ProviderResponse) -> String {
     let mut parts = Vec::new();
     let content_trimmed = response.content.trim();

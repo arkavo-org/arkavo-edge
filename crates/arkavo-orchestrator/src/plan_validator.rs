@@ -111,10 +111,7 @@ pub fn validate(plan: &ExecutionPlan) -> ValidationReport {
                 violations.push(ContractViolation {
                     step_number: Some(step.step_number),
                     code: "COMMAND_TOO_LONG",
-                    message: format!(
-                        "command length {} exceeds {MAX_COMMAND_LEN}",
-                        cmd.len()
-                    ),
+                    message: format!("command length {} exceeds {MAX_COMMAND_LEN}", cmd.len()),
                 });
             }
         }
@@ -123,10 +120,7 @@ pub fn validate(plan: &ExecutionPlan) -> ValidationReport {
             violations.push(ContractViolation {
                 step_number: Some(step.step_number),
                 code: "INVALID_CONFIDENCE",
-                message: format!(
-                    "confidence={} is outside [0.0, 1.0]",
-                    step.confidence
-                ),
+                message: format!("confidence={} is outside [0.0, 1.0]", step.confidence),
             });
         }
 
@@ -141,13 +135,15 @@ pub fn validate(plan: &ExecutionPlan) -> ValidationReport {
         // Require at least one recognizable verification kind for steps
         // that do declare verification (no all-custom-string noise).
         if !step.verification.is_empty()
-            && !step
-                .verification
-                .iter()
-                .any(|v| matches!(v, VerificationCheck::TestsPassing
-                    | VerificationCheck::LinterClean
-                    | VerificationCheck::BuildSuccessful
-                    | VerificationCheck::FileConstraint { .. }))
+            && !step.verification.iter().any(|v| {
+                matches!(
+                    v,
+                    VerificationCheck::TestsPassing
+                        | VerificationCheck::LinterClean
+                        | VerificationCheck::BuildSuccessful
+                        | VerificationCheck::FileConstraint { .. }
+                )
+            })
         {
             violations.push(ContractViolation {
                 step_number: Some(step.step_number),
@@ -165,10 +161,25 @@ const MAX_COMMAND_LEN: usize = 4096;
 /// Heuristic: does this step look like it writes to disk/git?
 fn looks_mutating(step: &PlanStep) -> bool {
     const MUTATING: &[&str] = &[
-        "write", "edit", "create", "delete", "remove", "modify",
-        "update", "refactor", "rename", "move", "patch",
-        "git commit", "git add", "git push", "git merge", "git rebase",
-        "cargo fmt", "apply", "fix",
+        "write",
+        "edit",
+        "create",
+        "delete",
+        "remove",
+        "modify",
+        "update",
+        "refactor",
+        "rename",
+        "move",
+        "patch",
+        "git commit",
+        "git add",
+        "git push",
+        "git merge",
+        "git rebase",
+        "cargo fmt",
+        "apply",
+        "fix",
     ];
     let desc = step.description.to_lowercase();
     if MUTATING.iter().any(|kw| desc.contains(kw)) {
@@ -225,10 +236,7 @@ mod tests {
         s.step_number = 5;
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
-        assert!(report
-            .violations
-            .iter()
-            .any(|v| v.code == "STEP_NUMBERING"));
+        assert!(report.violations.iter().any(|v| v.code == "STEP_NUMBERING"));
     }
 
     #[test]
@@ -246,10 +254,7 @@ mod tests {
         s.commands = vec!["   ".to_string()];
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
-        assert!(report
-            .violations
-            .iter()
-            .any(|v| v.code == "EMPTY_COMMAND"));
+        assert!(report.violations.iter().any(|v| v.code == "EMPTY_COMMAND"));
     }
 
     #[test]
@@ -258,10 +263,12 @@ mod tests {
         s.confidence = 1.5;
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
-        assert!(report
-            .violations
-            .iter()
-            .any(|v| v.code == "INVALID_CONFIDENCE"));
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.code == "INVALID_CONFIDENCE")
+        );
     }
 
     #[test]
@@ -275,10 +282,12 @@ mod tests {
         };
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
-        assert!(report
-            .violations
-            .iter()
-            .any(|v| v.code == "UNVERIFIED_MUTATION"));
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.code == "UNVERIFIED_MUTATION")
+        );
     }
 
     #[test]
@@ -301,9 +310,11 @@ mod tests {
         s.commands = vec!["x".repeat(MAX_COMMAND_LEN + 1)];
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
-        assert!(report
-            .violations
-            .iter()
-            .any(|v| v.code == "COMMAND_TOO_LONG"));
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.code == "COMMAND_TOO_LONG")
+        );
     }
 }

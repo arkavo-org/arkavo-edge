@@ -1,5 +1,5 @@
 use crate::agent_assignment::AgentAssignment;
-use crate::attempt_history::AttemptHistory;
+use crate::attempt_history::{AttemptHistory, FailureKind};
 use crate::cognitive_engine_planning::Planner;
 use crate::cognitive_engine_pr::PrCreator;
 use crate::cognitive_engine_verification::Verifier;
@@ -23,10 +23,52 @@ use uuid::Uuid;
 /// R4: per-step execution timeout. A single `do_step` call dispatches N
 /// command-level LLM invocations; this bounds the total wall-clock time
 /// for the step, preventing zombie work on a hung provider.
-const STEP_EXECUTION_TIMEOUT: Duration = Duration::from_secs(300);
+///
+/// Overridable via `ARKAVO_STEP_TIMEOUT_SECS` env var (u64 seconds).
+const DEFAULT_STEP_EXECUTION_TIMEOUT_SECS: u64 = 300;
 
 /// R4: per-command execution timeout inside a step.
-const COMMAND_EXECUTION_TIMEOUT: Duration = Duration::from_secs(120);
+///
+/// Overridable via `ARKAVO_COMMAND_TIMEOUT_SECS` env var (u64 seconds).
+const DEFAULT_COMMAND_EXECUTION_TIMEOUT_SECS: u64 = 120;
+
+/// Read a Duration from an env var, clamped to a sane range. On parse
+/// failure or out-of-range, the default is used.
+fn env_duration_secs(var: &str, default_secs: u64, min: u64, max: u64) -> Duration {
+    match std::env::var(var) {
+        Ok(val) => match val.parse::<u64>() {
+            Ok(n) if n >= min && n <= max => Duration::from_secs(n),
+            _ => {
+                warn!(
+                    var = %var,
+                    value = %val,
+                    default = default_secs,
+                    "invalid env duration; using default"
+                );
+                Duration::from_secs(default_secs)
+            }
+        },
+        Err(_) => Duration::from_secs(default_secs),
+    }
+}
+
+fn step_execution_timeout() -> Duration {
+    env_duration_secs(
+        "ARKAVO_STEP_TIMEOUT_SECS",
+        DEFAULT_STEP_EXECUTION_TIMEOUT_SECS,
+        5,
+        3600,
+    )
+}
+
+fn command_execution_timeout() -> Duration {
+    env_duration_secs(
+        "ARKAVO_COMMAND_TIMEOUT_SECS",
+        DEFAULT_COMMAND_EXECUTION_TIMEOUT_SECS,
+        5,
+        1800,
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlan {
@@ -170,9 +212,24 @@ impl CognitiveEngine {
             .complexity
             .token_budget();
 
+        // Read configurable timeouts once per execution; the planner runs
+        // first so a drifting env var doesn't change the policy mid-run.
+        let step_timeout = step_execution_timeout();
+        let command_timeout = command_execution_timeout();
+        debug!(
+            step_timeout_secs = step_timeout.as_secs(),
+            command_timeout_secs = command_timeout.as_secs(),
+            "cognitive engine execution configured"
+        );
+
         let mut total_tokens = 0u32;
         let mut steps_completed = 0usize;
         let mut verification_results = Vec::new();
+        // R4 x R1: remember why we aborted so the final failure recording
+        // can use the specific FailureKind. Initialized to Other; overridden
+        // when a specific cause (timeout, command error, budget) is hit.
+        let mut abort_kind: Option<FailureKind> = None;
+        let mut abort_detail: Option<String> = None;
 
         let plan = self.planner.plan(&assignment).await?;
         total_tokens += plan.estimated_tokens;
@@ -190,9 +247,10 @@ impl CognitiveEngine {
                 &format!("❌ Plan contract validation failed: {summary}"),
             )
             .await?;
-            self.attempt_history.record_failure(
+            self.attempt_history.record_failure_kind(
                 &assignment.repository,
                 assignment.issue_number,
+                FailureKind::PlanInvalid,
                 0,
                 plan.steps.len(),
                 &[],
@@ -223,6 +281,14 @@ impl CognitiveEngine {
 
         for (idx, step) in plan.steps.iter().enumerate() {
             if !self.check_budget(total_tokens, budget, &assignment).await? {
+                abort_kind = Some(FailureKind::BudgetExceeded);
+                abort_detail = Some(format!(
+                    "budget exhausted at step {}/{} ({}/{} tokens)",
+                    idx + 1,
+                    plan.steps.len(),
+                    total_tokens,
+                    budget
+                ));
                 break;
             }
 
@@ -238,18 +304,28 @@ impl CognitiveEngine {
             )
             .await?;
 
-            match timeout(STEP_EXECUTION_TIMEOUT, self.do_step(step)).await {
+            match timeout(step_timeout, self.do_step(step, command_timeout)).await {
                 Err(_) => {
-                    error!(step = idx + 1, timeout_secs = STEP_EXECUTION_TIMEOUT.as_secs(), "step timed out");
+                    error!(
+                        step = idx + 1,
+                        timeout_secs = step_timeout.as_secs(),
+                        "step timed out"
+                    );
                     self.post_progress(
                         &assignment,
                         &format!(
                             "⏱️ Step {} timed out after {}s; aborting",
                             idx + 1,
-                            STEP_EXECUTION_TIMEOUT.as_secs()
+                            step_timeout.as_secs()
                         ),
                     )
                     .await?;
+                    abort_kind = Some(FailureKind::Timeout);
+                    abort_detail = Some(format!(
+                        "step {} timed out after {}s",
+                        idx + 1,
+                        step_timeout.as_secs()
+                    ));
                     break;
                 }
                 Ok(Ok(tokens)) => {
@@ -281,9 +357,24 @@ impl CognitiveEngine {
                         if let Some(adjusted_step) =
                             self.planner.adjust(step, &check_results).await?
                         {
-                            match timeout(STEP_EXECUTION_TIMEOUT, self.do_step(&adjusted_step)).await {
+                            match timeout(
+                                step_timeout,
+                                self.do_step(&adjusted_step, command_timeout),
+                            )
+                            .await
+                            {
                                 Err(_) => {
-                                    error!(step = idx + 1, "adjusted step timed out");
+                                    error!(
+                                        step = idx + 1,
+                                        timeout_secs = step_timeout.as_secs(),
+                                        "adjusted step timed out"
+                                    );
+                                    abort_kind = Some(FailureKind::Timeout);
+                                    abort_detail = Some(format!(
+                                        "adjusted step {} timed out after {}s",
+                                        idx + 1,
+                                        step_timeout.as_secs()
+                                    ));
                                     break;
                                 }
                                 Ok(Ok(adj_tokens)) => {
@@ -299,6 +390,9 @@ impl CognitiveEngine {
                                 }
                                 Ok(Err(e)) => {
                                     error!(step = idx + 1, error = %e, "Adjustment execution failed");
+                                    abort_kind = Some(FailureKind::CommandError);
+                                    abort_detail =
+                                        Some(format!("adjusted step {} failed: {}", idx + 1, e));
                                     break;
                                 }
                             }
@@ -309,6 +403,8 @@ impl CognitiveEngine {
                     error!(step = idx + 1, error = %e, "Step execution failed");
                     self.post_progress(&assignment, &format!("❌ Step {} failed: {}", idx + 1, e))
                         .await?;
+                    abort_kind = Some(FailureKind::CommandError);
+                    abort_detail = Some(format!("step {} failed: {}", idx + 1, e));
                     break;
                 }
             }
@@ -351,18 +447,32 @@ impl CognitiveEngine {
             self.attempt_history
                 .clear(&assignment.repository, assignment.issue_number);
         } else {
-            self.attempt_history.record_failure(
-                &assignment.repository,
-                assignment.issue_number,
-                steps_completed,
-                plan.steps.len(),
-                &verification_results,
+            // Prefer the specific FailureKind captured during the loop; fall
+            // back to VerificationFailed / Other based on what we observed.
+            let verification_fail_count = verification_results.iter().filter(|r| !r.passed).count();
+            let kind = abort_kind.unwrap_or_else(|| {
+                if verification_fail_count > 0 {
+                    FailureKind::VerificationFailed
+                } else {
+                    FailureKind::Other
+                }
+            });
+            let summary = abort_detail.unwrap_or_else(|| {
                 format!(
                     "execution incomplete: {}/{} steps, {} verification failure(s)",
                     steps_completed,
                     plan.steps.len(),
-                    verification_results.iter().filter(|r| !r.passed).count()
-                ),
+                    verification_fail_count
+                )
+            });
+            self.attempt_history.record_failure_kind(
+                &assignment.repository,
+                assignment.issue_number,
+                kind,
+                steps_completed,
+                plan.steps.len(),
+                &verification_results,
+                summary,
             );
         }
 
@@ -409,7 +519,7 @@ impl CognitiveEngine {
         })
     }
 
-    async fn do_step(&self, step: &PlanStep) -> Result<u32> {
+    async fn do_step(&self, step: &PlanStep, command_timeout: Duration) -> Result<u32> {
         debug!(step = step.step_number, "Executing step");
 
         let mut tokens_used = 0u32;
@@ -434,14 +544,15 @@ impl CognitiveEngine {
             let messages = trace.build_messages(task_prompt.clone());
 
             // R4: bound a single command's wall-clock time.
-            let call =
-                self.router
-                    .route_with_tools(command, messages, Some(&self.tool_registry));
-            let response = match timeout(COMMAND_EXECUTION_TIMEOUT, call).await {
+            let call = self
+                .router
+                .route_with_tools(command, messages, Some(&self.tool_registry));
+            let response = match timeout(command_timeout, call).await {
                 Err(_) => {
                     return Err(Error::Other(anyhow::anyhow!(
-                        "command timed out after {}s: {}",
-                        COMMAND_EXECUTION_TIMEOUT.as_secs(),
+                        "step {} command timed out after {}s: {}",
+                        step.step_number,
+                        command_timeout.as_secs(),
                         command
                     )));
                 }
@@ -464,7 +575,9 @@ impl CognitiveEngine {
             // falling back to a more accurate heuristic than len()/4.
             let (input_tokens, output_tokens) =
                 token_estimator::tokens_from_response(&task_prompt, &response);
-            tokens_used = tokens_used.saturating_add(input_tokens).saturating_add(output_tokens);
+            tokens_used = tokens_used
+                .saturating_add(input_tokens)
+                .saturating_add(output_tokens);
 
             if !response.tool_calls.is_empty() {
                 debug!(
