@@ -207,15 +207,17 @@ fn format_check(check: &VerificationCheck) -> String {
 /// Deterministic 64-bit digest of the failing-checks set. Uses FNV-1a,
 /// which is portable and has no external dependencies.
 fn compute_digest(failing: &BTreeSet<String>) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    // FNV-1a 64-bit: offset basis and prime, per the reference spec.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x100_0000_01b3;
     for s in failing {
         for b in s.as_bytes() {
-            hash ^= *b as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash ^= u64::from(*b);
+            hash = hash.wrapping_mul(FNV_PRIME);
         }
         // Separator so "ab" + "c" differs from "a" + "bc".
         hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
 }

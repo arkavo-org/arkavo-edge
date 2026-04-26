@@ -209,17 +209,18 @@ impl CircuitBreaker {
     }
 }
 
-/// A permit held by an in-flight call. On drop without an explicit
-/// outcome, the call is assumed to have failed (fail-safe): this
-/// avoids silently leaving the breaker in a stale state if a caller
-/// returns early on an unexpected code path. Call [`Permit::success`]
-/// or [`Permit::failure`] explicitly for clarity.
+/// A permit held by an in-flight call.
+///
+/// On drop without an explicit outcome, the call is assumed to have failed
+/// (fail-safe): this avoids silently leaving the breaker in a stale state
+/// if a caller returns early on an unexpected code path. Call
+/// [`Permit::success`] or [`Permit::failure`] explicitly for clarity.
 pub struct Permit<'a> {
     breaker: &'a CircuitBreaker,
     provider: String,
 }
 
-impl<'a> Permit<'a> {
+impl Permit<'_> {
     /// Mark the guarded call as successful.
     pub fn success(self) {
         self.breaker.record_success(&self.provider);
@@ -234,7 +235,7 @@ impl<'a> Permit<'a> {
     }
 }
 
-impl<'a> Drop for Permit<'a> {
+impl Drop for Permit<'_> {
     fn drop(&mut self) {
         // Treat implicit drops as failures; callers who want to record
         // success must do so explicitly via `permit.success()`. This

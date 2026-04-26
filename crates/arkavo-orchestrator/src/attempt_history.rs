@@ -16,7 +16,8 @@ use crate::text_utils::truncate_ellipsis;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-/// Maximum attempts retained per issue. Anything beyond this is FIFO-evicted.
+/// Maximum attempts retained per issue; beyond this, records are FIFO-evicted.
+///
 /// Chosen so that a realistic 3-retry outer loop still fits, with headroom
 /// for adjustment sub-steps, without the map growing without bound on a
 /// misbehaving caller.
@@ -78,7 +79,8 @@ impl AttemptRecord {
         if !self.failed_verifications.is_empty() {
             out.push_str("\n  Verification failures:");
             for v in self.failed_verifications.iter().take(3) {
-                out.push_str(&format!("\n    - {v}"));
+                use std::fmt::Write as _;
+                let _ = write!(out, "\n    - {v}");
             }
         }
         out
@@ -105,6 +107,10 @@ impl AttemptHistory {
     ///
     /// Enforces a [`MAX_ATTEMPTS_PER_ISSUE`] cap via FIFO eviction so that
     /// a runaway retry loop cannot exhaust memory.
+    // Each argument carries distinct, non-derivable context (who, what,
+    // which kind of failure, progress, verification state, human summary).
+    // Collapsing them into a single struct would only add indirection.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_failure_kind(
         &self,
         repository: &str,

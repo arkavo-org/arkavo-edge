@@ -155,6 +155,10 @@ impl CognitiveEngine {
     /// allowing callers (or tests) to share a single history across the
     /// lifetime of the orchestrator so Reflexion-style retry memory
     /// survives cognitive cycles.
+    // Every argument is a distinct, non-substitutable dependency (budget,
+    // events, GitHub ops, router, tools, session, plan store, attempt
+    // history). A Builder would add friction without reducing coupling.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_attempt_history(
         budget_tracker: Arc<BudgetTracker>,
         event_writer: Arc<EventWriter>,
@@ -450,13 +454,12 @@ impl CognitiveEngine {
             // Prefer the specific FailureKind captured during the loop; fall
             // back to VerificationFailed / Other based on what we observed.
             let verification_fail_count = verification_results.iter().filter(|r| !r.passed).count();
-            let kind = abort_kind.unwrap_or_else(|| {
-                if verification_fail_count > 0 {
-                    FailureKind::VerificationFailed
-                } else {
-                    FailureKind::Other
-                }
-            });
+            let default_kind = if verification_fail_count > 0 {
+                FailureKind::VerificationFailed
+            } else {
+                FailureKind::Other
+            };
+            let kind = abort_kind.unwrap_or(default_kind);
             let summary = abort_detail.unwrap_or_else(|| {
                 format!(
                     "execution incomplete: {}/{} steps, {} verification failure(s)",
