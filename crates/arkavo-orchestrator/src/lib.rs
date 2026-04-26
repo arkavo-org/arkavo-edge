@@ -15,6 +15,7 @@
 pub mod agent_assignment;
 pub mod attempt_history;
 pub mod chunk_processor;
+pub mod circuit_breaker;
 pub mod code_solver;
 pub mod cognitive_engine;
 mod cognitive_engine_core;
@@ -31,6 +32,7 @@ pub mod plan_validator;
 pub mod planner_config;
 pub mod policy_events;
 pub mod progress_batcher;
+pub mod progress_sink;
 pub mod spawn_guard;
 pub mod step_context;
 pub mod task_executor;
@@ -38,6 +40,7 @@ pub mod task_policy_manager;
 pub mod text_utils;
 pub mod token_estimator;
 pub mod types;
+pub mod verifier_delta;
 pub mod webhook;
 
 pub use agent_assignment::{AgentAssigner, AgentAssignment};
@@ -45,14 +48,17 @@ pub use attempt_history::{AttemptHistory, AttemptRecord, FailureKind};
 pub use chunk_processor::{
     AgentCost, ChunkBatch, ChunkProcessor, ChunkProcessorConfig, ChunkResult, ProcessingResult,
 };
+pub use circuit_breaker::{BreakerError, BreakerSnapshot, CircuitBreaker, Permit as BreakerPermit};
 pub use code_solver::{CodeSolver, SolverConfig, SolverMetrics, SolverResult};
 pub use cognitive_engine::{CognitiveEngine, ExecutionPlan, ExecutionResult};
 pub use config::OrchestratorConfig;
 pub use error::{Error, Result};
 pub use plan_validator::{ContractViolation, ValidationReport, validate as validate_plan};
 pub use progress_batcher::ProgressBatcher;
+pub use progress_sink::{ProgressPriority, ProgressSink};
 pub use step_context::StepTrace;
 pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
+pub use verifier_delta::{DeltaKind, VerifierDelta, VerifierSnapshot};
 // Re-export GitHub types from arkavo-github for backward compatibility
 pub use arkavo_github::{GitHubApp, IssueOperations, IssueUpdate};
 pub use issue_analyzer::{Complexity, IssueAnalysis, IssueAnalyzer, IssueType};
