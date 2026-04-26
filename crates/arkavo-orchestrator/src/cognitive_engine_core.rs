@@ -1,19 +1,32 @@
 use crate::agent_assignment::AgentAssignment;
+use crate::attempt_history::AttemptHistory;
 use crate::cognitive_engine_planning::Planner;
 use crate::cognitive_engine_pr::PrCreator;
 use crate::cognitive_engine_verification::Verifier;
 use crate::error::{Error, Result};
+use crate::plan_validator;
+use crate::step_context::StepTrace;
+use crate::token_estimator;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_github::IssueOperations;
-use arkavo_llm::Message as LlmMessage;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_memory::{PlanStateStore, PlanStatus};
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// R4: per-step execution timeout. A single `do_step` call dispatches N
+/// command-level LLM invocations; this bounds the total wall-clock time
+/// for the step, preventing zombie work on a hung provider.
+const STEP_EXECUTION_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// R4: per-command execution timeout inside a step.
+const COMMAND_EXECUTION_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlan {
@@ -70,6 +83,8 @@ pub struct CognitiveEngine {
     planner: Planner,
     verifier: Verifier,
     pr_creator: PrCreator,
+    /// R1: Reflexion-style failure memory across outer retries.
+    attempt_history: Arc<AttemptHistory>,
 }
 
 impl CognitiveEngine {
@@ -82,7 +97,38 @@ impl CognitiveEngine {
         session_id: String,
         plan_store: Option<Arc<PlanStateStore>>,
     ) -> Self {
-        let planner = Planner::new(budget_tracker.clone(), router.clone(), plan_store.clone());
+        Self::new_with_attempt_history(
+            budget_tracker,
+            event_writer,
+            github_ops,
+            router,
+            tool_registry,
+            session_id,
+            plan_store,
+            Arc::new(AttemptHistory::new()),
+        )
+    }
+
+    /// Construct the engine with an externally-supplied `AttemptHistory`,
+    /// allowing callers (or tests) to share a single history across the
+    /// lifetime of the orchestrator so Reflexion-style retry memory
+    /// survives cognitive cycles.
+    pub fn new_with_attempt_history(
+        budget_tracker: Arc<BudgetTracker>,
+        event_writer: Arc<EventWriter>,
+        github_ops: Arc<IssueOperations>,
+        router: Arc<Router>,
+        tool_registry: Arc<ToolRegistry>,
+        session_id: String,
+        plan_store: Option<Arc<PlanStateStore>>,
+        attempt_history: Arc<AttemptHistory>,
+    ) -> Self {
+        let planner = Planner::new_with_history(
+            budget_tracker.clone(),
+            router.clone(),
+            plan_store.clone(),
+            attempt_history.clone(),
+        );
         let verifier = Verifier::new();
         let pr_creator = PrCreator::new(
             tool_registry.clone(),
@@ -102,7 +148,13 @@ impl CognitiveEngine {
             planner,
             verifier,
             pr_creator,
+            attempt_history,
         }
+    }
+
+    /// Access the shared attempt history (for external clear/query).
+    pub fn attempt_history(&self) -> Arc<AttemptHistory> {
+        Arc::clone(&self.attempt_history)
     }
 
     pub async fn execute(&self, assignment: AgentAssignment) -> Result<ExecutionResult> {
@@ -124,6 +176,39 @@ impl CognitiveEngine {
 
         let plan = self.planner.plan(&assignment).await?;
         total_tokens += plan.estimated_tokens;
+
+        // R5: Plan contract validation. Reject structurally malformed plans
+        // before we waste any execution cycles on them.
+        let validation = plan_validator::validate(&plan);
+        if !validation.is_valid() {
+            let summary = validation.summary();
+            error!(%summary, "plan failed contract validation");
+            self.log_event("plan_validation_failed", &validation.violations)
+                .await;
+            self.post_progress(
+                &assignment,
+                &format!("❌ Plan contract validation failed: {summary}"),
+            )
+            .await?;
+            self.attempt_history.record_failure(
+                &assignment.repository,
+                assignment.issue_number,
+                0,
+                plan.steps.len(),
+                &[],
+                format!("plan validation failed: {summary}"),
+            );
+            if let Some(store) = &self.plan_store {
+                let _ = store.mark_failed(plan.id, &summary).await;
+            }
+            return Ok(ExecutionResult {
+                success: false,
+                steps_completed: 0,
+                total_tokens_used: total_tokens,
+                verification_results: Vec::new(),
+                final_comment: format!("Plan failed contract validation: {summary}"),
+            });
+        }
 
         // Update plan status to Executing
         if let Some(store) = &self.plan_store {
@@ -153,8 +238,21 @@ impl CognitiveEngine {
             )
             .await?;
 
-            match self.do_step(step).await {
-                Ok(tokens) => {
+            match timeout(STEP_EXECUTION_TIMEOUT, self.do_step(step)).await {
+                Err(_) => {
+                    error!(step = idx + 1, timeout_secs = STEP_EXECUTION_TIMEOUT.as_secs(), "step timed out");
+                    self.post_progress(
+                        &assignment,
+                        &format!(
+                            "⏱️ Step {} timed out after {}s; aborting",
+                            idx + 1,
+                            STEP_EXECUTION_TIMEOUT.as_secs()
+                        ),
+                    )
+                    .await?;
+                    break;
+                }
+                Ok(Ok(tokens)) => {
                     total_tokens += tokens;
                     steps_completed += 1;
 
@@ -183,8 +281,12 @@ impl CognitiveEngine {
                         if let Some(adjusted_step) =
                             self.planner.adjust(step, &check_results).await?
                         {
-                            match self.do_step(&adjusted_step).await {
-                                Ok(adj_tokens) => {
+                            match timeout(STEP_EXECUTION_TIMEOUT, self.do_step(&adjusted_step)).await {
+                                Err(_) => {
+                                    error!(step = idx + 1, "adjusted step timed out");
+                                    break;
+                                }
+                                Ok(Ok(adj_tokens)) => {
                                     total_tokens += adj_tokens;
                                     let recheck_results =
                                         self.verifier.check(&adjusted_step).await?;
@@ -195,7 +297,7 @@ impl CognitiveEngine {
                                         break;
                                     }
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     error!(step = idx + 1, error = %e, "Adjustment execution failed");
                                     break;
                                 }
@@ -203,7 +305,7 @@ impl CognitiveEngine {
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!(step = idx + 1, error = %e, "Step execution failed");
                     self.post_progress(&assignment, &format!("❌ Step {} failed: {}", idx + 1, e))
                         .await?;
@@ -241,6 +343,28 @@ impl CognitiveEngine {
         };
 
         self.post_progress(&assignment, &final_comment).await?;
+
+        // R1: Update attempt history. On success, clear the history so a
+        // future unrelated re-run starts fresh; on failure, record the
+        // outcome so the next outer retry can learn from it.
+        if success {
+            self.attempt_history
+                .clear(&assignment.repository, assignment.issue_number);
+        } else {
+            self.attempt_history.record_failure(
+                &assignment.repository,
+                assignment.issue_number,
+                steps_completed,
+                plan.steps.len(),
+                &verification_results,
+                format!(
+                    "execution incomplete: {}/{} steps, {} verification failure(s)",
+                    steps_completed,
+                    plan.steps.len(),
+                    verification_results.iter().filter(|r| !r.passed).count()
+                ),
+            );
+        }
 
         // Update final plan status
         if let Some(store) = &self.plan_store {
@@ -289,6 +413,10 @@ impl CognitiveEngine {
         debug!(step = step.step_number, "Executing step");
 
         let mut tokens_used = 0u32;
+        // C5: Accumulate a rolling reasoning trace across the commands of
+        // this step so the model retains context from one command to the
+        // next, instead of re-planning from scratch each time.
+        let mut trace = StepTrace::new();
 
         for command in &step.commands {
             debug!(command, "Executing command");
@@ -302,13 +430,28 @@ impl CognitiveEngine {
                 step.step_number, step.description, command
             );
 
-            let messages = vec![LlmMessage::user(task_prompt.clone())];
+            // C5: prepend the rolling trace (if any) to the prompt.
+            let messages = trace.build_messages(task_prompt.clone());
 
-            let response = self
-                .router
-                .route_with_tools(command, messages, Some(&self.tool_registry))
-                .await
-                .map_err(|e| Error::Other(anyhow::anyhow!("Command execution failed: {e}")))?;
+            // R4: bound a single command's wall-clock time.
+            let call =
+                self.router
+                    .route_with_tools(command, messages, Some(&self.tool_registry));
+            let response = match timeout(COMMAND_EXECUTION_TIMEOUT, call).await {
+                Err(_) => {
+                    return Err(Error::Other(anyhow::anyhow!(
+                        "command timed out after {}s: {}",
+                        COMMAND_EXECUTION_TIMEOUT.as_secs(),
+                        command
+                    )));
+                }
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    return Err(Error::Other(anyhow::anyhow!(
+                        "Command execution failed: {e}"
+                    )));
+                }
+            };
 
             info!(
                 step = step.step_number,
@@ -317,8 +460,11 @@ impl CognitiveEngine {
                 response.tool_calls.len()
             );
 
-            let estimated_tokens = (task_prompt.len() + response.content.len()) / 4;
-            tokens_used += estimated_tokens as u32;
+            // P4: use provider-reported token counts when available,
+            // falling back to a more accurate heuristic than len()/4.
+            let (input_tokens, output_tokens) =
+                token_estimator::tokens_from_response(&task_prompt, &response);
+            tokens_used = tokens_used.saturating_add(input_tokens).saturating_add(output_tokens);
 
             if !response.tool_calls.is_empty() {
                 debug!(
@@ -330,6 +476,10 @@ impl CognitiveEngine {
                         .collect::<Vec<_>>()
                 );
             }
+
+            // C5: record this command's outcome into the rolling trace
+            // so the next command in this step starts with context.
+            trace.record(command, &response);
         }
 
         Ok(tokens_used)

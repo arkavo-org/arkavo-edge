@@ -13,6 +13,7 @@
 #![allow(clippy::struct_excessive_bools)]
 
 pub mod agent_assignment;
+pub mod attempt_history;
 pub mod chunk_processor;
 pub mod code_solver;
 pub mod cognitive_engine;
@@ -26,15 +27,24 @@ pub mod error;
 pub mod issue_analyzer;
 pub mod issue_router;
 pub mod orchestrator;
+pub mod plan_validator;
 pub mod planner_config;
 pub mod policy_events;
+pub mod progress_batcher;
 pub mod spawn_guard;
+pub mod step_context;
 pub mod task_executor;
 pub mod task_policy_manager;
+pub mod token_estimator;
 pub mod types;
 pub mod webhook;
 
 pub use agent_assignment::{AgentAssigner, AgentAssignment};
+pub use attempt_history::{AttemptHistory, AttemptRecord};
+pub use plan_validator::{validate as validate_plan, ContractViolation, ValidationReport};
+pub use progress_batcher::ProgressBatcher;
+pub use step_context::StepTrace;
+pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
 pub use chunk_processor::{
     AgentCost, ChunkBatch, ChunkProcessor, ChunkProcessorConfig, ChunkResult, ProcessingResult,
 };
