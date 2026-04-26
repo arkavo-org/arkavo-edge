@@ -5,9 +5,10 @@
 //! step execution loop starts.
 
 use crate::cognitive_engine_core::{ExecutionPlan, PlanStep, VerificationCheck};
+use serde::Serialize;
 
 /// A contract violation found during pre-flight validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContractViolation {
     pub step_number: Option<usize>,
     pub code: &'static str,
