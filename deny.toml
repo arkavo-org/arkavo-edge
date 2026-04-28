@@ -12,6 +12,8 @@ ignore = [
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
+    { id = "RUSTSEC-2025-0119", reason = "number_prefix via fastembed -> hf-hub -> indicatif (transitive, no upstream fix)" },
+    { id = "RUSTSEC-2026-0105", reason = "core2 via fastembed -> image -> ravif -> rav1e -> bitstream-io (transitive, no upstream fix)" },
 ]
 
 [bans]
