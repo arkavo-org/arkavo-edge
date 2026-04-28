@@ -242,7 +242,7 @@ torg-core = { version = "0.2", features = ["serde"] }
 torg-mask = "0.2"
 torg-serde = "0.2"
 hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = false, features = ["tokio", "rustls-tls"] }
-fastembed = "4"
+fastembed = "5"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.9"
 
