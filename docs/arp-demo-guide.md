@@ -84,11 +84,18 @@ Scroll to **Recent Decision Traces** below Violations. Same data, but unfiltered
 
 Mention that with the `signing` feature flag each entry is Ed25519-signed; with `cryptographic_signing.signing_required_above_sensitivity: confidential` you get tamper-evident logs that meet GRC retention rules.
 
-### Beat five — "and it learns" (60 seconds, aspirational)
+### Beat five — "and it learns"
 
-This part requires runtime wiring (PolicyCache and AdaptationEngine populated from the conductor). Today both panels show "not yet wired" empty states — be honest about that. The talk track when it lands:
+The runtime is now driving both engines. Each tool invocation in the conductor's tool loop updates two things:
 
-> *"Every violation feeds the Beta prior. After 20 trips, the agent has a posterior distribution showing it shouldn't trust that endpoint at all. This is encoded in the policy cache. Hover any cache entry — it has a decay curve. Lessons fade unless reinforced. Human-taught lessons never decay."*
+- The PolicyCache writes a hash-chained, decay-tracked entry keyed by `tool.outcome.<name>.<n>`.
+- The AdaptationEngine updates the Beta prior for that tool — successes above the quality gate increase `alpha`, failures or below-gate outcomes increase `beta`.
+
+Show this in the panel: under `Policy Cache (runtime)` the status row reads **live -- updated by the conductor on every tool outcome**. Under `Adaptation Engine` the priors table fills in as the agent calls tools.
+
+Talk track:
+
+> *"Every tool outcome feeds the Beta prior. After 20 successful invocations, the prior shows alpha 21, beta 1, mean 0.95 — the agent strongly trusts that tool. Failures push beta up. The cache logs each verdict with a decay curve. Lessons fade unless reinforced. Human-taught lessons never decay."*
 
 ## The kill shot
 
@@ -100,9 +107,9 @@ The cross-link is a small follow-up addition; the data path is already live.
 
 ## What not to show — be honest
 
-- **Runtime not yet driving the engine.** PolicyCache and AdaptationEngine are instantiated but not yet evaluated on every agent step. Empty-state messages on the panel say so. If asked: *"The data path is wired end-to-end; we're hooking the conductor next sprint. The UI is ready for the data."*
 - **Per-agent A2A push not yet implemented.** Today the gateway loads its own document as `(local)`. Real per-agent documents need a JSON-RPC `arp.snapshot` method. The handler API (`ArpHandler::set_agent_arp`, `attach_policy_cache`, `attach_decision_trace`) is ready; the transport isn't.
 - **Hot-reload.** Editing the ARP file doesn't reload it — the gateway loads once at startup. Easy to add but not done.
+- **Standalone showcase has no agent.** `./examples/arp-showcase/run.sh` boots only the UI, so the cache and adaptation tables are live but empty. To see populated state, run a real agent process (which embeds the conductor) and let it call tools — the gateway picks up the same `ArpRuntime` via the process-global registry.
 
 ## Q&A prep
 

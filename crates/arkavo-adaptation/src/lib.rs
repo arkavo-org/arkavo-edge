@@ -113,6 +113,47 @@ impl AdaptationEngine {
         self.observation_counts.insert(entity_id.to_string(), 0);
     }
 
+    /// Snapshot of all known entity priors plus their observation counts.
+    /// Used by UIs and audit tooling to inspect engine state.
+    pub fn snapshot(&self) -> Vec<EntityPriorSnapshot> {
+        let mut ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for k in self.priors.keys() {
+            ids.insert(k.as_str());
+        }
+        for k in self.observation_counts.keys() {
+            ids.insert(k.as_str());
+        }
+        let warmup_period = self
+            .config
+            .cold_start
+            .as_ref()
+            .and_then(|c| c.warmup_period)
+            .unwrap_or(5);
+        let mut out: Vec<EntityPriorSnapshot> = ids
+            .into_iter()
+            .map(|id| {
+                let prior = self.get_prior(id);
+                let observations = self.observations(id);
+                let mean = prior.alpha / (prior.alpha + prior.beta).max(f64::EPSILON);
+                EntityPriorSnapshot {
+                    id: id.to_string(),
+                    alpha: prior.alpha,
+                    beta: prior.beta,
+                    mean,
+                    observations,
+                    in_warmup: observations < warmup_period,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        out
+    }
+
+    /// The configured adaptation method for this engine.
+    pub fn method(&self) -> AdaptationMethod {
+        self.config.method
+    }
+
     fn initial_prior(&self) -> BetaPrior {
         self.config
             .cold_start
@@ -256,6 +297,17 @@ impl AdaptationEngine {
             }
         }
     }
+}
+
+/// Read-only snapshot of an entity's prior plus observation count.
+#[derive(Debug, Clone)]
+pub struct EntityPriorSnapshot {
+    pub id: String,
+    pub alpha: f64,
+    pub beta: f64,
+    pub mean: f64,
+    pub observations: u32,
+    pub in_warmup: bool,
 }
 
 #[cfg(test)]

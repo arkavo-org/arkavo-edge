@@ -45,6 +45,7 @@ arkavo-validation = { path = "../arkavo-validation" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-policy-cache = { path = "../arkavo-policy-cache" }
 arkavo-adaptation = { path = "../arkavo-adaptation" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }

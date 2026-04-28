@@ -17,14 +17,15 @@ use arkavo_arp::ArpDocument;
 use arkavo_arp::adaptation::AdaptationMethod;
 use arkavo_arp::feedback::DecayStrategy;
 use arkavo_arp::observability::{SelectionMethod, TraceEventType, TraceLayer};
+use arkavo_arp_runtime::ArpRuntime;
 use arkavo_observability::decision_trace::DecisionTrace;
-use arkavo_policy_cache::PolicyCache;
+use arkavo_policy_cache::{PolicyCache, PolicySource};
 use tokio::sync::RwLock;
 
 use crate::types::{
-    AgentArpStatus, ArpAdaptationSnapshot, ArpBudgetSummary, ArpDecisionTraceEntry,
-    ArpDocumentSummary, ArpPolicyCacheConfigSummary, ArpPolicyCacheEntry, ArpPolicyCacheSnapshot,
-    ArpQualityGateSummary, ArpStatusSnapshot,
+    AgentArpStatus, ArpAdaptationEntity, ArpAdaptationSnapshot, ArpBudgetSummary,
+    ArpDecisionTraceEntry, ArpDocumentSummary, ArpPolicyCacheConfigSummary, ArpPolicyCacheEntry,
+    ArpPolicyCacheSnapshot, ArpQualityGateSummary, ArpStatusSnapshot,
 };
 
 const DEFAULT_DOC_FILENAME: &str = "arkavo.arp.json";
@@ -42,6 +43,12 @@ pub struct ArpHandler {
 #[derive(Default)]
 struct AgentEntry {
     doc_state: Option<LoadedDocument>,
+    /// ARP runtime instantiated from the loaded document. Owns the
+    /// PolicyCache and AdaptationEngine that the conductor evaluates on
+    /// every agent step.
+    runtime: Option<Arc<ArpRuntime>>,
+    /// Optional explicit cache override (e.g. when the conductor lives in
+    /// a separate process and hands its cache to the gateway).
     policy_cache: Option<Arc<PolicyCache>>,
     decision_trace: Option<Arc<DecisionTrace>>,
 }
@@ -106,8 +113,7 @@ impl ArpHandler {
                 error: Some(format!("read error: {e}")),
             },
         };
-        let mut guard = self.agents.write().await;
-        guard.entry(agent_id.to_string()).or_default().doc_state = Some(loaded);
+        self.install_loaded(agent_id, loaded).await;
     }
 
     /// Set an agent's ARP document directly from a JSON string (e.g. pushed
@@ -125,8 +131,38 @@ impl ArpHandler {
                 error: Some(e.to_string()),
             },
         };
+        self.install_loaded(agent_id, loaded).await;
+    }
+
+    /// Stash a parsed/erroneous document and, when valid, instantiate the
+    /// ArpRuntime so the panel shows live cache and adaptation state.
+    async fn install_loaded(&self, agent_id: &str, loaded: LoadedDocument) {
+        let runtime = loaded.parsed.as_ref().map(|doc| {
+            // Reuse the process-global runtime when its document matches —
+            // otherwise the panel would show an empty cache while the
+            // conductor was writing into a different instance.
+            if agent_id == LOCAL_AGENT_ID
+                && let Some(global) = arkavo_arp_runtime::current()
+            {
+                return global;
+            }
+            Arc::new(ArpRuntime::from_document(doc))
+        });
+
+        // For the (local) agent, install the runtime as the process global so
+        // the conductor's tool loop can find it. set() is best-effort: if
+        // a runtime is already installed (e.g. the gateway started before
+        // a sibling subsystem), keep it.
+        if let Some(rt) = runtime.as_ref()
+            && agent_id == LOCAL_AGENT_ID
+        {
+            let _ = arkavo_arp_runtime::install(rt.clone());
+        }
+
         let mut guard = self.agents.write().await;
-        guard.entry(agent_id.to_string()).or_default().doc_state = Some(loaded);
+        let entry = guard.entry(agent_id.to_string()).or_default();
+        entry.doc_state = Some(loaded);
+        entry.runtime = runtime;
     }
 
     /// Attach a PolicyCache for a specific agent.
@@ -153,10 +189,10 @@ impl ArpHandler {
     /// Build the mesh-wide snapshot pushed to the UI.
     pub async fn snapshot(&self) -> ArpStatusSnapshot {
         let guard = self.agents.read().await;
-        let mut agents: Vec<AgentArpStatus> = guard
-            .iter()
-            .map(|(id, e)| build_agent_status(id, e))
-            .collect();
+        let mut agents: Vec<AgentArpStatus> = Vec::with_capacity(guard.len());
+        for (id, e) in guard.iter() {
+            agents.push(build_agent_status(id, e).await);
+        }
         // Stable ordering: (local) first, then alphabetical
         agents.sort_by(|a, b| match (a.agent_id.as_str(), b.agent_id.as_str()) {
             (LOCAL_AGENT_ID, LOCAL_AGENT_ID) => std::cmp::Ordering::Equal,
@@ -172,7 +208,7 @@ impl ArpHandler {
     }
 }
 
-fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
+async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
     let (path_str, valid, error, summary) = match &entry.doc_state {
         None => (None, false, None, None),
         Some(loaded) => {
@@ -185,16 +221,50 @@ fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
         }
     };
 
-    let policy_cache = entry
+    // Prefer an explicitly attached cache; otherwise read from the runtime
+    // instantiated from the loaded ARP document.
+    let cache_arc = entry
         .policy_cache
-        .as_ref()
-        .map(|cache| ArpPolicyCacheSnapshot {
-            entry_count: cache.len(),
-            chain_valid: cache.verify_chain(),
-            entries: collect_known_keys(cache),
-        });
+        .clone()
+        .or_else(|| entry.runtime.as_ref().map(|rt| rt.cache()));
 
-    let adaptation: Option<ArpAdaptationSnapshot> = None;
+    let policy_cache = cache_arc.as_ref().map(|cache| ArpPolicyCacheSnapshot {
+        entry_count: cache.len(),
+        chain_valid: cache.verify_chain(),
+        entries: cache
+            .snapshot()
+            .into_iter()
+            .map(|e| ArpPolicyCacheEntry {
+                key: e.key,
+                source: policy_source_label(e.source).to_string(),
+                influence: e.influence,
+                age_sec: e.age_sec,
+            })
+            .collect(),
+    });
+
+    let adaptation: Option<ArpAdaptationSnapshot> = match entry.runtime.as_ref() {
+        Some(rt) => {
+            let eng = rt.adaptation();
+            let guard = eng.lock().await;
+            Some(ArpAdaptationSnapshot {
+                method: adaptation_method_label(guard.method()).to_string(),
+                entities: guard
+                    .snapshot()
+                    .into_iter()
+                    .map(|p| ArpAdaptationEntity {
+                        id: p.id,
+                        alpha: p.alpha,
+                        beta: p.beta,
+                        mean: p.mean,
+                        observations: p.observations,
+                        in_warmup: p.in_warmup,
+                    })
+                    .collect(),
+            })
+        }
+        None => None,
+    };
 
     let decision_traces = entry
         .decision_trace
@@ -225,10 +295,12 @@ fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
     }
 }
 
-/// PolicyCache is currently opaque externally; expose only counts until
-/// the cache crate ships an iteration API.
-fn collect_known_keys(_cache: &PolicyCache) -> Vec<ArpPolicyCacheEntry> {
-    Vec::new()
+fn policy_source_label(source: PolicySource) -> &'static str {
+    match source {
+        PolicySource::Automated => "automated",
+        PolicySource::Human => "human",
+        PolicySource::Incident => "incident",
+    }
 }
 
 fn summarize_document(doc: &ArpDocument) -> ArpDocumentSummary {
@@ -477,5 +549,25 @@ mod tests {
         handler.remove_agent("rover-beta").await;
         let snap = handler.snapshot().await;
         assert!(snap.agents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn loaded_doc_exposes_live_runtime_state() {
+        // After loading a valid ARP document, the ArpHandler should
+        // instantiate an ArpRuntime so the panel shows live cache and
+        // adaptation state instead of "not yet wired" empty placeholders.
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", MIN_DOC).await;
+
+        let snap = handler.snapshot().await;
+        let agent = &snap.agents[0];
+
+        let cache = agent.policy_cache.as_ref().expect("policy cache live");
+        assert_eq!(cache.entry_count, 0, "cache starts empty but is live");
+        assert!(cache.chain_valid, "fresh chain should verify");
+
+        let adaptation = agent.adaptation.as_ref().expect("adaptation engine live");
+        assert_eq!(adaptation.method, "thompson_sampling");
+        assert!(adaptation.entities.is_empty(), "no priors observed yet");
     }
 }

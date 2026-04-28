@@ -194,12 +194,13 @@ function renderArpViolationsSection(traces) {
 function renderArpPolicyCacheSection(cache) {
     var html = '<div class="section-title">Policy Cache (runtime)</div>';
     if (!cache) {
-        html += '<div class="empty-state"><p>Cache not yet wired into the agent loop. Document config defines cache parameters; runtime state appears here once the loop populates it.</p></div>';
+        html += '<div class="empty-state"><p>No policy loaded for this agent -- runtime cache becomes available after a valid ARP document is loaded.</p></div>';
         return html;
     }
     var chainClass = cache.chainValid ? 'status-ok' : 'status-warn';
     var chainLabel = cache.chainValid ? 'valid' : 'BROKEN';
     html += '<div class="cost-table"><table><tbody>';
+    html += '<tr><td>Status</td><td><span class="status-ok">live</span> -- updated by the conductor on every tool outcome</td></tr>';
     html += '<tr><td>Entries</td><td>' + cache.entryCount + '</td></tr>';
     html += '<tr><td>Hash Chain</td><td><span class="' + chainClass + '">' + chainLabel + '</span></td></tr>';
     html += '</tbody></table></div>';
@@ -215,6 +216,8 @@ function renderArpPolicyCacheSection(cache) {
                 '</tr>';
         });
         html += '</tbody></table>';
+    } else {
+        html += '<div class="empty-state"><p>Cache initialized -- no tool outcomes recorded yet on this agent. Entries populate as the conductor invokes tools.</p></div>';
     }
     return html;
 }
@@ -222,10 +225,11 @@ function renderArpPolicyCacheSection(cache) {
 function renderArpAdaptationSection(adaptation) {
     var html = '<div class="section-title">Adaptation Engine</div>';
     if (!adaptation) {
-        html += '<div class="empty-state"><p>Engine not yet wired into the agent loop. Beta priors and entity selection state will appear here once the loop drives the engine.</p></div>';
+        html += '<div class="empty-state"><p>No policy loaded for this agent -- adaptation engine becomes available after a valid ARP document is loaded.</p></div>';
         return html;
     }
     html += '<div class="cost-table"><table><tbody>';
+    html += '<tr><td>Status</td><td><span class="status-ok">live</span> -- priors update on every tool outcome</td></tr>';
     html += '<tr><td>Method</td><td><code>' + escapeHtml(adaptation.method) + '</code></td></tr>';
     html += '</tbody></table></div>';
 
@@ -242,6 +246,8 @@ function renderArpAdaptationSection(adaptation) {
                 '</tr>';
         });
         html += '</tbody></table>';
+    } else {
+        html += '<div class="empty-state"><p>Engine initialized -- no priors observed yet on this agent. Entities populate as the conductor selects tools and records outcomes.</p></div>';
     }
     return html;
 }

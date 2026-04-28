@@ -535,6 +535,7 @@ dependencies = [
  "anyhow",
  "arkavo-adaptation",
  "arkavo-arp",
+ "arkavo-arp-runtime",
  "arkavo-budget",
  "arkavo-cef",
  "arkavo-dataflow",
@@ -575,6 +576,18 @@ version = "0.71.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "arkavo-arp-runtime"
+version = "0.71.0"
+dependencies = [
+ "arkavo-adaptation",
+ "arkavo-arp",
+ "arkavo-policy-cache",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1726,6 +1739,7 @@ version = "0.71.0"
 dependencies = [
  "anyhow",
  "arkavo-agent",
+ "arkavo-arp-runtime",
  "arkavo-autolearn",
  "arkavo-budget",
  "arkavo-critic",

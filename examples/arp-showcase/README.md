@@ -19,8 +19,8 @@ Then open <http://127.0.0.1:7700> and click the scales icon in the left navigati
 - **Agent** — selector at the top, since each agent in the mesh owns its own ARP. The gateway's locally-loaded document appears as `(local)`. As real agents join the mesh and report their policies via A2A, they will populate this list. The dropdown shows the document status and any violation count per agent (e.g. `rover-alpha (OK) [3 viol]`).
 - **Document** — VALID status, ADL URI, ARP spec version, sections-present chips for every section configured in the document.
 - **Violations** — filtered view of decision traces where `outcome.success == false` or `event_type ∈ {quarantine, escalation, budget_event, hitl_action}`. Empty until the runtime emits enforcement events. This is the single source of truth for "what got blocked"; the Security panel will cross-link here.
-- **Policy Cache (runtime)** — empty-state placeholder. The policy cache config (TTL, decay strategy, half-life) is read from the document and shown in the Document section, but live cache state populates here only once the agent loop starts inserting entries.
-- **Adaptation Engine** — empty-state placeholder for the same reason. Beta priors will appear once the conductor drives entity selection.
+- **Policy Cache (runtime)** — live. The handler instantiates a `PolicyCache` from the loaded document and the panel shows entry count, hash-chain validity, plus a per-entry table once the conductor records tool outcomes. Standalone `arkavo ui` shows zero entries because there's no agent invoking tools; run a full agent process to see the cache fill.
+- **Adaptation Engine** — live. The handler instantiates an `AdaptationEngine` and exposes Beta priors per tool entity. Each conductor tool call updates the prior — `alpha` grows on success above the quality gate, `beta` grows on failure or below-gate outcomes.
 - **Recent Decision Traces** — full trace stream (success and denied) for the selected agent. Empty until the runtime emits trace entries.
 
 ## Pointing at a different document
