@@ -1,14 +1,16 @@
-//! Per-agent ARP runtime: bundles `PolicyCache` and `AdaptationEngine` so the
-//! conductor can update both as a single unit on every agent step.
+//! Per-agent ARP runtime: bundles `PolicyCache`, `AdaptationEngine`, and
+//! the append-only `DecisionTrace` so the conductor can update all three
+//! as a single unit on every agent step.
 //!
 //! `ArpRuntime` is constructed from a parsed `ArpDocument` and exposes:
 //!
 //! * `record_tool_outcome` — called after each tool invocation in the
-//!   conductor loop. Updates the AdaptationEngine prior for the tool and
-//!   writes a quality-tagged entry into the PolicyCache so the cache
-//!   reflects what the agent has actually learned.
-//! * `cache()` / `adaptation()` — accessors for the gateway/UI to snapshot
-//!   live state.
+//!   conductor loop. Updates the AdaptationEngine prior for the tool,
+//!   writes a quality-tagged entry into the PolicyCache, and appends a
+//!   `tool_invocation` entry to the DecisionTrace with prior/posterior
+//!   state. This is the audit trail required by ARP §17.1.
+//! * `cache()` / `adaptation()` / `decision_trace()` — accessors for the
+//!   gateway and UI to snapshot live state.
 //!
 //! A process-global accessor (`install` / `current`) lets the conductor
 //! reach the runtime without threading an extra argument through every
@@ -20,15 +22,62 @@ use std::sync::{Arc, OnceLock};
 
 use arkavo_adaptation::AdaptationEngine;
 use arkavo_arp::ArpDocument;
+use arkavo_arp::model::BetaPrior;
+use arkavo_arp::observability::{
+    DecisionTraceConfig, SelectionMethod, TraceDecision, TraceEventType, TraceLayer, TraceOutcome,
+};
+use arkavo_observability::decision_trace::DecisionTrace;
 use arkavo_policy_cache::{PolicyCache, PolicySource};
 use serde_json::json;
 use tokio::sync::Mutex;
 
-/// Bundles the PolicyCache and AdaptationEngine instantiated from an ARP
-/// document. Cheap to clone — backed by `Arc`s.
+/// Default agent_id used when the conductor doesn't pass one explicitly.
+/// Matches the gateway's synthetic local-agent id.
+const DEFAULT_AGENT_ID: &str = "(local)";
+
+/// Optional per-call context attached to a tool outcome. Lets the
+/// conductor enrich DecisionTrace entries with task and timing data
+/// without making `record_tool_outcome` ergonomically noisy.
+#[derive(Debug, Clone, Default)]
+pub struct ToolOutcomeContext {
+    pub task_id: Option<uuid::Uuid>,
+    pub agent_id: Option<String>,
+    pub latency_ms: Option<u64>,
+    pub error_type: Option<String>,
+}
+
+impl ToolOutcomeContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_task_id(mut self, id: uuid::Uuid) -> Self {
+        self.task_id = Some(id);
+        self
+    }
+
+    pub fn with_agent_id<S: Into<String>>(mut self, id: S) -> Self {
+        self.agent_id = Some(id.into());
+        self
+    }
+
+    pub fn with_latency_ms(mut self, ms: u64) -> Self {
+        self.latency_ms = Some(ms);
+        self
+    }
+
+    pub fn with_error_type<S: Into<String>>(mut self, err: S) -> Self {
+        self.error_type = Some(err.into());
+        self
+    }
+}
+
+/// Bundles the PolicyCache, AdaptationEngine, and DecisionTrace
+/// instantiated from an ARP document. Cheap to clone — backed by `Arc`s.
 pub struct ArpRuntime {
     cache: Arc<PolicyCache>,
     adaptation: Arc<Mutex<AdaptationEngine>>,
+    decision_trace: Arc<DecisionTrace>,
     quality_threshold: f64,
     /// Monotonic counter so each cache key is unique. Required because the
     /// PolicyCache hash chain doesn't tolerate same-key overwrites.
@@ -38,14 +87,30 @@ pub struct ArpRuntime {
 impl ArpRuntime {
     /// Build a runtime from a parsed ARP document. Quality threshold is
     /// pulled from `feedback_loops.immediate.quality_gate.threshold_default`.
+    /// The DecisionTrace is configured from `observability.decision_trace`
+    /// when present, otherwise enabled with append-only defaults.
     pub fn from_document(doc: &ArpDocument) -> Self {
         let cache_cfg = doc.feedback_loops.short_term.policy_cache.clone();
         let cache = Arc::new(PolicyCache::new(cache_cfg));
         let adaptation = Arc::new(Mutex::new(AdaptationEngine::new(doc.adaptation.clone())));
         let quality_threshold = doc.feedback_loops.immediate.quality_gate.threshold_default;
+
+        let trace_cfg = doc
+            .observability
+            .as_ref()
+            .and_then(|o| o.decision_trace.clone())
+            .unwrap_or(DecisionTraceConfig {
+                enabled: Some(true),
+                storage: Some("append_only".into()),
+                retention_days: None,
+                cryptographic_signing: None,
+            });
+        let decision_trace = Arc::new(DecisionTrace::new(trace_cfg));
+
         Self {
             cache,
             adaptation,
+            decision_trace,
             quality_threshold,
             outcome_seq: AtomicU64::new(0),
         }
@@ -59,26 +124,46 @@ impl ArpRuntime {
         self.adaptation.clone()
     }
 
+    pub fn decision_trace(&self) -> Arc<DecisionTrace> {
+        self.decision_trace.clone()
+    }
+
     /// Quality threshold below which an outcome is treated as a failure
     /// when updating priors and the cache.
     pub fn quality_threshold(&self) -> f64 {
         self.quality_threshold
     }
 
-    /// Record a tool's outcome into both the AdaptationEngine prior and
-    /// the PolicyCache. Called once per tool invocation in the conductor.
+    /// Record a tool's outcome into the AdaptationEngine prior, the
+    /// PolicyCache, and the DecisionTrace. Called once per tool invocation
+    /// in the conductor.
     ///
     /// `quality` is the response/result quality in [0.0, 1.0]. Successes
     /// above the configured threshold reinforce the prior; below-threshold
-    /// outcomes degrade it. The cache entry records the latest verdict so
-    /// the UI can show what the agent has learned about each tool.
+    /// outcomes degrade it.
     pub async fn record_tool_outcome(&self, tool_name: &str, success: bool, quality: f64) {
+        self.record_tool_outcome_with(tool_name, success, quality, &ToolOutcomeContext::default())
+            .await;
+    }
+
+    /// Same as `record_tool_outcome` but accepts a `ToolOutcomeContext`
+    /// with task_id, latency, and error type that get propagated into
+    /// the DecisionTrace entry.
+    pub async fn record_tool_outcome_with(
+        &self,
+        tool_name: &str,
+        success: bool,
+        quality: f64,
+        ctx: &ToolOutcomeContext,
+    ) {
         let q = quality.clamp(0.0, 1.0);
         let above_gate = q >= self.quality_threshold;
         let effective_success = success && above_gate;
 
-        {
+        // Update the prior, capturing before/after for the trace entry.
+        let (prior_before, prior_after) = {
             let mut eng = self.adaptation.lock().await;
+            let before = eng.get_prior(tool_name);
             eng.update(
                 tool_name,
                 arkavo_adaptation::Outcome {
@@ -86,8 +171,11 @@ impl ArpRuntime {
                     quality_score: q,
                 },
             );
-        }
+            let after = eng.get_prior(tool_name);
+            (before, after)
+        };
 
+        // PolicyCache: append a new entry per outcome.
         let n = self.outcome_seq.fetch_add(1, Ordering::Relaxed);
         let key = format!("tool.outcome.{tool_name}.{n}");
         let value = json!({
@@ -97,6 +185,53 @@ impl ArpRuntime {
             "above_quality_gate": above_gate,
         });
         self.cache.insert(key, value, PolicySource::Automated);
+
+        // DecisionTrace: emit a `tool_invocation` entry on the Execution layer.
+        let task_id = ctx.task_id.unwrap_or_else(uuid::Uuid::nil);
+        let agent_id = ctx.agent_id.as_deref().unwrap_or(DEFAULT_AGENT_ID);
+        let error_type = if !effective_success {
+            ctx.error_type.clone().or_else(|| {
+                Some(
+                    if !above_gate {
+                        "below_quality_gate"
+                    } else {
+                        "tool_failure"
+                    }
+                    .into(),
+                )
+            })
+        } else {
+            None
+        };
+
+        let decision = TraceDecision {
+            chosen: Some(tool_name.to_string()),
+            alternatives_considered: None,
+            selection_method: Some(SelectionMethod::ThompsonSampling),
+            prior_state: Some(BetaPrior {
+                alpha: prior_before.alpha,
+                beta: prior_before.beta,
+            }),
+            posterior_state: Some(BetaPrior {
+                alpha: prior_after.alpha,
+                beta: prior_after.beta,
+            }),
+        };
+        let outcome = TraceOutcome {
+            success: Some(effective_success),
+            quality_score: Some(q),
+            latency_ms: ctx.latency_ms,
+            cost_usd: None,
+            error_type,
+        };
+        self.decision_trace.record(
+            TraceLayer::Execution,
+            TraceEventType::ToolInvocation,
+            task_id,
+            agent_id,
+            decision,
+            outcome,
+        );
     }
 }
 
@@ -195,5 +330,110 @@ mod tests {
         rt.record_tool_outcome("tool_b", false, 0.2).await;
         rt.record_tool_outcome("tool_a", true, 0.85).await;
         assert!(rt.cache().verify_chain());
+    }
+
+    #[tokio::test]
+    async fn record_emits_decision_trace_entry() {
+        let rt = make_runtime();
+        rt.record_tool_outcome("filesystem_tools", true, 0.95).await;
+
+        let trace = rt.decision_trace();
+        assert_eq!(trace.len(), 1);
+
+        let entries = trace.snapshot();
+        let entry = &entries[0];
+        assert_eq!(entry.event_type.to_string_repr(), "tool_invocation");
+        assert_eq!(entry.layer.to_string_repr(), "execution");
+        assert_eq!(entry.decision.chosen.as_deref(), Some("filesystem_tools"));
+        assert_eq!(entry.outcome.success, Some(true));
+        assert!((entry.outcome.quality_score.unwrap() - 0.95).abs() < 1e-9);
+
+        // prior_state and posterior_state both set; alpha grew on success.
+        let prior = entry.decision.prior_state.unwrap();
+        let posterior = entry.decision.posterior_state.unwrap();
+        assert!(posterior.alpha > prior.alpha);
+        assert_eq!(posterior.beta, prior.beta);
+    }
+
+    #[tokio::test]
+    async fn below_gate_outcome_carries_error_type() {
+        let rt = make_runtime();
+        rt.record_tool_outcome("shell_exec", true, 0.3).await; // below 0.7 gate
+
+        let entries = rt.decision_trace().snapshot();
+        let entry = &entries[0];
+        assert_eq!(entry.outcome.success, Some(false));
+        assert_eq!(
+            entry.outcome.error_type.as_deref(),
+            Some("below_quality_gate")
+        );
+    }
+
+    #[tokio::test]
+    async fn record_with_context_propagates_task_id_and_latency() {
+        let rt = make_runtime();
+        let task_id = uuid::Uuid::new_v4();
+        let ctx = ToolOutcomeContext::new()
+            .with_task_id(task_id)
+            .with_agent_id("rover-alpha")
+            .with_latency_ms(42);
+
+        rt.record_tool_outcome_with("git_status", true, 0.9, &ctx)
+            .await;
+
+        let entries = rt.decision_trace().snapshot();
+        let entry = &entries[0];
+        assert_eq!(entry.task_id, task_id.to_string());
+        assert_eq!(entry.agent_id, "rover-alpha");
+        assert_eq!(entry.outcome.latency_ms, Some(42));
+    }
+
+    #[tokio::test]
+    async fn explicit_error_type_overrides_default() {
+        let rt = make_runtime();
+        let ctx = ToolOutcomeContext::new().with_error_type("connection_refused");
+        rt.record_tool_outcome_with("shell_exec", false, 0.0, &ctx)
+            .await;
+
+        let entries = rt.decision_trace().snapshot();
+        assert_eq!(
+            entries[0].outcome.error_type.as_deref(),
+            Some("connection_refused")
+        );
+    }
+}
+
+// Test helpers — short string forms of the trace enums for assertion-readability.
+#[cfg(test)]
+trait EnumStringRepr {
+    fn to_string_repr(&self) -> &'static str;
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceLayer {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceLayer::Cognitive => "cognitive",
+            TraceLayer::Execution => "execution",
+            TraceLayer::DataSovereignty => "data_sovereignty",
+            TraceLayer::Network => "network",
+        }
+    }
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceEventType {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceEventType::RoutingDecision => "routing_decision",
+            TraceEventType::QualityGate => "quality_gate",
+            TraceEventType::ToolInvocation => "tool_invocation",
+            TraceEventType::DataAccess => "data_access",
+            TraceEventType::Delegation => "delegation",
+            TraceEventType::Escalation => "escalation",
+            TraceEventType::BudgetEvent => "budget_event",
+            TraceEventType::Quarantine => "quarantine",
+            TraceEventType::HitlAction => "hitl_action",
+        }
     }
 }

@@ -78,11 +78,9 @@ Talk track on the violations table:
 
 ### Beat four — "it's also evidence" (60 seconds)
 
-Scroll to **Recent Decision Traces** below Violations. Same data, but unfiltered — successes too. Point out the `ok` vs `denied` column.
+Scroll to **Recent Decision Traces** below Violations. Same data, but unfiltered — successes too. Point out the `ok` vs `denied` column. Each row is a real `tool_invocation` entry written by the conductor — layer, task id, chosen tool, prior/posterior priors, latency, quality score. Append-only per ARP §17.1.
 
-> *"Auditors don't just want to see the failures. They want proof that 99 things ran cleanly and one was blocked."*
-
-Mention that with the `signing` feature flag each entry is Ed25519-signed; with `cryptographic_signing.signing_required_above_sensitivity: confidential` you get tamper-evident logs that meet GRC retention rules.
+> *"Auditors don't just want to see the failures. They want proof that 99 things ran cleanly and one was blocked. Each row here is signed-eligible — turn on the `signing` feature flag and every confidential-or-above entry gets an Ed25519 signature, giving you a tamper-evident chain that satisfies GRC retention rules."*
 
 ### Beat five — "and it learns"
 

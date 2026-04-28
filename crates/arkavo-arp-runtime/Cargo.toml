@@ -12,9 +12,11 @@ description = "Per-agent ARP runtime that wires PolicyCache and AdaptationEngine
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-policy-cache = { path = "../arkavo-policy-cache" }
 arkavo-adaptation = { path = "../arkavo-adaptation" }
+arkavo-observability = { path = "../arkavo-observability" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

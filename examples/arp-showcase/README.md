@@ -21,7 +21,7 @@ Then open <http://127.0.0.1:7700> and click the scales icon in the left navigati
 - **Violations** — filtered view of decision traces where `outcome.success == false` or `event_type ∈ {quarantine, escalation, budget_event, hitl_action}`. Empty until the runtime emits enforcement events. This is the single source of truth for "what got blocked"; the Security panel will cross-link here.
 - **Policy Cache (runtime)** — live. The handler instantiates a `PolicyCache` from the loaded document and the panel shows entry count, hash-chain validity, plus a per-entry table once the conductor records tool outcomes. Standalone `arkavo ui` shows zero entries because there's no agent invoking tools; run a full agent process to see the cache fill.
 - **Adaptation Engine** — live. The handler instantiates an `AdaptationEngine` and exposes Beta priors per tool entity. Each conductor tool call updates the prior — `alpha` grows on success above the quality gate, `beta` grows on failure or below-gate outcomes.
-- **Recent Decision Traces** — full trace stream (success and denied) for the selected agent. Empty until the runtime emits trace entries.
+- **Recent Decision Traces** — full trace stream (success and denied) for the selected agent. The runtime emits a `tool_invocation` entry per tool call with prior/posterior Beta state, latency, quality score, and an error type when an outcome is below the quality gate or fails outright. Standalone `arkavo ui` shows zero entries because there's no agent invoking tools.
 
 ## Pointing at a different document
 

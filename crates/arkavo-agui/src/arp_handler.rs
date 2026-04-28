@@ -266,8 +266,14 @@ async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatu
         None => None,
     };
 
-    let decision_traces = entry
+    // Prefer an explicitly attached trace; otherwise pull from the
+    // runtime (which now emits an entry per tool outcome).
+    let trace_arc = entry
         .decision_trace
+        .clone()
+        .or_else(|| entry.runtime.as_ref().map(|rt| rt.decision_trace()));
+
+    let decision_traces = trace_arc
         .as_ref()
         .map(|trace| {
             let mut entries: Vec<_> = trace
@@ -569,5 +575,34 @@ mod tests {
         let adaptation = agent.adaptation.as_ref().expect("adaptation engine live");
         assert_eq!(adaptation.method, "thompson_sampling");
         assert!(adaptation.entities.is_empty(), "no priors observed yet");
+    }
+
+    #[tokio::test]
+    async fn tool_outcome_surfaces_in_decision_trace_snapshot() {
+        // The runtime's DecisionTrace must flow through to the gateway
+        // snapshot so the panel's Recent Decision Traces table populates
+        // as the conductor records tool outcomes.
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", MIN_DOC).await;
+
+        // Reach into the runtime owned by the handler and record an
+        // outcome — same path the conductor uses, just direct.
+        let rt = {
+            let guard = handler.agents.read().await;
+            guard
+                .get("rover-alpha")
+                .and_then(|e| e.runtime.clone())
+                .expect("runtime instantiated")
+        };
+        rt.record_tool_outcome("filesystem_tools", true, 0.92).await;
+
+        let snap = handler.snapshot().await;
+        let agent = &snap.agents[0];
+        assert_eq!(agent.decision_traces.len(), 1);
+        let entry = &agent.decision_traces[0];
+        assert_eq!(entry.event_type, "tool_invocation");
+        assert_eq!(entry.layer, "execution");
+        assert_eq!(entry.chosen_entity.as_deref(), Some("filesystem_tools"));
+        assert_eq!(entry.success, Some(true));
     }
 }

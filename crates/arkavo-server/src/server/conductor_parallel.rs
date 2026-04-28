@@ -545,7 +545,10 @@ async fn executor_track(
                             None if success => 1.0,
                             None => 0.0,
                         };
-                        rt.record_tool_outcome(&tool_name, success, quality).await;
+                        let ctx = arkavo_arp_runtime::ToolOutcomeContext::new()
+                            .with_latency_ms(latency_ms);
+                        rt.record_tool_outcome_with(&tool_name, success, quality, &ctx)
+                            .await;
                     }
 
                     let _ = result_tx
@@ -568,7 +571,11 @@ async fn executor_track(
                     }
 
                     if let Some(rt) = arkavo_arp_runtime::current() {
-                        rt.record_tool_outcome(&tool_name, false, 0.0).await;
+                        let ctx = arkavo_arp_runtime::ToolOutcomeContext::new()
+                            .with_latency_ms(latency_ms)
+                            .with_error_type(err.clone());
+                        rt.record_tool_outcome_with(&tool_name, false, 0.0, &ctx)
+                            .await;
                     }
 
                     let _ = result_tx

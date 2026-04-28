@@ -584,10 +584,12 @@ version = "0.71.0"
 dependencies = [
  "arkavo-adaptation",
  "arkavo-arp",
+ "arkavo-observability",
  "arkavo-policy-cache",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
