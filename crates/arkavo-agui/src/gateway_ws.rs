@@ -1,4 +1,5 @@
 use crate::agent_connection::AgentConnection;
+use crate::arp_handler::ArpHandler;
 use crate::budget_handler::BudgetHandler;
 use crate::types::*;
 use crate::{gateway_config, gateway_events, gateway_routing, gateway_task_dispatch};
@@ -29,6 +30,7 @@ pub async fn websocket_handler(
             state.lesson_tx,
             state.lesson_store,
             state.context_topology_cache,
+            state.arp_handler,
         )
     })
 }
@@ -49,6 +51,7 @@ async fn handle_websocket(
     lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    arp_handler: Arc<ArpHandler>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -106,6 +109,7 @@ async fn handle_websocket(
             &lesson_tx,
             &lesson_store,
             &context_topology_cache,
+            &arp_handler,
             &tx,
         )
         .await
@@ -134,6 +138,7 @@ async fn handle_websocket(
                         &lesson_tx,
                         &lesson_store,
                         &context_topology_cache,
+                        &arp_handler,
                         &tx,
                     )
                     .await
@@ -185,6 +190,7 @@ async fn dispatch_event(
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    arp_handler: &Arc<ArpHandler>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -331,6 +337,14 @@ async fn dispatch_event(
                 selected_agent,
                 tx,
             )
+            .await?;
+        }
+        AgUiEvent::RequestArpStatus => {
+            let snapshot = arp_handler.snapshot().await;
+            tx.send(AgUiEvent::ArpStatusUpdate {
+                snapshot,
+                event_id: uuid::Uuid::new_v4().to_string(),
+            })
             .await?;
         }
         AgUiEvent::RequestLearningStatus => {

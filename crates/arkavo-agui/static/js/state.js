@@ -34,6 +34,8 @@ var AppState = {
     contextTopology: null,
     selectedContextAgent: null,
     conversationWindow: null,
+    arpStatus: null,
+    arpSelectedAgent: null,
 };
 
 var MAX_TELEMETRY = 200;

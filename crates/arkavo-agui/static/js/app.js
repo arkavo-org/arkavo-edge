@@ -92,6 +92,9 @@ function routeEvent(event) {
         case 'contextTopologyUpdate':
             handleContextTopologyUpdate(event);
             break;
+        case 'arpStatusUpdate':
+            handleArpStatusUpdate(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;
@@ -142,6 +145,9 @@ function switchView(viewId) {
     } else if (viewId === 'context') {
         wsSend({ type: 'requestContextTopology' });
         startContextPolling();
+    } else if (viewId === 'arp') {
+        wsSend({ type: 'requestArpStatus' });
+        startArpPolling();
     }
 
     // Stop polling when navigating away
@@ -150,6 +156,9 @@ function switchView(viewId) {
     }
     if (viewId !== 'context') {
         stopContextPolling();
+    }
+    if (viewId !== 'arp') {
+        stopArpPolling();
     }
 }
 
