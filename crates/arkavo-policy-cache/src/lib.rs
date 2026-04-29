@@ -218,6 +218,39 @@ impl PolicyCache {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Snapshot of all entries with their current source, age, and influence.
+    /// Sorted by insertion order (seq) for deterministic display.
+    pub fn snapshot(&self) -> Vec<PolicyEntrySnapshot> {
+        let mut entries: Vec<_> = self
+            .entries
+            .iter()
+            .map(|e| {
+                let v = e.value();
+                let age_sec = v.created_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+                let influence = self.influence(&v.key);
+                PolicyEntrySnapshot {
+                    key: v.key.clone(),
+                    source: v.source,
+                    age_sec,
+                    influence,
+                    seq: v.seq,
+                }
+            })
+            .collect();
+        entries.sort_by_key(|e| e.seq);
+        entries
+    }
+}
+
+/// Read-only snapshot of a cache entry suitable for UI display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyEntrySnapshot {
+    pub key: String,
+    pub source: PolicySource,
+    pub age_sec: u64,
+    pub influence: f64,
+    pub seq: u64,
 }
 
 /// Compute a deterministic hash for chain integrity.

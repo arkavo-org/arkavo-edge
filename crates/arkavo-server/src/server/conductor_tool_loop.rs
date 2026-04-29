@@ -701,6 +701,21 @@ async fn execute_tool_calls(
                     let _ = bus.sender().send(event).await;
                 }
 
+                // ARP runtime: feed tool outcome into the per-agent
+                // PolicyCache, AdaptationEngine, and DecisionTrace so they
+                // evaluate on every step (ARP §6, §7.2, §17.1).
+                if let Some(rt) = arkavo_arp_runtime::current() {
+                    let quality = match reward {
+                        Some(r) => f64::midpoint(r, 1.0).clamp(0.0, 1.0),
+                        None if tool_success => 1.0,
+                        None => 0.0,
+                    };
+                    let ctx =
+                        arkavo_arp_runtime::ToolOutcomeContext::new().with_latency_ms(latency_ms);
+                    rt.record_tool_outcome_with(&tool_call.tool_name, tool_success, quality, &ctx)
+                        .await;
+                }
+
                 tool_result_parts.push(condense_tool_result(
                     &tool_call.tool_name,
                     &result_str,
@@ -762,6 +777,17 @@ async fn execute_tool_calls(
                         // conversation is cleared.
                         bus.add_fast_lesson(&tool_call.tool_name, &err_str).await;
                     }
+                }
+
+                // ARP runtime: record the failure so the AdaptationEngine
+                // prior reflects the bad outcome (§6), the cache logs it,
+                // and a `tool_invocation` trace row captures the error.
+                if let Some(rt) = arkavo_arp_runtime::current() {
+                    let ctx = arkavo_arp_runtime::ToolOutcomeContext::new()
+                        .with_latency_ms(latency_ms)
+                        .with_error_type(err_str.clone());
+                    rt.record_tool_outcome_with(&tool_call.tool_name, false, 0.0, &ctx)
+                        .await;
                 }
 
                 tool_result_parts

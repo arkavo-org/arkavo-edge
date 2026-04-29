@@ -1,4 +1,5 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
+use crate::arp_handler::ArpHandler;
 use crate::budget_handler::BudgetHandler;
 use crate::cost_handler::CostHandler;
 use crate::dataflow_handler::DataflowHandler;
@@ -63,6 +64,8 @@ pub struct AppState {
     pub lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     /// Latest context topology push from each agent (keyed by agent_id)
     pub context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    /// Agent Runtime Policy (ARP) document + runtime snapshot.
+    pub arp_handler: Arc<ArpHandler>,
 }
 
 pub struct AgUiGateway {
@@ -390,6 +393,11 @@ impl AgUiGateway {
             lesson_tx: Some(lesson_tx),
             lesson_store,
             context_topology_cache,
+            arp_handler: {
+                let handler = Arc::new(ArpHandler::new());
+                handler.load_from_environment().await;
+                handler
+            },
         };
 
         // Register learning pipeline health reporter (uses gateway shared stores)

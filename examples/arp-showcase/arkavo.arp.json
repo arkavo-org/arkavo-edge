@@ -1,0 +1,179 @@
+{
+  "arp_spec": "0.1.0",
+  "adl_ref": {
+    "uri": "file://./agent.adl.json",
+    "document_hash": "sha256:showcase-demo"
+  },
+  "adaptation": {
+    "method": "thompson_sampling",
+    "parameters": {
+      "exploration_floor": 0.05
+    },
+    "cold_start": {
+      "strategy": "optimistic",
+      "initial_prior": { "alpha": 2.0, "beta": 1.0 },
+      "warmup_period": 5,
+      "warmup_behavior": "constitutional_only"
+    },
+    "prior_management": {
+      "version_binding": "entity_hash",
+      "reset_on_version_change": true,
+      "reset_state": { "alpha": 2.0, "beta": 1.0 }
+    }
+  },
+  "feedback_loops": {
+    "immediate": {
+      "quality_gate": {
+        "threshold_default": 0.7,
+        "metric": "composite",
+        "on_failure": "update_prior_and_log",
+        "threshold_overrides": [
+          { "task_class": "code_review",   "threshold": 0.85 },
+          { "task_class": "summarization", "threshold": 0.6 }
+        ]
+      }
+    },
+    "short_term": {
+      "policy_cache": {
+        "default_ttl_sec": 3600,
+        "decay_strategy": "exponential",
+        "decay_half_life_sec": 86400,
+        "human_source_exempt_from_decay": true,
+        "incident_source_quarantine_sec": 7200
+      }
+    },
+    "gossip": {
+      "propagation_interval_sec": 30,
+      "peer_discount_factor": 0.8,
+      "require_did_signature": false,
+      "quorum": {
+        "min_trusted_peers": 1,
+        "trusted_registry": "did:web:arkavo.example:registry",
+        "untrusted_did_weight": 0.0,
+        "new_did_probation_period_sec": 300
+      }
+    }
+  },
+  "cognitive": {
+    "context_inspection": {
+      "pattern_registry": [
+        {
+          "name": "ssn",
+          "regex": "\\d{3}-\\d{2}-\\d{4}",
+          "sensitivity": "restricted",
+          "action": "redact"
+        },
+        {
+          "name": "email",
+          "regex": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+",
+          "sensitivity": "internal",
+          "action": "log"
+        }
+      ],
+      "max_input_chars": 8192,
+      "max_output_chars": 4096
+    },
+    "drift_detection": {
+      "metric": "cosine_distance",
+      "threshold": 0.4,
+      "sample_interval_tokens": 512,
+      "on_drift_exceeded": "halt_and_report"
+    }
+  },
+  "execution": {
+    "sandbox": {
+      "default_limits": {
+        "memory_limit_mb": 1024,
+        "cpu_limit_percent": 50,
+        "timeout_sec": 30
+      }
+    },
+    "tool_risk": {
+      "risk_levels": [
+        { "level": "low",      "ordinal": 0, "description": "Read-only filesystem ops" },
+        { "level": "medium",   "ordinal": 1, "description": "Filesystem writes" },
+        { "level": "high",     "ordinal": 2, "description": "Shell + network egress" },
+        { "level": "critical", "ordinal": 3, "description": "System modification" }
+      ],
+      "classifications": [
+        { "tool_pattern": "fs.read*",    "risk": "low" },
+        { "tool_pattern": "fs.write*",   "risk": "medium" },
+        { "tool_pattern": "shell.*",     "risk": "high",     "requires_hitl": true },
+        { "tool_pattern": "network.*",   "risk": "high" }
+      ]
+    }
+  },
+  "network": {
+    "egress": {
+      "dynamic_deny": {
+        "on_connection_failure_count": 3,
+        "on_tls_error": true,
+        "on_suspicious_response": true
+      },
+      "deny_takes_precedence": true,
+      "dynamic_deny_ttl_sec": 600
+    },
+    "peer_routing": {
+      "peer_adaptation_method": "thompson_sampling",
+      "delegation_roi_tracking": true,
+      "delegation_roi_window_sec": 120,
+      "prefer_local_threshold": 0.6
+    }
+  },
+  "budget": {
+    "task_ceiling_usd": 2.50,
+    "on_exhaustion": "halt_and_report",
+    "alert_threshold_pct": 0.8,
+    "velocity": {
+      "max_spend_per_minute_usd": 0.50,
+      "max_tool_calls_per_minute": 30,
+      "max_tokens_per_minute": 50000
+    }
+  },
+  "escalation": {
+    "ratchet_direction": "tighten_only",
+    "relaxation_requires": "human_approval",
+    "cross_layer_rules": [
+      {
+        "trigger": { "layer": "cognitive", "event": "pii_redaction_failed" },
+        "actions": [
+          { "target_layer": "network", "action": "tighten_egress" }
+        ]
+      }
+    ]
+  },
+  "session": {
+    "timeout_bounds": {
+      "absolute_timeout_min_sec": 60,
+      "absolute_timeout_max_sec": 86400
+    },
+    "defaults": {
+      "absolute_timeout_sec": 3600,
+      "idle_timeout_sec": 600
+    }
+  },
+  "state_storage": {
+    "policy_cache": {
+      "backend": "local_encrypted",
+      "integrity": "hash_chain",
+      "encryption_at_rest": true
+    }
+  },
+  "observability": {
+    "decision_trace": {
+      "enabled": true,
+      "storage": "append_only",
+      "retention_days": 90,
+      "cryptographic_signing": {
+        "signing_required_above_sensitivity": "confidential",
+        "algorithm": "Ed25519"
+      }
+    },
+    "export": {
+      "siem_export": {
+        "format": "json_lines",
+        "frequency": "hourly"
+      }
+    }
+  }
+}

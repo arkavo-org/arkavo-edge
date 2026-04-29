@@ -540,6 +540,14 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Agent Runtime Policy (ARP) events
+    RequestArpStatus,
+    ArpStatusUpdate {
+        snapshot: ArpStatusSnapshot,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -1077,4 +1085,166 @@ pub struct AgentContextInfo {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub category_stats: Vec<CategoryStat>,
+}
+
+/// Mesh-wide ARP snapshot — one entry per agent.
+///
+/// Each agent in the mesh owns its own Agent Runtime Policy, so the panel
+/// is keyed by agent. The gateway includes its locally-loaded document as
+/// a synthetic `(local)` agent until per-agent A2A polling is wired.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpStatusSnapshot {
+    pub agents: Vec<AgentArpStatus>,
+    pub timestamp: String,
+}
+
+/// Per-agent ARP state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentArpStatus {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    /// Path the ARP document was loaded from (None if no document configured).
+    #[serde(rename = "documentPath", skip_serializing_if = "Option::is_none")]
+    pub document_path: Option<String>,
+    /// Whether the loaded document parsed and validated successfully.
+    #[serde(rename = "documentValid")]
+    pub document_valid: bool,
+    /// Parse / validation error if loading failed.
+    #[serde(rename = "loadError", skip_serializing_if = "Option::is_none")]
+    pub load_error: Option<String>,
+    /// Document summary (None if no document loaded).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<ArpDocumentSummary>,
+    /// Runtime PolicyCache state (None if cache not instantiated).
+    #[serde(rename = "policyCache", skip_serializing_if = "Option::is_none")]
+    pub policy_cache: Option<ArpPolicyCacheSnapshot>,
+    /// Adaptation engine state (None if engine not instantiated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adaptation: Option<ArpAdaptationSnapshot>,
+    /// Most recent decision-trace entries from arkavo-observability.
+    #[serde(
+        rename = "decisionTraces",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub decision_traces: Vec<ArpDecisionTraceEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpDocumentSummary {
+    #[serde(rename = "arpSpec")]
+    pub arp_spec: String,
+    #[serde(rename = "adlUri", skip_serializing_if = "Option::is_none")]
+    pub adl_uri: Option<String>,
+    #[serde(rename = "adlHash", skip_serializing_if = "Option::is_none")]
+    pub adl_hash: Option<String>,
+    #[serde(rename = "integritySigned")]
+    pub integrity_signed: bool,
+    #[serde(rename = "adaptationMethod")]
+    pub adaptation_method: String,
+    #[serde(rename = "qualityGate", skip_serializing_if = "Option::is_none")]
+    pub quality_gate: Option<ArpQualityGateSummary>,
+    #[serde(rename = "policyCacheConfig", skip_serializing_if = "Option::is_none")]
+    pub policy_cache_config: Option<ArpPolicyCacheConfigSummary>,
+    pub budget: ArpBudgetSummary,
+    #[serde(rename = "sectionsPresent")]
+    pub sections_present: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpQualityGateSummary {
+    pub threshold: f64,
+    pub metric: String,
+    #[serde(rename = "onFailure")]
+    pub on_failure: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheConfigSummary {
+    #[serde(rename = "ttlSec")]
+    pub ttl_sec: u64,
+    #[serde(rename = "decayStrategy")]
+    pub decay_strategy: String,
+    #[serde(rename = "halfLifeSec", skip_serializing_if = "Option::is_none")]
+    pub half_life_sec: Option<u64>,
+    #[serde(rename = "humanExempt")]
+    pub human_exempt: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpBudgetSummary {
+    #[serde(rename = "taskCeilingUsd")]
+    pub task_ceiling_usd: f64,
+    #[serde(rename = "onExhaustion")]
+    pub on_exhaustion: String,
+    #[serde(
+        rename = "maxSpendPerMinuteUsd",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_spend_per_minute_usd: Option<f64>,
+    #[serde(
+        rename = "maxToolCallsPerMinute",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_tool_calls_per_minute: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheSnapshot {
+    #[serde(rename = "entryCount")]
+    pub entry_count: usize,
+    #[serde(rename = "chainValid")]
+    pub chain_valid: bool,
+    pub entries: Vec<ArpPolicyCacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheEntry {
+    pub key: String,
+    pub source: String,
+    pub influence: f64,
+    #[serde(rename = "ageSec")]
+    pub age_sec: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpAdaptationSnapshot {
+    pub method: String,
+    pub entities: Vec<ArpAdaptationEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpAdaptationEntity {
+    pub id: String,
+    pub alpha: f64,
+    pub beta: f64,
+    pub mean: f64,
+    pub observations: u32,
+    #[serde(rename = "inWarmup")]
+    pub in_warmup: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpDecisionTraceEntry {
+    #[serde(rename = "traceId")]
+    pub trace_id: String,
+    pub layer: String,
+    #[serde(rename = "eventType")]
+    pub event_type: String,
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "chosenEntity", skip_serializing_if = "Option::is_none")]
+    pub chosen_entity: Option<String>,
+    #[serde(rename = "selectionMethod", skip_serializing_if = "Option::is_none")]
+    pub selection_method: Option<String>,
+    /// Outcome.success from the trace; `false` indicates an attempted
+    /// policy violation that was blocked or denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+    /// Free-form denial reason or error type, when present.
+    #[serde(rename = "deniedReason", skip_serializing_if = "Option::is_none")]
+    pub denied_reason: Option<String>,
+    pub timestamp: String,
 }

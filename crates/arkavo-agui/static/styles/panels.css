@@ -751,3 +751,29 @@
 .context-token-bar-track { background: var(--border-color); border-radius: 2px; height: 6px; overflow: hidden; }
 .context-token-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
 
+
+/* Agent Runtime Policy panel */
+.status-ok { color: var(--success, #4ecdc4); font-weight: 600; }
+.status-warn { color: var(--warning, #ff9f43); font-weight: 600; }
+.chip {
+    display: inline-block;
+    font-size: 10px;
+    font-family: monospace;
+    padding: 2px 8px;
+    margin: 2px 2px 2px 0;
+    background: rgba(78, 205, 196, 0.1);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-secondary);
+}
+.violations-table .violation-row { background: rgba(255, 159, 67, 0.07); }
+.violations-table .violation-row td { border-top: 1px solid rgba(255, 159, 67, 0.25); }
+#arp-agent-select {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: monospace;
+    font-size: 12px;
+}

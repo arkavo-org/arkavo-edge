@@ -98,6 +98,7 @@ arkavo-autolearn = { path = "../arkavo-autolearn" }
 arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-critic = { path = "../arkavo-critic" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 

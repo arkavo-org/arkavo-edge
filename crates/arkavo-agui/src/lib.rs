@@ -1,5 +1,6 @@
 pub mod agent_connection;
 pub mod api_keys;
+pub mod arp_handler;
 pub mod budget_handler;
 pub mod coding_agent_bridge;
 pub mod command_health_collector;

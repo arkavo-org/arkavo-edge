@@ -14,4 +14,5 @@ fn main() {
     println!("cargo:rerun-if-changed=static/js/panels/budget.js");
     println!("cargo:rerun-if-changed=static/js/panels/health.js");
     println!("cargo:rerun-if-changed=static/js/panels/router.js");
+    println!("cargo:rerun-if-changed=static/js/panels/arp.js");
 }

@@ -539,6 +539,18 @@ async fn executor_track(
                         let _ = bus.sender().send(event).await;
                     }
 
+                    if let Some(rt) = arkavo_arp_runtime::current() {
+                        let quality = match reward {
+                            Some(r) => f64::midpoint(r, 1.0).clamp(0.0, 1.0),
+                            None if success => 1.0,
+                            None => 0.0,
+                        };
+                        let ctx = arkavo_arp_runtime::ToolOutcomeContext::new()
+                            .with_latency_ms(latency_ms);
+                        rt.record_tool_outcome_with(&tool_name, success, quality, &ctx)
+                            .await;
+                    }
+
                     let _ = result_tx
                         .send(ExecutionResult {
                             tool_name,
@@ -556,6 +568,14 @@ async fn executor_track(
                         mem.write()
                             .await
                             .add(tool_name.clone(), &args, &format!("Error: {err}"));
+                    }
+
+                    if let Some(rt) = arkavo_arp_runtime::current() {
+                        let ctx = arkavo_arp_runtime::ToolOutcomeContext::new()
+                            .with_latency_ms(latency_ms)
+                            .with_error_type(err.clone());
+                        rt.record_tool_outcome_with(&tool_name, false, 0.0, &ctx)
+                            .await;
                     }
 
                     let _ = result_tx
