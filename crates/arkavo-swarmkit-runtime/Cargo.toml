@@ -19,7 +19,13 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+arkavo-agui = { path = "../arkavo-agui", default-features = false }
+serde_json = { workspace = true }
 
 [[example]]
 name = "swarm_flight_demo"
+required-features = []
+
+[[example]]
+name = "swarmkit_agui_demo"
 required-features = []

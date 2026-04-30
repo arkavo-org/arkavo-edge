@@ -1128,6 +1128,32 @@ pub struct AgentArpStatus {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub decision_traces: Vec<ArpDecisionTraceEntry>,
+    /// Set when this agent entry represents a role within a SwarmFlight.
+    /// The UI uses this to label the entry with kit + role metadata
+    /// rather than the synthetic agent_id used for storage.
+    #[serde(rename = "flightContext", skip_serializing_if = "Option::is_none")]
+    pub flight_context: Option<FlightContext>,
+}
+
+/// Identifies a SwarmFlight role surfaced through the AG-UI ARP panel.
+///
+/// SwarmKit's `agent_provisioning` block hands off to the companion ARP
+/// specification at SwarmFlight start. When the gateway registers a flight,
+/// each role becomes addressable in the panel's agent dropdown; this struct
+/// carries enough metadata for the UI to render the role meaningfully
+/// instead of showing the synthetic per-role agent_id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightContext {
+    #[serde(rename = "flightId")]
+    pub flight_id: String,
+    #[serde(rename = "kitId")]
+    pub kit_id: String,
+    #[serde(rename = "kitName")]
+    pub kit_name: String,
+    #[serde(rename = "roleId")]
+    pub role_id: String,
+    #[serde(rename = "roleType")]
+    pub role_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

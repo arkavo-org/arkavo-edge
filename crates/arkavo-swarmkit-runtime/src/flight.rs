@@ -38,11 +38,14 @@ pub struct LaunchOptions {
 }
 
 /// Per-role runtime: the ARP runtime plus minimal manifest metadata so
-/// callers can route by role_type without re-parsing the manifest.
+/// callers can route by role_type without re-parsing the manifest. The
+/// originating ARP document is retained so the AG-UI ARP panel and other
+/// observers can render the same document the runtime was built from.
 pub struct RoleRuntime {
     role_id: String,
     role_type: String,
     arp: Arc<ArpRuntime>,
+    arp_document: ArpDocument,
 }
 
 impl RoleRuntime {
@@ -56,6 +59,13 @@ impl RoleRuntime {
 
     pub fn arp(&self) -> &Arc<ArpRuntime> {
         &self.arp
+    }
+
+    /// The ARP document this role's runtime was built from — either an
+    /// explicit override from `LaunchOptions::arp_overrides` or the default
+    /// derived from `agent_provisioning`.
+    pub fn arp_document(&self) -> &ArpDocument {
+        &self.arp_document
     }
 }
 
@@ -123,6 +133,7 @@ impl SwarmFlight {
                     role_id: role.id.clone(),
                     role_type: role.role_type.clone(),
                     arp,
+                    arp_document: arp_doc,
                 },
             );
         }

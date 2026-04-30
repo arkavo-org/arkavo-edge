@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 use crate::types::{
     AgentArpStatus, ArpAdaptationEntity, ArpAdaptationSnapshot, ArpBudgetSummary,
     ArpDecisionTraceEntry, ArpDocumentSummary, ArpPolicyCacheConfigSummary, ArpPolicyCacheEntry,
-    ArpPolicyCacheSnapshot, ArpQualityGateSummary, ArpStatusSnapshot,
+    ArpPolicyCacheSnapshot, ArpQualityGateSummary, ArpStatusSnapshot, FlightContext,
 };
 
 const DEFAULT_DOC_FILENAME: &str = "arkavo.arp.json";
@@ -51,6 +51,10 @@ struct AgentEntry {
     /// a separate process and hands its cache to the gateway).
     policy_cache: Option<Arc<PolicyCache>>,
     decision_trace: Option<Arc<DecisionTrace>>,
+    /// Set when this entry represents a role within a registered SwarmFlight.
+    /// Surfaced in the snapshot so the UI can render kit/role metadata
+    /// alongside the per-role runtime state.
+    flight_context: Option<FlightContext>,
 }
 
 struct LoadedDocument {
@@ -186,6 +190,55 @@ impl ArpHandler {
         guard.remove(agent_id);
     }
 
+    /// Register one role of a SwarmFlight as an agent in the panel.
+    ///
+    /// SwarmKit's spec §1.2 / §5 hands off from `agent_provisioning` to ARP
+    /// at SwarmFlight start. This method makes the per-role ARP state visible
+    /// in the same panel that mesh agents publish to. The runtime is reused
+    /// — no rebuild — so the cache/adaptation/trace shown in the panel are
+    /// the same instances the SwarmFlight is mutating.
+    ///
+    /// The synthetic agent_id is `flight:{flight_id}:{role_id}` so multiple
+    /// concurrent flights with overlapping role_ids do not collide. The UI
+    /// uses `FlightContext` to render the friendly kit_name + role_type.
+    pub async fn attach_flight_role(&self, registration: FlightRoleRegistration) {
+        let FlightRoleRegistration {
+            flight_id,
+            kit_id,
+            kit_name,
+            role_id,
+            role_type,
+            arp_doc,
+            runtime,
+        } = registration;
+        let agent_id = flight_role_agent_id(flight_id, &role_id);
+        let flight_context = FlightContext {
+            flight_id: flight_id.to_string(),
+            kit_id,
+            kit_name,
+            role_id,
+            role_type,
+        };
+        let loaded = LoadedDocument {
+            path: None,
+            parsed: Some(arp_doc),
+            error: None,
+        };
+        let mut guard = self.agents.write().await;
+        let entry = guard.entry(agent_id).or_default();
+        entry.doc_state = Some(loaded);
+        entry.runtime = Some(runtime);
+        entry.flight_context = Some(flight_context);
+    }
+
+    /// Remove every role registered under `flight_id`. Called when a
+    /// SwarmFlight terminates so stale entries don't accumulate.
+    pub async fn remove_flight(&self, flight_id: uuid::Uuid) {
+        let prefix = format!("flight:{flight_id}:");
+        let mut guard = self.agents.write().await;
+        guard.retain(|k, _| !k.starts_with(&prefix));
+    }
+
     /// Build the mesh-wide snapshot pushed to the UI.
     pub async fn snapshot(&self) -> ArpStatusSnapshot {
         let guard = self.agents.read().await;
@@ -193,19 +246,59 @@ impl ArpHandler {
         for (id, e) in guard.iter() {
             agents.push(build_agent_status(id, e).await);
         }
-        // Stable ordering: (local) first, then alphabetical
-        agents.sort_by(|a, b| match (a.agent_id.as_str(), b.agent_id.as_str()) {
-            (LOCAL_AGENT_ID, LOCAL_AGENT_ID) => std::cmp::Ordering::Equal,
-            (LOCAL_AGENT_ID, _) => std::cmp::Ordering::Less,
-            (_, LOCAL_AGENT_ID) => std::cmp::Ordering::Greater,
-            (a, b) => a.cmp(b),
-        });
+        // Stable ordering: (local) first, then mesh agents alphabetically,
+        // then flight roles grouped by flight_id then role_id. This keeps
+        // the dropdown sections visually consistent.
+        agents.sort_by(sort_status);
 
         ArpStatusSnapshot {
             agents,
             timestamp: chrono::Utc::now().to_rfc3339(),
         }
     }
+}
+
+fn sort_status(a: &AgentArpStatus, b: &AgentArpStatus) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let a_local = a.agent_id == LOCAL_AGENT_ID;
+    let b_local = b.agent_id == LOCAL_AGENT_ID;
+    if a_local || b_local {
+        return match (a_local, b_local) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => Ordering::Equal,
+        };
+    }
+    // Flight roles always sort after mesh agents.
+    match (&a.flight_context, &b.flight_context) {
+        (None, None) => a.agent_id.cmp(&b.agent_id),
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(fa), Some(fb)) => fa
+            .flight_id
+            .cmp(&fb.flight_id)
+            .then_with(|| fa.role_id.cmp(&fb.role_id)),
+    }
+}
+
+/// Synthetic agent_id used to address one role of a SwarmFlight in the
+/// per-agent ARP map. Exposed for use in tests and bridge code.
+pub fn flight_role_agent_id(flight_id: uuid::Uuid, role_id: &str) -> String {
+    format!("flight:{flight_id}:{role_id}")
+}
+
+/// All inputs required to surface one SwarmFlight role in the ARP panel.
+/// Bundled so `ArpHandler::attach_flight_role` stays ergonomic while the
+/// data the UI needs to render the role grows.
+pub struct FlightRoleRegistration {
+    pub flight_id: uuid::Uuid,
+    pub kit_id: String,
+    pub kit_name: String,
+    pub role_id: String,
+    pub role_type: String,
+    pub arp_doc: ArpDocument,
+    pub runtime: Arc<ArpRuntime>,
 }
 
 async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
@@ -298,6 +391,7 @@ async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatu
         policy_cache,
         adaptation,
         decision_traces,
+        flight_context: entry.flight_context.clone(),
     }
 }
 
@@ -575,6 +669,160 @@ mod tests {
         let adaptation = agent.adaptation.as_ref().expect("adaptation engine live");
         assert_eq!(adaptation.method, "thompson_sampling");
         assert!(adaptation.entities.is_empty(), "no priors observed yet");
+    }
+
+    fn flight_reg(
+        flight_id: uuid::Uuid,
+        kit_name: &str,
+        role_id: &str,
+        role_type: &str,
+        runtime: Arc<ArpRuntime>,
+    ) -> FlightRoleRegistration {
+        FlightRoleRegistration {
+            flight_id,
+            kit_id: format!("blake3:{kit_name}"),
+            kit_name: kit_name.into(),
+            role_id: role_id.into(),
+            role_type: role_type.into(),
+            arp_doc: arkavo_arp::parse(MIN_DOC).unwrap(),
+            runtime,
+        }
+    }
+
+    #[tokio::test]
+    async fn flight_role_appears_with_context() {
+        let handler = ArpHandler::new();
+        let doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        let runtime = Arc::new(ArpRuntime::from_document(&doc));
+        let flight_id = uuid::Uuid::new_v4();
+
+        handler
+            .attach_flight_role(flight_reg(
+                flight_id,
+                "Tiny Kit",
+                "worker",
+                "specialist",
+                runtime.clone(),
+            ))
+            .await;
+
+        let snap = handler.snapshot().await;
+        assert_eq!(snap.agents.len(), 1);
+        let entry = &snap.agents[0];
+        assert_eq!(
+            entry.agent_id,
+            format!("flight:{flight_id}:worker"),
+            "synthetic agent_id namespaces by flight_id"
+        );
+        let ctx = entry.flight_context.as_ref().expect("flight context set");
+        assert_eq!(ctx.kit_name, "Tiny Kit");
+        assert_eq!(ctx.role_id, "worker");
+        assert_eq!(ctx.role_type, "specialist");
+        assert_eq!(ctx.flight_id, flight_id.to_string());
+
+        // Document panel populated from the supplied ARP doc.
+        assert!(entry.document_valid);
+        let doc_summary = entry.document.as_ref().unwrap();
+        assert_eq!(doc_summary.adaptation_method, "thompson_sampling");
+
+        // Runtime panels populated from the runtime — empty so far.
+        let cache = entry.policy_cache.as_ref().unwrap();
+        assert_eq!(cache.entry_count, 0);
+        let adaptation = entry.adaptation.as_ref().unwrap();
+        assert!(adaptation.entities.is_empty());
+    }
+
+    #[tokio::test]
+    async fn flight_role_runtime_state_flows_through_snapshot() {
+        let handler = ArpHandler::new();
+        let doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        let runtime = Arc::new(ArpRuntime::from_document(&doc));
+        let flight_id = uuid::Uuid::new_v4();
+
+        handler
+            .attach_flight_role(flight_reg(
+                flight_id,
+                "Demo Kit",
+                "analyst",
+                "asset_analyst",
+                runtime.clone(),
+            ))
+            .await;
+
+        // Drive the same runtime instance the handler is observing.
+        runtime
+            .record_tool_outcome("asset.summarize", true, 0.91)
+            .await;
+
+        let snap = handler.snapshot().await;
+        let entry = &snap.agents[0];
+        assert_eq!(entry.decision_traces.len(), 1);
+        assert_eq!(
+            entry.decision_traces[0].chosen_entity.as_deref(),
+            Some("asset.summarize")
+        );
+        assert_eq!(entry.policy_cache.as_ref().unwrap().entry_count, 1);
+    }
+
+    #[tokio::test]
+    async fn remove_flight_drops_only_its_roles() {
+        let handler = ArpHandler::new();
+        let doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        let f1 = uuid::Uuid::new_v4();
+        let f2 = uuid::Uuid::new_v4();
+
+        for (flight, role) in [(f1, "alpha"), (f1, "beta"), (f2, "alpha")] {
+            handler
+                .attach_flight_role(flight_reg(
+                    flight,
+                    "Kit",
+                    role,
+                    "specialist",
+                    Arc::new(ArpRuntime::from_document(&doc)),
+                ))
+                .await;
+        }
+        handler.set_agent_arp("rover-alpha", MIN_DOC).await;
+
+        assert_eq!(handler.snapshot().await.agents.len(), 4);
+        handler.remove_flight(f1).await;
+
+        let snap = handler.snapshot().await;
+        assert_eq!(snap.agents.len(), 2);
+        assert!(
+            snap.agents
+                .iter()
+                .any(|a| a.agent_id == format!("flight:{f2}:alpha"))
+        );
+        assert!(snap.agents.iter().any(|a| a.agent_id == "rover-alpha"));
+    }
+
+    #[tokio::test]
+    async fn snapshot_sort_order_local_then_mesh_then_flight() {
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-zulu", MIN_DOC).await;
+        handler.set_agent_arp("rover-alpha", MIN_DOC).await;
+        handler.set_agent_arp(LOCAL_AGENT_ID, MIN_DOC).await;
+        let doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        let flight_id = uuid::Uuid::new_v4();
+        handler
+            .attach_flight_role(flight_reg(
+                flight_id,
+                "Kit",
+                "worker",
+                "specialist",
+                Arc::new(ArpRuntime::from_document(&doc)),
+            ))
+            .await;
+
+        let snap = handler.snapshot().await;
+        assert_eq!(snap.agents[0].agent_id, LOCAL_AGENT_ID);
+        assert_eq!(snap.agents[1].agent_id, "rover-alpha");
+        assert_eq!(snap.agents[2].agent_id, "rover-zulu");
+        assert_eq!(
+            snap.agents[3].agent_id,
+            format!("flight:{flight_id}:worker")
+        );
     }
 
     #[tokio::test]

@@ -100,8 +100,17 @@ function renderArpAgentSelector(agents) {
         var status = a.documentValid ? 'OK' : (a.documentPath ? 'INVALID' : 'NONE');
         var vcount = violationsByAgent[a.agentId];
         var vtag = vcount > 0 ? ' [' + vcount + ' viol]' : '';
+        // SwarmFlight roles carry a flightContext block; render the kit/role
+        // metadata instead of the synthetic flight:<uuid>:<role> agent_id.
+        var label;
+        if (a.flightContext) {
+            label = '⚓ ' + a.flightContext.kitName + ' / ' +
+                a.flightContext.roleId + ' (' + a.flightContext.roleType + ')';
+        } else {
+            label = a.agentId;
+        }
         html += '<option value="' + escapeHtml(a.agentId) + '"' + selected + '>' +
-            escapeHtml(a.agentId) + ' (' + status + ')' + vtag + '</option>';
+            escapeHtml(label) + ' (' + status + ')' + vtag + '</option>';
     });
     html += '</select>';
     html += '</td></tr></tbody></table></div>';
