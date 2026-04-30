@@ -77,6 +77,7 @@ members = [
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
     "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "tests/golden_dataset",
     ".cargo/xtask",
@@ -137,6 +138,7 @@ default-members = [
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
     "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     ".cargo/xtask",
 ]

@@ -1,0 +1,25 @@
+[package]
+name = "arkavo-swarmkit-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SwarmFlight runtime — per-role ARP runtime provisioning and DecisionTrace isolation"
+
+[dependencies]
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-arp = { path = "../arkavo-arp" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[[example]]
+name = "swarm_flight_demo"
+required-features = []
