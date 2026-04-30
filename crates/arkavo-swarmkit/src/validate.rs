@@ -1,0 +1,436 @@
+//! Cross-block validation rules per spec §4.6 (rubric weights), §5.1 (per-role caps),
+//! §10.1 (expiry cap), §9.1 (kit.id matches BLAKE3 of canonical form).
+//!
+//! These rules cannot be expressed in the JSON Schema; they require relational
+//! checks across blocks. The orchestrator MUST enforce them before provisioning.
+
+use std::collections::HashSet;
+
+use chrono::{DateTime, FixedOffset};
+
+use crate::canonical::kit_id_for;
+use crate::manifest::Manifest;
+
+/// Maximum accepted kit lifetime per spec §10.1 — `expires - created` MUST be ≤ 1 year.
+pub const MAX_EXPIRY_HORIZON_SECONDS: i64 = 365 * 24 * 60 * 60;
+/// Recommended cap per spec §10.1 — SHOULD be ≤ 90 days.
+pub const RECOMMENDED_EXPIRY_HORIZON_SECONDS: i64 = 90 * 24 * 60 * 60;
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum ValidationError {
+    #[error("spec_version {found} unsupported; only 1.x is recognized")]
+    SpecVersionMismatch { found: String },
+
+    #[error("roles is empty; at least one role is required (§4.1)")]
+    NoRoles,
+
+    #[error("duplicate role id {0:?}")]
+    DuplicateRoleId(String),
+
+    #[error("handoff target {target:?} from role {from:?} does not resolve to a known role")]
+    UnresolvedHandoff { from: String, target: String },
+
+    #[error("evaluation.critic_role {0:?} does not resolve to a known role")]
+    UnresolvedCriticRole(String),
+
+    #[error(
+        "agent_provisioning.failure.fallback_role {target:?} on role {from:?} does not resolve to a known role"
+    )]
+    UnresolvedFallbackRole { from: String, target: String },
+
+    #[error(
+        "agent_provisioning.budget.{field} on role {role:?} ({value}) exceeds constraints.global_budget.{field} ({limit})"
+    )]
+    BudgetExceedsGlobal {
+        role: String,
+        field: &'static str,
+        value: u64,
+        limit: u64,
+    },
+
+    #[error(
+        "role {role:?} sets isolation.network_egress=true but constraints.network.egress_allowed=false"
+    )]
+    NetworkEgressDenied { role: String },
+
+    #[error("evaluation.rubric.dimensions weight sum {sum} is not 1.0 (within ±1e-6)")]
+    RubricWeightsDoNotSumToOne { sum: f64 },
+
+    #[error("invalid timestamp {field:?}: {raw:?}")]
+    InvalidTimestamp { field: &'static str, raw: String },
+
+    #[error("kit.expires - kit.created exceeds the §10.1 1-year cap")]
+    ExpiryHorizonTooLarge,
+
+    #[error("kit.expires is at or before kit.created")]
+    ExpiryBeforeCreated,
+
+    #[error("kit.id {found:?} does not match BLAKE3 of canonical manifest (expected {expected:?})")]
+    KitIdHashMismatch { found: String, expected: String },
+}
+
+/// Validate the cross-block invariants of a SwarmKit manifest.
+///
+/// Returns the first encountered error. Skips `kit.id` verification when
+/// `kit.id` is the empty string (used by producers building a new manifest).
+pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
+    if !m.spec_version.starts_with("1.") {
+        return Err(ValidationError::SpecVersionMismatch {
+            found: m.spec_version.clone(),
+        });
+    }
+
+    if m.roles.is_empty() {
+        return Err(ValidationError::NoRoles);
+    }
+
+    let mut role_ids: HashSet<&str> = HashSet::new();
+    for role in &m.roles {
+        if !role_ids.insert(&role.id) {
+            return Err(ValidationError::DuplicateRoleId(role.id.clone()));
+        }
+    }
+
+    for role in &m.roles {
+        for h in &role.handoffs {
+            if !role_ids.contains(h.to.as_str()) {
+                return Err(ValidationError::UnresolvedHandoff {
+                    from: role.id.clone(),
+                    target: h.to.clone(),
+                });
+            }
+        }
+        if let Some(failure) = &role.agent_provisioning.failure
+            && let Some(target) = &failure.fallback_role
+            && !role_ids.contains(target.as_str())
+        {
+            return Err(ValidationError::UnresolvedFallbackRole {
+                from: role.id.clone(),
+                target: target.clone(),
+            });
+        }
+        validate_role_budget(role, &m.constraints.global_budget)?;
+        validate_network_egress(role, m.constraints.network.egress_allowed)?;
+    }
+
+    if let Some(eval) = &m.evaluation {
+        if !role_ids.contains(eval.critic_role.as_str()) {
+            return Err(ValidationError::UnresolvedCriticRole(
+                eval.critic_role.clone(),
+            ));
+        }
+        let sum: f64 = eval.rubric.dimensions.iter().map(|d| d.weight).sum();
+        if (sum - 1.0).abs() > 1e-6 {
+            return Err(ValidationError::RubricWeightsDoNotSumToOne { sum });
+        }
+    }
+
+    validate_expiry(m)?;
+
+    if !m.kit.id.is_empty() {
+        validate_kit_id(m)?;
+    }
+
+    Ok(())
+}
+
+fn validate_role_budget(
+    role: &crate::role::RoleSpec,
+    global: &crate::coordination::GlobalBudget,
+) -> Result<(), ValidationError> {
+    let Some(budget) = &role.agent_provisioning.budget else {
+        return Ok(());
+    };
+
+    let role_id = &role.id;
+
+    if let Some(ms) = budget.max_wallclock_ms {
+        let global_ms = global.max_wallclock_seconds.saturating_mul(1000);
+        if ms > global_ms {
+            return Err(ValidationError::BudgetExceedsGlobal {
+                role: role_id.clone(),
+                field: "max_wallclock_ms",
+                value: ms,
+                limit: global_ms,
+            });
+        }
+    }
+
+    if let Some(toks) = budget.max_total_tokens
+        && toks > global.max_total_tokens
+    {
+        return Err(ValidationError::BudgetExceedsGlobal {
+            role: role_id.clone(),
+            field: "max_total_tokens",
+            value: toks,
+            limit: global.max_total_tokens,
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_network_egress(
+    role: &crate::role::RoleSpec,
+    global_allowed: bool,
+) -> Result<(), ValidationError> {
+    let Some(isolation) = &role.agent_provisioning.isolation else {
+        return Ok(());
+    };
+    if isolation.network_egress == Some(true) && !global_allowed {
+        return Err(ValidationError::NetworkEgressDenied {
+            role: role.id.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_expiry(m: &Manifest) -> Result<(), ValidationError> {
+    let Some(expires_str) = &m.kit.expires else {
+        return Ok(());
+    };
+    let created = parse_rfc3339(&m.kit.created, "kit.created")?;
+    let expires = parse_rfc3339(expires_str, "kit.expires")?;
+    let delta = expires.signed_duration_since(created).num_seconds();
+    if delta <= 0 {
+        return Err(ValidationError::ExpiryBeforeCreated);
+    }
+    if delta > MAX_EXPIRY_HORIZON_SECONDS {
+        return Err(ValidationError::ExpiryHorizonTooLarge);
+    }
+    Ok(())
+}
+
+fn parse_rfc3339(raw: &str, field: &'static str) -> Result<DateTime<FixedOffset>, ValidationError> {
+    DateTime::parse_from_rfc3339(raw).map_err(|_| ValidationError::InvalidTimestamp {
+        field,
+        raw: raw.to_string(),
+    })
+}
+
+fn validate_kit_id(m: &Manifest) -> Result<(), ValidationError> {
+    let expected = kit_id_for(m).map_err(|_| ValidationError::KitIdHashMismatch {
+        found: m.kit.id.clone(),
+        expected: "<serialization failed>".to_string(),
+    })?;
+    if expected != m.kit.id {
+        return Err(ValidationError::KitIdHashMismatch {
+            found: m.kit.id.clone(),
+            expected,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordination::*;
+    use crate::manifest::*;
+    use crate::role::*;
+
+    fn minimal_manifest() -> Manifest {
+        Manifest {
+            spec_version: "1.0.0".into(),
+            kit: KitMetadata {
+                id: String::new(),
+                name: "test".into(),
+                version: "1.0.0".into(),
+                description: None,
+                authors: vec![Author {
+                    did: "did:web:example.com".into(),
+                    name: None,
+                }],
+                created: "2026-04-29T00:00:00Z".into(),
+                expires: Some("2026-05-29T00:00:00Z".into()),
+                nonce: "thz1Cz8aWOUURbyQQfvA0Q".into(),
+            },
+            objective: Objective {
+                goal: "test".into(),
+                success_criteria: vec![],
+            },
+            inputs: vec![],
+            deliverables: vec![],
+            roles: vec![RoleSpec {
+                id: "r1".into(),
+                role_type: "specialist".into(),
+                description: None,
+                agent_provisioning: AgentProvisioning::default(),
+                skills: vec![],
+                mcp_tools: vec![],
+                tdf_attribute_release_policy: None,
+                handoffs: vec![],
+                context_scope: None,
+            }],
+            coordination: CoordinationSpec {
+                topology: Topology::HubSpoke,
+                protocol: "a2a-jsonrpc-2.0".into(),
+                routing: Routing {
+                    strategy: RoutingStrategy::Static,
+                    parameters: None,
+                },
+                context_sharing: None,
+            },
+            constraints: ConstraintsSpec {
+                global_budget: GlobalBudget {
+                    max_wallclock_seconds: 60,
+                    max_total_tokens: 8000,
+                    max_cost_usd: 0.01,
+                },
+                data_classifications: vec!["public".into()],
+                jurisdiction: vec![],
+                network: NetworkConstraints {
+                    egress_allowed: false,
+                    egress_allowlist: vec![],
+                },
+            },
+            evaluation: None,
+            completion: CompletionSpec {
+                rules: vec!["all deliverables present".into()],
+                on_failure: OnFailure::Abort,
+                max_retries: 0,
+            },
+            provenance: ProvenanceSpec {
+                c2pa_assertions: vec![],
+                signatures: vec![Signature {
+                    signer_did: "did:web:example.com".into(),
+                    algorithm: "ed25519".into(),
+                    signature: "AAA".into(),
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn minimal_validates() {
+        validate(&minimal_manifest()).unwrap();
+    }
+
+    #[test]
+    fn budget_overflow_caught() {
+        let mut m = minimal_manifest();
+        m.roles[0].agent_provisioning.budget = Some(Budget {
+            max_total_tokens: Some(99_999),
+            ..Default::default()
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::BudgetExceedsGlobal {
+                field: "max_total_tokens",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn network_egress_denied() {
+        let mut m = minimal_manifest();
+        m.roles[0].agent_provisioning.isolation = Some(Isolation {
+            sandbox: None,
+            fs_writable: vec![],
+            network_egress: Some(true),
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(err, ValidationError::NetworkEgressDenied { .. }));
+    }
+
+    #[test]
+    fn unresolved_handoff() {
+        let mut m = minimal_manifest();
+        m.roles[0].handoffs.push(Handoff {
+            to: "ghost".into(),
+            on: "always".into(),
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(err, ValidationError::UnresolvedHandoff { .. }));
+    }
+
+    #[test]
+    fn unresolved_critic() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![EvaluationDimension {
+                    name: "accuracy".into(),
+                    weight: 1.0,
+                    threshold: 0.7,
+                }],
+            },
+            critic_role: "ghost".into(),
+            sample_size: None,
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(err, ValidationError::UnresolvedCriticRole(_)));
+    }
+
+    #[test]
+    fn rubric_weights_must_sum_to_one() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "a".into(),
+                        weight: 0.4,
+                        threshold: 0.5,
+                    },
+                    EvaluationDimension {
+                        name: "b".into(),
+                        weight: 0.4,
+                        threshold: 0.5,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::RubricWeightsDoNotSumToOne { .. }
+        ));
+    }
+
+    #[test]
+    fn expiry_horizon_capped() {
+        let mut m = minimal_manifest();
+        m.kit.expires = Some("2030-01-01T00:00:00Z".into()); // > 1 year out
+        let err = validate(&m).unwrap_err();
+        assert_eq!(err, ValidationError::ExpiryHorizonTooLarge);
+    }
+
+    #[test]
+    fn expiry_before_created() {
+        let mut m = minimal_manifest();
+        m.kit.expires = Some("2026-04-28T00:00:00Z".into()); // before created
+        let err = validate(&m).unwrap_err();
+        assert_eq!(err, ValidationError::ExpiryBeforeCreated);
+    }
+
+    #[test]
+    fn duplicate_role_id() {
+        let mut m = minimal_manifest();
+        m.roles.push(m.roles[0].clone());
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(err, ValidationError::DuplicateRoleId(_)));
+    }
+
+    #[test]
+    fn kit_id_round_trip() {
+        let mut m = minimal_manifest();
+        let id = crate::canonical::kit_id_for(&m).unwrap();
+        m.kit.id = id;
+        validate(&m).unwrap();
+    }
+
+    #[test]
+    fn kit_id_mismatch_detected() {
+        let mut m = minimal_manifest();
+        m.kit.id = "blake3:wrong".into();
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(err, ValidationError::KitIdHashMismatch { .. }));
+    }
+}

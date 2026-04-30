@@ -76,6 +76,7 @@ members = [
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
+    "crates/arkavo-swarmkit",
     "crates/arkavo-mcp-identity",
     "tests/golden_dataset",
     ".cargo/xtask",
@@ -135,6 +136,7 @@ default-members = [
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
+    "crates/arkavo-swarmkit",
     "crates/arkavo-mcp-identity",
     ".cargo/xtask",
 ]
@@ -143,7 +145,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.72.0"
+version = "0.73.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
