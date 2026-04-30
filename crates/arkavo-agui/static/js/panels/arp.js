@@ -60,6 +60,7 @@ function renderArp() {
     }
 
     var html = '';
+    html += renderArpFlightsSection(agents);
     html += renderArpAgentSelector(agents);
 
     var selected = agents.filter(function(a) { return a.agentId === AppState.arpSelectedAgent; })[0];
@@ -83,6 +84,19 @@ function renderArp() {
             renderArp();
         });
     }
+
+    // Pills in the flight section dispatch the same selection action as
+    // the dropdown, but route through data-agent-id since the visible
+    // label is friendlier than the synthetic agent_id.
+    var pills = document.querySelectorAll('.arp-flight-pill');
+    Array.prototype.forEach.call(pills, function(pill) {
+        pill.addEventListener('click', function() {
+            var id = pill.getAttribute('data-agent-id');
+            if (!id) return;
+            AppState.arpSelectedAgent = id;
+            renderArp();
+        });
+    });
 }
 
 function renderArpAgentSelector(agents) {
@@ -114,6 +128,79 @@ function renderArpAgentSelector(agents) {
     });
     html += '</select>';
     html += '</td></tr></tbody></table></div>';
+    return html;
+}
+
+function groupFlightRoles(agents) {
+    var byFlight = {};
+    var order = [];
+    agents.forEach(function(a) {
+        if (!a.flightContext) return;
+        var fid = a.flightContext.flightId;
+        if (!byFlight[fid]) {
+            byFlight[fid] = {
+                flightId: fid,
+                kitId: a.flightContext.kitId,
+                kitName: a.flightContext.kitName,
+                roles: []
+            };
+            order.push(fid);
+        }
+        byFlight[fid].roles.push(a);
+    });
+    return order.map(function(fid) { return byFlight[fid]; });
+}
+
+function renderArpFlightsSection(agents) {
+    var flights = groupFlightRoles(agents);
+    if (flights.length === 0) return '';
+
+    var html = '<div class="section-title">Active SwarmFlights</div>';
+    html += '<div class="cost-table"><table><tbody>';
+
+    flights.forEach(function(flight) {
+        var shortId = (flight.flightId || '').slice(0, 8);
+        var rolesCell = '<div class="arp-flight-roles">';
+
+        flight.roles.forEach(function(role) {
+            var ctx = role.flightContext;
+            var traces = role.decisionTraces || [];
+            var traceCount = traces.length;
+            var violationCount = traces.filter(isViolation).length;
+
+            var pillClass = 'arp-flight-pill';
+            if (role.agentId === AppState.arpSelectedAgent) pillClass += ' arp-flight-pill-selected';
+            if (violationCount > 0) pillClass += ' arp-flight-pill-violation';
+            else if (!role.documentValid) pillClass += ' arp-flight-pill-invalid';
+
+            var statusGlyph;
+            if (violationCount > 0) statusGlyph = '⚠';
+            else if (traceCount > 0) statusGlyph = '✓';
+            else statusGlyph = '○';
+
+            var counter = '';
+            if (violationCount > 0) counter = ' ' + violationCount + ' viol';
+            else if (traceCount > 0) counter = ' ' + traceCount;
+
+            rolesCell += '<button type="button" class="' + pillClass + '"' +
+                ' data-agent-id="' + escapeHtml(role.agentId) + '"' +
+                ' title="' + escapeHtml(role.agentId) + '">' +
+                statusGlyph + ' <strong>' + escapeHtml(ctx.roleId) + '</strong>' +
+                ' <span class="arp-flight-pill-type">' + escapeHtml(ctx.roleType) + '</span>' +
+                escapeHtml(counter) +
+                '</button>';
+        });
+
+        rolesCell += '</div>';
+
+        html += '<tr><td>' +
+            '<strong>' + escapeHtml(flight.kitName) + '</strong>' +
+            '<div class="arp-flight-meta">flight <code>' + escapeHtml(shortId) + '…</code>' +
+            ' · ' + flight.roles.length + ' role' + (flight.roles.length === 1 ? '' : 's') + '</div>' +
+            '</td><td>' + rolesCell + '</td></tr>';
+    });
+
+    html += '</tbody></table></div>';
     return html;
 }
 
