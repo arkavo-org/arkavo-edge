@@ -46,7 +46,10 @@ arkavo-arp = { path = "../arkavo-arp" }
 arkavo-policy-cache = { path = "../arkavo-policy-cache" }
 arkavo-adaptation = { path = "../arkavo-adaptation" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-swarmkit-runtime = { path = "../arkavo-swarmkit-runtime" }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 async-trait = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
