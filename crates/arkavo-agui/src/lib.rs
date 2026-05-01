@@ -31,6 +31,7 @@ pub mod response_judge;
 pub mod roi_metrics;
 pub mod security_handler;
 pub mod streaming;
+pub mod swarm_flight_registry;
 pub mod timeout_handler;
 pub mod types;
 pub mod ui_handler;

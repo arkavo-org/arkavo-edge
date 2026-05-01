@@ -1,0 +1,211 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:UQrbWgCpQxTEHaHORFpfDGww71rFFmo5MZsCX6fkR8E"
+  name: "Campaign Kit (3-agent MVP)"
+  version: "0.1.0"
+  description: >-
+    Vertical slice for the Campaign SwarmKit (arkavo-org/arkavo-edge#573).
+    Three roles — Asset Analyst, Copy Agent, Critic — produce a structured
+    campaign kit from a source asset and a target platform. Single
+    orchestrator hand-off path: analyst → copy → critic → packaged result.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-04-29T12:00:00Z"
+  expires: "2026-07-28T12:00:00Z"
+  nonce: "APW3Y2vM2k92WNTjI1kLrg"
+
+objective:
+  goal: "Produce a structured Campaign Kit for one source asset and one platform from a creator-supplied brief."
+  success_criteria:
+    - "all four campaign-kit fields populated (brief, posts, scripts, risk_notes)"
+    - "no unsupported claims about the source asset"
+    - "rubric.weighted_score >= 0.75"
+
+inputs:
+  - name: "source_asset"
+    type: "tdf-ref"
+    required: true
+    classification: "internal"
+  - name: "creator_brief"
+    type: "text"
+    required: true
+  - name: "platform"
+    type: "text"
+    required: true
+
+deliverables:
+  - name: "campaign_kit"
+    type: "json"
+    classification: "internal"
+
+roles:
+  - id: "analyst"
+    role_type: "asset_analyst"
+    description: "Summarize the source asset and extract selling points."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.2
+        thinking: true
+      budget:
+        max_inference_calls: 4
+        max_wallclock_ms: 60000
+        max_total_tokens: 16000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:asset-analysis"
+        version: "0.1.0"
+        source: "registry"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/asset_analyst"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "copy"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "copy"
+    role_type: "platform_copy"
+    description: "Generate platform-specific copy from the analyst's selling points."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.4
+        thinking: false
+      budget:
+        max_inference_calls: 6
+        max_wallclock_ms: 90000
+        max_total_tokens: 24000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "tool_result"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:platform-copy"
+        version: "0.1.0"
+        source: "registry"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/platform_copy"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "critic"
+        on: "always"
+    context_scope:
+      can_read: ["analyst", "self"]
+      can_write: ["self"]
+
+  - id: "critic"
+    role_type: "critic"
+    description: "Score the produced copy against the rubric and flag unsupported claims."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 512
+        temperature: 0.0
+        thinking: false
+      budget:
+        max_inference_calls: 3
+        max_wallclock_ms: 30000
+        max_total_tokens: 8000
+      context:
+        max_context_tokens: 16000
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:campaign-critic"
+        version: "0.1.0"
+        source: "registry"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/critic"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["analyst", "copy", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "pipeline"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+    compaction:
+      strategy: "tool_result"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 60000
+    max_cost_usd: 0.25
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+evaluation:
+  rubric:
+    reference: "swarmkit-spec-draft-00#appendix-d"
+    dimensions:
+      - name: "accuracy"
+        weight: 0.30
+        threshold: 0.7
+      - name: "completeness"
+        weight: 0.25
+        threshold: 0.7
+      - name: "safety"
+        weight: 0.25
+        threshold: 0.9
+      - name: "alignment"
+        weight: 0.20
+        threshold: 0.8
+  critic_role: "critic"
+
+completion:
+  rules:
+    - "all deliverables present"
+    - "rubric.weighted_score >= 0.75"
+    - "no role in error state"
+  on_failure: "abort"
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "AzqNXKR_APggRBJKZ3XAkl5Kxlw21zoHyoVRbcG9-sTooJO4rlyidASm79nNHQWLZuheQ_oT-ivWugunwEMYcQ"

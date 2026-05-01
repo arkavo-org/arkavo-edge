@@ -12,6 +12,24 @@ var VIOLATION_EVENT_TYPES = {
 
 function handleArpStatusUpdate(event) {
     AppState.arpStatus = event.snapshot;
+    // Dedup re-renders: the panel polls every 5s but most poll cycles
+    // return identical state. Comparing the serialized snapshot lets us
+    // skip the DOM rebuild — preserving <select> focus, table scroll
+    // position, and pill hover state — when nothing actually changed.
+    // The `timestamp` field is excluded from the comparison since it
+    // ticks every poll even when the rest of the snapshot is stable.
+    var snap = event.snapshot || {};
+    var withoutTs = {};
+    for (var k in snap) {
+        if (k !== 'timestamp' && Object.prototype.hasOwnProperty.call(snap, k)) {
+            withoutTs[k] = snap[k];
+        }
+    }
+    var fingerprint = JSON.stringify(withoutTs);
+    if (AppState.arpLastFingerprint === fingerprint) {
+        return;
+    }
+    AppState.arpLastFingerprint = fingerprint;
     renderArp();
 }
 
@@ -60,6 +78,7 @@ function renderArp() {
     }
 
     var html = '';
+    html += renderArpFlightsSection(agents);
     html += renderArpAgentSelector(agents);
 
     var selected = agents.filter(function(a) { return a.agentId === AppState.arpSelectedAgent; })[0];
@@ -83,6 +102,34 @@ function renderArp() {
             renderArp();
         });
     }
+
+    // Pills in the flight section dispatch the same selection action as
+    // the dropdown, but route through data-agent-id since the visible
+    // label is friendlier than the synthetic agent_id.
+    var pills = document.querySelectorAll('.arp-flight-pill');
+    Array.prototype.forEach.call(pills, function(pill) {
+        pill.addEventListener('click', function() {
+            var id = pill.getAttribute('data-agent-id');
+            if (!id) return;
+            AppState.arpSelectedAgent = id;
+            renderArp();
+        });
+    });
+
+    // Stop buttons send a requestStopFlight event; the gateway responds
+    // with FlightStopped + an ArpStatusUpdate so the panel re-renders
+    // without the dropped flight.
+    var stops = document.querySelectorAll('.arp-flight-stop');
+    Array.prototype.forEach.call(stops, function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var fid = btn.getAttribute('data-flight-id');
+            if (!fid) return;
+            btn.disabled = true;
+            btn.textContent = 'Stopping…';
+            wsSend({ type: 'requestStopFlight', flightId: fid });
+        });
+    });
 }
 
 function renderArpAgentSelector(agents) {
@@ -100,11 +147,99 @@ function renderArpAgentSelector(agents) {
         var status = a.documentValid ? 'OK' : (a.documentPath ? 'INVALID' : 'NONE');
         var vcount = violationsByAgent[a.agentId];
         var vtag = vcount > 0 ? ' [' + vcount + ' viol]' : '';
+        // SwarmFlight roles carry a flightContext block; render the kit/role
+        // metadata instead of the synthetic flight:<uuid>:<role> agent_id.
+        var label;
+        if (a.flightContext) {
+            label = '⚓ ' + a.flightContext.kitName + ' / ' +
+                a.flightContext.roleId + ' (' + a.flightContext.roleType + ')';
+        } else {
+            label = a.agentId;
+        }
         html += '<option value="' + escapeHtml(a.agentId) + '"' + selected + '>' +
-            escapeHtml(a.agentId) + ' (' + status + ')' + vtag + '</option>';
+            escapeHtml(label) + ' (' + status + ')' + vtag + '</option>';
     });
     html += '</select>';
     html += '</td></tr></tbody></table></div>';
+    return html;
+}
+
+function groupFlightRoles(agents) {
+    var byFlight = {};
+    var order = [];
+    agents.forEach(function(a) {
+        if (!a.flightContext) return;
+        var fid = a.flightContext.flightId;
+        if (!byFlight[fid]) {
+            byFlight[fid] = {
+                flightId: fid,
+                kitId: a.flightContext.kitId,
+                kitName: a.flightContext.kitName,
+                roles: []
+            };
+            order.push(fid);
+        }
+        byFlight[fid].roles.push(a);
+    });
+    return order.map(function(fid) { return byFlight[fid]; });
+}
+
+function renderArpFlightsSection(agents) {
+    var flights = groupFlightRoles(agents);
+    if (flights.length === 0) return '';
+
+    var html = '<div class="section-title">Active SwarmFlights</div>';
+    html += '<div class="cost-table"><table><tbody>';
+
+    flights.forEach(function(flight) {
+        var shortId = (flight.flightId || '').slice(0, 8);
+        var rolesCell = '<div class="arp-flight-roles">';
+
+        flight.roles.forEach(function(role) {
+            var ctx = role.flightContext;
+            var traces = role.decisionTraces || [];
+            var traceCount = traces.length;
+            var violationCount = traces.filter(isViolation).length;
+
+            var pillClass = 'arp-flight-pill';
+            if (role.agentId === AppState.arpSelectedAgent) pillClass += ' arp-flight-pill-selected';
+            if (violationCount > 0) pillClass += ' arp-flight-pill-violation';
+            else if (!role.documentValid) pillClass += ' arp-flight-pill-invalid';
+
+            var statusGlyph;
+            if (violationCount > 0) statusGlyph = '⚠';
+            else if (traceCount > 0) statusGlyph = '✓';
+            else statusGlyph = '○';
+
+            var counter = '';
+            if (violationCount > 0) counter = ' ' + violationCount + ' viol';
+            else if (traceCount > 0) counter = ' ' + traceCount;
+
+            rolesCell += '<button type="button" class="' + pillClass + '"' +
+                ' data-agent-id="' + escapeHtml(role.agentId) + '"' +
+                ' title="' + escapeHtml(role.agentId) + '">' +
+                statusGlyph + ' <strong>' + escapeHtml(ctx.roleId) + '</strong>' +
+                ' <span class="arp-flight-pill-type">' + escapeHtml(ctx.roleType) + '</span>' +
+                escapeHtml(counter) +
+                '</button>';
+        });
+
+        rolesCell += '</div>';
+
+        var stopBtn =
+            '<button type="button" class="arp-flight-stop"' +
+            ' data-flight-id="' + escapeHtml(flight.flightId) + '"' +
+            ' title="Stop this SwarmFlight and remove its roles from the panel">' +
+            'Stop</button>';
+
+        html += '<tr><td>' +
+            '<strong>' + escapeHtml(flight.kitName) + '</strong> ' + stopBtn +
+            '<div class="arp-flight-meta">flight <code>' + escapeHtml(shortId) + '…</code>' +
+            ' · ' + flight.roles.length + ' role' + (flight.roles.length === 1 ? '' : 's') + '</div>' +
+            '</td><td>' + rolesCell + '</td></tr>';
+    });
+
+    html += '</tbody></table></div>';
     return html;
 }
 

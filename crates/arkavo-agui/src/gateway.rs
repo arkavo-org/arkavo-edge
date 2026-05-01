@@ -5,6 +5,7 @@ use crate::cost_handler::CostHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
 use crate::security_handler::SecurityHandler;
+use crate::swarm_flight_registry::{SwarmFlightRegistry, auto_launch_from_environment};
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
@@ -66,6 +67,11 @@ pub struct AppState {
     pub context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     /// Agent Runtime Policy (ARP) document + runtime snapshot.
     pub arp_handler: Arc<ArpHandler>,
+    /// Active SwarmFlights running in this gateway process. Each role of
+    /// a registered flight surfaces in `arp_handler` under
+    /// `flight:<flight_id>:<role_id>` so the AG-UI ARP panel can render
+    /// per-role runtime state alongside regular mesh agents.
+    pub swarm_flights: Arc<SwarmFlightRegistry>,
 }
 
 pub struct AgUiGateway {
@@ -398,7 +404,21 @@ impl AgUiGateway {
                 handler.load_from_environment().await;
                 handler
             },
+            swarm_flights: Arc::new(SwarmFlightRegistry::new()),
         };
+
+        // Auto-launch a SwarmFlight when ARKAVO_SWARMKIT_PATH points at a
+        // manifest. Mirrors the ARKAVO_ARP_PATH pattern: errors are logged
+        // but never fatal, so a misconfigured env var doesn't kill the
+        // gateway.
+        match auto_launch_from_environment(&state.swarm_flights, &state.arp_handler).await {
+            Ok(Some(flight_id)) => tracing::info!(
+                flight_id = %flight_id,
+                "auto-launched SwarmFlight from ARKAVO_SWARMKIT_PATH"
+            ),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "failed to auto-launch SwarmFlight"),
+        }
 
         // Register learning pipeline health reporter (uses gateway shared stores)
         {

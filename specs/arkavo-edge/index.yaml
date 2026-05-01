@@ -559,6 +559,26 @@ components:
       - Health and ROI metrics
       - Context topology aggregated from pushed telemetry
 
+  - name: swarmkit
+    file: swarmkit.spec.yaml
+    module: arkavo_swarmkit
+    description: SwarmKit manifest, runtime, and AG-UI gateway integration
+    criticality: high
+    scenario_count: 35
+    invariants:
+      - kit.id equals BLAKE3 of canonical manifest
+      - SwarmFlight builds one ArpRuntime per role at launch
+      - Per-role DecisionTrace and PolicyCache are isolated
+      - ARKAVO_SWARMKIT_PATH auto-launch failures are non-fatal
+      - requestStopFlight deregisters every role of a flight in one call
+      - Identical ArpStatusUpdate payloads do not cause panel re-renders
+      - TDF envelope round-trips the manifest losslessly under canonical-form serialization
+      - role_policy splits attributes at the last "/" into (fqn, value)
+      - Per-role policies bind to agent DIDs via the dissemination list (spec §6.3 example)
+      - .swarmkit.tdf file format is canonical JSON of the TdfManifest struct
+      - unwrap_manifest_kas_gated fails fast on unhealthy KAS or policy mismatch before invoking the decryptor
+      - Auto-launch dispatches on file extension (.tdf vs .yaml / .json)
+
   - name: ui-core
     file: ui-core.spec.yaml
     module: arkavo_ui_core

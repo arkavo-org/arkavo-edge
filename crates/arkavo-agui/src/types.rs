@@ -548,6 +548,23 @@ pub enum AgUiEvent {
         event_id: String,
     },
 
+    /// Operator request to stop an active SwarmFlight. The gateway
+    /// deregisters every role of the flight from the ArpHandler and
+    /// drops the flight from the registry. Stopping a non-existent or
+    /// already-stopped flight is a no-op (`FlightStopped` reports success).
+    RequestStopFlight {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+    },
+    FlightStopped {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+        /// `None` on success; `Some(message)` if the flight_id failed to
+        /// parse as a UUID or some other server-side error occurred.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -1128,6 +1145,32 @@ pub struct AgentArpStatus {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub decision_traces: Vec<ArpDecisionTraceEntry>,
+    /// Set when this agent entry represents a role within a SwarmFlight.
+    /// The UI uses this to label the entry with kit + role metadata
+    /// rather than the synthetic agent_id used for storage.
+    #[serde(rename = "flightContext", skip_serializing_if = "Option::is_none")]
+    pub flight_context: Option<FlightContext>,
+}
+
+/// Identifies a SwarmFlight role surfaced through the AG-UI ARP panel.
+///
+/// SwarmKit's `agent_provisioning` block hands off to the companion ARP
+/// specification at SwarmFlight start. When the gateway registers a flight,
+/// each role becomes addressable in the panel's agent dropdown; this struct
+/// carries enough metadata for the UI to render the role meaningfully
+/// instead of showing the synthetic per-role agent_id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightContext {
+    #[serde(rename = "flightId")]
+    pub flight_id: String,
+    #[serde(rename = "kitId")]
+    pub kit_id: String,
+    #[serde(rename = "kitName")]
+    pub kit_name: String,
+    #[serde(rename = "roleId")]
+    pub role_id: String,
+    #[serde(rename = "roleType")]
+    pub role_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
