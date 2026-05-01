@@ -356,6 +356,55 @@ scenarios:
       - crates/arkavo-agui/static/js/panels/arp.js:13-35
     changed: "2026-05-01"
 
+  # --- TDF envelope (spec §6) ----------------------------------------------
+
+  - id: SK-050
+    name: TDF envelope round-trips a SwarmKit manifest losslessly
+    criticality: critical
+    given:
+      - Validated SwarmKit manifest
+      - TdfEncryptor + TdfDecryptor pair (e.g. OpenTdfService or MockTdfService)
+      - SwarmKit-level orchestrator policy
+    when: wrap_manifest then unwrap_manifest are called in sequence
+    then:
+      - Manifest serialized via canonical_full_manifest (sorted keys, no whitespace)
+      - Encrypted bytes wrapped in TdfManifest with the policy bound
+      - Decrypted plaintext parses back into an equal Manifest (including kit.id and provenance.signatures)
+      - Wrap output is deterministic when the encryptor is deterministic
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:32-56
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:62-72
+    changed: "2026-05-01"
+
+  - id: SK-051
+    name: unwrap_manifest re-validates the recovered manifest
+    criticality: high
+    given:
+      - TdfManifest whose decrypted payload is corrupt or fails cross-block validation
+    when: unwrap_manifest is called
+    then:
+      - TdfEnvelopeError::Decrypt returned when ciphertext fails MAC/AEAD check
+      - TdfEnvelopeError::Utf8 returned when plaintext is not valid UTF-8
+      - TdfEnvelopeError::Parse returned when JSON does not validate against the manifest schema
+      - No partially-constructed Manifest is ever returned from a failed unwrap
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:74-86
+    changed: "2026-05-01"
+
+  - id: SK-052
+    name: swarmkit_orchestrator_policy emits the §6.3 baseline gate
+    criticality: medium
+    given:
+      - Optional clearance level (defaults to "internal")
+    when: swarmkit_orchestrator_policy is called
+    then:
+      - Policy includes attribute https://attr.arkavo.com/role with value "orchestrator"
+      - Policy includes attribute https://attr.arkavo.com/clearance with the supplied or default value
+      - PolicyBuilder validation succeeds (every attribute has at least one value, FQNs are URLs)
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:88-100
+    changed: "2026-05-01"
+
   # --- Operator controls ---------------------------------------------------
 
   - id: SK-040

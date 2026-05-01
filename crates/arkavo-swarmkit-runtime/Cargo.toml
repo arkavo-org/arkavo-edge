@@ -8,10 +8,18 @@ license.workspace = true
 repository.workspace = true
 description = "SwarmFlight runtime — per-role ARP runtime provisioning and DecisionTrace isolation"
 
+[features]
+default = []
+# Wrap/unwrap SwarmKit manifests through the OpenTDF envelope. Pulls in
+# opentdf-rs via arkavo-tdf for AES-256-GCM + RSA-OAEP key wrap. Keep
+# disabled for headless / in-process flight orchestration.
+tdf = ["dep:arkavo-tdf"]
+
 [dependencies]
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
@@ -21,6 +29,7 @@ uuid = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 arkavo-agui = { path = "../arkavo-agui", default-features = false }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf", "testing"] }
 serde_json = { workspace = true }
 
 [[example]]
