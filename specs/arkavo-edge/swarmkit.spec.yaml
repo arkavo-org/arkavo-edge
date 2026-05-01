@@ -425,6 +425,48 @@ scenarios:
       - crates/arkavo-swarmkit-runtime/src/tdf.rs:154-194
     changed: "2026-05-01"
 
+  - id: SK-055
+    name: write_kit_tdf and read_kit_tdf round-trip a TdfManifest losslessly
+    criticality: high
+    given:
+      - TdfManifest produced by wrap_manifest
+    when: serialized via write_kit_tdf and parsed back via read_kit_tdf
+    then:
+      - On-disk format is canonical JSON of the TdfManifest struct
+      - Recovered TdfManifest is serde-equal to the original
+      - Encryption metadata (encryptionInformation) and inline base64 payload preserved
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:269-289
+    changed: "2026-05-01"
+
+  - id: SK-056
+    name: wrap_manifest_to_path / unwrap_manifest_from_path round-trip a Manifest
+    criticality: high
+    given:
+      - Manifest, encryptor, policy, and target path
+    when: wrap_manifest_to_path then unwrap_manifest_from_path are called
+    then:
+      - .swarmkit.tdf file written at the path
+      - File reads back cleanly through the consumer flow
+      - Recovered Manifest equals the original (kit.id, signatures, every field)
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:309-336
+    changed: "2026-05-01"
+
+  - id: SK-057
+    name: file-format readers report distinct errors for I/O vs parse failures
+    criticality: medium
+    given:
+      - Reader for a missing path or non-JSON content
+    when: read_kit_tdf or unwrap_manifest_from_path is invoked
+    then:
+      - Missing file produces TdfEnvelopeError::Io
+      - Malformed JSON produces TdfEnvelopeError::Serialize (serde_json failures map to that variant)
+      - No partially-constructed TdfManifest is ever returned from a failed read
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:291-307
+    changed: "2026-05-01"
+
   - id: SK-054
     name: role_policies extracts per-role policies and supports DID lookup
     criticality: high

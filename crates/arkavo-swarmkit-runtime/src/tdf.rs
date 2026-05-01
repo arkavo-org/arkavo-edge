@@ -9,10 +9,11 @@
 //! This module is gated behind the `tdf` feature so that headless /
 //! in-process flight orchestration can avoid the opentdf-rs dependency
 //! tree. Per-role TDF policy construction (spec §6.4) is implemented
-//! via [`role_policy`] / [`role_policies`]. Out of scope for now:
-//! KAS-gated decryption enforcement (spec §6.3 orchestrator gate),
-//! `.swarmkit.tdf` file-format serialization, and `.tdf`-aware
-//! auto-launch — those land in subsequent slices.
+//! via [`role_policy`] / [`role_policies`]. The `.swarmkit.tdf` file
+//! format is implemented via [`write_kit_tdf`] / [`read_kit_tdf`] and
+//! their path-based / one-shot variants. Out of scope for now:
+//! KAS-gated decryption enforcement (spec §6.3 orchestrator gate)
+//! and `.tdf`-aware auto-launch — those land in subsequent slices.
 //!
 //! Agent identity binding: every policy builder accepts an optional
 //! agent DID that is added to the policy's dissemination list. Callers
@@ -45,6 +46,8 @@ pub enum TdfEnvelopeError {
     Policy(TdfError),
     #[error("load agent identity: {0}")]
     Identity(String),
+    #[error(".swarmkit.tdf I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Wrap a SwarmKit manifest in a TDF envelope per spec §6.
@@ -268,6 +271,89 @@ fn split_attribute(attr: &str) -> Option<(String, String)> {
         return None;
     }
     Some((fqn.to_string(), value.to_string()))
+}
+
+// --- .swarmkit.tdf file format -----------------------------------------
+
+/// Recommended file extension for SwarmKit TDF envelopes on disk.
+pub const SWARMKIT_TDF_EXTENSION: &str = "swarmkit.tdf";
+
+/// Write a [`TdfManifest`] to disk as a `.swarmkit.tdf` file.
+///
+/// The on-disk format is the canonical JSON encoding of the
+/// [`TdfManifest`] struct itself — encryption metadata
+/// (`encryptionInformation`) and the inline base64 ciphertext
+/// (`payload`) live in a single self-contained JSON document. This is
+/// strictly equivalent to the in-memory `TdfManifest` and round-trips
+/// losslessly via [`read_kit_tdf`].
+///
+/// This is not the OpenTDF ZIP container format — that's a future
+/// interop slice when we need to exchange `.tdf` files with external
+/// OpenTDF tooling. For SwarmKit-internal storage and transport, the
+/// JSON form is simpler, scriptable, and sufficient.
+pub fn write_kit_tdf<W: std::io::Write>(
+    tdf: &TdfManifest,
+    mut writer: W,
+) -> Result<(), TdfEnvelopeError> {
+    let json = serde_json::to_vec_pretty(tdf)?;
+    writer.write_all(&json)?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+/// Read a [`TdfManifest`] from a `.swarmkit.tdf` file written by
+/// [`write_kit_tdf`].
+pub fn read_kit_tdf<R: std::io::Read>(reader: R) -> Result<TdfManifest, TdfEnvelopeError> {
+    let tdf: TdfManifest = serde_json::from_reader(reader)?;
+    Ok(tdf)
+}
+
+/// Convenience: write a `.swarmkit.tdf` to a path, creating or
+/// truncating the file as needed.
+pub fn write_kit_tdf_to_path<P: AsRef<std::path::Path>>(
+    tdf: &TdfManifest,
+    path: P,
+) -> Result<(), TdfEnvelopeError> {
+    let file = std::fs::File::create(path.as_ref())?;
+    write_kit_tdf(tdf, std::io::BufWriter::new(file))
+}
+
+/// Convenience: read a `.swarmkit.tdf` from a path.
+pub fn read_kit_tdf_from_path<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<TdfManifest, TdfEnvelopeError> {
+    let file = std::fs::File::open(path.as_ref())?;
+    read_kit_tdf(std::io::BufReader::new(file))
+}
+
+/// One-shot producer flow: encrypt a manifest and write it to a
+/// `.swarmkit.tdf` file in a single call.
+pub async fn wrap_manifest_to_path<E, P>(
+    manifest: &Manifest,
+    encryptor: &E,
+    policy: &Policy,
+    path: P,
+) -> Result<(), TdfEnvelopeError>
+where
+    E: TdfEncryptor,
+    P: AsRef<std::path::Path>,
+{
+    let tdf = wrap_manifest(manifest, encryptor, policy).await?;
+    write_kit_tdf_to_path(&tdf, path)
+}
+
+/// One-shot consumer flow: read a `.swarmkit.tdf` file and decrypt
+/// straight to a validated `Manifest`.
+pub async fn unwrap_manifest_from_path<D, P>(
+    decryptor: &D,
+    path: P,
+) -> Result<Manifest, TdfEnvelopeError>
+where
+    D: TdfDecryptor,
+    P: AsRef<std::path::Path>,
+{
+    let tdf = read_kit_tdf_from_path(path)?;
+    unwrap_manifest(&tdf, decryptor).await
 }
 
 #[cfg(test)]
@@ -524,6 +610,67 @@ provenance:
         assert!(pols.contains_key("with-arp"));
         assert!(!pols.contains_key("without-arp"));
     }
+
+    // --- .swarmkit.tdf file format ---------------------------------------
+
+    #[spec("SK-055")]
+    #[tokio::test]
+    async fn write_kit_tdf_round_trips_through_reader() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x33);
+        let pol = policy();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let mut buf: Vec<u8> = Vec::new();
+        write_kit_tdf(&tdf, &mut buf).expect("write");
+        let recovered = read_kit_tdf(&buf[..]).expect("read");
+
+        // The TdfManifest is serde-equal across the round trip.
+        let a = serde_json::to_value(&tdf).unwrap();
+        let b = serde_json::to_value(&recovered).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[spec("SK-056")]
+    #[tokio::test]
+    async fn wrap_unwrap_via_path_round_trips_manifest() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x77);
+        let pol = policy();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.swarmkit.tdf");
+
+        wrap_manifest_to_path(&manifest, &svc, &pol, &path)
+            .await
+            .expect("wrap to path");
+        let recovered = unwrap_manifest_from_path(&svc, &path)
+            .await
+            .expect("unwrap from path");
+
+        assert_eq!(manifest, recovered);
+    }
+
+    #[spec("SK-057")]
+    #[tokio::test]
+    async fn unwrap_from_path_surfaces_io_error_for_missing_file() {
+        let svc = MockTdfService::new(0x44);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.swarmkit.tdf");
+
+        let err = unwrap_manifest_from_path(&svc, &path).await.unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::Io(_)));
+    }
+
+    #[spec("SK-057")]
+    #[test]
+    fn read_kit_tdf_rejects_non_json() {
+        let bogus = b"this is not a tdf manifest";
+        let err = read_kit_tdf(&bogus[..]).unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::Serialize(_)));
+    }
+
+    // --- end file format -------------------------------------------------
 
     #[spec("SK-054")]
     #[test]

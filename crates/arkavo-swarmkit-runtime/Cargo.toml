@@ -34,6 +34,7 @@ arkavo-agui = { path = "../arkavo-agui", default-features = false }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf", "testing"] }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 [[example]]
 name = "swarm_flight_demo"
