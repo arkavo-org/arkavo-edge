@@ -1,0 +1,341 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: SwarmKit Manifest, Runtime, and Gateway Integration
+module: arkavo_swarmkit
+version: 0.73.0
+
+invariants:
+  - SwarmKit manifest is parser+validator only — no runtime side effects
+  - kit.id MUST equal BLAKE3 of canonical manifest minus kit.id and provenance.signatures
+  - kit.expires - kit.created MUST NOT exceed 1 year (spec §10.1 cap)
+  - evaluation.rubric.dimensions weight sum MUST equal 1.0 (spec §4.6)
+  - role_type is free-form per spec §4.3 / Appendix C; orchestrator MUST NOT reject domain-specific values
+  - SwarmFlight builds one ArpRuntime per role at launch (spec §1.2 / §5 handoff)
+  - Each role's DecisionTrace and PolicyCache are isolated from other roles in the same flight
+  - Per-role budget MUST NOT exceed constraints.global_budget when validated (spec §5.1)
+  - SwarmFlight is a logical orchestration object — no process spawning, A2A wire, or TDF unwrap
+  - ArpHandler stores flight roles under synthetic agent_id "flight:<flight_id>:<role_id>" so multi-flight role_id collisions are impossible
+  - FlightContext on AgentArpStatus carries kit_id, kit_name, role_id, role_type for the AG-UI panel
+  - ARKAVO_SWARMKIT_PATH auto-launch failures are logged and non-fatal — a misconfigured kit MUST NOT prevent gateway boot
+
+scenarios:
+  # --- Manifest layer (arkavo-swarmkit) -----------------------------------
+
+  - id: SK-001
+    name: Parse a SwarmKit manifest from YAML and run cross-block validation
+    criticality: critical
+    given:
+      - YAML manifest conforming to spec §4
+      - All required fields present (spec_version, kit, objective, roles, coordination, constraints, completion, provenance)
+    when: parse_yaml called
+    then:
+      - Manifest deserializes into typed Rust structs
+      - validate() runs all cross-block invariants
+      - Returns Manifest on success
+    refs:
+      - crates/arkavo-swarmkit/src/lib.rs:39-44
+      - crates/arkavo-swarmkit/src/manifest.rs:14-30
+    changed: "2026-04-30"
+
+  - id: SK-002
+    name: Reject manifest with role budget exceeding global cap
+    criticality: critical
+    given:
+      - Manifest with role.agent_provisioning.budget.max_total_tokens > constraints.global_budget.max_total_tokens
+    when: validate called
+    then:
+      - Returns ValidationError::BudgetExceedsGlobal
+      - Includes role id, field name, value, and limit in error
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs:137-171
+    changed: "2026-04-30"
+
+  - id: SK-003
+    name: kit.id round-trips through BLAKE3 of canonical form
+    criticality: critical
+    given:
+      - Manifest with declared kit.id
+    when: validate called and kit.id is non-empty
+    then:
+      - canonical_json computed with kit.id and provenance.signatures stripped
+      - BLAKE3 of canonical bytes base64url-encoded
+      - Computed hash matches declared kit.id or returns KitIdHashMismatch
+    refs:
+      - crates/arkavo-swarmkit/src/canonical.rs:92-100
+      - crates/arkavo-swarmkit/src/validate.rs:211-223
+    changed: "2026-04-30"
+
+  - id: SK-004
+    name: Reject manifest with expiry horizon exceeding §10.1 cap
+    criticality: high
+    given:
+      - kit.created and kit.expires set
+      - expires - created > 365 days
+    when: validate called
+    then:
+      - Returns ValidationError::ExpiryHorizonTooLarge
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs:188-202
+    changed: "2026-04-30"
+    edge_cases:
+      - condition: expires <= created
+        expected: ExpiryBeforeCreated error
+
+  - id: SK-005
+    name: Validate evaluation rubric weights sum to 1.0
+    criticality: high
+    given:
+      - Manifest with evaluation block
+      - dimensions[*].weight values
+    when: validate called
+    then:
+      - Sum of weights computed
+      - If |sum - 1.0| > 1e-6 returns RubricWeightsDoNotSumToOne
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs:116-126
+    changed: "2026-04-30"
+
+  - id: SK-006
+    name: Accept domain-specific role_type values
+    criticality: medium
+    given:
+      - Manifest role with role_type outside the recommended vocabulary (e.g. "campaign_lead", "asset_analyst")
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully
+      - role_type retains domain-specific value
+    refs:
+      - crates/arkavo-swarmkit/src/role.rs:5-25
+    changed: "2026-04-30"
+
+  # --- Runtime layer (arkavo-swarmkit-runtime) ----------------------------
+
+  - id: SK-010
+    name: SwarmFlight launch builds one ArpRuntime per role
+    criticality: critical
+    given:
+      - Validated manifest with N roles
+      - LaunchOptions with no overrides
+    when: SwarmFlight::launch called
+    then:
+      - For each role, derive_arp_for_role produces a default ARP doc
+      - ArpRuntime::from_document instantiated per role
+      - RoleRuntime stored keyed by role_id, retains the ArpDocument
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:98-137
+      - crates/arkavo-swarmkit-runtime/src/derive.rs:56-117
+    changed: "2026-04-30"
+
+  - id: SK-011
+    name: Per-role DecisionTrace and PolicyCache stay isolated
+    criticality: critical
+    given:
+      - Active SwarmFlight with multiple roles
+      - Tool outcomes recorded against role A
+    when: outcomes recorded via record_tool_outcome
+    then:
+      - role A's DecisionTrace contains the outcome
+      - role B's DecisionTrace does NOT contain the outcome
+      - role A's PolicyCache holds the entry
+      - role B's PolicyCache is unchanged
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:165-184
+      - crates/arkavo-swarmkit-runtime/tests/campaign_kit_flight.rs:15-115
+    changed: "2026-04-30"
+
+  - id: SK-012
+    name: Below-quality-gate outcome degrades the role's prior
+    criticality: high
+    given:
+      - SwarmFlight with role having default 0.7 quality gate
+    when: record_tool_outcome called with quality < 0.7
+    then:
+      - AdaptationEngine prior beta increases for the tool
+      - DecisionTrace entry has success=false
+      - error_type tagged "below_quality_gate"
+    refs:
+      - crates/arkavo-swarmkit-runtime/tests/campaign_kit_flight.rs:117-147
+    changed: "2026-04-30"
+
+  - id: SK-013
+    name: Default ARP doc derived from agent_provisioning + global budget
+    criticality: high
+    given:
+      - Role with agent_provisioning block
+      - constraints.global_budget.max_cost_usd
+      - role_count = N
+    when: derive_arp_for_role called
+    then:
+      - Adaptation method = thompson_sampling
+      - Quality gate threshold = 0.7
+      - PolicyCache TTL = 3600s with exponential decay
+      - Budget task_ceiling_usd = global_cost / N
+      - Velocity = task_ceiling / 5 minutes
+      - adl_ref.uri = "urn:swarmkit:role:<role_id>"
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/derive.rs:56-117
+    changed: "2026-04-30"
+
+  - id: SK-014
+    name: LaunchOptions.arp_overrides supplies hand-authored ARP per role
+    criticality: medium
+    given:
+      - LaunchOptions with arp_overrides containing a role_id present in the manifest
+    when: SwarmFlight::launch called
+    then:
+      - The supplied ArpDocument is used instead of derive_arp_for_role
+      - RoleRuntime.arp_document() returns the override
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:106-117
+    changed: "2026-04-30"
+    edge_cases:
+      - condition: override role_id not in manifest
+        expected: LaunchError::UnknownOverrideRole
+
+  - id: SK-015
+    name: flight_id propagates into per-role DecisionTrace task_id
+    criticality: medium
+    given:
+      - SwarmFlight launched with explicit flight_id
+    when: record_tool_outcome called for any role
+    then:
+      - DecisionTrace entry's task_id equals the flight_id
+      - DecisionTrace entry's agent_id equals the role_id
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:170-182
+    changed: "2026-04-30"
+
+  # --- Gateway integration (arkavo-agui) ----------------------------------
+
+  - id: SK-020
+    name: SwarmFlightRegistry.register attaches every role to ArpHandler
+    criticality: critical
+    given:
+      - Active SwarmFlight
+      - ArpHandler instance
+    when: SwarmFlightRegistry::register called
+    then:
+      - Each role surfaces in ArpHandler under flight:<flight_id>:<role_id>
+      - Each AgentArpStatus carries FlightContext (kit_id, kit_name, role_id, role_type)
+      - The role's ArpRuntime is reused — not rebuilt
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:36-56
+      - crates/arkavo-agui/src/arp_handler.rs:204-235
+    changed: "2026-04-30"
+
+  - id: SK-021
+    name: SwarmFlightRegistry.deregister removes only that flight's roles
+    criticality: high
+    given:
+      - Multiple flights and mesh agents registered
+    when: deregister called for one flight_id
+    then:
+      - All roles under that flight_id removed from ArpHandler
+      - Other flights' roles remain
+      - Mesh agents remain
+      - Registry entry for flight_id removed
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:60-65
+      - crates/arkavo-agui/src/arp_handler.rs:243-248
+    changed: "2026-04-30"
+
+  - id: SK-022
+    name: ARKAVO_SWARMKIT_PATH auto-launches a flight at gateway boot
+    criticality: high
+    given:
+      - ARKAVO_SWARMKIT_PATH env var points at a valid manifest
+      - Gateway initializing
+    when: auto_launch_from_environment called during AppState construction
+    then:
+      - Manifest parsed (YAML or JSON depending on extension)
+      - SwarmFlight launched
+      - Registry holds the flight
+      - ArpHandler holds every role
+      - Returns Ok(Some(flight_id))
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:91-102
+      - crates/arkavo-agui/src/gateway.rs:401-417
+    changed: "2026-04-30"
+    edge_cases:
+      - condition: env var unset
+        expected: Ok(None) — no flight launched
+      - condition: manifest fails to parse or validate
+        expected: tracing::warn logged, gateway boot continues
+
+  - id: SK-023
+    name: ArpHandler snapshot orders local → mesh agents → flight roles
+    criticality: medium
+    given:
+      - (local) agent registered
+      - Multiple mesh agents registered with arbitrary ids
+      - One or more flight roles registered
+    when: snapshot called
+    then:
+      - First entry is the (local) synthetic agent
+      - Mesh agents follow alphabetically by agent_id
+      - Flight roles last, grouped by flight_id then role_id
+    refs:
+      - crates/arkavo-agui/src/arp_handler.rs:259-281
+    changed: "2026-04-30"
+
+  - id: SK-024
+    name: AgentArpStatus serializes flightContext using camelCase
+    criticality: medium
+    given:
+      - Flight role registered with FlightContext
+    when: snapshot serialized to JSON for the AG-UI WebSocket
+    then:
+      - Field name is "flightContext" (camelCase)
+      - Inner fields are flightId, kitId, kitName, roleId, roleType
+      - flightContext omitted on non-flight agents (skip_serializing_if)
+    refs:
+      - crates/arkavo-agui/src/types.rs:1126-1156
+    changed: "2026-04-30"
+
+  # --- Panel UI -----------------------------------------------------------
+
+  - id: SK-030
+    name: ARP panel renders an Active SwarmFlights section when flights are present
+    criticality: medium
+    given:
+      - WebSocket snapshot containing one or more agents with flightContext
+    when: renderArp called
+    then:
+      - renderArpFlightsSection emits a section above the agent dropdown
+      - Roles grouped by flightId in manifest insertion order
+      - Each role rendered as a clickable pill carrying role_id, role_type, status glyph, count
+    refs:
+      - crates/arkavo-agui/static/js/panels/arp.js:134-208
+    changed: "2026-04-30"
+    edge_cases:
+      - condition: snapshot contains no flightContext entries
+        expected: section returns empty string and is not rendered
+
+  - id: SK-031
+    name: Clicking a flight pill selects the corresponding role
+    criticality: medium
+    given:
+      - Active SwarmFlights section rendered
+      - User clicks a role pill
+    when: pill click event fires
+    then:
+      - AppState.arpSelectedAgent set to the synthetic flight:<id>:<role> agent_id
+      - renderArp re-runs and the document/violations/cache/adaptation/traces sections show that role's state
+    refs:
+      - crates/arkavo-agui/static/js/panels/arp.js:91-101
+    changed: "2026-04-30"
+
+  - id: SK-032
+    name: Pill status reflects violations, traces, or empty state
+    criticality: low
+    given:
+      - Flight role with decisionTraces in the snapshot
+    when: pill rendered
+    then:
+      - violationCount > 0 → ⚠ glyph and arp-flight-pill-violation class
+      - traceCount > 0 and no violations → ✓ glyph and base class
+      - traceCount = 0 → ○ glyph and base class
+      - selected role gets arp-flight-pill-selected class
+    refs:
+      - crates/arkavo-agui/static/js/panels/arp.js:163-188
+    changed: "2026-04-30"
