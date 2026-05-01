@@ -598,11 +598,6 @@ jobs:
           echo "✅ Issue #114 regression test passed"
           cd ../..
 
-      - name: Install idb-companion
-        run: |
-          brew tap facebook/fb
-          brew install idb-companion
-
       - name: Build
         env:
           SCCACHE_GHA_ENABLED: "true"
