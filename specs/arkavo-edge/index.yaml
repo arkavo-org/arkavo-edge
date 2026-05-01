@@ -559,6 +559,18 @@ components:
       - Health and ROI metrics
       - Context topology aggregated from pushed telemetry
 
+  - name: swarmkit
+    file: swarmkit.spec.yaml
+    module: arkavo_swarmkit
+    description: SwarmKit manifest, runtime, and AG-UI gateway integration
+    criticality: high
+    scenario_count: 20
+    invariants:
+      - kit.id equals BLAKE3 of canonical manifest
+      - SwarmFlight builds one ArpRuntime per role at launch
+      - Per-role DecisionTrace and PolicyCache are isolated
+      - ARKAVO_SWARMKIT_PATH auto-launch failures are non-fatal
+
   - name: ui-core
     file: ui-core.spec.yaml
     module: arkavo_ui_core
