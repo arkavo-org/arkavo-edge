@@ -11,9 +11,10 @@
 //! tree. Per-role TDF policy construction (spec §6.4) is implemented
 //! via [`role_policy`] / [`role_policies`]. The `.swarmkit.tdf` file
 //! format is implemented via [`write_kit_tdf`] / [`read_kit_tdf`] and
-//! their path-based / one-shot variants. Out of scope for now:
-//! KAS-gated decryption enforcement (spec §6.3 orchestrator gate)
-//! and `.tdf`-aware auto-launch — those land in subsequent slices.
+//! their path-based / one-shot variants. KAS-gated unwrap (spec §6.3)
+//! is implemented via [`unwrap_manifest_kas_gated`] with embedded-policy
+//! verification + KAS health check before decrypt. Out of scope for
+//! now: `.tdf`-aware auto-launch — that lands in the final slice.
 //!
 //! Agent identity binding: every policy builder accepts an optional
 //! agent DID that is added to the policy's dissemination list. Callers
@@ -21,11 +22,28 @@
 //! [`swarmkit_orchestrator_policy_for_current_agent`] /
 //! [`role_policies_for_current_agent`] async helpers to load the
 //! locally-stored token from `arkavo-agent-auth` and bind to it.
+//!
+//! KAS gating: [`unwrap_manifest_kas_gated`] adds an explicit KAS health
+//! check + embedded-policy verification before invoking the underlying
+//! decrypt path. The opentdf-rs decryptor performs its own KAS rewrap
+//! internally; the SwarmKit gate complements that with fail-fast checks
+//! (KAS unreachable, policy attributes don't match what the orchestrator
+//! requires) so the orchestrator never attempts a decrypt that's
+//! guaranteed to be denied or that's against an unexpected policy.
+//!
+//! P2P transport: this module covers the **encryption / policy plane
+//! only**. For peer-to-peer distribution of `.swarmkit.tdf` blobs
+//! (staging, fetching, content addressing), compose with the existing
+//! [`arkavo-tdf-iroh`] crate's `IrohTransport` — do NOT re-implement
+//! transport here.
 
 use std::collections::HashMap;
 
 use arkavo_swarmkit::{Manifest, ParseError, TdfAttributeReleasePolicy, parse_json};
-use arkavo_tdf::{Policy, PolicyBuilder, TdfDecryptor, TdfEncryptor, TdfError, TdfManifest};
+use arkavo_tdf::{
+    KasClient, Policy, PolicyBuilder, TdfDecryptor, TdfEncryptor, TdfError, TdfManifest,
+};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
 use crate::canonical_full_manifest;
 
@@ -48,6 +66,15 @@ pub enum TdfEnvelopeError {
     Identity(String),
     #[error(".swarmkit.tdf I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("KAS unavailable: {0}")]
+    KasUnavailable(String),
+    #[error("embedded policy could not be parsed: {0}")]
+    EmbeddedPolicy(String),
+    #[error("embedded policy is missing required attribute {missing:?} (policy carries {found:?})")]
+    PolicyMismatch {
+        missing: Vec<String>,
+        found: Vec<String>,
+    },
 }
 
 /// Wrap a SwarmKit manifest in a TDF envelope per spec §6.
@@ -271,6 +298,124 @@ fn split_attribute(attr: &str) -> Option<(String, String)> {
         return None;
     }
     Some((fqn.to_string(), value.to_string()))
+}
+
+// --- KAS-gated unwrap ---------------------------------------------------
+
+/// Extract the policy embedded in a [`TdfManifest`] (spec §6.1
+/// `encryptionInformation.policy`, base64-encoded JSON) and parse it
+/// back into a [`Policy`]. Useful for inspecting what attributes a
+/// distributed `.swarmkit.tdf` actually requires before attempting to
+/// unwrap it.
+pub fn extract_embedded_policy(tdf: &TdfManifest) -> Result<Policy, TdfEnvelopeError> {
+    let raw = &tdf.encryption_information.policy;
+    let bytes = B64
+        .decode(raw)
+        .map_err(|e| TdfEnvelopeError::EmbeddedPolicy(format!("base64: {e}")))?;
+    let policy: Policy = serde_json::from_slice(&bytes)
+        .map_err(|e| TdfEnvelopeError::EmbeddedPolicy(format!("json: {e}")))?;
+    Ok(policy)
+}
+
+/// Verify that the embedded policy on a [`TdfManifest`] requires every
+/// attribute FQN listed in `required_fqns`. Returns
+/// [`TdfEnvelopeError::PolicyMismatch`] when one or more are missing.
+///
+/// Use this *before* attempting to unwrap a kit when the orchestrator
+/// has expectations about which attributes the wrapped content was
+/// gated on (e.g. a producer that always wraps under
+/// `https://attr.arkavo.com/role/orchestrator` can refuse kits that
+/// don't carry that requirement, distinguishing a misrouted kit from a
+/// genuine KAS denial at decrypt time).
+pub fn verify_embedded_policy_requires(
+    tdf: &TdfManifest,
+    required_fqns: &[&str],
+) -> Result<Policy, TdfEnvelopeError> {
+    let policy = extract_embedded_policy(tdf)?;
+    let found: Vec<String> = policy
+        .attributes
+        .iter()
+        .map(|a| a.attribute.clone())
+        .collect();
+    let missing: Vec<String> = required_fqns
+        .iter()
+        .filter(|fqn| !found.iter().any(|f| f == *fqn))
+        .map(|s| (*s).to_string())
+        .collect();
+    if !missing.is_empty() {
+        return Err(TdfEnvelopeError::PolicyMismatch { missing, found });
+    }
+    Ok(policy)
+}
+
+/// KAS-gated unwrap. Adds two pre-flight checks the bare
+/// [`unwrap_manifest`] path doesn't perform:
+///
+/// 1. **KAS health**: if `kas.health_check()` returns `Ok(false)` or
+///    errors, fail fast with [`TdfEnvelopeError::KasUnavailable`]
+///    instead of timing out inside the decryptor.
+/// 2. **Policy verification**: extract the policy embedded in the TDF
+///    and confirm it requires every FQN in `required_fqns`. Surfaces
+///    [`TdfEnvelopeError::PolicyMismatch`] for misrouted or
+///    misconfigured kits before any KAS round-trip.
+///
+/// Pass an empty `required_fqns` slice to skip the policy check and
+/// rely on KAS-side enforcement only. Pass
+/// `&["https://attr.arkavo.com/role"]` (or similar) for the
+/// orchestrator-gated baseline.
+///
+/// The KAS rewrap itself happens inside the underlying [`TdfDecryptor`]
+/// implementation (opentdf-rs talks to KAS during decrypt). The KAS
+/// client passed here is used only for the health check; SwarmKit
+/// doesn't currently re-implement the rewrap protocol.
+pub async fn unwrap_manifest_kas_gated<D, K>(
+    tdf: &TdfManifest,
+    decryptor: &D,
+    kas: &K,
+    required_fqns: &[&str],
+) -> Result<Manifest, TdfEnvelopeError>
+where
+    D: TdfDecryptor,
+    K: KasClient,
+{
+    // 1. Health gate — fail fast if KAS is unreachable so we don't
+    //    proceed into the decryptor's slower retry/timeout paths.
+    match kas.health_check().await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(TdfEnvelopeError::KasUnavailable(
+                "health_check returned false".to_string(),
+            ));
+        }
+        Err(e) => return Err(TdfEnvelopeError::KasUnavailable(e.to_string())),
+    }
+
+    // 2. Embedded-policy verification — surface a distinct error when
+    //    the kit's policy doesn't carry the attributes the orchestrator
+    //    requires. This separates "I won't even try" from "I tried and
+    //    KAS denied me."
+    if !required_fqns.is_empty() {
+        verify_embedded_policy_requires(tdf, required_fqns)?;
+    }
+
+    // 3. Decrypt + parse + validate. KAS rewrap happens inside.
+    unwrap_manifest(tdf, decryptor).await
+}
+
+/// Convenience: KAS-gated unwrap that also reads from a path.
+pub async fn unwrap_manifest_from_path_kas_gated<D, K, P>(
+    decryptor: &D,
+    kas: &K,
+    path: P,
+    required_fqns: &[&str],
+) -> Result<Manifest, TdfEnvelopeError>
+where
+    D: TdfDecryptor,
+    K: KasClient,
+    P: AsRef<std::path::Path>,
+{
+    let tdf = read_kit_tdf_from_path(path)?;
+    unwrap_manifest_kas_gated(&tdf, decryptor, kas, required_fqns).await
 }
 
 // --- .swarmkit.tdf file format -----------------------------------------
@@ -609,6 +754,117 @@ provenance:
         assert_eq!(pols.len(), 1);
         assert!(pols.contains_key("with-arp"));
         assert!(!pols.contains_key("without-arp"));
+    }
+
+    // --- KAS-gated unwrap ------------------------------------------------
+
+    use arkavo_tdf::testing::MockKasClient;
+
+    #[spec("SK-058")]
+    #[tokio::test]
+    async fn extract_embedded_policy_decodes_base64_json() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xC3);
+        let pol = swarmkit_orchestrator_policy(None, Some("did:web:gateway.example.com")).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let recovered = extract_embedded_policy(&tdf).expect("decode policy");
+        assert_eq!(recovered.attributes.len(), 2);
+        assert!(
+            recovered
+                .attributes
+                .iter()
+                .any(|a| a.attribute.contains("/role"))
+        );
+        assert_eq!(
+            recovered.dissemination,
+            vec!["did:web:gateway.example.com".to_string()]
+        );
+    }
+
+    #[spec("SK-058")]
+    #[tokio::test]
+    async fn verify_embedded_policy_requires_passes_for_matching_attrs() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xC3);
+        let pol = swarmkit_orchestrator_policy(None, None).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        verify_embedded_policy_requires(&tdf, &["https://attr.arkavo.com/role"])
+            .expect("policy carries the role attribute");
+    }
+
+    #[spec("SK-058")]
+    #[tokio::test]
+    async fn verify_embedded_policy_rejects_missing_attr() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xC3);
+        let pol = swarmkit_orchestrator_policy(None, None).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let err = verify_embedded_policy_requires(
+            &tdf,
+            &[
+                "https://attr.arkavo.com/role",
+                "https://attr.arkavo.com/region",
+            ],
+        )
+        .unwrap_err();
+        match err {
+            TdfEnvelopeError::PolicyMismatch { missing, found } => {
+                assert_eq!(missing, vec!["https://attr.arkavo.com/region".to_string()]);
+                assert!(found.iter().any(|a| a == "https://attr.arkavo.com/role"));
+            }
+            other => panic!("expected PolicyMismatch, got {other:?}"),
+        }
+    }
+
+    #[spec("SK-059")]
+    #[tokio::test]
+    async fn unwrap_manifest_kas_gated_succeeds_when_kas_healthy_and_policy_matches() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xD1);
+        let pol = swarmkit_orchestrator_policy(None, None).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let kas = MockKasClient::new();
+        let recovered =
+            unwrap_manifest_kas_gated(&tdf, &svc, &kas, &["https://attr.arkavo.com/role"])
+                .await
+                .expect("kas-gated unwrap");
+        assert_eq!(manifest, recovered);
+    }
+
+    #[spec("SK-060")]
+    #[tokio::test]
+    async fn unwrap_manifest_kas_gated_fails_fast_when_kas_unhealthy() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xD2);
+        let pol = swarmkit_orchestrator_policy(None, None).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let kas = MockKasClient::new();
+        kas.set_healthy(false);
+
+        let err = unwrap_manifest_kas_gated(&tdf, &svc, &kas, &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::KasUnavailable(_)));
+    }
+
+    #[spec("SK-060")]
+    #[tokio::test]
+    async fn unwrap_manifest_kas_gated_surfaces_policy_mismatch_before_decrypt() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xD3);
+        let pol = swarmkit_orchestrator_policy(None, None).unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let kas = MockKasClient::new();
+        let err = unwrap_manifest_kas_gated(&tdf, &svc, &kas, &["https://attr.arkavo.com/region"])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::PolicyMismatch { .. }));
     }
 
     // --- .swarmkit.tdf file format ---------------------------------------
