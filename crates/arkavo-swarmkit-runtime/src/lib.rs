@@ -16,7 +16,7 @@ pub mod derive;
 pub mod flight;
 
 pub use derive::{DeriveOptions, derive_arp_for_role};
-pub use flight::{LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
+pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
 
 #[cfg(test)]
 mod tests {

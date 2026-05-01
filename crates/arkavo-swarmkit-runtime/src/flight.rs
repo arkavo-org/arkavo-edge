@@ -16,13 +16,26 @@ use uuid::Uuid;
 
 use crate::derive::{DeriveOptions, derive_arp_for_role};
 
-/// Errors that can occur while launching a SwarmFlight.
+/// Errors that can occur while *launching* a SwarmFlight. These reflect
+/// validation against the manifest at flight construction time — once a
+/// flight is launched, runtime operations against it use [`FlightError`]
+/// instead.
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
     #[error("override role_id {0:?} does not appear in the manifest")]
     UnknownOverrideRole(String),
     #[error("manifest has no roles")]
     NoRoles,
+}
+
+/// Errors that can occur while *operating* on a launched SwarmFlight —
+/// e.g. recording a tool outcome against a role that does not exist.
+/// Distinct from [`LaunchError`] so callers can distinguish a misconfigured
+/// flight from a misuse of an already-launched one.
+#[derive(Debug, thiserror::Error)]
+pub enum FlightError {
+    #[error("role_id {0:?} is not a role in this flight")]
+    UnknownRole(String),
 }
 
 /// Options applied at SwarmFlight launch time.
@@ -179,11 +192,11 @@ impl SwarmFlight {
         tool_name: &str,
         success: bool,
         quality: f64,
-    ) -> Result<(), LaunchError> {
+    ) -> Result<(), FlightError> {
         let role = self
             .roles
             .get(role_id)
-            .ok_or_else(|| LaunchError::UnknownOverrideRole(role_id.to_string()))?;
+            .ok_or_else(|| FlightError::UnknownRole(role_id.to_string()))?;
         let ctx = ToolOutcomeContext::new()
             .with_task_id(self.flight_id)
             .with_agent_id(role_id);
@@ -306,7 +319,11 @@ provenance:
             .record_tool_outcome("ghost", "x", true, 0.9)
             .await
             .unwrap_err();
-        assert!(matches!(err, LaunchError::UnknownOverrideRole(_)));
+        // Runtime lookup failure on a launched flight surfaces as
+        // FlightError::UnknownRole, distinct from LaunchError so callers
+        // can tell construction-time misconfiguration apart from runtime
+        // misuse.
+        assert!(matches!(err, FlightError::UnknownRole(_)));
     }
 
     #[spec("SK-014")]
