@@ -396,13 +396,49 @@ scenarios:
     criticality: medium
     given:
       - Optional clearance level (defaults to "internal")
+      - Optional orchestrator DID
     when: swarmkit_orchestrator_policy is called
     then:
       - Policy includes attribute https://attr.arkavo.com/role with value "orchestrator"
       - Policy includes attribute https://attr.arkavo.com/clearance with the supplied or default value
+      - When orchestrator_did is Some, dissemination contains exactly that DID
+      - When orchestrator_did is None, dissemination is empty (attribute-only gating)
       - PolicyBuilder validation succeeds (every attribute has at least one value, FQNs are URLs)
     refs:
-      - crates/arkavo-swarmkit-runtime/src/tdf.rs:88-100
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:103-122
+    changed: "2026-05-01"
+
+  - id: SK-053
+    name: role_policy converts TdfAttributeReleasePolicy into a runnable Policy
+    criticality: high
+    given:
+      - role's tdf_attribute_release_policy from the manifest
+      - Optional agent DID for dissemination binding
+    when: role_policy is called
+    then:
+      - Each attribute string split at the last "/" into (fqn, value)
+      - Attributes sharing an FQN merged into a single OpenTDF attribute with multiple values
+      - Policy id set to "swarmkit:role:<role_id>"
+      - When agent_did is Some, dissemination contains exactly that DID
+      - When agent_did is None, dissemination is empty
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:154-194
+    changed: "2026-05-01"
+
+  - id: SK-054
+    name: role_policies extracts per-role policies and supports DID lookup
+    criticality: high
+    given:
+      - Manifest with some roles declaring tdf_attribute_release_policy
+      - Closure mapping role_id → Option<DID>
+    when: role_policies is called
+    then:
+      - Roles without an ARP block are omitted from the result
+      - Each role's policy carries the DID returned by the closure for that role_id
+      - role_policies_for_current_agent loads the agent DID from arkavo-agent-auth StoredToken and binds every role to it
+      - Malformed attribute strings (missing "/" or non-URL prefix) produce TdfError::Policy
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:212-245
     changed: "2026-05-01"
 
   # --- Operator controls ---------------------------------------------------
