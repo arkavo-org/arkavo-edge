@@ -14,9 +14,27 @@
 
 pub mod derive;
 pub mod flight;
+#[cfg(feature = "tdf")]
+pub mod tdf;
 
 pub use derive::{DeriveOptions, derive_arp_for_role};
 pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
+
+#[cfg(feature = "tdf")]
+pub use tdf::{TdfEnvelopeError, swarmkit_orchestrator_policy, unwrap_manifest, wrap_manifest};
+
+/// Serialize a manifest to canonical JSON (sorted keys, no insignificant
+/// whitespace) for hashing, signing, or TDF wrapping.
+///
+/// Distinct from `arkavo_swarmkit::canonical::kit_id_for` which strips
+/// `kit.id` and `provenance.signatures` before hashing — this helper
+/// preserves every field for round-trip reconstruction.
+pub fn canonical_full_manifest(
+    manifest: &arkavo_swarmkit::Manifest,
+) -> Result<String, serde_json::Error> {
+    let value = serde_json::to_value(manifest)?;
+    Ok(arkavo_swarmkit::canonical_json(&value))
+}
 
 #[cfg(test)]
 mod tests {

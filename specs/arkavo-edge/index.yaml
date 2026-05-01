@@ -564,7 +564,7 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 22
+    scenario_count: 25
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch
@@ -572,6 +572,7 @@ components:
       - ARKAVO_SWARMKIT_PATH auto-launch failures are non-fatal
       - requestStopFlight deregisters every role of a flight in one call
       - Identical ArpStatusUpdate payloads do not cause panel re-renders
+      - TDF envelope round-trips the manifest losslessly under canonical-form serialization
 
   - name: ui-core
     file: ui-core.spec.yaml
