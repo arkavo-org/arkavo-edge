@@ -564,7 +564,7 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 30
+    scenario_count: 33
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch
@@ -576,6 +576,7 @@ components:
       - role_policy splits attributes at the last "/" into (fqn, value)
       - Per-role policies bind to agent DIDs via the dissemination list (spec §6.3 example)
       - .swarmkit.tdf file format is canonical JSON of the TdfManifest struct
+      - unwrap_manifest_kas_gated fails fast on unhealthy KAS or policy mismatch before invoking the decryptor
 
   - name: ui-core
     file: ui-core.spec.yaml

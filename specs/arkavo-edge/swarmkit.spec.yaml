@@ -425,6 +425,53 @@ scenarios:
       - crates/arkavo-swarmkit-runtime/src/tdf.rs:154-194
     changed: "2026-05-01"
 
+  # --- KAS gate (spec §6.3) ------------------------------------------------
+
+  - id: SK-058
+    name: extract_embedded_policy decodes the policy carried in the TDF envelope
+    criticality: high
+    given:
+      - TdfManifest produced by wrap_manifest with a SwarmKit-level policy
+    when: extract_embedded_policy is called
+    then:
+      - encryption_information.policy is base64-decoded
+      - The decoded JSON is parsed into a Policy struct
+      - All attributes and dissemination entries from the wrap-time policy are recovered
+      - verify_embedded_policy_requires accepts FQNs the policy carries
+      - verify_embedded_policy_requires rejects FQNs that are absent with TdfEnvelopeError::PolicyMismatch listing missing and found
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:282-326
+    changed: "2026-05-01"
+
+  - id: SK-059
+    name: unwrap_manifest_kas_gated succeeds when KAS healthy and policy matches
+    criticality: critical
+    given:
+      - Healthy KasClient
+      - TdfManifest carrying the required attributes
+    when: unwrap_manifest_kas_gated is called
+    then:
+      - KAS health_check passes
+      - Embedded policy contains the required FQNs
+      - Underlying TdfDecryptor decrypts and the manifest is returned validated
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:344-382
+    changed: "2026-05-01"
+
+  - id: SK-060
+    name: unwrap_manifest_kas_gated fails fast on unhealthy KAS or policy mismatch
+    criticality: critical
+    given:
+      - KasClient that reports unhealthy OR a TdfManifest whose policy lacks the required attributes
+    when: unwrap_manifest_kas_gated is called
+    then:
+      - Unhealthy KAS returns TdfEnvelopeError::KasUnavailable WITHOUT calling the decryptor
+      - Policy mismatch returns TdfEnvelopeError::PolicyMismatch listing missing FQNs WITHOUT calling the decryptor
+      - Distinct variant from KAS-side denial during decrypt (which surfaces as TdfEnvelopeError::Decrypt)
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:355-365
+    changed: "2026-05-01"
+
   - id: SK-055
     name: write_kit_tdf and read_kit_tdf round-trip a TdfManifest losslessly
     criticality: high
