@@ -1,0 +1,99 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:fYvTdVeTyZ-zce8pzbtcWBIAf9y26Mqm7OetdYwZ7VY"
+  name: "ARP Showcase Kit"
+  version: "0.1.0"
+  description: >-
+    Single-role SwarmKit demo: pairs with the existing arkavo.arp.json
+    showcase. Setting both ARKAVO_ARP_PATH and ARKAVO_SWARMKIT_PATH lets
+    the panel render the fully-fleshed (local) ARP agent alongside this
+    flight role's derived ARP, so the SwarmKit handoff is visible in the
+    same UI as the original showcase.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-05-01T00:00:00Z"
+  expires: "2026-07-30T00:00:00Z"
+  nonce: "PTFVsMS5pBJwnGyWcPq-cA"
+
+objective:
+  goal: "Demonstrate the SwarmKit per-role ARP handoff in the AG-UI ARP panel."
+  success_criteria:
+    - "panel renders a flight section above the agent dropdown"
+    - "single role appears as a clickable pill with derived ARP state"
+    - "stop button removes the flight without disrupting the (local) ARP agent"
+
+inputs: []
+deliverables:
+  - name: "panel_state"
+    type: "json"
+
+roles:
+  - id: "showcase"
+    role_type: "showcase_agent"
+    description: "Single specialist surfacing a derived ARP runtime in the panel."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "0.8B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 256
+        temperature: 0.2
+      budget:
+        max_inference_calls: 10
+        max_wallclock_ms: 30000
+        max_total_tokens: 4000
+      context:
+        max_context_tokens: 8000
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills: []
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/clearance/public"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.05
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+evaluation:
+  rubric:
+    dimensions:
+      - name: "accuracy"
+        weight: 1.0
+        threshold: 0.7
+  critic_role: "showcase"
+
+completion:
+  rules:
+    - "panel renders flight role"
+  on_failure: "abort"
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "i_TEuEOJp97yBlK1dVTDECgJjQBTJD2POG3CIKRfjnMFCEmD4iLI33EAB-qr6xMqZIjl4nq7h_obv27af7JWug"
