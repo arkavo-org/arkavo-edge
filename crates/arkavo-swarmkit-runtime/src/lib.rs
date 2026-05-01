@@ -22,9 +22,11 @@ pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlig
 
 #[cfg(feature = "tdf")]
 pub use tdf::{
-    TdfEnvelopeError, load_current_agent_did, role_policies, role_policies_for_current_agent,
-    role_policy, swarmkit_orchestrator_policy, swarmkit_orchestrator_policy_for_current_agent,
-    unwrap_manifest, wrap_manifest,
+    SWARMKIT_TDF_EXTENSION, TdfEnvelopeError, load_current_agent_did, read_kit_tdf,
+    read_kit_tdf_from_path, role_policies, role_policies_for_current_agent, role_policy,
+    swarmkit_orchestrator_policy, swarmkit_orchestrator_policy_for_current_agent, unwrap_manifest,
+    unwrap_manifest_from_path, wrap_manifest, wrap_manifest_to_path, write_kit_tdf,
+    write_kit_tdf_to_path,
 };
 
 /// Serialize a manifest to canonical JSON (sorted keys, no insignificant
