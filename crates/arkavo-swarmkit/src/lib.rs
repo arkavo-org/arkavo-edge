@@ -23,8 +23,8 @@ pub use coordination::{
 };
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 pub use role::{
-    AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
-    Observability, RoleSpec, Skill, TdfAttributeReleasePolicy, ToolUse,
+    AgentProvisioning, ArpRule, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
+    Model, Observability, RoleSpec, Skill, TdfAttributeReleasePolicy, ToolUse,
 };
 pub use validate::{ValidationError, validate};
 

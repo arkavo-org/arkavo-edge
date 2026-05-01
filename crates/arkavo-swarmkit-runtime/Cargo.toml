@@ -11,15 +11,18 @@ description = "SwarmFlight runtime — per-role ARP runtime provisioning and Dec
 [features]
 default = []
 # Wrap/unwrap SwarmKit manifests through the OpenTDF envelope. Pulls in
-# opentdf-rs via arkavo-tdf for AES-256-GCM + RSA-OAEP key wrap. Keep
-# disabled for headless / in-process flight orchestration.
-tdf = ["dep:arkavo-tdf"]
+# opentdf-rs via arkavo-tdf for AES-256-GCM + RSA-OAEP key wrap. Also
+# pulls in arkavo-agent-auth so role policies can bind to the running
+# agent's StoredToken DID (spec §6.3 dissemination list). Keep disabled
+# for headless / in-process flight orchestration.
+tdf = ["dep:arkavo-tdf", "dep:arkavo-agent-auth"]
 
 [dependencies]
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
+arkavo-agent-auth = { path = "../arkavo-agent-auth", optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
