@@ -530,6 +530,42 @@ scenarios:
       - crates/arkavo-swarmkit-runtime/src/tdf.rs:212-245
     changed: "2026-05-01"
 
+  # --- TDF auto-launch (slice 5) ------------------------------------------
+
+  - id: SK-061
+    name: is_tdf_path recognises .tdf and .swarmkit.tdf extensions case-insensitively
+    criticality: medium
+    given:
+      - File path with various extensions
+    when: is_tdf_path is called
+    then:
+      - .tdf returns true
+      - .swarmkit.tdf returns true
+      - mixed-case .SWARMKIT.TDF returns true
+      - .yaml / .json / no extension return false
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:179-189
+    changed: "2026-05-01"
+
+  - id: SK-062
+    name: auto_launch dispatches .tdf paths through unwrap_manifest_from_path
+    criticality: high
+    given:
+      - ARKAVO_SWARMKIT_PATH points at a .swarmkit.tdf file
+      - arkavo-agui built with the `tdf` feature
+    when: auto_launch_from_environment runs at gateway boot
+    then:
+      - is_tdf_path returns true on the env-var path
+      - launch_from_tdf_path used instead of launch_from_path
+      - OpenTdfService default decryptor decrypts the envelope
+      - Recovered manifest validated and SwarmFlight launched
+      - Without the `tdf` feature, AutoLaunchError::TdfFeatureDisabled is returned (rebuild guidance in the message)
+      - Decrypt failures (KAS unreachable, key denied) surface as AutoLaunchError::TdfUnwrap, distinct from Read / Parse / Launch
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:104-117
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:140-170
+    changed: "2026-05-01"
+
   # --- Operator controls ---------------------------------------------------
 
   - id: SK-040

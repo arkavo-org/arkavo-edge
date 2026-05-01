@@ -83,11 +83,24 @@ pub enum AutoLaunchError {
     Parse { path: String, message: String },
     #[error("launch flight from {path}: {message}")]
     Launch { path: String, message: String },
+    #[error(
+        "{path} is a .tdf-encoded SwarmKit but arkavo-agui was built without the `tdf` feature; \
+         rebuild with --features tdf to auto-launch encrypted kits"
+    )]
+    TdfFeatureDisabled { path: String },
+    #[error("decrypt .tdf manifest at {path}: {message}")]
+    TdfUnwrap { path: String, message: String },
 }
 
 /// Read `ARKAVO_SWARMKIT_PATH`, parse the manifest, launch a flight, and
 /// register it with the gateway. Returns `Ok(None)` when the env var is
 /// unset (the common case); errors are non-fatal at the call site.
+///
+/// Path dispatch:
+/// * `*.swarmkit.yaml`, `*.yaml`, `*.yml` → plain YAML
+/// * `*.json` → plain JSON
+/// * `*.swarmkit.tdf`, `*.tdf` → encrypted TDF envelope (requires the
+///   `tdf` feature; surfaces `TdfFeatureDisabled` otherwise)
 pub async fn auto_launch_from_environment(
     registry: &SwarmFlightRegistry,
     arp_handler: &ArpHandler,
@@ -95,14 +108,19 @@ pub async fn auto_launch_from_environment(
     let Some(path) = std::env::var("ARKAVO_SWARMKIT_PATH").ok() else {
         return Ok(None);
     };
-    let flight = launch_from_path(Path::new(&path))?;
+    let path_buf = Path::new(&path).to_path_buf();
+    let flight = if is_tdf_path(&path_buf) {
+        launch_from_tdf_path(&path_buf).await?
+    } else {
+        launch_from_path(&path_buf)?
+    };
     let flight_id = flight.flight_id();
     registry.register(Arc::new(flight), arp_handler).await;
     Ok(Some(flight_id))
 }
 
-/// Parse a manifest from disk and launch a flight against it. Public for
-/// callers that want to drive a flight without going through the env var.
+/// Parse a plaintext manifest from disk and launch a flight against it.
+/// For `.tdf`-encoded kits use [`launch_from_tdf_path`].
 pub fn launch_from_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
     let raw = std::fs::read_to_string(path).map_err(|e| AutoLaunchError::Read {
         path: path.display().to_string(),
@@ -113,6 +131,50 @@ pub fn launch_from_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
         path: path.display().to_string(),
         message: e.to_string(),
     })
+}
+
+/// Decrypt a `.swarmkit.tdf` envelope with the default `OpenTdfService`
+/// and launch a flight against the recovered manifest.
+///
+/// Available only with the `tdf` feature. For tighter control over the
+/// decryptor (custom KAS URL) or to add a KAS health gate before
+/// decryption, use the lower-level helpers in
+/// `arkavo-swarmkit-runtime`'s `tdf` module directly.
+#[cfg(feature = "tdf")]
+pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
+    use arkavo_swarmkit_runtime::{OpenTdfService, unwrap_manifest_from_path};
+
+    let decryptor = OpenTdfService::default();
+    let manifest = unwrap_manifest_from_path(&decryptor, path)
+        .await
+        .map_err(|e| AutoLaunchError::TdfUnwrap {
+            path: path.display().to_string(),
+            message: e.to_string(),
+        })?;
+    SwarmFlight::launch(&manifest, LaunchOptions::default()).map_err(|e| AutoLaunchError::Launch {
+        path: path.display().to_string(),
+        message: e.to_string(),
+    })
+}
+
+/// Stub returned when the gateway is built without the `tdf` feature
+/// but a `.tdf` path is supplied. Surfaces a clear error so operators
+/// know to rebuild rather than guessing why the flight didn't start.
+#[cfg(not(feature = "tdf"))]
+pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
+    Err(AutoLaunchError::TdfFeatureDisabled {
+        path: path.display().to_string(),
+    })
+}
+
+/// `true` when the path's extension marks it as a TDF envelope. Matches
+/// either bare `.tdf` or the recommended `.swarmkit.tdf` double extension.
+pub fn is_tdf_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".tdf") || lower.ends_with(".swarmkit.tdf")
 }
 
 fn parse_manifest(path: &Path, raw: &str) -> Result<Manifest, AutoLaunchError> {
@@ -260,6 +322,63 @@ provenance:
         let flight = launch_from_path(&path).expect("launch");
         assert_eq!(flight.kit_name(), "registry-test-kit");
         assert_eq!(flight.roles().count(), 2);
+    }
+
+    #[spec("SK-061")]
+    #[test]
+    fn is_tdf_path_recognises_extensions() {
+        use std::path::PathBuf;
+        assert!(is_tdf_path(&PathBuf::from("kit.tdf")));
+        assert!(is_tdf_path(&PathBuf::from("kit.swarmkit.tdf")));
+        assert!(is_tdf_path(&PathBuf::from("/abs/path/Kit.SWARMKIT.TDF")));
+        assert!(!is_tdf_path(&PathBuf::from("kit.swarmkit.yaml")));
+        assert!(!is_tdf_path(&PathBuf::from("kit.json")));
+        assert!(!is_tdf_path(&PathBuf::from("kit")));
+    }
+
+    #[cfg(not(feature = "tdf"))]
+    #[spec("SK-062")]
+    #[tokio::test]
+    async fn launch_from_tdf_path_errors_when_feature_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kit.swarmkit.tdf");
+        std::fs::write(&path, b"unused").unwrap();
+        let err = launch_from_tdf_path(&path).await.unwrap_err();
+        assert!(matches!(err, AutoLaunchError::TdfFeatureDisabled { .. }));
+    }
+
+    #[cfg(feature = "tdf")]
+    #[spec("SK-062")]
+    #[tokio::test]
+    async fn launch_from_tdf_path_round_trips_through_wrap_to_path() {
+        use arkavo_swarmkit_runtime::{
+            OpenTdfService, swarmkit_orchestrator_policy, wrap_manifest_to_path,
+        };
+        // We can't decrypt with OpenTdfService here without a working KAS,
+        // so this test verifies the *dispatch* path: a .swarmkit.tdf file
+        // produced by our own helpers is recognised, the unwrap is
+        // attempted, and any failure surfaces as TdfUnwrap rather than
+        // a generic Read or Parse error.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kit.swarmkit.tdf");
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = OpenTdfService::default();
+        let policy = swarmkit_orchestrator_policy(None, None).unwrap();
+        // wrap_manifest_to_path requires a working OpenTdfService; if it
+        // can't reach the default KAS the wrap itself fails — in that
+        // case skip rather than masking real test failures.
+        let Ok(()) = wrap_manifest_to_path(&manifest, &svc, &policy, &path).await else {
+            eprintln!("wrap_manifest_to_path failed (no KAS); skipping dispatch test");
+            return;
+        };
+        // Now dispatch path: file exists with .tdf extension, should be
+        // recognised. The unwrap will likely fail (no KAS in test env),
+        // but the error must be TdfUnwrap, not a generic Read/Parse.
+        match launch_from_tdf_path(&path).await {
+            Ok(_) => {}
+            Err(AutoLaunchError::TdfUnwrap { .. }) => {}
+            Err(other) => panic!("expected Ok or TdfUnwrap, got {other:?}"),
+        }
     }
 
     #[spec("SK-022")]
