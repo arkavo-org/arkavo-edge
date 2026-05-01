@@ -339,3 +339,27 @@ scenarios:
     refs:
       - crates/arkavo-agui/static/js/panels/arp.js:163-188
     changed: "2026-04-30"
+
+  # --- Operator controls ---------------------------------------------------
+
+  - id: SK-040
+    name: requestStopFlight deregisters the flight and pushes a fresh snapshot
+    criticality: high
+    given:
+      - WebSocket session connected
+      - One or more SwarmFlights registered
+    when: client sends requestStopFlight with a valid flight_id
+    then:
+      - SwarmFlightRegistry::deregister called with the parsed UUID
+      - Every role of that flight removed from ArpHandler
+      - FlightStopped emitted with error=None
+      - ArpStatusUpdate emitted immediately so the panel re-renders without the stopped flight
+    refs:
+      - crates/arkavo-agui/src/gateway_ws.rs:351-385
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:60-65
+    changed: "2026-05-01"
+    edge_cases:
+      - condition: flight_id is not a valid UUID
+        expected: FlightStopped with error=Some(...) explaining the parse failure; no deregister call
+      - condition: flight_id is a valid UUID but no flight is registered with it
+        expected: FlightStopped with error=None (deregister is idempotent)

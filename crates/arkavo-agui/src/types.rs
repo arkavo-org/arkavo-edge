@@ -548,6 +548,23 @@ pub enum AgUiEvent {
         event_id: String,
     },
 
+    /// Operator request to stop an active SwarmFlight. The gateway
+    /// deregisters every role of the flight from the ArpHandler and
+    /// drops the flight from the registry. Stopping a non-existent or
+    /// already-stopped flight is a no-op (`FlightStopped` reports success).
+    RequestStopFlight {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+    },
+    FlightStopped {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+        /// `None` on success; `Some(message)` if the flight_id failed to
+        /// parse as a UUID or some other server-side error occurred.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {

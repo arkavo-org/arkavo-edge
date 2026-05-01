@@ -823,3 +823,25 @@
     color: var(--text-secondary);
     font-size: 10px;
 }
+.arp-flight-stop {
+    font-size: 10px;
+    font-family: monospace;
+    padding: 2px 8px;
+    margin-left: 6px;
+    background: rgba(255, 99, 99, 0.10);
+    color: var(--warning, #ff9f43);
+    border: 1px solid rgba(255, 99, 99, 0.35);
+    border-radius: 4px;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.1s, border-color 0.1s;
+}
+.arp-flight-stop:hover:not(:disabled) {
+    background: rgba(255, 99, 99, 0.22);
+    border-color: #ff6b6b;
+    color: #ff6b6b;
+}
+.arp-flight-stop:disabled {
+    opacity: 0.55;
+    cursor: progress;
+}

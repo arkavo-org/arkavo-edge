@@ -97,6 +97,21 @@ function renderArp() {
             renderArp();
         });
     });
+
+    // Stop buttons send a requestStopFlight event; the gateway responds
+    // with FlightStopped + an ArpStatusUpdate so the panel re-renders
+    // without the dropped flight.
+    var stops = document.querySelectorAll('.arp-flight-stop');
+    Array.prototype.forEach.call(stops, function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var fid = btn.getAttribute('data-flight-id');
+            if (!fid) return;
+            btn.disabled = true;
+            btn.textContent = 'Stopping…';
+            wsSend({ type: 'requestStopFlight', flightId: fid });
+        });
+    });
 }
 
 function renderArpAgentSelector(agents) {
@@ -193,8 +208,14 @@ function renderArpFlightsSection(agents) {
 
         rolesCell += '</div>';
 
+        var stopBtn =
+            '<button type="button" class="arp-flight-stop"' +
+            ' data-flight-id="' + escapeHtml(flight.flightId) + '"' +
+            ' title="Stop this SwarmFlight and remove its roles from the panel">' +
+            'Stop</button>';
+
         html += '<tr><td>' +
-            '<strong>' + escapeHtml(flight.kitName) + '</strong>' +
+            '<strong>' + escapeHtml(flight.kitName) + '</strong> ' + stopBtn +
             '<div class="arp-flight-meta">flight <code>' + escapeHtml(shortId) + '…</code>' +
             ' · ' + flight.roles.length + ' role' + (flight.roles.length === 1 ? '' : 's') + '</div>' +
             '</td><td>' + rolesCell + '</td></tr>';
