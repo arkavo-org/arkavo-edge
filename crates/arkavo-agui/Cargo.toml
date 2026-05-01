@@ -15,6 +15,10 @@ mdns = ["dep:mdns-sd"]
 llama-cpp = ["arkavo-router/llama-cpp"]
 # Windows compatible features (no C++ dependencies)
 windows = ["mdns", "arkavo-router/windows"]
+# Auto-launch can decrypt .swarmkit.tdf files at gateway boot via opentdf-rs.
+# Pulls in arkavo-tdf + arkavo-swarmkit-runtime/tdf. Off by default so
+# headless deployments don't drag in opentdf-rs unnecessarily.
+tdf = ["arkavo-swarmkit-runtime/tdf"]
 
 [dependencies]
 # Core dependencies

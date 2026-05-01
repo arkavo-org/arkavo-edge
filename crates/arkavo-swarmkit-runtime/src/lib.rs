@@ -30,6 +30,17 @@ pub use tdf::{
     wrap_manifest_to_path, write_kit_tdf, write_kit_tdf_to_path,
 };
 
+// Re-export the underlying TDF runtime types so downstream consumers
+// (the AG-UI gateway's auto-launch path, the swarmkit demo binaries,
+// etc.) can compose with our wrap/unwrap helpers without taking a
+// direct dependency on arkavo-tdf. Stable surface for the long-lived
+// integration branch.
+#[cfg(feature = "tdf")]
+pub use arkavo_tdf::{
+    KasClient, OpenTdfConfig, OpenTdfService, Policy as TdfPolicy, TdfDecryptor, TdfEncryptor,
+    TdfManifest,
+};
+
 /// Serialize a manifest to canonical JSON (sorted keys, no insignificant
 /// whitespace) for hashing, signing, or TDF wrapping.
 ///
