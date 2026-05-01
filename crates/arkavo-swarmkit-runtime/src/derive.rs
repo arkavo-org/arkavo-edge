@@ -21,15 +21,35 @@ use arkavo_arp::model::AdlRef;
 use arkavo_swarmkit::{GlobalBudget, RoleSpec};
 
 /// Tunables for the default-ARP derivation.
+///
+/// **Rationale for the defaults below.** The SwarmKit specification does not
+/// prescribe specific ARP runtime values for derived flights — it only
+/// requires that a derivation exist (spec §1.2 / §5 hand-off language). The
+/// numbers chosen here are ours, intended to track the existing
+/// arkavo-arp-runtime conventions so a flight launched from a manifest looks
+/// indistinguishable to the panel from a manually-loaded ARP document:
+///
+/// * `quality_threshold = 0.7` — matches the spec §4.6 baseline rubric's
+///   accuracy/completeness thresholds and the existing PR #572 ARP showcase.
+/// * `cache_ttl_sec = 3600` — matches the arkavo-arp-runtime test fixture and
+///   keeps short-lived flights (90-day max horizon per §10.1) well inside the
+///   bound.
+/// * `cache_half_life_sec = 86400` — mirrors the showcase's exponential-decay
+///   tuning. Beta priors compete with constitutional policy on a daily scale.
+/// * `velocity_window_minutes = 5.0` — divides `task_ceiling_usd` over a
+///   5-minute spending window. Matches the budget velocity defaults the
+///   conductor enforces today; chosen because most agent tasks are bounded
+///   by single-digit minutes of LLM inference.
+///
+/// All four are tunable. Producers that need different defaults supply a
+/// hand-authored ARP via `LaunchOptions::arp_overrides`, which bypasses
+/// derivation entirely.
 #[derive(Debug, Clone, Copy)]
 pub struct DeriveOptions {
     /// Quality gate threshold below which an outcome is treated as a failure
-    /// when updating priors. SwarmKit spec §4.6 default rubric uses 0.7
-    /// for accuracy/completeness; we mirror that.
+    /// when updating priors.
     pub quality_threshold: f64,
-    /// Cache TTL applied to every PolicyCache entry. 1 hour matches the
-    /// arkavo-arp-runtime default and the spec §10.1 recommendation that
-    /// short-lived flights stay well inside it.
+    /// Cache TTL applied to every PolicyCache entry.
     pub cache_ttl_sec: u64,
     /// Decay half-life for cache entries.
     pub cache_half_life_sec: u64,
@@ -132,6 +152,7 @@ pub fn derive_arp_for_role(
 mod tests {
     use super::*;
     use arkavo_swarmkit::{AgentProvisioning, RoleSpec};
+    use arkavo_test_macros::spec;
 
     fn role(id: &str) -> RoleSpec {
         RoleSpec {
@@ -155,6 +176,7 @@ mod tests {
         }
     }
 
+    #[spec("SK-013")]
     #[test]
     fn derives_thompson_sampling_default() {
         let doc = derive_arp_for_role(&role("r1"), &budget(), 3, DeriveOptions::default());
@@ -165,12 +187,14 @@ mod tests {
         );
     }
 
+    #[spec("SK-013")]
     #[test]
     fn splits_global_cost_across_roles() {
         let doc = derive_arp_for_role(&role("r1"), &budget(), 3, DeriveOptions::default());
         assert!((doc.budget.task_ceiling_usd - 0.10).abs() < 1e-9);
     }
 
+    #[spec("SK-013")]
     #[test]
     fn velocity_derived_from_ceiling_and_window() {
         let opts = DeriveOptions {
@@ -182,6 +206,7 @@ mod tests {
         assert!((doc.budget.velocity.max_spend_per_minute_usd - 0.02).abs() < 1e-9);
     }
 
+    #[spec("SK-013")]
     #[test]
     fn adl_ref_carries_role_id() {
         let doc = derive_arp_for_role(&role("planner-1"), &budget(), 1, DeriveOptions::default());

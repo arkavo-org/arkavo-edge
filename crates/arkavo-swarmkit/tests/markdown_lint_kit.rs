@@ -3,6 +3,7 @@
 //! its kit.id under our BLAKE3 implementation.
 
 use arkavo_swarmkit::{kit_id_for, parse_yaml};
+use arkavo_test_macros::spec;
 
 const SPEC_EXAMPLE_YAML: &str = r#"
 spec_version: "1.0.0"
@@ -91,6 +92,8 @@ provenance:
       signature: "-E3rwWzQ_pl92kJP9ZTnQv1fEohUfmhU2d4SE1bJrMXsjli6z6gNs4ZaMAtL0X2qxRDKSgJWZEgNen9ikweYRw"
 "#;
 
+#[spec("SK-001")]
+#[spec("SK-003")]
 #[test]
 fn spec_example_parses_validates_and_hashes() {
     let manifest = parse_yaml(SPEC_EXAMPLE_YAML).expect("spec §12.1 example must parse + validate");

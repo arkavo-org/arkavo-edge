@@ -13,8 +13,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 chrono = { workspace = true }
+semver = { workspace = true }
 blake3 = "1.5"
 base64 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }

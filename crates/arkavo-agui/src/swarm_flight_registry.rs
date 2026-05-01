@@ -134,6 +134,7 @@ fn parse_manifest(path: &Path, raw: &str) -> Result<Manifest, AutoLaunchError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     const KIT: &str = r#"
 spec_version: "1.0.0"
@@ -172,6 +173,7 @@ provenance:
   signatures: [{signer_did: "did:web:example.com", algorithm: "ed25519", signature: "AAA"}]
 "#;
 
+    #[spec("SK-020")]
     #[tokio::test]
     async fn register_attaches_all_roles_to_handler() {
         let registry = SwarmFlightRegistry::new();
@@ -202,6 +204,7 @@ provenance:
         );
     }
 
+    #[spec("SK-021")]
     #[tokio::test]
     async fn deregister_removes_roles_and_registry_entry() {
         let registry = SwarmFlightRegistry::new();
@@ -217,12 +220,18 @@ provenance:
         assert!(handler.snapshot().await.agents.is_empty());
     }
 
+    #[spec("SK-022")]
+    #[serial_test::serial(env_arkavo_swarmkit_path)]
     #[tokio::test]
     async fn auto_launch_unset_env_var_returns_none() {
-        // Save and clear so this test is not order-dependent.
+        // serial_test ensures no other test mutates ARKAVO_SWARMKIT_PATH
+        // concurrently. The default cargo test harness runs test functions
+        // across multiple threads even when each one uses
+        // `tokio::test(flavor = "current_thread")`; the flavor only governs
+        // the tokio runtime *inside* one test, not the harness scheduler.
         let prev = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
-        // SAFETY: tests are single-threaded under tokio::test current_thread
-        // and we restore after.
+        // SAFETY: serial_test serializes any test in this binary that
+        // touches the same key, so set_var/remove_var calls do not race.
         unsafe {
             std::env::remove_var("ARKAVO_SWARMKIT_PATH");
         }
@@ -241,6 +250,7 @@ provenance:
         assert_eq!(registry.flight_count().await, 0);
     }
 
+    #[spec("SK-022")]
     #[tokio::test]
     async fn launch_from_path_loads_yaml_manifest() {
         let dir = tempfile::tempdir().unwrap();
@@ -252,6 +262,7 @@ provenance:
         assert_eq!(flight.roles().count(), 2);
     }
 
+    #[spec("SK-022")]
     #[tokio::test]
     async fn launch_from_path_reports_invalid_manifest() {
         let dir = tempfile::tempdir().unwrap();

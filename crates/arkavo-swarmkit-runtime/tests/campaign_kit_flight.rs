@@ -8,10 +8,12 @@
 
 use arkavo_swarmkit::parse_yaml;
 use arkavo_swarmkit_runtime::{LaunchOptions, SwarmFlight};
+use arkavo_test_macros::spec;
 
 const CAMPAIGN_KIT: &str =
     include_str!("../../../examples/campaign-kit/campaign-kit.swarmkit.yaml");
 
+#[spec("SK-011")]
 #[tokio::test]
 async fn campaign_kit_flight_isolates_per_role_traces() {
     let manifest = parse_yaml(CAMPAIGN_KIT).expect("Campaign Kit manifest must validate");
@@ -114,6 +116,7 @@ async fn campaign_kit_flight_isolates_per_role_traces() {
     assert!(copy_keys.iter().all(|k| k.contains("copy.")));
 }
 
+#[spec("SK-012")]
 #[tokio::test]
 async fn below_quality_gate_outcome_degrades_role_prior() {
     let manifest = parse_yaml(CAMPAIGN_KIT).unwrap();

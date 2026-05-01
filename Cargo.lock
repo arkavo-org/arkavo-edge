@@ -564,6 +564,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "serial_test",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1862,9 +1863,11 @@ dependencies = [
 name = "arkavo-swarmkit"
 version = "0.73.0"
 dependencies = [
+ "arkavo-test-macros",
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "semver 1.0.27",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1879,6 +1882,7 @@ dependencies = [
  "arkavo-arp",
  "arkavo-arp-runtime",
  "arkavo-swarmkit",
+ "arkavo-test-macros",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

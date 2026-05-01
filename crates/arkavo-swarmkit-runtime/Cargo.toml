@@ -20,6 +20,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 arkavo-agui = { path = "../arkavo-agui", default-features = false }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 serde_json = { workspace = true }
 
 [[example]]

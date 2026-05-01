@@ -18,6 +18,9 @@ pub const RECOMMENDED_EXPIRY_HORIZON_SECONDS: i64 = 90 * 24 * 60 * 60;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ValidationError {
+    #[error("spec_version {found:?} is not a valid semver: {reason}")]
+    SpecVersionUnparseable { found: String, reason: String },
+
     #[error("spec_version {found} unsupported; only 1.x is recognized")]
     SpecVersionMismatch { found: String },
 
@@ -53,6 +56,9 @@ pub enum ValidationError {
     )]
     NetworkEgressDenied { role: String },
 
+    #[error("evaluation.rubric.dimensions is empty; at least one dimension is required (§4.6)")]
+    EmptyRubricDimensions,
+
     #[error("evaluation.rubric.dimensions weight sum {sum} is not 1.0 (within ±1e-6)")]
     RubricWeightsDoNotSumToOne { sum: f64 },
 
@@ -67,14 +73,26 @@ pub enum ValidationError {
 
     #[error("kit.id {found:?} does not match BLAKE3 of canonical manifest (expected {expected:?})")]
     KitIdHashMismatch { found: String, expected: String },
+
+    #[error("manifest could not be canonicalized for kit.id verification: {0}")]
+    CanonicalSerializationFailed(String),
 }
 
 /// Validate the cross-block invariants of a SwarmKit manifest.
 ///
 /// Returns the first encountered error. Skips `kit.id` verification when
-/// `kit.id` is the empty string (used by producers building a new manifest).
+/// `kit.id` is the empty string — producers building a new manifest can
+/// author with an empty id, run `validate`, then assign the computed
+/// hash via `Manifest::compute_kit_id` (or the lower-level
+/// `canonical::kit_id_for`) and re-validate.
 pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
-    if !m.spec_version.starts_with("1.") {
+    let parsed = semver::Version::parse(&m.spec_version).map_err(|e| {
+        ValidationError::SpecVersionUnparseable {
+            found: m.spec_version.clone(),
+            reason: e.to_string(),
+        }
+    })?;
+    if parsed.major != 1 {
         return Err(ValidationError::SpecVersionMismatch {
             found: m.spec_version.clone(),
         });
@@ -118,6 +136,9 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
             return Err(ValidationError::UnresolvedCriticRole(
                 eval.critic_role.clone(),
             ));
+        }
+        if eval.rubric.dimensions.is_empty() {
+            return Err(ValidationError::EmptyRubricDimensions);
         }
         let sum: f64 = eval.rubric.dimensions.iter().map(|d| d.weight).sum();
         if (sum - 1.0).abs() > 1e-6 {
@@ -209,9 +230,11 @@ fn parse_rfc3339(raw: &str, field: &'static str) -> Result<DateTime<FixedOffset>
 }
 
 fn validate_kit_id(m: &Manifest) -> Result<(), ValidationError> {
-    let expected = kit_id_for(m).map_err(|_| ValidationError::KitIdHashMismatch {
-        found: m.kit.id.clone(),
-        expected: "<serialization failed>".to_string(),
+    let expected = kit_id_for(m).map_err(|e| {
+        // Distinct from KitIdHashMismatch: a serialization failure on a
+        // successfully-deserialized Manifest is a bug, not a producer
+        // error. Surface the underlying serde_json message for diagnosis.
+        ValidationError::CanonicalSerializationFailed(e.to_string())
     })?;
     if expected != m.kit.id {
         return Err(ValidationError::KitIdHashMismatch {
@@ -228,6 +251,7 @@ mod tests {
     use crate::coordination::*;
     use crate::manifest::*;
     use crate::role::*;
+    use arkavo_test_macros::spec;
 
     fn minimal_manifest() -> Manifest {
         Manifest {
@@ -306,6 +330,7 @@ mod tests {
         validate(&minimal_manifest()).unwrap();
     }
 
+    #[spec("SK-002")]
     #[test]
     fn budget_overflow_caught() {
         let mut m = minimal_manifest();
@@ -365,6 +390,7 @@ mod tests {
         assert!(matches!(err, ValidationError::UnresolvedCriticRole(_)));
     }
 
+    #[spec("SK-005")]
     #[test]
     fn rubric_weights_must_sum_to_one() {
         let mut m = minimal_manifest();
@@ -394,6 +420,7 @@ mod tests {
         ));
     }
 
+    #[spec("SK-004")]
     #[test]
     fn expiry_horizon_capped() {
         let mut m = minimal_manifest();
@@ -402,6 +429,7 @@ mod tests {
         assert_eq!(err, ValidationError::ExpiryHorizonTooLarge);
     }
 
+    #[spec("SK-004")]
     #[test]
     fn expiry_before_created() {
         let mut m = minimal_manifest();
@@ -418,6 +446,7 @@ mod tests {
         assert!(matches!(err, ValidationError::DuplicateRoleId(_)));
     }
 
+    #[spec("SK-003")]
     #[test]
     fn kit_id_round_trip() {
         let mut m = minimal_manifest();
@@ -426,6 +455,7 @@ mod tests {
         validate(&m).unwrap();
     }
 
+    #[spec("SK-003")]
     #[test]
     fn kit_id_mismatch_detected() {
         let mut m = minimal_manifest();

@@ -559,6 +559,7 @@ fn convert_trace_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     const MIN_DOC: &str = r#"{
         "arp_spec": "0.1.0",
@@ -689,6 +690,8 @@ mod tests {
         }
     }
 
+    #[spec("SK-020")]
+    #[spec("SK-024")]
     #[tokio::test]
     async fn flight_role_appears_with_context() {
         let handler = ArpHandler::new();
@@ -732,6 +735,7 @@ mod tests {
         assert!(adaptation.entities.is_empty());
     }
 
+    #[spec("SK-020")]
     #[tokio::test]
     async fn flight_role_runtime_state_flows_through_snapshot() {
         let handler = ArpHandler::new();
@@ -764,6 +768,7 @@ mod tests {
         assert_eq!(entry.policy_cache.as_ref().unwrap().entry_count, 1);
     }
 
+    #[spec("SK-021")]
     #[tokio::test]
     async fn remove_flight_drops_only_its_roles() {
         let handler = ArpHandler::new();
@@ -797,6 +802,7 @@ mod tests {
         assert!(snap.agents.iter().any(|a| a.agent_id == "rover-alpha"));
     }
 
+    #[spec("SK-023")]
     #[tokio::test]
     async fn snapshot_sort_order_local_then_mesh_then_flight() {
         let handler = ArpHandler::new();

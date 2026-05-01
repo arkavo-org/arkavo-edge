@@ -22,6 +22,7 @@ pub use flight::{LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
 mod tests {
     use crate::{LaunchOptions, SwarmFlight};
     use arkavo_swarmkit::parse_yaml;
+    use arkavo_test_macros::spec;
 
     const TINY_KIT: &str = r#"
 spec_version: "1.0.0"
@@ -62,6 +63,7 @@ provenance:
   signatures: [{signer_did: "did:web:example.com", algorithm: "ed25519", signature: "AAA"}]
 "#;
 
+    #[spec("SK-010")]
     #[tokio::test]
     async fn launch_creates_per_role_runtime() {
         let manifest = parse_yaml(TINY_KIT).unwrap();

@@ -67,6 +67,10 @@ pub struct ConstraintsSpec {
     pub global_budget: GlobalBudget,
     #[serde(default)]
     pub data_classifications: Vec<String>,
+    /// ISO 3166 alpha-2 country codes per spec §4.5. Currently parsed and
+    /// round-tripped but not enforced — runtime binding to TDF attribute
+    /// release policies is deferred until the orchestrator-level policy
+    /// engine lands. See spec §4.5 / §6.4 for the intended interaction.
     #[serde(default)]
     pub jurisdiction: Vec<String>,
     pub network: NetworkConstraints,

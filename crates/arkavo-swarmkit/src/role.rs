@@ -275,7 +275,9 @@ pub struct ContextScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SK-006")]
     #[test]
     fn role_type_is_free_form() {
         let json = r#"{

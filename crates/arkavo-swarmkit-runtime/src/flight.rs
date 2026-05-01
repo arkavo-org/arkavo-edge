@@ -198,6 +198,7 @@ impl SwarmFlight {
 mod tests {
     use super::*;
     use arkavo_swarmkit::parse_yaml;
+    use arkavo_test_macros::spec;
 
     const KIT: &str = r#"
 spec_version: "1.0.0"
@@ -236,6 +237,7 @@ provenance:
   signatures: [{signer_did: "did:web:example.com", algorithm: "ed25519", signature: "AAA"}]
 "#;
 
+    #[spec("SK-010")]
     #[tokio::test]
     async fn launch_assigns_one_runtime_per_role() {
         let m = parse_yaml(KIT).unwrap();
@@ -245,6 +247,7 @@ provenance:
         assert!(f.role("beta").is_some());
     }
 
+    #[spec("SK-011")]
     #[tokio::test]
     async fn outcomes_isolate_per_role() {
         let m = parse_yaml(KIT).unwrap();
@@ -275,6 +278,7 @@ provenance:
         assert_eq!(beta_entries[0].outcome.success, Some(false));
     }
 
+    #[spec("SK-015")]
     #[tokio::test]
     async fn flight_id_propagates_into_trace_task_id() {
         let m = parse_yaml(KIT).unwrap();
@@ -305,6 +309,7 @@ provenance:
         assert!(matches!(err, LaunchError::UnknownOverrideRole(_)));
     }
 
+    #[spec("SK-014")]
     #[tokio::test]
     async fn unknown_override_id_rejected_at_launch() {
         let m = parse_yaml(KIT).unwrap();

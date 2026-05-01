@@ -26,6 +26,22 @@ pub struct Manifest {
     pub provenance: ProvenanceSpec,
 }
 
+impl Manifest {
+    /// Compute the canonical `kit.id` (BLAKE3 of the canonical manifest
+    /// minus `kit.id` and `provenance.signatures`) and assign it to
+    /// `self.kit.id`. The producer flow is:
+    ///
+    /// 1. Author the manifest with `kit.id: ""`.
+    /// 2. Call `validate` (which skips the BLAKE3 round-trip when id is empty).
+    /// 3. Call `compute_kit_id` to populate the field.
+    /// 4. Optionally re-validate to confirm the round-trip holds.
+    pub fn compute_kit_id(&mut self) -> Result<(), serde_json::Error> {
+        let id = crate::canonical::kit_id_for(self)?;
+        self.kit.id = id;
+        Ok(())
+    }
+}
+
 /// `kit` block per §4.1.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KitMetadata {
