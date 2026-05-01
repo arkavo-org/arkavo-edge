@@ -340,6 +340,22 @@ scenarios:
       - crates/arkavo-agui/static/js/panels/arp.js:163-188
     changed: "2026-04-30"
 
+  - id: SK-033
+    name: ArpStatusUpdate skips re-render when snapshot is unchanged
+    criticality: low
+    given:
+      - ARP panel rendered with a known snapshot
+      - Server sends another ArpStatusUpdate whose payload is identical except for the timestamp field
+    when: handleArpStatusUpdate runs
+    then:
+      - JSON fingerprint of the snapshot (excluding timestamp) is computed
+      - Compared against AppState.arpLastFingerprint
+      - If equal, renderArp is NOT called — DOM stays stable so <select> focus, scroll position, and pill hover state are preserved
+      - If different (e.g. a flight stopped, a new outcome arrived), AppState.arpLastFingerprint is updated and renderArp runs
+    refs:
+      - crates/arkavo-agui/static/js/panels/arp.js:13-35
+    changed: "2026-05-01"
+
   # --- Operator controls ---------------------------------------------------
 
   - id: SK-040

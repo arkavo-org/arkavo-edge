@@ -12,6 +12,24 @@ var VIOLATION_EVENT_TYPES = {
 
 function handleArpStatusUpdate(event) {
     AppState.arpStatus = event.snapshot;
+    // Dedup re-renders: the panel polls every 5s but most poll cycles
+    // return identical state. Comparing the serialized snapshot lets us
+    // skip the DOM rebuild — preserving <select> focus, table scroll
+    // position, and pill hover state — when nothing actually changed.
+    // The `timestamp` field is excluded from the comparison since it
+    // ticks every poll even when the rest of the snapshot is stable.
+    var snap = event.snapshot || {};
+    var withoutTs = {};
+    for (var k in snap) {
+        if (k !== 'timestamp' && Object.prototype.hasOwnProperty.call(snap, k)) {
+            withoutTs[k] = snap[k];
+        }
+    }
+    var fingerprint = JSON.stringify(withoutTs);
+    if (AppState.arpLastFingerprint === fingerprint) {
+        return;
+    }
+    AppState.arpLastFingerprint = fingerprint;
     renderArp();
 }
 
