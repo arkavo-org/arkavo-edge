@@ -548,6 +548,15 @@ pub enum AgUiEvent {
         event_id: String,
     },
 
+    // MCP-T Published Trust panel — read-only view of what the agent
+    // publishes externally via `trust/query` and `trust/history`.
+    RequestPublishedTrust,
+    PublishedTrustUpdate {
+        snapshot: PublishedTrustSnapshot,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+
     /// Operator request to stop an active SwarmFlight. The gateway
     /// deregisters every role of the flight from the ArpHandler and
     /// drops the flight from the registry. Stopping a non-existent or
@@ -1113,6 +1122,59 @@ pub struct AgentContextInfo {
 pub struct ArpStatusSnapshot {
     pub agents: Vec<AgentArpStatus>,
     pub timestamp: String,
+}
+
+/// Read-only snapshot of every MCP-T trust score this agent publishes.
+///
+/// Each agent acts as its own provider — `provider_did` is the persistent
+/// device key that signs all scores. `self_score` is what the agent
+/// publishes about itself; `peers` are scores it publishes about other
+/// agents it has observed (one entry per peer, signed by the same key).
+/// `recent_traces` spans every subject so the panel can show the most
+/// recent N tool-execution traces across the swarm at a glance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedTrustSnapshot {
+    pub provider_did: String,
+    pub self_subject_id: String,
+    pub self_score: Option<TrustScoreView>,
+    pub peers: Vec<TrustScoreView>,
+    pub recent_traces: Vec<BehaviorTraceView>,
+    pub fetched_at: String,
+}
+
+/// Display projection of a single MCP-T `TrustScore`. Strips the signature
+/// and JCS bookkeeping the panel doesn't render.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustScoreView {
+    pub subject_id: String,
+    pub composite: u32,
+    pub dimensions: Vec<DimensionView>,
+    pub validity_expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DimensionView {
+    pub name: String,
+    pub value: u32,
+    pub confidence: f64,
+    pub evidence_count: u32,
+}
+
+/// Display projection of a `behavior.trace` event payload — just the fields
+/// the panel renders (subject, contract, fidelity ratio, counts, time).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BehaviorTraceView {
+    pub trace_id: String,
+    pub contract_id: String,
+    pub subject_id: String,
+    pub timestamp: String,
+    pub fidelity_ratio: f64,
+    pub total_tool_calls: u32,
+    pub undeclared_tool_calls: u32,
 }
 
 /// Per-agent ARP state.

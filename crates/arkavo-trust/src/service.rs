@@ -64,6 +64,17 @@ impl TrustService {
         inputs.insert(subject_id.to_string(), input);
     }
 
+    /// All subject IDs this provider currently has input for. Used by clients
+    /// (e.g. the agui panel) that need to enumerate scorable subjects;
+    /// MCP-T v0.2.0 does not define a spec method for this, so callers reach
+    /// it through a private adjunct RPC rather than `trust/*`.
+    pub fn subjects(&self) -> Vec<String> {
+        let inputs = self.agent_inputs.read().unwrap();
+        let mut out: Vec<String> = inputs.keys().cloned().collect();
+        out.sort();
+        out
+    }
+
     /// Handle trust/query (Section 7.1)
     pub fn query(&self, request: &TrustQueryRequest) -> Result<TrustQueryResponse, TrustError> {
         let domain = request.domain.as_deref().unwrap_or("general");
@@ -594,6 +605,17 @@ mod tests {
         assert_eq!(resp.providers.len(), 1);
         assert_eq!(resp.providers[0].conformance_level, 1);
         assert!(resp.providers[0].provider_id.starts_with("did:key:"));
+    }
+
+    #[test]
+    fn subjects_lists_every_updated_agent_in_sorted_order() {
+        let service = setup();
+        // setup() already populates "did:key:z6MkAgent1"; add two peers and
+        // confirm the enumeration covers all three in sorted order.
+        service.update_agent_input("agent-c", AgentTrustInput::default());
+        service.update_agent_input("agent-a", AgentTrustInput::default());
+        let subjects = service.subjects();
+        assert_eq!(subjects, vec!["agent-a", "agent-c", "did:key:z6MkAgent1"]);
     }
 
     #[test]

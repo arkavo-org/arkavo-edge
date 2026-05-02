@@ -95,6 +95,9 @@ function routeEvent(event) {
         case 'arpStatusUpdate':
             handleArpStatusUpdate(event);
             break;
+        case 'publishedTrustUpdate':
+            handlePublishedTrustUpdate(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;
@@ -148,6 +151,9 @@ function switchView(viewId) {
     } else if (viewId === 'arp') {
         wsSend({ type: 'requestArpStatus' });
         startArpPolling();
+    } else if (viewId === 'published-trust') {
+        wsSend({ type: 'requestPublishedTrust' });
+        startPublishedTrustPolling();
     }
 
     // Stop polling when navigating away
@@ -159,6 +165,9 @@ function switchView(viewId) {
     }
     if (viewId !== 'arp') {
         stopArpPolling();
+    }
+    if (viewId !== 'published-trust') {
+        stopPublishedTrustPolling();
     }
 }
 

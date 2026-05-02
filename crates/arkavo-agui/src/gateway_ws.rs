@@ -352,6 +352,41 @@ async fn dispatch_event(
             })
             .await?;
         }
+        AgUiEvent::RequestPublishedTrust => {
+            // Single-agent install is the common case; multi-agent UI
+            // sessions can refine this by inspecting `connections` for the
+            // session's selected agent. For v1 the panel queries the first
+            // live AgentConnection.
+            let conn = {
+                let map = agent_connections.read().await;
+                map.values().next().cloned()
+            };
+            match conn {
+                Some(c) => match c.get_published_trust().await {
+                    Ok(snapshot) => {
+                        tx.send(AgUiEvent::PublishedTrustUpdate {
+                            snapshot,
+                            event_id: uuid::Uuid::new_v4().to_string(),
+                        })
+                        .await?;
+                    }
+                    Err(e) => {
+                        tx.send(AgUiEvent::Error {
+                            code: "TRUST_QUERY_FAILED".to_string(),
+                            message: format!("Published trust fetch failed: {e}"),
+                        })
+                        .await?;
+                    }
+                },
+                None => {
+                    tx.send(AgUiEvent::Error {
+                        code: "NO_AGENT".to_string(),
+                        message: "No agent connected — cannot fetch published trust".to_string(),
+                    })
+                    .await?;
+                }
+            }
+        }
         AgUiEvent::RequestStopFlight { flight_id } => {
             let response = match uuid::Uuid::parse_str(&flight_id) {
                 Ok(parsed_id) => {

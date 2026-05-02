@@ -906,6 +906,183 @@ impl AgentConnection {
         Ok(result)
     }
 
+    /// Aggregate snapshot of every subject this agent's MCP-T trust service
+    /// scores: composite + dimensions per subject, plus the most recent
+    /// `behavior.trace` events across all subjects. The browser's "Published
+    /// Trust" panel consumes one of these per refresh.
+    ///
+    /// Wire path: `trust.subjects` (private adjunct, returns the list) →
+    /// per-subject `trust/query` and `trust/history` (both spec methods),
+    /// fanned out concurrently. The whole call rides the existing JSON-RPC
+    /// WebSocket — no new transport.
+    pub async fn get_published_trust(
+        &self,
+    ) -> Result<crate::types::PublishedTrustSnapshot, Box<dyn std::error::Error + Send + Sync>>
+    {
+        use crate::types::{
+            BehaviorTraceView, DimensionView, PublishedTrustSnapshot, TrustScoreView,
+        };
+
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let subjects_resp: serde_json::Value =
+            client.request("trust.subjects", rpc_params![]).await?;
+        let subjects: Vec<String> = subjects_resp
+            .get("subjects")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Concurrent fan-out — N subjects × (1 query + 1 history) round trips,
+        // executed in parallel so the panel refresh stays under one second
+        // even with a swarm of peers.
+        let queries = subjects.iter().map(|s| {
+            let s = s.clone();
+            async move {
+                let q = client
+                    .request::<serde_json::Value, _>(
+                        "trust/query",
+                        rpc_params![serde_json::json!({ "subject_id": s })],
+                    )
+                    .await
+                    .ok();
+                let h = client
+                    .request::<serde_json::Value, _>(
+                        "trust/history",
+                        rpc_params![serde_json::json!({
+                            "subject_id": s,
+                            "event_types": ["behavior.trace"],
+                            "limit": 5,
+                        })],
+                    )
+                    .await
+                    .ok();
+                (s, q, h)
+            }
+        });
+        let results = futures::future::join_all(queries).await;
+
+        let mut self_score: Option<TrustScoreView> = None;
+        let mut peers: Vec<TrustScoreView> = Vec::new();
+        let mut recent_traces: Vec<BehaviorTraceView> = Vec::new();
+        let mut provider_did = String::new();
+
+        let self_subject_id = self.agent_id.clone();
+
+        for (subject_id, query, history) in results {
+            if let Some(q) = query.as_ref()
+                && let Some(score) = q.get("trust_score")
+            {
+                if provider_did.is_empty()
+                    && let Some(p) = score.get("provider_id").and_then(|v| v.as_str())
+                {
+                    provider_did = p.to_string();
+                }
+                let view = TrustScoreView {
+                    subject_id: subject_id.clone(),
+                    composite: score
+                        .get("score")
+                        .and_then(|s| s.get("composite"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32,
+                    dimensions: score
+                        .get("score")
+                        .and_then(|s| s.get("dimensions"))
+                        .and_then(|d| d.as_object())
+                        .map(|map| {
+                            let mut v: Vec<DimensionView> = map
+                                .iter()
+                                .map(|(name, val)| DimensionView {
+                                    name: name.clone(),
+                                    value: val.get("value").and_then(|x| x.as_u64()).unwrap_or(0)
+                                        as u32,
+                                    confidence: val
+                                        .get("confidence")
+                                        .and_then(|x| x.as_f64())
+                                        .unwrap_or(0.0),
+                                    evidence_count: val
+                                        .get("evidence_count")
+                                        .and_then(|x| x.as_u64())
+                                        .unwrap_or(0)
+                                        as u32,
+                                })
+                                .collect();
+                            v.sort_by(|a, b| a.name.cmp(&b.name));
+                            v
+                        })
+                        .unwrap_or_default(),
+                    validity_expires_at: score
+                        .get("validity")
+                        .and_then(|v| v.get("expires_at"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                };
+                if subject_id == self_subject_id {
+                    self_score = Some(view);
+                } else {
+                    peers.push(view);
+                }
+            }
+
+            if let Some(h) = history.as_ref()
+                && let Some(events) = h.get("events").and_then(|v| v.as_array())
+            {
+                for ev in events {
+                    let payload = ev.get("payload");
+                    let trace_view = BehaviorTraceView {
+                        trace_id: payload
+                            .and_then(|p| p.get("trace_id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        contract_id: payload
+                            .and_then(|p| p.get("contract_id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        subject_id: subject_id.clone(),
+                        timestamp: ev
+                            .get("timestamp")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        fidelity_ratio: payload
+                            .and_then(|p| p.get("fidelity_ratio"))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(1.0),
+                        total_tool_calls: payload
+                            .and_then(|p| p.get("total_tool_calls"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32,
+                        undeclared_tool_calls: payload
+                            .and_then(|p| p.get("undeclared_tool_calls"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32,
+                    };
+                    recent_traces.push(trace_view);
+                }
+            }
+        }
+
+        peers.sort_by_key(|p| std::cmp::Reverse(p.composite));
+        recent_traces.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        recent_traces.truncate(5);
+
+        Ok(PublishedTrustSnapshot {
+            provider_did,
+            self_subject_id,
+            self_score,
+            peers,
+            recent_traces,
+            fetched_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
     /// Subscribe to push-based metrics stream from agent.
     /// Replaces polling of system.metrics + budget.compute_status.
     pub async fn subscribe_metrics(

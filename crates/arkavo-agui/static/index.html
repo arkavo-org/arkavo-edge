@@ -34,6 +34,7 @@
                 <button class="nav-btn" data-view="learning" title="Learning">&#x1F9E0;</button>
                 <button class="nav-btn" data-view="context" title="Context Topology">&#x2B21;</button>
                 <button class="nav-btn" data-view="arp" title="Agent Runtime Policy">&#x2696;</button>
+                <button class="nav-btn" data-view="published-trust" title="Published Trust (MCP-T)">&#x1F50F;</button>
                 <button class="nav-btn showcase-btn" id="showcase-toggle" title="Showcase Mode">&#x25B6;</button>
             </nav>
 
@@ -111,6 +112,13 @@
                     </div>
                 </div>
 
+                <div class="view-panel" id="view-published-trust">
+                    <div class="panel-header">Published Trust (MCP-T)</div>
+                    <div id="published-trust-container">
+                        <div class="empty-state"><h3>Loading Published Trust...</h3><p>Querying trust/query and trust/history over the A2A WebSocket</p></div>
+                    </div>
+                </div>
+
             </div>
         </main>
 
@@ -147,6 +155,7 @@
     <script src="/static/js/panels/context-charts.js"></script>
     <script src="/static/js/panels/context.js"></script>
     <script src="/static/js/panels/arp.js"></script>
+    <script src="/static/js/panels/published-trust.js"></script>
     <script src="/static/js/panels/task-detail.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/showcase.js"></script>

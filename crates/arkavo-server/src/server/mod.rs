@@ -340,6 +340,13 @@ pub trait A2aRpc {
         &self,
         request: arkavo_trust::TrustPublishRequest,
     ) -> RpcResult<arkavo_trust::TrustPublishResponse>;
+
+    /// Private adjunct (NOT in MCP-T spec): enumerate subject IDs this
+    /// provider currently scores. The dot-namespace keeps it distinct from
+    /// the spec's `trust/*` slash methods so external MCP-T clients never
+    /// see it via discovery. Used by the agui Published Trust panel.
+    #[method(name = "trust.subjects")]
+    async fn trust_subjects(&self) -> RpcResult<serde_json::Value>;
 }
 
 pub struct A2aRpcImpl {
@@ -1280,6 +1287,25 @@ impl A2aRpcServer for A2aRpcImpl {
             request,
         )
         .await
+    }
+
+    async fn trust_subjects(&self) -> RpcResult<serde_json::Value> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        if self.rate_limiter.check_rate_limit().is_err() {
+            self.metrics.record_rate_limit_blocked(None);
+            return Err(ErrorObjectOwned::owned(
+                arkavo_trust::error_codes::RATE_LIMITED,
+                "Rate limit exceeded",
+                None::<()>,
+            ));
+        }
+        Ok(serde_json::json!({ "subjects": trust_service.subjects() }))
     }
 
     async fn system_metrics_subscribe(&self, sink: PendingSubscriptionSink) -> SubscriptionResult {
