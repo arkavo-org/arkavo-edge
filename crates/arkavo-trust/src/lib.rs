@@ -1,3 +1,4 @@
+pub mod events;
 pub mod jcs;
 pub mod mapper;
 pub mod service;
@@ -5,10 +6,10 @@ pub mod signing;
 pub mod store;
 pub mod types;
 
-pub use mapper::{compute_trust_score, AgentTrustInput};
+pub use mapper::{AgentTrustInput, compute_trust_score};
 pub use service::{SharedTrustService, TrustService};
 pub use signing::{
-    sign_trust_event, sign_trust_score, verify_trust_event, verify_trust_score, SigningError,
+    SigningError, sign_trust_event, sign_trust_score, verify_trust_event, verify_trust_score,
 };
 pub use types::*;
 

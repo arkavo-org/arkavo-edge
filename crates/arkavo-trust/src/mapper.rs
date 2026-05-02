@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use crate::types::{
-    dimensions, DimensionScore, TrustScore, TrustScoreValue, ValidityWindow, SCHEMA_VERSION,
+    DimensionScore, SCHEMA_VERSION, TrustScore, TrustScoreValue, ValidityWindow, dimensions,
 };
 
 /// Input data for computing trust dimensions from internal agent scoring.
@@ -30,6 +30,16 @@ pub struct AgentTrustInput {
     pub decision_trace_coverage: Option<f64>,
     /// Number of connected peers
     pub peer_count: Option<u32>,
+    /// Mean of `behavior.trace.fidelity_ratio` across observed traces (0.0-1.0).
+    /// 1.0 = every action observed was within declared scope.
+    pub mean_fidelity_ratio: Option<f64>,
+    /// Number of behavioral traces contributing to `mean_fidelity_ratio`.
+    pub fidelity_observation_count: Option<u32>,
+    /// Mean simulation/actual divergence (0.0 = perfect prediction, 1.0 = worst).
+    /// Sourced from `simulation.delta` events.
+    pub mean_simulation_divergence: Option<f64>,
+    /// Count of declaration-delta events with severity high or critical.
+    pub scope_violation_count: Option<u32>,
 }
 
 /// Compute a TrustScore from internal agent data.
@@ -144,6 +154,13 @@ pub fn compute_trust_score(
         );
     }
 
+    // Behavioral fidelity (v0.2.0): combines declared/observed alignment,
+    // simulation accuracy, and a penalty for high-severity scope violations.
+    // Each signal is independently optional; the score uses whichever are set.
+    if let Some(score) = compute_behavioral_fidelity(input) {
+        dimensions.insert(dimensions::BEHAVIORAL_FIDELITY.to_string(), score);
+    }
+
     let composite = compute_composite(&dimensions);
     let now = Utc::now();
 
@@ -177,6 +194,56 @@ fn scale_unit(value: f64) -> u32 {
 /// Asymptotically approaches 1.0 with more observations.
 fn observation_confidence(observations: u32) -> f64 {
     1.0 - 1.0 / (observations as f64 + 1.0)
+}
+
+/// Combine declared/observed alignment, simulation accuracy, and scope-violation
+/// penalty into a single behavioral_fidelity dimension. Returns `None` when no
+/// fidelity signals are available — verification-only profiles do not get a
+/// score for a dimension they have no evidence for.
+fn compute_behavioral_fidelity(input: &AgentTrustInput) -> Option<DimensionScore> {
+    let mut weighted_sum = 0.0_f64;
+    let mut weight_total = 0.0_f64;
+    let mut evidence_total: u32 = 0;
+
+    if let Some(ratio) = input.mean_fidelity_ratio {
+        let n = input.fidelity_observation_count.unwrap_or(0);
+        let weight = observation_confidence(n).max(0.05);
+        weighted_sum += ratio.clamp(0.0, 1.0) * weight;
+        weight_total += weight;
+        evidence_total = evidence_total.saturating_add(n);
+    }
+
+    if let Some(div) = input.mean_simulation_divergence {
+        // Convert divergence (0.0 = perfect) to alignment score (1.0 = perfect).
+        let alignment = 1.0 - div.clamp(0.0, 1.0);
+        // Simulation accuracy is meaningful even with few samples; weight it
+        // moderately so it does not dominate fidelity_ratio.
+        let weight = 0.5;
+        weighted_sum += alignment * weight;
+        weight_total += weight;
+    }
+
+    if let Some(violations) = input.scope_violation_count {
+        // Each high/critical violation subtracts proportionally from fidelity,
+        // capped at 1.0 (i.e. ten or more violations zero this signal out).
+        let alignment = 1.0 - (violations as f64 * 0.1).min(1.0);
+        let weight = 0.75;
+        weighted_sum += alignment * weight;
+        weight_total += weight;
+        evidence_total = evidence_total.saturating_add(violations);
+    }
+
+    if weight_total == 0.0 {
+        return None;
+    }
+
+    let value = scale_unit(weighted_sum / weight_total);
+    let confidence = observation_confidence(evidence_total);
+    Some(DimensionScore {
+        value,
+        confidence,
+        evidence_count: evidence_total,
+    })
 }
 
 /// Compute composite score as weighted mean of dimensions.
@@ -231,10 +298,12 @@ mod tests {
         let score = compute_trust_score(&input, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
 
         // Only verification dimension (always present, value=0 since has_verified_did is false)
-        assert!(score
-            .score
-            .dimensions
-            .contains_key(dimensions::VERIFICATION));
+        assert!(
+            score
+                .score
+                .dimensions
+                .contains_key(dimensions::VERIFICATION)
+        );
         assert_eq!(score.score.dimensions[dimensions::VERIFICATION].value, 0);
     }
 
@@ -250,6 +319,10 @@ mod tests {
             total_anti_pattern_weight: Some(1.0),
             decision_trace_coverage: Some(0.95),
             peer_count: Some(10),
+            mean_fidelity_ratio: Some(0.9),
+            fidelity_observation_count: Some(120),
+            mean_simulation_divergence: Some(0.1),
+            scope_violation_count: Some(0),
         };
 
         let score = compute_trust_score(
@@ -263,6 +336,12 @@ mod tests {
         assert!(score.score.dimensions.len() >= 6);
         assert_eq!(score.score.dimensions[dimensions::VERIFICATION].value, 1000);
         assert_eq!(score.score.dimensions[dimensions::PERFORMANCE].value, 850);
+        assert!(
+            score
+                .score
+                .dimensions
+                .contains_key(dimensions::BEHAVIORAL_FIDELITY)
+        );
         assert_eq!(score.domain, Some("code-execution".to_string()));
         assert!(score.score.composite > 0);
     }
@@ -355,6 +434,70 @@ mod tests {
 
         assert!(old_tenure > new_tenure);
         assert!(old_tenure >= 900); // ~1 year should be close to max
+    }
+
+    #[test]
+    fn behavioral_fidelity_absent_when_no_signals() {
+        let input = AgentTrustInput::default();
+        let score = compute_trust_score(&input, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+        assert!(
+            !score
+                .score
+                .dimensions
+                .contains_key(dimensions::BEHAVIORAL_FIDELITY)
+        );
+    }
+
+    #[test]
+    fn behavioral_fidelity_perfect_signals_score_high() {
+        let input = AgentTrustInput {
+            mean_fidelity_ratio: Some(1.0),
+            fidelity_observation_count: Some(500),
+            mean_simulation_divergence: Some(0.0),
+            scope_violation_count: Some(0),
+            ..Default::default()
+        };
+        let score = compute_trust_score(&input, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+        let bf = &score.score.dimensions[dimensions::BEHAVIORAL_FIDELITY];
+        assert_eq!(bf.value, 1000);
+        assert!(bf.confidence > 0.99);
+    }
+
+    #[test]
+    fn behavioral_fidelity_violations_drag_score_down() {
+        let clean = AgentTrustInput {
+            mean_fidelity_ratio: Some(0.9),
+            fidelity_observation_count: Some(100),
+            scope_violation_count: Some(0),
+            ..Default::default()
+        };
+        let dirty = AgentTrustInput {
+            mean_fidelity_ratio: Some(0.9),
+            fidelity_observation_count: Some(100),
+            scope_violation_count: Some(10),
+            ..Default::default()
+        };
+
+        let clean_score =
+            compute_trust_score(&clean, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+        let dirty_score =
+            compute_trust_score(&dirty, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+
+        let clean_bf = clean_score.score.dimensions[dimensions::BEHAVIORAL_FIDELITY].value;
+        let dirty_bf = dirty_score.score.dimensions[dimensions::BEHAVIORAL_FIDELITY].value;
+        assert!(clean_bf > dirty_bf, "clean={} dirty={}", clean_bf, dirty_bf);
+    }
+
+    #[test]
+    fn behavioral_fidelity_simulation_only_signal() {
+        let input = AgentTrustInput {
+            mean_simulation_divergence: Some(0.25),
+            ..Default::default()
+        };
+        let score = compute_trust_score(&input, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+        let bf = &score.score.dimensions[dimensions::BEHAVIORAL_FIDELITY];
+        // Single signal, alignment = 0.75 → ~750
+        assert!((700..=800).contains(&bf.value), "got {}", bf.value);
     }
 
     #[test]

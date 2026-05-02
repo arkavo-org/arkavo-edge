@@ -1,7 +1,7 @@
 //! Trust score and event signing/verification using Ed25519 + JCS
 
 use arkavo_crypto::{AgentKeypair, AgentPublicKey, CryptoError};
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::jcs::canonicalize;
 use crate::types::{TrustEvent, TrustScore, TrustSignature};

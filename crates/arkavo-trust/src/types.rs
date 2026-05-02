@@ -248,7 +248,10 @@ pub mod domains {
     pub const RESEARCH: &str = "research";
 }
 
-/// Standard trust dimension names (Section 5.1)
+/// Standard trust dimension names (Section 5.1).
+///
+/// `BEHAVIORAL_FIDELITY` was introduced in MCP-T v0.2.0 to measure
+/// alignment between declared and observed runtime behavior.
 pub mod dimensions {
     pub const VERIFICATION: &str = "verification";
     pub const TENURE: &str = "tenure";
@@ -259,9 +262,33 @@ pub mod dimensions {
     pub const TRANSPARENCY: &str = "transparency";
     pub const COMPLIANCE: &str = "compliance";
     pub const SECURITY: &str = "security";
+    pub const BEHAVIORAL_FIDELITY: &str = "behavioral_fidelity";
 }
 
-pub const SCHEMA_VERSION: &str = "0.1.0";
+/// Standard event-type identifiers (Sections 6.x).
+///
+/// The `behavior.*`, `simulation.*`, and `contract.bid_*` families were
+/// introduced in MCP-T v0.2.0. Existing `contract.completed`/`contract.failed`
+/// events remain unchanged from v0.1.0.
+pub mod event_types {
+    pub const CONTRACT_COMPLETED: &str = "contract.completed";
+    pub const CONTRACT_FAILED: &str = "contract.failed";
+
+    pub const BEHAVIOR_TRACE: &str = "behavior.trace";
+    pub const BEHAVIOR_INVARIANT_DISCOVERED: &str = "behavior.invariant_discovered";
+    pub const BEHAVIOR_DECLARATION_DELTA: &str = "behavior.declaration_delta";
+    pub const BEHAVIOR_RESOURCE_ACCESS: &str = "behavior.resource_access";
+
+    pub const SIMULATION_EXECUTED: &str = "simulation.executed";
+    pub const SIMULATION_RESULT: &str = "simulation.result";
+    pub const SIMULATION_DELTA: &str = "simulation.delta";
+
+    pub const CONTRACT_BID_SUBMITTED: &str = "contract.bid_submitted";
+    pub const CONTRACT_BID_ACCEPTED: &str = "contract.bid_accepted";
+    pub const CONTRACT_BID_REJECTED: &str = "contract.bid_rejected";
+}
+
+pub const SCHEMA_VERSION: &str = "0.2.0";
 
 #[cfg(test)]
 mod tests {
@@ -376,6 +403,42 @@ mod tests {
         let parsed: TrustVerifyResponse = serde_json::from_str(&json).unwrap();
         assert!(parsed.verified);
         assert_eq!(parsed.nonce, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn schema_version_is_v0_2() {
+        assert_eq!(SCHEMA_VERSION, "0.2.0");
+    }
+
+    #[test]
+    fn behavioral_fidelity_dimension_constant_present() {
+        assert_eq!(dimensions::BEHAVIORAL_FIDELITY, "behavioral_fidelity");
+    }
+
+    #[test]
+    fn v0_2_event_type_constants_match_spec() {
+        assert_eq!(event_types::BEHAVIOR_TRACE, "behavior.trace");
+        assert_eq!(
+            event_types::BEHAVIOR_INVARIANT_DISCOVERED,
+            "behavior.invariant_discovered"
+        );
+        assert_eq!(
+            event_types::BEHAVIOR_DECLARATION_DELTA,
+            "behavior.declaration_delta"
+        );
+        assert_eq!(
+            event_types::BEHAVIOR_RESOURCE_ACCESS,
+            "behavior.resource_access"
+        );
+        assert_eq!(event_types::SIMULATION_EXECUTED, "simulation.executed");
+        assert_eq!(event_types::SIMULATION_RESULT, "simulation.result");
+        assert_eq!(event_types::SIMULATION_DELTA, "simulation.delta");
+        assert_eq!(
+            event_types::CONTRACT_BID_SUBMITTED,
+            "contract.bid_submitted"
+        );
+        assert_eq!(event_types::CONTRACT_BID_ACCEPTED, "contract.bid_accepted");
+        assert_eq!(event_types::CONTRACT_BID_REJECTED, "contract.bid_rejected");
     }
 
     #[test]

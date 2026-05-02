@@ -4,11 +4,11 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::mapper::{compute_trust_score, AgentTrustInput};
+use crate::TrustError;
+use crate::mapper::{AgentTrustInput, compute_trust_score};
 use crate::signing::{sign_trust_event, sign_trust_score, verify_trust_event};
 use crate::store::TrustStore;
 use crate::types::*;
-use crate::TrustError;
 use arkavo_crypto::AgentKeypair;
 
 /// MCP-T L1 trust service provider.
@@ -73,14 +73,14 @@ impl TrustService {
         let cache_key = (request.subject_id.clone(), domain.to_string());
         {
             let cache = self.score_cache.read().unwrap();
-            if let Some(cached) = cache.get(&cache_key) {
-                if cached.validity.expires_at > Utc::now() {
-                    let mut score = cached.clone();
-                    if let Some(ref dims) = request.dimensions {
-                        score.score.dimensions.retain(|k, _| dims.contains(k));
-                    }
-                    return Ok(TrustQueryResponse { trust_score: score });
+            if let Some(cached) = cache.get(&cache_key)
+                && cached.validity.expires_at > Utc::now()
+            {
+                let mut score = cached.clone();
+                if let Some(ref dims) = request.dimensions {
+                    score.score.dimensions.retain(|k, _| dims.contains(k));
                 }
+                return Ok(TrustQueryResponse { trust_score: score });
             }
         }
 
@@ -166,10 +166,10 @@ impl TrustService {
             results
         });
 
-        if let Some(conf_min) = request.threshold.confidence_min {
-            if min_confidence < conf_min {
-                verified = false;
-            }
+        if let Some(conf_min) = request.threshold.confidence_min
+            && min_confidence < conf_min
+        {
+            verified = false;
         }
 
         if let Some(min_count) = request.threshold.min_evidence_count {
@@ -313,6 +313,9 @@ impl TrustService {
                     dimensions::TENURE.to_string(),
                     dimensions::SECURITY.to_string(),
                     dimensions::TRANSPARENCY.to_string(),
+                    dimensions::COMPLIANCE.to_string(),
+                    dimensions::COMMUNITY.to_string(),
+                    dimensions::BEHAVIORAL_FIDELITY.to_string(),
                 ],
                 scoring_methodology_uri: None,
                 public_key: self
@@ -390,6 +393,7 @@ mod tests {
                 total_anti_pattern_weight: Some(0.0),
                 decision_trace_coverage: Some(0.95),
                 peer_count: Some(5),
+                ..Default::default()
             },
         );
 
@@ -441,11 +445,12 @@ mod tests {
 
         let resp = service.query(&req).unwrap();
         assert_eq!(resp.trust_score.score.dimensions.len(), 1);
-        assert!(resp
-            .trust_score
-            .score
-            .dimensions
-            .contains_key("performance"));
+        assert!(
+            resp.trust_score
+                .score
+                .dimensions
+                .contains_key("performance")
+        );
     }
 
     #[test]
@@ -589,6 +594,109 @@ mod tests {
         assert_eq!(resp.providers.len(), 1);
         assert_eq!(resp.providers[0].conformance_level, 1);
         assert!(resp.providers[0].provider_id.starts_with("did:key:"));
+    }
+
+    #[test]
+    fn providers_advertises_behavioral_fidelity() {
+        let service = setup();
+        let resp = service.providers();
+        assert!(
+            resp.providers[0]
+                .dimensions
+                .iter()
+                .any(|d| d == dimensions::BEHAVIORAL_FIDELITY)
+        );
+    }
+
+    #[test]
+    fn query_includes_behavioral_fidelity_when_signals_present() {
+        let keypair = AgentKeypair::generate();
+        let service = TrustService::new(keypair, 3600);
+        service.update_agent_input(
+            "did:key:z6MkAgentBF",
+            AgentTrustInput {
+                has_verified_did: true,
+                mean_fidelity_ratio: Some(0.95),
+                fidelity_observation_count: Some(200),
+                mean_simulation_divergence: Some(0.05),
+                scope_violation_count: Some(1),
+                ..Default::default()
+            },
+        );
+
+        let resp = service
+            .query(&TrustQueryRequest {
+                subject_id: "did:key:z6MkAgentBF".to_string(),
+                domain: None,
+                provider_id: None,
+                max_age_seconds: None,
+                dimensions: None,
+            })
+            .unwrap();
+
+        assert!(
+            resp.trust_score
+                .score
+                .dimensions
+                .contains_key(dimensions::BEHAVIORAL_FIDELITY)
+        );
+    }
+
+    #[test]
+    fn publish_v0_2_event_payload_round_trips_through_history() {
+        let service = setup();
+        let keypair = AgentKeypair::generate();
+
+        let payload = serde_json::to_value(crate::events::BehaviorTrace {
+            trace_id: "trc_x".into(),
+            contract_id: "ctr_x".into(),
+            tool_calls: vec![],
+            resources_accessed: vec![],
+            side_effects: vec![],
+            duration_ms: 42,
+            peak_memory_bytes: None,
+            total_tool_calls: 0,
+            undeclared_tool_calls: 0,
+            total_resources: 0,
+            undeclared_resources: 0,
+            fidelity_ratio: 1.0,
+        })
+        .unwrap();
+
+        let mut event = TrustEvent {
+            event_id: "evt_bt_1".to_string(),
+            event_type: event_types::BEHAVIOR_TRACE.to_string(),
+            subject_id: "did:key:z6MkAgent1".to_string(),
+            issuer_id: keypair.public_key().to_did_key(),
+            timestamp: Utc::now(),
+            payload,
+            dimensions_affected: Some(vec![
+                dimensions::BEHAVIORAL_FIDELITY.to_string(),
+                dimensions::PERFORMANCE.to_string(),
+            ]),
+            signature: None,
+            co_signatures: None,
+        };
+        crate::signing::sign_trust_event(&mut event, &keypair);
+        service
+            .publish(&TrustPublishRequest {
+                event: event.clone(),
+            })
+            .unwrap();
+
+        let hist = service.history(&TrustHistoryRequest {
+            subject_id: "did:key:z6MkAgent1".to_string(),
+            event_types: Some(vec![event_types::BEHAVIOR_TRACE.to_string()]),
+            after: None,
+            before: None,
+            limit: None,
+            cursor: None,
+        });
+        assert_eq!(hist.events.len(), 1);
+        let parsed: crate::events::BehaviorTrace =
+            serde_json::from_value(hist.events[0].payload.clone()).unwrap();
+        assert_eq!(parsed.trace_id, "trc_x");
+        assert!((parsed.fidelity_ratio - 1.0).abs() < 1e-9);
     }
 
     #[test]

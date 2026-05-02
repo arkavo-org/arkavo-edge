@@ -170,13 +170,13 @@ impl TrustStore {
         );
         let mut bind_values: Vec<String> = vec![subject_id.to_string()];
 
-        if let Some(types) = event_types {
-            if !types.is_empty() {
-                let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
-                query.push_str(&format!(" AND event_type IN ({})", placeholders.join(",")));
-                for t in types {
-                    bind_values.push(t.clone());
-                }
+        if let Some(types) = event_types
+            && !types.is_empty()
+        {
+            let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
+            query.push_str(&format!(" AND event_type IN ({})", placeholders.join(",")));
+            for t in types {
+                bind_values.push(t.clone());
             }
         }
 
@@ -329,6 +329,11 @@ pub enum TrustStoreError {
 }
 
 #[cfg(test)]
+// `#[tokio::test]` expands to `Runtime::block_on(...)` inside each test function;
+// the workspace `disallowed_methods` lint flags it even though it is the
+// canonical way to run async tests. Allow at the module level rather than
+// scattering attributes on every test.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::types::*;
