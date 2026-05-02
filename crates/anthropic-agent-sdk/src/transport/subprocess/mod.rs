@@ -253,7 +253,9 @@ impl Drop for SubprocessTransport {
 mod tests {
     use super::*;
     use crate::transport::Transport;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_find_cli() {
         // This will succeed if claude is installed
@@ -262,12 +264,14 @@ mod tests {
         println!("CLI search result: {result:?}");
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_prompt_input_conversions() {
         let _prompt1: PromptInput = "hello".into();
         let _prompt2: PromptInput = String::from("world").into();
     }
 
+    #[spec("CASDK-002", "CASDK-004")]
     #[test]
     fn test_extra_args_allowlist_rejects_disallowed() {
         // Use same CLI discovery as production code
@@ -290,6 +294,7 @@ mod tests {
         assert!(err.to_string().contains("dangerous-flag"));
     }
 
+    #[spec("CASDK-002", "CASDK-004")]
     #[test]
     fn test_extra_args_allowlist_accepts_allowed() {
         // Use same CLI discovery as production code
@@ -312,6 +317,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-002", "CASDK-004")]
     #[tokio::test]
     async fn test_dangerous_env_vars_rejected() {
         // Use same CLI discovery as production code
@@ -334,6 +340,7 @@ mod tests {
         assert!(err.to_string().contains("LD_PRELOAD"));
     }
 
+    #[spec("CASDK-002", "CASDK-004")]
     #[tokio::test]
     async fn test_safe_env_vars_accepted() {
         // Use same CLI discovery as production code
@@ -357,6 +364,7 @@ mod tests {
         transport.close().await.ok();
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_session_id_option_maps_to_cli_arg() {
         let Ok(cli_path) = SubprocessTransport::find_cli() else {
@@ -392,6 +400,7 @@ mod tests {
         assert_eq!(value, "550e8400-e29b-41d4-a716-446655440000");
     }
 
+    #[spec("CASDK-002", "CASDK-003")]
     #[test]
     fn test_plugin_dir_flag_correct() {
         let Ok(cli_path) = SubprocessTransport::find_cli() else {

@@ -155,7 +155,9 @@ impl fmt::Display for BoundedContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("VAL-007")]
     #[test]
     fn test_wrap_basic() {
         let boundary = ContentBoundary::with_id("abc123");
@@ -170,6 +172,7 @@ mod tests {
         assert_eq!(result.boundary_id, "abc123");
     }
 
+    #[spec("VAL-007")]
     #[test]
     fn test_strips_injected_markers() {
         let boundary = ContentBoundary::with_id("safe123");

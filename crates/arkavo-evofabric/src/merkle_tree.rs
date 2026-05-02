@@ -134,6 +134,7 @@ fn hash_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn leaf_hash(data: &[u8]) -> [u8; 32] {
         let mut hasher = Sha256::new();
@@ -144,6 +145,7 @@ mod tests {
         out
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn single_leaf_tree() {
         let h = leaf_hash(b"only leaf");
@@ -154,6 +156,7 @@ mod tests {
         assert!(proof.verify());
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn two_leaf_tree() {
         let a = leaf_hash(b"a");
@@ -162,6 +165,7 @@ mod tests {
         assert_eq!(tree.root(), hash_pair(&a, &b));
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn four_leaf_tree() {
         let leaves: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -171,6 +175,7 @@ mod tests {
         assert_eq!(tree.root(), hash_pair(&left, &right));
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn three_leaf_pads_to_four() {
         let leaves: Vec<_> = (0..3).map(|i| leaf_hash(&[i])).collect();
@@ -181,6 +186,7 @@ mod tests {
         assert_eq!(tree.root(), hash_pair(&left, &right));
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn proof_verifies_all_leaves() {
         let leaves: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -193,6 +199,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn proof_fails_with_wrong_root() {
         let leaves: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -202,6 +209,7 @@ mod tests {
         assert!(!proof.verify());
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn proof_fails_with_wrong_leaf() {
         let leaves: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -211,6 +219,7 @@ mod tests {
         assert!(!proof.verify());
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn proof_fails_with_tampered_sibling() {
         let leaves: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -220,6 +229,7 @@ mod tests {
         assert!(!proof.verify());
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn large_tree() {
         let leaves: Vec<_> = (0..100u32).map(|i| leaf_hash(&i.to_le_bytes())).collect();
@@ -231,6 +241,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn deterministic_root() {
         let leaves: Vec<_> = (0..8).map(|i| leaf_hash(&[i])).collect();
@@ -239,6 +250,7 @@ mod tests {
         assert_eq!(tree1.root(), tree2.root());
     }
 
+    #[spec("EVO-003")]
     #[test]
     fn different_leaves_different_root() {
         let a: Vec<_> = (0..4).map(|i| leaf_hash(&[i])).collect();
@@ -248,6 +260,7 @@ mod tests {
         assert_ne!(ta.root(), tb.root());
     }
 
+    #[spec("EVO-003")]
     #[test]
     #[should_panic(expected = "Cannot build Merkle tree from empty leaves")]
     fn empty_tree_panics() {

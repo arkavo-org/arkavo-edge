@@ -31,10 +31,10 @@ members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
-    "crates/arkavo-code-search",
+    "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
-    "crates/arkavo-workspace",
-    "crates/arkavo-bench",
+    "crates/arkavo-mcp-workspace",
+    "crates/arkavo-mcp-bench",
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
@@ -73,6 +73,13 @@ members = [
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
     "crates/arkavo-trust",
+    "crates/arkavo-arp",
+    "crates/arkavo-policy-cache",
+    "crates/arkavo-adaptation",
+    "crates/arkavo-arp-runtime",
+    "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-runtime",
+    "crates/arkavo-mcp-identity",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -106,10 +113,10 @@ default-members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
-    "crates/arkavo-code-search",
+    "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
-    "crates/arkavo-workspace",
-    "crates/arkavo-bench",
+    "crates/arkavo-mcp-workspace",
+    "crates/arkavo-mcp-bench",
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
@@ -127,6 +134,13 @@ default-members = [
     "crates/arkavo-session",
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
+    "crates/arkavo-arp",
+    "crates/arkavo-policy-cache",
+    "crates/arkavo-adaptation",
+    "crates/arkavo-arp-runtime",
+    "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-runtime",
+    "crates/arkavo-mcp-identity",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -134,7 +148,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.68.0"
+version = "0.73.11"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -158,13 +172,13 @@ tokio-util = "0.7.12"
 
 # Consolidated versions to reduce duplicates
 base64 = "0.22.1"
-jsonschema = { version = "0.26.2", default-features = false, features = ["resolve-http", "resolve-file"] }
+jsonschema = { version = "0.45", default-features = false, features = ["resolve-http", "resolve-file", "tls-aws-lc-rs"] }
 thiserror = "2.0.12"
 tempfile = "3.20"
 reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.41", default-features = false, features = ["serde", "clock", "std"] }
 keyring = "3.6"
 
 # Common utilities
@@ -184,15 +198,19 @@ dirs = "6.0"
 toml = "0.8"
 serde_yaml = "0.9"
 rand = "0.8"
+rand_distr = "0.4"
 bytes = "1.8"
 parking_lot = "0.12"
 sysinfo = "0.34"
 ed25519-dalek = "2.1"
-qrcode = "0.14"
+fast_qr = { version = "0.13", default-features = false }
 hex = "0.4"
 
 # UI generation dependencies
 handlebars = "6.2"
+
+# Force single hashbrown version to reduce binary bloat
+hashbrown = "0.15.5"
 
 # Terminal and UI
 ratatui = "0.30.0"
@@ -213,8 +231,8 @@ tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false }
 webpki-roots = "0.26"
-governor = "0.6"
-dashmap = "5.5"
+governor = "0.10"
+dashmap = "6.1"
 crossbeam-queue = "0.3"
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
@@ -231,9 +249,9 @@ torg-core = { version = "0.2", features = ["serde"] }
 torg-mask = "0.2"
 torg-serde = "0.2"
 hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = false, features = ["tokio", "rustls-tls"] }
-fastembed = "4"
+fastembed = "5"
 hnsw_rs = "0.3"
-tiktoken-rs = "0.6"
+tiktoken-rs = "0.9"
 
 # Proc macro
 proc-macro2 = "1"
@@ -256,6 +274,10 @@ codegen-units = 1
 strip = true
 opt-level = 2
 panic = "abort"
+debug = false
+
+# Disable debuginfo for all dependencies in release builds
+[profile.release.package."*"]
 debug = false
 
 [profile.dev]
@@ -356,9 +378,3 @@ too_many_lines = "allow"
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
 
-[patch.crates-io]
-# n0-snafu enables backtraces-impl-backtrace-crate on snafu, which replaces
-# std::backtrace::Backtrace with backtrace::Backtrace (missing capture() method).
-# This breaks octocrab which calls snafu::Backtrace::capture().
-# Patch removes that feature so snafu uses std::backtrace::Backtrace everywhere.
-n0-snafu = { path = "patches/n0-snafu" }

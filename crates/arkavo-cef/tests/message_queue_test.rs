@@ -1,7 +1,7 @@
 use arkavo_cef::{ReceivedMessage, UdsTransport};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixListener;
 
 /// Test that events received during feedback wait are queued properly
 #[tokio::test]
@@ -82,7 +82,7 @@ async fn test_event_queuing_during_feedback_wait() {
         assert_eq!(event.event_type, "submit");
         assert_eq!(event.value, "test");
     } else {
-        panic!("Expected Event message, got: {:?}", msg);
+        panic!("Expected Event message, got: {msg:?}");
     }
 
     server_task.await.unwrap();

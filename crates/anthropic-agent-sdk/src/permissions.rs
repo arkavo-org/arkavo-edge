@@ -200,7 +200,9 @@ impl Default for PermissionManagerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-004")]
     #[tokio::test]
     async fn test_permission_manager_default_allow() {
         let manager = PermissionManager::new();
@@ -220,6 +222,7 @@ mod tests {
         }
     }
 
+    #[spec("CASDK-004")]
     #[tokio::test]
     async fn test_permission_manager_disallowed() {
         let mut manager = PermissionManager::new();
@@ -240,6 +243,7 @@ mod tests {
         }
     }
 
+    #[spec("CASDK-004")]
     #[tokio::test]
     async fn test_permission_manager_allowed_list() {
         let mut manager = PermissionManager::new();
@@ -280,6 +284,7 @@ mod tests {
     // Security: Cancellation Token Tests
     // ========================================================================
 
+    #[spec("CASDK-004")]
     #[test]
     fn test_permission_context_new() {
         let ctx = ToolPermissionContext::new(vec![]);
@@ -288,6 +293,7 @@ mod tests {
         assert!(!ctx.is_cancelled());
     }
 
+    #[spec("CASDK-004")]
     #[test]
     fn test_permission_context_with_cancellation() {
         use tokio_util::sync::CancellationToken;
@@ -303,6 +309,7 @@ mod tests {
         assert!(ctx.is_cancelled());
     }
 
+    #[spec("CASDK-004")]
     #[test]
     fn test_permission_context_default() {
         let ctx = ToolPermissionContext::default();

@@ -1,12 +1,19 @@
 mod a2a_server;
+mod agent_event;
+mod agent_loop;
 mod anti_pattern;
 mod autolearn_bridge;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
+mod conductor_parallel;
 mod conductor_planner;
 mod conductor_tool_loop;
 mod config_helpers;
+mod consolidation;
+mod contract_negotiation;
+mod conversation_window;
+mod curiosity;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
@@ -21,12 +28,18 @@ mod policy_cache;
 mod rlm_bridge;
 mod startup;
 mod synthesis;
+mod token_estimator;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
 mod well_known;
 
 pub use a2a_server::A2aServer;
+pub use agent_event::{
+    AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
+    PendingMessage,
+};
+pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;
 pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
@@ -46,6 +59,7 @@ pub use mcp_bridge::McpBridgeTool;
 pub use policy_cache::{PolicyCache, QualityTrend};
 pub use rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
 pub use startup::{AgentGoal, AgentPlan, GoalStatus, run_startup_planning_phase};
+pub use token_estimator::TokenEstimator;
 pub use tool_memory::{ToolMemory, ToolMemoryEntry};
 pub use tool_pattern_cache::ToolPatternCache;
 pub use tool_pattern_observer::ToolPatternObserver;
@@ -218,6 +232,7 @@ pub trait A2aRpc {
         device_id: String,
         public_key: String,
         signature: String,
+        delegation_jwt: Option<String>,
     ) -> RpcResult<VerifyResponse>;
 
     /// Get registration status for a device
@@ -287,6 +302,10 @@ pub trait A2aRpc {
     #[method(name = "system.metrics")]
     async fn system_metrics(&self) -> RpcResult<serde_json::Value>;
 
+    /// Push-based metrics stream — replaces polling of system.metrics + budget.compute_status
+    #[subscription(name = "system.metrics.subscribe", unsubscribe = "system.metrics.unsubscribe", item = serde_json::Value)]
+    async fn system_metrics_subscribe(&self) -> SubscriptionResult;
+
     /// MCP-T: Query full trust score for a subject (Section 7.1)
     #[method(name = "trust/query")]
     async fn trust_query(
@@ -344,11 +363,11 @@ pub struct A2aRpcImpl {
     pub(crate) public_key: Option<String>,
     /// Budget manager for cost enforcement
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
-    /// Orchestrator tick counter (shared with orchestrator loop)
+    /// Agent cycle counter (shared with agent loop)
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
     /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
-    /// Per-agent compute budget (specialists check before each tick)
+    /// Per-agent compute budget (specialists check before each cycle)
     pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
     /// Mesh state for A2A delegation (send_task, list_agents, etc.)
     pub(crate) mesh_state: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
@@ -362,6 +381,12 @@ pub struct A2aRpcImpl {
     /// TDF share offer store for pending P2P offers
     #[cfg(feature = "kas")]
     pub(crate) tdf_offer_store: Arc<handlers::tdf_share::TdfOfferStore>,
+    /// Event sender for injecting A2A messages into the orchestrator agent loop.
+    /// Shared via Arc<Mutex> so start_orchestrator_loop can set it after RPC construction.
+    pub(crate) agent_event_tx:
+        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<agent_event::AgentEvent>>>>,
+    /// Published snapshot of the agent's ConversationWindow for @context introspection
+    pub(crate) context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
@@ -517,6 +542,9 @@ impl A2aRpcServer for A2aRpcImpl {
             self.mesh_state.as_ref(),
             &self.agent_metadata,
             &self.agent_memory,
+            self.agent_event_tx.clone(),
+            #[cfg(feature = "iroh")]
+            self.iroh_node.as_ref(),
             request,
         )
         .await
@@ -570,6 +598,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.chat_sessions,
             self.router.as_ref(),
+            &self.context_snapshot,
             session_id,
             message,
         )
@@ -713,12 +742,14 @@ impl A2aRpcServer for A2aRpcImpl {
         device_id: String,
         public_key: String,
         signature: String,
+        delegation_jwt: Option<String>,
     ) -> RpcResult<VerifyResponse> {
         let request = VerifyRequest {
             challenge_id,
             device_id,
             public_key,
             signature,
+            delegation_jwt,
         };
         handlers::registration::handle_registration_verify(
             &self.metrics,
@@ -857,7 +888,7 @@ impl A2aRpcServer for A2aRpcImpl {
             None => {
                 timer.success();
                 return Ok(
-                    serde_json::json!({ "agents": [], "selectedModel": null, "tickCount": 0 }),
+                    serde_json::json!({ "agents": [], "selectedModel": null, "cycleCount": 0 }),
                 );
             }
         };
@@ -894,7 +925,7 @@ impl A2aRpcServer for A2aRpcImpl {
             }));
         }
 
-        let tick = self
+        let cycle_count = self
             .orchestrator_tick
             .load(std::sync::atomic::Ordering::Relaxed);
 
@@ -937,7 +968,7 @@ impl A2aRpcServer for A2aRpcImpl {
         Ok(serde_json::json!({
             "agents": agents,
             "selectedModel": router.last_routed_model(),
-            "tickCount": tick,
+            "cycleCount": cycle_count,
             "routingHistory": routing_history,
             "optimalConfigs": optimal_configs,
         }))
@@ -1140,6 +1171,11 @@ impl A2aRpcServer for A2aRpcImpl {
             Some(timing)
         };
 
+        #[cfg(feature = "iroh")]
+        let iroh_active = self.iroh_node.is_some();
+        #[cfg(not(feature = "iroh"))]
+        let iroh_active = false;
+
         Ok(serde_json::json!({
             "agent_id": agent_id,
             "rss_mb": rss_mb,
@@ -1148,6 +1184,7 @@ impl A2aRpcServer for A2aRpcImpl {
             "total_ram_mb": total_ram_mb,
             "available_ram_mb": available_ram_mb,
             "subsystem_timing": subsystem_timing,
+            "iroh_active": iroh_active,
         }))
     }
 
@@ -1240,5 +1277,163 @@ impl A2aRpcServer for A2aRpcImpl {
             request,
         )
         .await
+    }
+
+    async fn system_metrics_subscribe(&self, sink: PendingSubscriptionSink) -> SubscriptionResult {
+        let sink = match sink.accept().await {
+            Ok(s) => s,
+            Err(_) => return Ok(()),
+        };
+
+        let agent_metadata = self.agent_metadata.clone();
+        let compute_budget = self.compute_budget.clone();
+        let agent_memory = self.agent_memory.clone();
+        let learning_bus = self.learning_bus.clone();
+        let router = self.router.clone();
+        let context_snapshot = self.context_snapshot.clone();
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.clone();
+
+        tokio::spawn(async move {
+            loop {
+                use sysinfo::{Pid, System};
+                let pid = std::process::id();
+                let mut sys = System::new();
+                sys.refresh_memory();
+                sys.refresh_processes_specifics(
+                    sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+                    true,
+                    sysinfo::ProcessRefreshKind::nothing()
+                        .with_memory()
+                        .with_cpu(),
+                );
+                let (rss_mb, cpu_percent) = if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+                    (
+                        proc.memory() as f64 / (1024.0 * 1024.0),
+                        proc.cpu_usage() as f64,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+
+                let agent_id = agent_metadata.read().await.name.clone();
+
+                let timing = arkavo_observability::subsystem_timing::global_timing().snapshot();
+                let subsystem_timing = if timing.is_empty() {
+                    None
+                } else {
+                    Some(timing)
+                };
+
+                let budget_snapshot = {
+                    let b = compute_budget.read().await;
+                    serde_json::to_value(b.snapshot()).ok()
+                };
+
+                #[cfg(feature = "iroh")]
+                let iroh_active = iroh_node.is_some();
+                #[cfg(not(feature = "iroh"))]
+                let iroh_active = false;
+
+                // Context topology: tool memory
+                let tool_memory_snap = agent_memory.read().await.topology_snapshot();
+
+                // Context topology: gossip stats
+                let gossip_snap = if let Some(bus) = &learning_bus {
+                    let stats = bus.stats().await;
+                    serde_json::json!({
+                        "eventsReceived": stats.events_received,
+                        "episodesSynthesized": stats.episodes_synthesized,
+                        "lessonsStored": stats.lessons_stored,
+                        "gossipPeers": stats.gossip_peers,
+                        "lastEventSecsAgo": stats.last_event_secs_ago,
+                    })
+                } else {
+                    serde_json::json!(null)
+                };
+
+                // Context topology: anti-patterns
+                let anti_patterns_snap: Vec<serde_json::Value> = if let Some(bus) = &learning_bus {
+                    let cache = bus.policy_cache().read().await;
+                    let mut patterns = Vec::new();
+                    if let Some(r) = &router {
+                        let lm = r.model_learning();
+                        let all_stats = lm.get_all_stats().await;
+                        for s in &all_stats {
+                            for ap in cache.anti_patterns.get_for_model(&s.agent_id) {
+                                patterns.push(serde_json::json!({
+                                    "model": ap.model,
+                                    "category": ap.category,
+                                    "failureSignature": ap.failure_signature,
+                                    "failureCount": ap.failure_count,
+                                    "decayedWeight": ap.decayed_weight(),
+                                    "lastSeen": ap.last_seen.to_rfc3339(),
+                                }));
+                            }
+                        }
+                    }
+                    patterns
+                } else {
+                    vec![]
+                };
+
+                // Context topology: decision traces
+                let traces_snap: Vec<serde_json::Value> = if let Some(r) = &router {
+                    r.recent_decision_traces(10)
+                        .into_iter()
+                        .map(|t| {
+                            serde_json::json!({
+                                "traceId": t.trace_id.to_string(),
+                                "agentId": &agent_id,
+                                "taskCategory": t.task_category.as_str(),
+                                "selectedModel": t.selected_model,
+                                "selectionReason": match &t.selection_reason {
+                                    arkavo_router::learning::SelectionReason::ThompsonSampling { score, .. } =>
+                                        format!("Thompson({score:.2})"),
+                                    arkavo_router::learning::SelectionReason::BudgetConstrained => "BudgetConstrained".to_string(),
+                                    arkavo_router::learning::SelectionReason::SingleFeasible => "SingleFeasible".to_string(),
+                                    arkavo_router::learning::SelectionReason::Probationary => "Probationary".to_string(),
+                                    arkavo_router::learning::SelectionReason::Fallback => "Fallback".to_string(),
+                                },
+                                "budgetUsagePct": t.budget_usage_pct,
+                                "feasibleCount": t.feasible_models.len(),
+                                "timestamp": t.timestamp.to_rfc3339(),
+                            })
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+                let metrics = serde_json::json!({
+                    "agent_id": agent_id,
+                    "rss_mb": rss_mb,
+                    "cpu_percent": cpu_percent,
+                    "pid": pid,
+                    "total_ram_mb": sys.total_memory() as f64 / (1024.0 * 1024.0),
+                    "available_ram_mb": sys.available_memory() as f64 / (1024.0 * 1024.0),
+                    "subsystem_timing": subsystem_timing,
+                    "iroh_active": iroh_active,
+                    "compute_budget": budget_snapshot,
+                    "context_topology": {
+                        "toolMemory": tool_memory_snap,
+                        "gossip": gossip_snap,
+                        "antiPatterns": anti_patterns_snap,
+                        "decisionTraces": traces_snap,
+                        "conversationWindow": *context_snapshot.read().await,
+                    },
+                });
+
+                if let Ok(msg) = serde_json::value::to_raw_value(&metrics)
+                    && sink.send(msg).await.is_err()
+                {
+                    break; // Client disconnected
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
+
+        Ok(())
     }
 }

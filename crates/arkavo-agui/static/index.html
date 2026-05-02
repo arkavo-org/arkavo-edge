@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
-    <title>Arkavo Mesh Dashboard</title>
+    <title>Arkavo Edge</title>
     <link rel="stylesheet" href="/static/styles/base.css">
     <link rel="stylesheet" href="/static/styles/panels.css">
     <link rel="stylesheet" href="/static/styles/dashboard.css">
 </head>
 <body>
     <header>
-        <h1>Arkavo Mesh Dashboard</h1>
+        <h1>Arkavo Edge</h1>
         <span id="connection-status" class="disconnected">Connecting...</span>
         <span id="cost-badge" class="cost-badge">$0.00</span>
         <div id="stats">
@@ -32,6 +32,8 @@
                 <button class="nav-btn" data-view="router" title="Router">&#x21C4;</button>
                 <button class="nav-btn" data-view="telemetry" title="Telemetry">&#x223F;</button>
                 <button class="nav-btn" data-view="learning" title="Learning">&#x1F9E0;</button>
+                <button class="nav-btn" data-view="context" title="Context Topology">&#x2B21;</button>
+                <button class="nav-btn" data-view="arp" title="Agent Runtime Policy">&#x2696;</button>
                 <button class="nav-btn showcase-btn" id="showcase-toggle" title="Showcase Mode">&#x25B6;</button>
             </nav>
 
@@ -94,6 +96,21 @@
                         <div class="empty-state"><h3>Waiting for Routing Data</h3><p>Submit tasks to watch the mesh brain think</p></div>
                     </div>
                 </div>
+
+                <div class="view-panel" id="view-context">
+                    <div class="panel-header">Context Topology Matrix</div>
+                    <div id="context-container">
+                        <div class="empty-state"><h3>Waiting for Context Data</h3><p>Submit tasks to populate context topology</p></div>
+                    </div>
+                </div>
+
+                <div class="view-panel" id="view-arp">
+                    <div class="panel-header">Agent Runtime Policy (ARP)</div>
+                    <div id="arp-container">
+                        <div class="empty-state"><h3>Loading ARP Status...</h3><p>Requesting policy document and runtime state</p></div>
+                    </div>
+                </div>
+
             </div>
         </main>
 
@@ -127,6 +144,9 @@
     <script src="/static/js/panels/router.js"></script>
     <script src="/static/js/panels/learning-charts.js"></script>
     <script src="/static/js/panels/learning.js"></script>
+    <script src="/static/js/panels/context-charts.js"></script>
+    <script src="/static/js/panels/context.js"></script>
+    <script src="/static/js/panels/arp.js"></script>
     <script src="/static/js/panels/task-detail.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/showcase.js"></script>

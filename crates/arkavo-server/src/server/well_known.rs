@@ -132,7 +132,9 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-002")]
     #[tokio::test]
     async fn test_build_agent_card() {
         let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
@@ -140,7 +142,7 @@ mod tests {
             purpose: "Test agent for unit tests".to_string(),
             model: "test-model".to_string(),
             endpoint: "http://localhost:8080".to_string(),
-            api_keys: Default::default(),
+            ..Default::default()
         }));
         let mcp_registry = Arc::new(McpRegistry::new());
 

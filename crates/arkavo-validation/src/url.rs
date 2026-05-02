@@ -6,6 +6,14 @@ pub struct EgressFilter {
     blocked_ips: HashSet<IpAddr>,
     blocked_ranges: Vec<ipnet::IpNet>,
     allowlist: HashSet<String>,
+    /// ARP §12.1: TTL for dynamically-added deny entries (seconds).
+    pub arp_dynamic_deny_ttl_sec: Option<u64>,
+    /// ARP §12.1: Consecutive connection failures before auto-deny.
+    pub arp_connection_failure_threshold: Option<u32>,
+    /// ARP §12.1: Auto-deny on TLS errors.
+    pub arp_deny_on_tls_error: bool,
+    /// ARP §12.1: Auto-deny on suspicious (injection) responses.
+    pub arp_deny_on_suspicious_response: bool,
 }
 
 impl Default for EgressFilter {
@@ -20,8 +28,26 @@ impl EgressFilter {
             blocked_ips: HashSet::new(),
             blocked_ranges: Vec::new(),
             allowlist: HashSet::new(),
+            arp_dynamic_deny_ttl_sec: None,
+            arp_connection_failure_threshold: None,
+            arp_deny_on_tls_error: false,
+            arp_deny_on_suspicious_response: false,
         };
         filter.add_default_blocks();
+        filter
+    }
+
+    /// Create an egress filter with ARP network egress config (§12.1) merged
+    /// on top of the default static blocks. ARP can add dynamic deny triggers
+    /// and TTL, but cannot remove the hardcoded SSRF protection ranges.
+    pub fn with_arp(arp: &arkavo_arp::layers::Egress) -> Self {
+        let mut filter = Self::new();
+        filter.arp_dynamic_deny_ttl_sec = arp.dynamic_deny_ttl_sec;
+        if let Some(deny) = &arp.dynamic_deny {
+            filter.arp_connection_failure_threshold = deny.on_connection_failure_count;
+            filter.arp_deny_on_tls_error = deny.on_tls_error.unwrap_or(false);
+            filter.arp_deny_on_suspicious_response = deny.on_suspicious_response.unwrap_or(false);
+        }
         filter
     }
 
@@ -247,10 +273,12 @@ mod tests {
     //! - CRI-003: Egress filtering (SSRF prevention)
 
     use super::*;
+    use arkavo_test_macros::spec;
 
     /// Test: Egress filter blocks access to private IP ranges and cloud metadata
     /// Spec: NET-007 - Block cloud metadata and internal network access
     /// Vulnerability: CRI-003 - SSRF Prevention
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_blocks_private_ips() {
         let filter = EgressFilter::new();
@@ -267,6 +295,7 @@ mod tests {
 
     /// Test: Egress filter allows legitimate public URLs
     /// Spec: NET-007 - Public IPs should be accessible
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_allows_public_urls() {
         let filter = EgressFilter::new();
@@ -276,6 +305,7 @@ mod tests {
 
     /// Test: Allowlist can bypass egress filter for specific URLs
     /// Spec: NET-007 - Explicit allowlist can override for known-safe internal services
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_allowlist() {
         let mut filter = EgressFilter::new();
@@ -286,6 +316,7 @@ mod tests {
     /// Test: Host validator prevents DNS rebinding attacks
     /// Spec: NET-006 - Host header validation (anti-rebinding)
     /// Spec: HIGH-004 - Host header validation
+    #[spec("VAL-006")]
     #[test]
     fn test_host_validator() {
         let validator = HostValidator::new();
@@ -298,6 +329,7 @@ mod tests {
 
     /// Test: Loopback host detection for local binding validation
     /// Spec: NET-002 - Localhost-only binding by default
+    #[spec("VAL-006")]
     #[test]
     fn test_is_loopback_host() {
         assert!(is_loopback_host("localhost"));
@@ -307,6 +339,7 @@ mod tests {
         assert!(!is_loopback_host("example.com"));
     }
 
+    #[spec("VAL-006")]
     #[test]
     fn test_extract_host_from_url() {
         assert_eq!(
@@ -316,6 +349,7 @@ mod tests {
         assert_eq!(extract_host_from_url("not-a-url"), None);
     }
 
+    #[spec("VAL-005", "VAL-006")]
     #[test]
     fn test_userinfo_bypass_blocked() {
         assert_eq!(
@@ -324,6 +358,7 @@ mod tests {
         );
     }
 
+    #[spec("VAL-006")]
     #[test]
     fn test_ipv6_url_extraction() {
         assert_eq!(
@@ -334,6 +369,42 @@ mod tests {
             extract_host_from_url("http://[::ffff:169.254.169.254]/"),
             Some("::ffff:169.254.169.254".to_string())
         );
+    }
+
+    #[spec("VAL-005")]
+    #[test]
+    fn test_egress_filter_from_arp_preserves_defaults() {
+        let arp_egress = arkavo_arp::layers::Egress {
+            dynamic_deny: None,
+            deny_takes_precedence: Some(true),
+            dynamic_deny_ttl_sec: Some(3600),
+        };
+        let filter = EgressFilter::with_arp(&arp_egress);
+        assert!(filter.is_allowed("http://10.0.0.1/api").is_err());
+        assert!(
+            filter
+                .is_allowed("http://169.254.169.254/latest/meta-data")
+                .is_err()
+        );
+        assert!(filter.is_allowed("https://api.example.com/v1").is_ok());
+        assert_eq!(filter.arp_dynamic_deny_ttl_sec, Some(3600));
+    }
+
+    #[test]
+    fn test_egress_filter_from_arp_dynamic_deny_config() {
+        let arp_egress = arkavo_arp::layers::Egress {
+            dynamic_deny: Some(arkavo_arp::layers::DynamicDeny {
+                on_connection_failure_count: Some(3),
+                on_tls_error: Some(true),
+                on_suspicious_response: Some(true),
+            }),
+            deny_takes_precedence: Some(true),
+            dynamic_deny_ttl_sec: Some(7200),
+        };
+        let filter = EgressFilter::with_arp(&arp_egress);
+        assert_eq!(filter.arp_connection_failure_threshold, Some(3));
+        assert!(filter.arp_deny_on_tls_error);
+        assert!(filter.arp_deny_on_suspicious_response);
     }
 
     #[test]

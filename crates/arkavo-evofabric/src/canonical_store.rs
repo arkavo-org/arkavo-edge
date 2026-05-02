@@ -111,7 +111,9 @@ pub fn content_hash(source: &str) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("EVO-004")]
     #[test]
     fn empty_store() {
         let store = CanonicalStore::new();
@@ -120,6 +122,7 @@ mod tests {
         assert!(store.head().is_none());
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn store_and_retrieve() {
         let mut store = CanonicalStore::new();
@@ -130,6 +133,7 @@ mod tests {
         assert!(entry.parent.is_none());
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn head_tracks_latest() {
         let mut store = CanonicalStore::new();
@@ -139,6 +143,7 @@ mod tests {
         assert_eq!(store.head_hash(), Some(h2));
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn deduplicates_same_source() {
         let mut store = CanonicalStore::new();
@@ -148,6 +153,7 @@ mod tests {
         assert_eq!(store.len(), 1);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn ancestry_chain() {
         let mut store = CanonicalStore::new();
@@ -158,6 +164,7 @@ mod tests {
         assert_eq!(chain, vec![h3, h2, h1]);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn ancestry_single_version() {
         let mut store = CanonicalStore::new();
@@ -165,6 +172,7 @@ mod tests {
         assert_eq!(store.ancestry(&h), vec![h]);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn content_hash_deterministic() {
         let h1 = content_hash("fn foo() {}");
@@ -172,6 +180,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn content_hash_differs_for_different_source() {
         let h1 = content_hash("fn foo() {}");
@@ -179,6 +188,7 @@ mod tests {
         assert_ne!(h1, h2);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn bundles_stored() {
         let mut store = CanonicalStore::new();
@@ -188,6 +198,7 @@ mod tests {
         assert_eq!(entry.applied_bundles, vec![id]);
     }
 
+    #[spec("EVO-004")]
     #[test]
     fn contains_check() {
         let mut store = CanonicalStore::new();

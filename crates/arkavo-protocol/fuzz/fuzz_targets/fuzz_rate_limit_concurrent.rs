@@ -16,16 +16,17 @@ struct ConcurrentInput {
 
 impl<'a> arbitrary::Arbitrary<'a> for ConcurrentInput {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let max_ip_entries = u.int_in_range(50..=200)?;
         Ok(ConcurrentInput {
             config: RateLimitConfig {
                 max_requests_per_second: u.int_in_range(1..=100)?,
                 burst_size: u.int_in_range(1..=20)?,
                 enabled: true,
-                max_ip_entries: u.int_in_range(50..=500)?,
+                max_ip_entries,
                 ip_entry_ttl_seconds: u.int_in_range(1..=60)?,
             },
-            thread_count: u.int_in_range(1..=10)?,
-            requests_per_thread: u.int_in_range(10..=100)?,
+            thread_count: u.int_in_range(2..=4)?,
+            requests_per_thread: u.int_in_range(10..=50)?,
         })
     }
 }

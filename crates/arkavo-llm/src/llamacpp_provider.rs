@@ -1,6 +1,9 @@
 use crate::gpu_fault::GpuCircuitBreaker;
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
+
+/// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
+type TemplateParseTuple = (i32, Option<String>, Option<String>);
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -43,6 +46,12 @@ pub struct SamplingConfig {
     /// Tool choice for native template rendering
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub chat_tool_choice: arkavo_llama_cpp::ToolChoice,
+    /// Chat format from llama.cpp Jinja template (for native output parsing)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub chat_format: i32,
+    /// Serialized PEG parser from Jinja template (for native output parsing)
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub chat_parser_str: Option<String>,
 }
 
 impl Default for SamplingConfig {
@@ -51,7 +60,7 @@ impl Default for SamplingConfig {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
-            max_tokens: 4096,
+            max_tokens: 16384,
             seed: 42,
             debug: false,
             tool_format: LocalToolFormat::Fence,
@@ -62,6 +71,10 @@ impl Default for SamplingConfig {
             chat_tools: Vec::new(),
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             chat_tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            chat_format: 0,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            chat_parser_str: None,
         }
     }
 }
@@ -97,6 +110,10 @@ pub struct LlamaCppProvider {
     conversation_id: Option<ConversationId>,
     /// GPU fault circuit breaker for retry/fallback logic
     gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
+    /// Template-generated format and PEG parser string, stored after generate_streaming
+    /// so complete_with_tools can pass them to the output parser.
+    /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
+    template_parse_info: std::sync::Mutex<Option<TemplateParseTuple>>,
 }
 
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -163,6 +180,7 @@ impl LlamaCppProvider {
             mtmd_ctx,
             conversation_id: None,
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -192,6 +210,7 @@ impl LlamaCppProvider {
             mtmd_ctx: None,
             conversation_id: None,
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -219,6 +238,7 @@ impl LlamaCppProvider {
             mtmd_ctx: None,
             conversation_id: Some(conversation_id),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -365,9 +385,13 @@ impl LlamaCppProvider {
         let (
             prompt_bytes,
             template_grammar,
+            template_grammar_lazy,
             template_triggers,
             _thinking_forced_open,
             template_stops,
+            template_chat_format,
+            template_chat_parser_str,
+            template_generation_prompt,
         ) = match model.chat_templates() {
             Ok(tmpls) => {
                 let inputs = ChatInputs {
@@ -396,19 +420,48 @@ impl LlamaCppProvider {
                                 eprintln!("  thinking_forced_open=true");
                             }
                         }
-                        // Template grammar uses character-level GBNF rules (e.g., "<tool_call>")
-                        // but models tokenize these as single special tokens. This mismatch
-                        // causes GGML_ASSERT failures in the grammar sampler. The template
-                        // grammar is designed for llama-server's integrated grammar handler
-                        // which resolves special tokens — our standalone sampler cannot use it.
-                        // We rely on the template's prompt formatting + enable_thinking=false
-                        // to guide generation, and use our own fence grammar if configured.
+                        // Pass the template grammar and triggers through.
+                        // Token triggers are converted to word triggers in
+                        // add_grammar_lazy_with_triggers to avoid the
+                        // token_to_piece mismatch issue.
+                        if result.grammar.is_some() {
+                            eprintln!(
+                                "  grammar: {} bytes, lazy={}, {} triggers",
+                                result.grammar.as_ref().map_or(0, |g| g.len()),
+                                result.grammar_lazy,
+                                result.grammar_triggers.len(),
+                            );
+                            if let Some(ref g) = result.grammar {
+                                eprintln!("  grammar full:\n{g}");
+                            }
+                            for (i, t) in result.grammar_triggers.iter().enumerate() {
+                                eprintln!(
+                                    "  trigger[{i}]: type={:?} value={:?} token={}",
+                                    t.trigger_type, t.value, t.token
+                                );
+                            }
+                        }
+                        // Only use lazy grammars (trigger-activated). Non-lazy grammars
+                        // (e.g., Gemma 4) require full sampler pipeline integration that
+                        // our standalone grammar sampler doesn't support. For those models,
+                        // we skip grammar-constrained generation and rely on the native
+                        // PEG output parser instead.
+                        let (grammar, lazy, triggers) =
+                            if result.grammar_lazy && !result.grammar_triggers.is_empty() {
+                                (result.grammar, true, Some(result.grammar_triggers))
+                            } else {
+                                (None, false, None)
+                            };
                         (
                             result.prompt,
-                            None,
-                            None,
+                            grammar,
+                            lazy,
+                            triggers,
                             result.thinking_forced_open,
                             result.additional_stops,
+                            result.format,
+                            result.parser_str,
+                            result.generation_prompt,
                         )
                     }
                     Err(e) => {
@@ -445,9 +498,13 @@ impl LlamaCppProvider {
                                 Ok(result) => (
                                     result.prompt,
                                     None,
+                                    false,
                                     None,
                                     result.thinking_forced_open,
                                     result.additional_stops,
+                                    result.format,
+                                    result.parser_str,
+                                    result.generation_prompt,
                                 ),
                                 Err(e2) => {
                                     tracing::warn!(
@@ -460,7 +517,7 @@ impl LlamaCppProvider {
                                                     "Failed to apply chat template: {e}"
                                                 ))
                                             })?;
-                                    (bytes, None, None, false, Vec::new())
+                                    (bytes, None, false, None, false, Vec::new(), 0, None, None)
                                 }
                             }
                         } else {
@@ -472,7 +529,7 @@ impl LlamaCppProvider {
                                     .map_err(|e| {
                                         Error::Config(format!("Failed to apply chat template: {e}"))
                                     })?;
-                            (bytes, None, None, false, Vec::new())
+                            (bytes, None, false, None, false, Vec::new(), 0, None, None)
                         }
                     }
                 }
@@ -481,7 +538,7 @@ impl LlamaCppProvider {
                 tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
                 let bytes = apply_chat_template_with_format(&llama_messages, true, format)
                     .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, None, false, Vec::new())
+                (bytes, None, false, None, false, Vec::new(), 0, None, None)
             }
         };
 
@@ -500,11 +557,40 @@ impl LlamaCppProvider {
         let use_dry_sampling = true;
 
         // Merge template grammar with config grammar (template takes precedence)
+        // Store template parse info for complete_with_tools to use later
+        if (template_chat_format != 0 || template_chat_parser_str.is_some())
+            && let Ok(mut guard) = self.template_parse_info.lock()
+        {
+            *guard = Some((
+                template_chat_format,
+                template_chat_parser_str,
+                template_generation_prompt.clone(),
+            ));
+        }
+
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
-        let grammar_triggers_merged =
-            template_triggers.or_else(|| self.config.grammar_triggers.clone());
+        // Convert string-only fence triggers to typed GrammarTrigger::Word
+        let grammar_triggers_merged = template_triggers.or_else(|| {
+            self.config.grammar_triggers.as_ref().map(|strings| {
+                strings
+                    .iter()
+                    .map(|s| arkavo_llama_cpp::GrammarTrigger {
+                        trigger_type: arkavo_llama_cpp::GrammarTriggerType::Word,
+                        value: s.clone(),
+                        token: -1,
+                    })
+                    .collect()
+            })
+        });
 
         let additional_stops = template_stops;
+
+        // Template grammar_lazy takes precedence; fence grammar is always lazy
+        let grammar_lazy = if template_grammar_lazy {
+            true
+        } else {
+            self.config.grammar.is_some() // fence grammar is lazy by default
+        };
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -515,8 +601,10 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar,
+            grammar_lazy,
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
+            generation_prompt: template_generation_prompt,
         };
 
         // Try pooled context first (avoids context allocation contention).
@@ -526,7 +614,12 @@ impl LlamaCppProvider {
             if let Ok(pooled) = registry.acquire_fresh_context(&model_name) {
                 let pooled_ctx = pooled.context.clone();
                 let registry_clone = registry.clone();
+                let agent_name = self.name.clone();
                 tokio::spawn(async move {
+                    // GPU guard held for entire inference — serializes Metal access
+                    let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                        .acquire(&agent_name)
+                        .await;
                     crate::llamacpp_streaming::generate_tokens_pooled(
                         pooled_ctx,
                         model,
@@ -541,7 +634,12 @@ impl LlamaCppProvider {
             }
         }
 
+        let agent_name = self.name.clone();
         tokio::spawn(async move {
+            // GPU guard held for entire inference — serializes Metal access
+            let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                .acquire(&agent_name)
+                .await;
             generate_tokens(model, prompt_bytes, streaming_config, tx).await;
         });
 
@@ -574,11 +672,18 @@ impl LlamaCppProvider {
             use_dry_sampling,
             model_format: format,
             grammar: None,
+            grammar_lazy: false,
             grammar_triggers: None,
             additional_stops: Vec::new(),
+            generation_prompt: None,
         };
 
+        let agent_name = self.name.clone();
         tokio::spawn(async move {
+            // GPU guard held for entire inference — serializes Metal access
+            let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                .acquire(&agent_name)
+                .await;
             generate_tokens_with_vision(model, mtmd_ctx, messages, streaming_config, tx).await;
         });
 
@@ -602,6 +707,7 @@ impl LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
             &custom_provider
         } else {
@@ -722,6 +828,7 @@ impl Provider for LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
             &custom_provider
         } else {
@@ -879,7 +986,10 @@ impl Provider for LlamaCppProvider {
                 || name_lower.contains("270m")
             {
                 Some(0.1) // Near-greedy for tiny models
-            } else if name_lower.contains("3b") || name_lower.contains("4b") {
+            } else if (name_lower.contains("3b") || name_lower.contains("4b"))
+                && !name_lower.contains("26b")
+                && !name_lower.contains("31b")
+            {
                 Some(0.2)
             } else {
                 None // Keep default for 8B+
@@ -888,13 +998,28 @@ impl Provider for LlamaCppProvider {
             None
         };
 
-        // Convert tool definitions to ChatTool format for native template rendering
+        // Convert tool definitions to ChatTool format for native template rendering.
+        // When input_schema is a trivial empty object (from NameAndDescription detail
+        // level), omit parameters_json so the Jinja template renders compactly —
+        // preventing the 16K+ token expansion that causes GPU faults.
         let chat_tools: Vec<arkavo_llama_cpp::ChatTool> = if let Some(ref tools_value) = tools {
             tools_value
                 .as_array()
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|t| {
+                            let params = t
+                                .get("input_schema")
+                                .filter(|s| {
+                                    // Keep schema only if it has actual properties
+                                    s.get("properties")
+                                        .and_then(|p| p.as_object())
+                                        .is_some_and(|o| !o.is_empty())
+                                })
+                                .map(|s| s.to_string())
+                                // Must be valid JSON — empty string causes
+                                // json::parse("") to throw in chat.cpp
+                                .unwrap_or_else(|| "{}".to_string());
                             Some(arkavo_llama_cpp::ChatTool {
                                 name: t.get("name")?.as_str()?.to_string(),
                                 description: t
@@ -902,10 +1027,7 @@ impl Provider for LlamaCppProvider {
                                     .and_then(|d| d.as_str())
                                     .unwrap_or("")
                                     .to_string(),
-                                parameters_json: t
-                                    .get("input_schema")
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_default(),
+                                parameters_json: params,
                             })
                         })
                         .collect()
@@ -915,7 +1037,7 @@ impl Provider for LlamaCppProvider {
             Vec::new()
         };
 
-        let (raw_content, inference_timing) = {
+        let ((raw_content, inference_timing), template_parse_info) = {
             let mut config = self.config.clone();
             if let Some(temp) = tool_temperature {
                 config.temperature = temp;
@@ -937,14 +1059,25 @@ impl Provider for LlamaCppProvider {
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+                template_parse_info: std::sync::Mutex::new(None),
             };
-            custom_provider
+            let result = custom_provider
                 .complete_with_timing(modified_messages, max_tokens)
-                .await?
+                .await?;
+            // Retrieve template parse info stored by generate_streaming
+            let parse_info = custom_provider
+                .template_parse_info
+                .lock()
+                .ok()
+                .and_then(|g| g.clone());
+            if parse_info.is_none() {
+                tracing::debug!("No template parse info — using format-based parser");
+            }
+            (result, parse_info)
         };
 
         // Extract thinking blocks for GLM models; also strip for sub-1B Qwen defensively
-        let (content, reasoning_content) = if is_glm {
+        let (mut content, reasoning_content) = if is_glm {
             let extraction = ToolParser::extract_thinking_blocks(&raw_content);
             let reasoning = if extraction.thinking.is_empty() {
                 None
@@ -961,23 +1094,85 @@ impl Provider for LlamaCppProvider {
 
         let tool_calls = if let Some(ref tools_value) = tools {
             // Collect registered tool names to filter false positives
-            // (e.g. ```python``` code fences matching as tool calls)
             let registered_names: std::collections::HashSet<&str> = tools_value
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|t| t.get("name")?.as_str()).collect())
                 .unwrap_or_default();
 
-            // Try configured format first, then fallback chain
-            let parsed = match self.config.tool_format {
-                LocalToolFormat::Fence => ToolParser::parse_fence(&content)
-                    .or_else(|_| ToolParser::parse_xml(&content))
-                    .unwrap_or_default(),
-                LocalToolFormat::Xml => ToolParser::parse_xml(&content)
-                    .or_else(|_| ToolParser::parse_fence(&content))
-                    .unwrap_or_default(),
-                LocalToolFormat::Json => ToolParser::parse_json(&content)
-                    .or_else(|_| ToolParser::parse_fence(&content))
-                    .unwrap_or_default(),
+            // Try llama.cpp's native PEG parser first (handles Gemma 4, etc.),
+            // then fall back to our custom parser chain.
+            // Use template parse info if available (has PEG parser for correct arg extraction),
+            // otherwise fall back to format-based detection.
+            let (native_format, native_parser_str, gen_prompt) =
+                if let Some((fmt, ref ps, ref gp)) = template_parse_info {
+                    (fmt, ps.as_deref(), gp.clone())
+                } else {
+                    let fmt = match format {
+                        ModelFormat::Gemma4 => 3i32, // COMMON_CHAT_FORMAT_PEG_GEMMA4
+                        _ => 0,
+                    };
+                    (fmt, None, None)
+                };
+            let parsed = {
+                let mut native_parsed: Vec<crate::tool_parser::ParsedToolCall> = Vec::new();
+
+                if native_format > 0 {
+                    // Prepend generation_prompt if available — the PEG parser_str grammar
+                    // expects the full output including the template-injected prefix.
+                    let parse_input = if let Some(ref gp) = gen_prompt {
+                        format!("{gp}{content}")
+                    } else {
+                        content.clone()
+                    };
+                    let (native_content, _native_reasoning, native_calls) =
+                        arkavo_llama_cpp::parse_tool_calls(
+                            &parse_input,
+                            native_format,
+                            native_parser_str,
+                        );
+                    if !native_calls.is_empty() {
+                        content = native_content;
+                        native_parsed = native_calls
+                            .into_iter()
+                            .map(|tc| crate::tool_parser::ParsedToolCall {
+                                tool_name: tc
+                                    .name
+                                    .strip_prefix("call:")
+                                    .unwrap_or(&tc.name)
+                                    .to_string(),
+                                arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(
+                                    |e| {
+                                        tracing::warn!(
+                                            tool = tc.name,
+                                            args_raw = &tc.arguments[..tc.arguments.len().min(200)],
+                                            error = %e,
+                                            "Failed to parse tool call arguments, defaulting to empty"
+                                        );
+                                        serde_json::Value::Object(serde_json::Map::default())
+                                    },
+                                ),
+                                call_id: if tc.id.is_empty() { None } else { Some(tc.id) },
+                            })
+                            .collect();
+                    }
+                }
+
+                if native_parsed.is_empty() {
+                    // Fallback to our custom parser chain
+                    match self.config.tool_format {
+                        LocalToolFormat::Fence => ToolParser::parse_fence(&content)
+                            .or_else(|_| ToolParser::parse_xml(&content))
+                            .unwrap_or_default(),
+                        LocalToolFormat::Xml => ToolParser::parse_xml(&content)
+                            .or_else(|_| ToolParser::parse_fence(&content))
+                            .unwrap_or_default(),
+                        LocalToolFormat::Json => ToolParser::parse_json(&content)
+                            .or_else(|_| ToolParser::parse_fence(&content))
+                            .unwrap_or_default(),
+                    }
+                } else {
+                    native_parsed
+                }
             };
 
             // Only keep calls that match actual registered tools

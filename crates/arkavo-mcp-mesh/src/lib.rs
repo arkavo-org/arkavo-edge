@@ -71,6 +71,11 @@ pub struct MeshToolsState {
     pub agent_addresses: Arc<RwLock<HashMap<String, String>>>,
     /// Delegated tasks awaiting specialist responses
     pub pending_delegations: Arc<RwLock<Vec<PendingDelegation>>>,
+    /// Completions pushed by gossip (specialist → commander, no polling)
+    push_completions: Arc<RwLock<Vec<CompletedDelegation>>>,
+    /// Telemetry: completions delivered via push vs fallback polling
+    completions_pushed: std::sync::atomic::AtomicU64,
+    completions_polled: std::sync::atomic::AtomicU64,
 }
 
 impl MeshToolsState {
@@ -79,17 +84,56 @@ impl MeshToolsState {
             registry: Arc::new(AgentRegistry::new()),
             agent_addresses: Arc::new(RwLock::new(HashMap::new())),
             pending_delegations: Arc::new(RwLock::new(Vec::new())),
+            push_completions: Arc::new(RwLock::new(Vec::new())),
+            completions_pushed: std::sync::atomic::AtomicU64::new(0),
+            completions_polled: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Push a completion received via gossip into the local queue.
+    /// Called by the gossip handler when a TaskCompleted message arrives.
+    pub async fn push_completed(&self, task_id: &str, completion: CompletedDelegation) {
+        // Remove matching pending delegation so polling doesn't duplicate it
+        let mut pending = self.pending_delegations.write().await;
+        pending.retain(|d| d.task_id != task_id);
+        drop(pending);
+
+        self.push_completions.write().await.push(completion);
     }
 
     /// Fetch all completed specialist responses, removing them from pending.
     ///
-    /// Called by the orchestrator before each tick so the commander can act on
-    /// specialist advice immediately without wasting iterations on `get_task_status`.
+    /// Drains push-delivered completions first (zero network cost), then falls
+    /// back to HTTP polling for any remaining pending delegations.
     pub async fn collect_completed(&self) -> Vec<CompletedDelegation> {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        // Drain push-delivered completions first (from gossip TaskCompleted messages)
+        let mut pushed: Vec<CompletedDelegation> =
+            self.push_completions.write().await.drain(..).collect();
+        let push_count = pushed.len() as u64;
+
         let mut pending = self.pending_delegations.write().await;
         if pending.is_empty() {
-            return Vec::new();
+            if push_count > 0 {
+                self.completions_pushed.fetch_add(push_count, Relaxed);
+                let total_push = self.completions_pushed.load(Relaxed);
+                let total_poll = self.completions_polled.load(Relaxed);
+                let total = total_push + total_poll;
+                let pct = if total > 0 {
+                    (total_push as f64 / total as f64) * 100.0
+                } else {
+                    100.0
+                };
+                tracing::info!(
+                    pushed = push_count,
+                    total_pushed = total_push,
+                    total_polled = total_poll,
+                    push_pct = format!("{:.0}%", pct),
+                    "Task completions: push-delivered"
+                );
+            }
+            return pushed;
         }
 
         let mut completed = Vec::new();
@@ -97,7 +141,7 @@ impl MeshToolsState {
 
         for delegation in pending.drain(..) {
             // Expire delegations older than 5 minutes
-            if delegation.sent_at.elapsed() > Duration::from_secs(300) {
+            if delegation.sent_at.elapsed() > Duration::from_mins(5) {
                 tracing::warn!(
                     agent_id = %delegation.agent_id,
                     task_id = %delegation.task_id,
@@ -118,13 +162,13 @@ impl MeshToolsState {
                             response_len = response.len(),
                             remaining_inferences = snap.remaining_inferences,
                             status = %snap.status,
-                            "Specialist response pre-fetched with budget feedback"
+                            "Specialist response POLLED (fallback)"
                         );
                     } else {
                         tracing::info!(
                             agent_id = %delegation.agent_id,
                             response_len = response.len(),
-                            "Specialist response pre-fetched (no budget data)"
+                            "Specialist response POLLED (fallback, no budget)"
                         );
                     }
                     completed.push(CompletedDelegation {
@@ -149,8 +193,34 @@ impl MeshToolsState {
             }
         }
 
+        let poll_count = completed.len() as u64;
         *pending = still_pending;
-        completed
+        drop(pending);
+        pushed.extend(completed);
+
+        // Update counters and log ratio
+        if push_count > 0 || poll_count > 0 {
+            self.completions_pushed.fetch_add(push_count, Relaxed);
+            self.completions_polled.fetch_add(poll_count, Relaxed);
+            let total_push = self.completions_pushed.load(Relaxed);
+            let total_poll = self.completions_polled.load(Relaxed);
+            let total = total_push + total_poll;
+            let pct = if total > 0 {
+                (total_push as f64 / total as f64) * 100.0
+            } else {
+                100.0
+            };
+            tracing::info!(
+                pushed = push_count,
+                polled = poll_count,
+                total_pushed = total_push,
+                total_polled = total_poll,
+                push_pct = format!("{:.0}%", pct),
+                "Task completion delivery ratio"
+            );
+        }
+
+        pushed
     }
 }
 

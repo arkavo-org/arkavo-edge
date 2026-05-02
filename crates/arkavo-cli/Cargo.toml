@@ -35,7 +35,7 @@ llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/ll
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
-iroh = ["dep:arkavo-tdf-iroh"]
+iroh = ["dep:arkavo-tdf-iroh", "arkavo-server/iroh"]
 kas = ["arkavo-protocol/kas", "arkavo-tdf/kas", "arkavo-server/kas"]
 
 [dependencies]
@@ -45,6 +45,7 @@ arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-identity = { path = "../arkavo-mcp-identity" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }

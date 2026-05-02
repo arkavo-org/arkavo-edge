@@ -1,0 +1,17 @@
+[package]
+name = "arkavo-policy-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime PolicyCache with temporal decay for Agent Runtime Policy"
+
+[dependencies]
+arkavo-arp = { path = "../arkavo-arp" }
+dashmap = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]

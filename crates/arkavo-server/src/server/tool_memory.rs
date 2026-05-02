@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Write;
 
 /// Sliding window memory for recent tool calls and responses.
@@ -12,6 +12,10 @@ pub struct ToolMemory {
     /// Tracks consecutive same-type actions across ticks (persists beyond window)
     last_action_type: Option<String>,
     consecutive_same_type: usize,
+    /// Tools that succeeded once and should not be called again (e.g., registration)
+    completed_setup_tools: HashSet<String>,
+    /// Current context utilization percentage (updated per conductor call, not peak)
+    context_utilization_pct: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +39,19 @@ impl ToolMemory {
             last_observe_full: None,
             last_action_type: None,
             consecutive_same_type: 0,
+            completed_setup_tools: HashSet::new(),
+            context_utilization_pct: 0.0,
         }
+    }
+
+    /// Clear all entries and reset consecutive action tracking.
+    /// Used when the orchestrator detects degenerate output and needs
+    /// to start fresh without poisoned context.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.last_action_type = None;
+        self.consecutive_same_type = 0;
+        // Preserve last_observe_full — the observed state is still valid
     }
 
     pub fn add(&mut self, tool_name: String, args: &serde_json::Value, result: &str) {
@@ -80,6 +96,11 @@ impl ToolMemory {
         let result_limit = if is_error { 400 } else { 200 };
         let result_summary: String = result.chars().take(result_limit).collect();
 
+        // Track one-time setup tools that succeeded (register, init, connect patterns)
+        if !is_error && Self::is_setup_tool(&tool_name) {
+            self.completed_setup_tools.insert(tool_name.clone());
+        }
+
         if self.entries.len() >= self.max_entries {
             self.entries.pop_front();
         }
@@ -96,39 +117,117 @@ impl ToolMemory {
         });
     }
 
-    pub fn format_for_prompt(&self) -> String {
-        if self.entries.is_empty() {
-            return String::new();
+    /// Check if a tool is a one-time setup tool (should not be called repeatedly).
+    fn is_setup_tool(tool_name: &str) -> bool {
+        let lower = tool_name.to_lowercase();
+        lower.contains("register")
+            || lower.contains("init")
+            || lower.contains("connect")
+            || lower.contains("setup")
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if a setup tool has already succeeded and should be skipped.
+    pub fn is_setup_complete(&self, tool_name: &str) -> bool {
+        self.completed_setup_tools.contains(tool_name)
+    }
+
+    /// Emit only derived control signals — not history replay.
+    /// ConversationWindow carries the raw conversation history; ToolMemory
+    /// adds signals that aren't obvious from reading the history.
+    /// Returns None if there are no signals (common case — silent when things go well).
+    pub fn format_control_signals(&self) -> Option<String> {
+        let mut signals = Vec::new();
+
+        // Setup completion state — tools the model should NOT call again
+        if !self.completed_setup_tools.is_empty() {
+            let mut section = String::from("## Setup State\n");
+            for tool in &self.completed_setup_tools {
+                let _ = writeln!(section, "- {tool}: complete (DO NOT call again)");
+            }
+            signals.push(section);
         }
-        let mut output = String::from("\n\n## Recent Actions\n");
-        for (i, entry) in self.entries.iter().enumerate() {
-            let status = if entry.is_error { "FAILED" } else { "OK" };
-            let label = if !entry.action_type.is_empty() {
-                &entry.action_type
-            } else {
-                &entry.tool_name
-            };
-            let dup_warning = if entry.is_duplicate {
-                " ← DUPLICATE (already done, try different params)"
-            } else {
-                ""
-            };
-            let _ = writeln!(
-                output,
-                "{}. {}: {}{}\n   → {}",
-                i + 1,
-                label,
-                status,
-                dup_warning,
-                entry.result_summary
+
+        // Deduplication warnings — same action called with same params
+        let dupes: Vec<&ToolMemoryEntry> = self.entries.iter().filter(|e| e.is_duplicate).collect();
+        if !dupes.is_empty() {
+            let mut section = String::from("## Duplicate Actions Detected\n");
+            for d in &dupes {
+                let _ = writeln!(
+                    section,
+                    "- `{}` with same params already called — try different params",
+                    d.tool_name,
+                );
+            }
+            signals.push(section);
+        }
+
+        // Action variety warning — same action type used 3+ times
+        if self.consecutive_same_type >= 3 {
+            let action_type = self.last_action_type.as_deref().unwrap_or("unknown");
+            signals.push(format!(
+                "## Action Variety\nYou have used {action_type} {} times in a row. Try a DIFFERENT action type.",
+                self.consecutive_same_type
+            ));
+        }
+
+        // Error escalation — pattern, not individual errors
+        let error_count = self.entries.iter().filter(|e| e.is_error).count();
+        if error_count >= 2 {
+            let mut error_tools: Vec<&str> = self
+                .entries
+                .iter()
+                .filter(|e| e.is_error)
+                .map(|e| e.tool_name.as_str())
+                .collect();
+            error_tools.dedup();
+            let mut section = format!(
+                "## Error Pattern\n{error_count} errors across: {}.\n",
+                error_tools.join(", "),
             );
+            // Include the most recent error message for context
+            if let Some(last_err) = self.entries.iter().rev().find(|e| e.is_error) {
+                let _ = writeln!(section, "Latest: {}", last_err.result_summary);
+            }
+            section.push_str("Consider a different approach or corrected parameters.");
+            signals.push(section);
         }
-        output
+
+        if signals.is_empty() {
+            None
+        } else {
+            Some(signals.join("\n\n"))
+        }
     }
 
     /// Full text of the most recent Observe result (for state broadcast to specialists)
     pub fn last_observe_full(&self) -> Option<&str> {
         self.last_observe_full.as_deref()
+    }
+
+    /// Build a summary of recent tool results for the ConversationWindow.
+    /// Called when the conductor returns empty text (tool-only responses)
+    /// so the model retains memory of what it observed/did across cycles.
+    pub fn format_recent_for_context(&self) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for entry in self.entries.iter().rev().take(3) {
+            if entry.is_observe {
+                // Include the full observe result (truncated to fit context)
+                if let Some(ref obs) = self.last_observe_full {
+                    let truncated = if obs.len() > 3000 { &obs[..3000] } else { obs };
+                    let _ = writeln!(out, "[Observed]: {truncated}");
+                }
+            } else if !entry.result_summary.is_empty() {
+                let _ = writeln!(out, "[{}]: {}", entry.tool_name, entry.result_summary);
+            }
+        }
+        if out.is_empty() { None } else { Some(out) }
     }
 
     /// Check if any recent entry was a meaningful action (has Action.Type, not observation)
@@ -233,13 +332,36 @@ impl ToolMemory {
             format!("{action_type}({})", params.join(","))
         }
     }
+
+    /// Update current context utilization (called after each conductor tool loop)
+    pub fn set_context_utilization(&mut self, pct: f64) {
+        self.context_utilization_pct = pct;
+    }
+
+    /// Snapshot for the Context Topology Matrix UI tab
+    pub fn topology_snapshot(&self) -> serde_json::Value {
+        let error_count = self.entries.iter().filter(|e| e.is_error).count();
+        let duplicate_count = self.entries.iter().filter(|e| e.is_duplicate).count();
+        serde_json::json!({
+            "entryCount": self.entries.len(),
+            "maxEntries": self.max_entries,
+            "errorCount": error_count,
+            "duplicateCount": duplicate_count,
+            "recentActionTypes": self.recent_action_types(),
+            "consecutiveSameType": self.consecutive_same_type,
+            "hasObserveData": self.last_observe_full.is_some(),
+            "contextUtilizationPct": self.context_utilization_pct,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_with_params() {
         let args =
@@ -251,6 +373,7 @@ mod tests {
         assert!(key.contains("Y=15"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_single_param() {
         let args = json!({"Action": {"Type": "CreateGrowingZone", "ZoneId": "food1"}});
@@ -260,6 +383,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_type_only_no_params() {
         // Action types without extra params produce a plain key (no parens)
@@ -267,18 +391,21 @@ mod tests {
         assert_eq!(ToolMemory::extract_action_key(&args), "Observe");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_no_action_is_empty() {
         let args = json!({"task": "something"});
         assert_eq!(ToolMemory::extract_action_key(&args), "");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_key_no_params() {
         let args = json!({"Action": {"Type": "DoSomething"}});
         assert_eq!(ToolMemory::extract_action_key(&args), "DoSomething");
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_duplicate_detection() {
         let mut mem = ToolMemory::new(10);
@@ -291,6 +418,7 @@ mod tests {
         assert!(mem.entries.back().unwrap().is_duplicate);
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_no_false_duplicate_different_params() {
         let mut mem = ToolMemory::new(10);
@@ -302,6 +430,7 @@ mod tests {
         assert!(!mem.entries.back().unwrap().is_duplicate);
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_format_shows_duplicate_warning() {
         let mut mem = ToolMemory::new(10);
@@ -310,11 +439,12 @@ mod tests {
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
 
-        let prompt = mem.format_for_prompt();
-        assert!(prompt.contains("DUPLICATE"));
-        assert!(prompt.contains("Build"));
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.as_ref().unwrap().contains("already called"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_had_meaningful_action() {
         let mut mem = ToolMemory::new(10);
@@ -352,6 +482,7 @@ mod tests {
         assert!(!mem3.had_meaningful_action());
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_warning_triggers() {
         let mut mem = ToolMemory::new(10);
@@ -369,6 +500,7 @@ mod tests {
         assert!(warning.contains("3 times"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_ignores_observe() {
         let mut mem = ToolMemory::new(10);
@@ -398,6 +530,7 @@ mod tests {
         assert!(warning.contains("3 times"));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_action_variety_no_warning_with_mixed() {
         let mut mem = ToolMemory::new(10);
@@ -420,6 +553,7 @@ mod tests {
         assert!(mem.action_variety_warning().is_empty());
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_recent_action_types() {
         let mut mem = ToolMemory::new(10);
@@ -443,6 +577,7 @@ mod tests {
         assert!(types.contains(&"Build".to_string()));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_last_observe_full_captured() {
         let mut mem = ToolMemory::new(10);
@@ -465,6 +600,7 @@ mod tests {
         assert_eq!(mem.last_observe_full(), Some(new_result));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_last_observe_full_state_and_status_tools() {
         let mut mem = ToolMemory::new(10);
@@ -479,6 +615,7 @@ mod tests {
         assert_eq!(mem.last_observe_full(), Some(result2));
     }
 
+    #[spec("SRV-003")]
     #[test]
     fn test_error_detection() {
         let mut mem = ToolMemory::new(10);
@@ -489,5 +626,60 @@ mod tests {
 
         mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
         assert!(!mem.entries.back().unwrap().is_error);
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_none_when_clean() {
+        let mem = ToolMemory::new(10);
+        assert!(mem.format_control_signals().is_none());
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_setup_state() {
+        let mut mem = ToolMemory::new(10);
+        mem.add("registerAgent".into(), &json!({}), r#"{"ok":true}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.unwrap().contains("registerAgent"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_duplicate() {
+        let mut mem = ToolMemory::new(10);
+        let args = json!({"Action": {"Type": "Build", "X": 10}});
+        mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
+        mem.add("tool_a".into(), &args, r#"{"ok":true}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        assert!(signals.unwrap().contains("already called"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_shows_error_pattern() {
+        let mut mem = ToolMemory::new(10);
+        let args = json!({"Action": {"Type": "Build"}});
+        mem.add("tool_a".into(), &args, r#"{"Error":"fail1"}"#);
+        mem.add("tool_a".into(), &args, r#"{"Error":"fail2"}"#);
+        let signals = mem.format_control_signals();
+        assert!(signals.is_some());
+        let text = signals.unwrap();
+        assert!(text.contains("Error Pattern"));
+        assert!(text.contains("2 errors"));
+    }
+
+    #[spec("SRV-010")]
+    #[test]
+    fn test_control_signals_silent_on_success() {
+        let mut mem = ToolMemory::new(10);
+        // Non-setup tool, no duplicates, no errors
+        let args = json!({"Action": {"Type": "Observe"}});
+        mem.add("game-rl:observe".into(), &args, r#"{"ok":true}"#);
+        // Observe tools don't trigger setup tracking, no dupes, no errors
+        // Should be silent
+        assert!(mem.format_control_signals().is_none());
     }
 }

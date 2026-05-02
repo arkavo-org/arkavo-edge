@@ -119,7 +119,9 @@ pub use subprocess::{PromptInput, SubprocessTransport};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_version_lt() {
         assert!(version_lt("1.0.0", "2.0.0"));

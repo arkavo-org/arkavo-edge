@@ -151,8 +151,8 @@ impl EmbeddingService {
 
             // Run the blocking embed operation in a separate thread
             let embeddings = tokio::task::spawn_blocking(move || {
-                let model_guard = model_clone.blocking_read();
-                let model = model_guard.as_ref().ok_or_else(|| {
+                let mut model_guard = model_clone.blocking_write();
+                let model = model_guard.as_mut().ok_or_else(|| {
                     MemoryError::ModelNotAvailable("Model not initialized".to_string())
                 })?;
 

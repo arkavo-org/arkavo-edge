@@ -38,8 +38,13 @@ toml = { workspace = true }
 # System metrics
 sysinfo = { workspace = true }
 
+# ARP types for DecisionTrace
+arkavo-arp = { path = "../arkavo-arp" }
+arkavo-crypto = { path = "../arkavo-crypto", optional = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 
 [features]
 default = []
+signing = ["arkavo-crypto"]

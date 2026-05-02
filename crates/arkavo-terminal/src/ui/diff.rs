@@ -374,30 +374,27 @@ impl DiffView {
                     };
                     self.needs_redraw = true;
                 }
-                KeyCode::Up => {
-                    if self.scroll_offset > 0 {
+                KeyCode::Up
+                    if self.scroll_offset > 0 => {
                         self.scroll_offset -= 1;
                         self.needs_redraw = true;
                     }
-                }
                 KeyCode::Down => {
                     self.scroll_offset += 1;
                     self.needs_redraw = true;
                 }
-                KeyCode::Char('n') => {
+                KeyCode::Char('n')
                     // Next hunk
-                    if self.current_hunk < self.hunks.len() - 1 {
+                    if self.current_hunk < self.hunks.len() - 1 => {
                         self.current_hunk += 1;
                         self.needs_redraw = true;
                     }
-                }
-                KeyCode::Char('p') => {
+                KeyCode::Char('p')
                     // Previous hunk
-                    if self.current_hunk > 0 {
+                    if self.current_hunk > 0 => {
                         self.current_hunk -= 1;
                         self.needs_redraw = true;
                     }
-                }
                 _ => {}
             }
         }

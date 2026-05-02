@@ -108,14 +108,15 @@ async fn test_format_with_model(
     };
 
     let prompt = format!(
-        "{}\n\n{}\n\nUser: What's the weather in Tokyo?\n\nAssistant:",
-        TEST_TOOL_SCHEMA, format_instruction
+        "{TEST_TOOL_SCHEMA}\n\n{format_instruction}\n\nUser: What's the weather in Tokyo?\n\nAssistant:"
     );
 
     let messages = vec![Message {
         role: Role::User,
         content: prompt,
         images: None,
+        tool_call_id: None,
+        tool_name: None,
     }];
 
     let start = Instant::now();
@@ -152,7 +153,7 @@ async fn test_format_with_model(
             (success, latency_ms)
         }
         Err(e) => {
-            println!("  {} format test: ERROR - {}", format, e);
+            println!("  {format} format test: ERROR - {e}");
 
             // Record failure
             let feedback =
@@ -178,7 +179,7 @@ async fn test_format_learning_ministral() {
         }
     };
 
-    println!("Loading Ministral 3B model from: {}", model_path);
+    println!("Loading Ministral 3B model from: {model_path}");
 
     let config = SamplingConfig {
         temperature: 0.1, // Low temp for deterministic tool calls
@@ -213,7 +214,7 @@ async fn test_format_learning_ministral() {
         let mut successes = 0u32;
         let mut total = 0u32;
 
-        println!("Testing {} format (3 iterations):", format);
+        println!("Testing {format} format (3 iterations):");
 
         for i in 0..3 {
             let (success, _latency) =
@@ -270,7 +271,7 @@ async fn test_format_learning_qwen() {
         }
     };
 
-    println!("Loading Qwen3 0.6B model from: {}", model_path);
+    println!("Loading Qwen3 0.6B model from: {model_path}");
 
     let config = SamplingConfig {
         temperature: 0.1,
@@ -305,7 +306,7 @@ async fn test_format_learning_qwen() {
         let mut successes = 0u32;
         let mut total = 0u32;
 
-        println!("Testing {} format (3 iterations):", format);
+        println!("Testing {format} format (3 iterations):");
 
         for i in 0..3 {
             let (success, _latency) =
@@ -409,18 +410,15 @@ async fn test_format_learning_comparison() {
     for model_id in &["ministral-3b", "qwen3.5-0.8b"] {
         let stats = learning.get_format_stats(model_id).await;
         if !stats.is_empty() {
-            println!("{}:", model_id);
+            println!("{model_id}:");
             for format in ToolCallFormat::all() {
                 if let Some((ev, obs)) = stats.get(format) {
-                    println!(
-                        "  {}: expected_value={:.3}, observations={}",
-                        format, ev, obs
-                    );
+                    println!("  {format}: expected_value={ev:.3}, observations={obs}");
                 }
             }
 
             let (best_format, score) = learning.sample_format(model_id).await;
-            println!("  Recommended: {} (score: {:.3})\n", best_format, score);
+            println!("  Recommended: {best_format} (score: {score:.3})\n");
         }
     }
 }

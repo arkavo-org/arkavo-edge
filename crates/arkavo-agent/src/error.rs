@@ -97,7 +97,9 @@ pub type Result<T> = std::result::Result<T, AgentError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("AGENT-005")]
     #[test]
     fn test_error_display() {
         let err = AgentError::Config("missing field".to_string());
@@ -110,6 +112,7 @@ mod tests {
         assert_eq!(err.to_string(), "Authentication failed: invalid signature");
     }
 
+    #[spec("AGENT-005")]
     #[test]
     fn test_io_error_conversion() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");

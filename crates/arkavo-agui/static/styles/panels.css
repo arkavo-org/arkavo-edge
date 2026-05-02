@@ -535,6 +535,26 @@
     line-height: 1.6;
 }
 
+.task-detail-io {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 14px;
+    margin: 0 12px 4px;
+}
+
+.task-io-text {
+    font-size: 13px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-primary);
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 0;
+    line-height: 1.6;
+}
+
 .task-detail-routing {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -712,4 +732,116 @@
     font-size: 10px;
     color: var(--text-secondary);
     flex-shrink: 0;
+}
+
+/* Context Conversation Inspector */
+.context-conversation { margin-top: 12px; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; }
+.context-conversation-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.context-conversation-agent { font-weight: bold; font-size: 14px; }
+.context-conversation-meta { color: var(--text-secondary); font-size: 11px; margin-left: 8px; }
+.context-conversation-live { font-size: 10px; color: var(--success); background: rgba(78, 205, 196, 0.1); padding: 2px 8px; border-radius: 10px; }
+.context-conversation-messages { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+.context-message-card { background: var(--bg-primary); border-radius: 6px; padding: 10px 12px; border-left: 3px solid var(--border-color); }
+.context-message-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.context-message-role { font-size: 10px; font-weight: bold; text-transform: uppercase; }
+.context-message-tokens { font-size: 9px; color: var(--text-secondary); }
+.context-message-content { font-size: 11px; color: var(--text-primary); line-height: 1.4; font-family: monospace; white-space: pre-wrap; word-break: break-word; }
+.context-token-bar { margin-top: 12px; background: var(--bg-primary); border-radius: 4px; padding: 8px 12px; }
+.context-token-bar-header { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 9px; color: var(--text-secondary); }
+.context-token-bar-track { background: var(--border-color); border-radius: 2px; height: 6px; overflow: hidden; }
+.context-token-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
+
+
+/* Agent Runtime Policy panel */
+.status-ok { color: var(--success, #4ecdc4); font-weight: 600; }
+.status-warn { color: var(--warning, #ff9f43); font-weight: 600; }
+.chip {
+    display: inline-block;
+    font-size: 10px;
+    font-family: monospace;
+    padding: 2px 8px;
+    margin: 2px 2px 2px 0;
+    background: rgba(78, 205, 196, 0.1);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-secondary);
+}
+.violations-table .violation-row { background: rgba(255, 159, 67, 0.07); }
+.violations-table .violation-row td { border-top: 1px solid rgba(255, 159, 67, 0.25); }
+#arp-agent-select {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: monospace;
+    font-size: 12px;
+}
+/* SwarmFlight section in the ARP panel */
+.arp-flight-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+.arp-flight-roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.arp-flight-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: monospace;
+    padding: 4px 10px;
+    background: rgba(78, 205, 196, 0.08);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+}
+.arp-flight-pill:hover {
+    background: rgba(78, 205, 196, 0.18);
+    border-color: var(--success, #4ecdc4);
+}
+.arp-flight-pill-selected {
+    background: rgba(78, 205, 196, 0.25);
+    border-color: var(--success, #4ecdc4);
+    box-shadow: 0 0 0 1px var(--success, #4ecdc4) inset;
+}
+.arp-flight-pill-violation {
+    background: rgba(255, 159, 67, 0.15);
+    border-color: var(--warning, #ff9f43);
+}
+.arp-flight-pill-invalid {
+    background: rgba(255, 99, 99, 0.12);
+    border-color: #ff6b6b;
+}
+.arp-flight-pill-type {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+.arp-flight-stop {
+    font-size: 10px;
+    font-family: monospace;
+    padding: 2px 8px;
+    margin-left: 6px;
+    background: rgba(255, 99, 99, 0.10);
+    color: var(--warning, #ff9f43);
+    border: 1px solid rgba(255, 99, 99, 0.35);
+    border-radius: 4px;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.1s, border-color 0.1s;
+}
+.arp-flight-stop:hover:not(:disabled) {
+    background: rgba(255, 99, 99, 0.22);
+    border-color: #ff6b6b;
+    color: #ff6b6b;
+}
+.arp-flight-stop:disabled {
+    opacity: 0.55;
+    cursor: progress;
 }

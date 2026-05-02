@@ -126,7 +126,9 @@ impl CodeScanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_detects_process_spawn() {
         let result = CodeScanner::scan("const child = child_process.exec('ls')");
@@ -134,6 +136,7 @@ mod tests {
         assert_eq!(result.findings[0].pattern_name, "process_spawn");
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_detects_eval() {
         let result = CodeScanner::scan("eval('malicious code')");
@@ -141,24 +144,28 @@ mod tests {
         assert_eq!(result.findings[0].pattern_name, "code_eval");
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_detects_fs_write() {
         let result = CodeScanner::scan("fs.writeFileSync('/etc/hosts', data)");
         assert!(result.has_critical());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_detects_network_listen() {
         let result = CodeScanner::scan("http.createServer(handler)");
         assert!(result.has_critical());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_detects_dynamic_import() {
         let result = CodeScanner::scan("const mod = require(userInput)");
         assert!(result.has_critical());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_warns_on_fetch() {
         let result = CodeScanner::scan("const data = fetch('https://api.example.com')");
@@ -167,12 +174,14 @@ mod tests {
         assert_eq!(result.warning_count(), 1);
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_warns_on_env_access() {
         let result = CodeScanner::scan("const key = process.env.API_KEY");
         assert!(result.has_findings());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_clean_code_passes() {
         let code = "function add(a, b) {\n    return a + b;\n}\nconst result = add(1, 2);";
@@ -180,12 +189,14 @@ mod tests {
         assert!(!result.has_findings());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_skips_comments() {
         let result = CodeScanner::scan("// eval('this is a comment')\nconst x = 1;");
         assert!(!result.has_findings());
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_multiple_findings() {
         let result = CodeScanner::scan("eval('x')\nchild_process.exec('ls')\nfetch('url')");
@@ -193,6 +204,7 @@ mod tests {
         assert_eq!(result.warning_count(), 1);
     }
 
+    #[spec("MCPD-005")]
     #[test]
     fn test_line_numbers() {
         let result = CodeScanner::scan("safe line\nunsafe eval('x')");

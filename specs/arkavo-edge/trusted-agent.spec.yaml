@@ -1,0 +1,331 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Trusted Agent Mesh Establishment
+module: cross_cutting
+version: 0.67.6
+
+invariants:
+  - "Deny-by-default: an agent has zero mesh privileges until the full trust chain completes"
+  - "Forward-only chain: completed phases are never re-entered; failure returns to Untrusted"
+  - "No ambient authority: mesh membership alone grants no capability; only config bundle defines permissions"
+  - "Attestation binds identity: attestation evidence must cryptographically reference the device identity key"
+
+# Trust chain phases (additional structured data, not in base schema)
+trust_chain:
+  phases:
+    - phase: 1
+      name: Device identity establishment
+      crate: arkavo-device-identity
+      spec_ref: device-identity.spec.yaml
+      description: Agent generates or unlocks device-bound asymmetric key pair
+      outputs: [device_public_key, device_did]
+      gate: device_public_key is non-null and stored in platform-appropriate secure storage; device_did is derived via did:key encoding of device_public_key
+
+    - phase: 2
+      name: Platform attestation
+      crate: arkavo-attestation
+      spec_ref: attestation.spec.yaml
+      description: Agent collects platform evidence bound to the device key from Phase 1
+      inputs: [device_public_key]
+      outputs: [platform_evidence]
+      gate: platform_evidence.device_id matches device_public_key holder and timestamp is fresh
+
+    - phase: 3
+      name: Orchestrator registration
+      crate: arkavo-protocol
+      spec_ref: registration.spec.yaml
+      description: Agent presents attestation to orchestrator via challenge-response; orchestrator verifies and registers
+      inputs: [platform_evidence, device_public_key]
+      outputs: [registration_record, agent_id]
+      gate: registration_record.verified is true and agent_id is assigned by orchestrator
+
+    - phase: 4
+      name: Agent authentication
+      crate: arkavo-agent-auth
+      spec_ref: agent-auth.spec.yaml
+      description: Agent authenticates with device key and registration to obtain scoped auth token
+      inputs: [device_public_key, registration_record]
+      outputs: [auth_token]
+      gate: auth_token is valid and initially carries only config-fetch capability
+
+    - phase: 5
+      name: Config encryption
+      crate: arkavo-config-encryption
+      spec_ref: config-encryption.spec.yaml
+      description: Orchestrator prepares encrypted config bundle targeted to the agent's identity attributes
+      inputs: [agent_id, policy_snapshot]
+      outputs: [encrypted_config_bundle]
+      gate: encrypted_config_bundle targets agent's attributes and is signed by orchestrator
+
+    - phase: 6
+      name: Config transport and activation
+      crate: arkavo-config-transport
+      spec_ref: config-transport.spec.yaml
+      description: Agent fetches encrypted config, decrypts, validates, and activates; token upgraded with full capabilities
+      inputs: [auth_token, encrypted_config_bundle]
+      outputs: [active_config, upgraded_auth_token]
+      gate: active_config loaded and upgraded_auth_token carries capabilities defined by config
+
+# Agent lifecycle states
+states:
+  definitions:
+    - name: Untrusted
+      description: Default. No mesh privileges. Only transition is to begin Phase 1.
+    - name: Establishing
+      description: Progressing through Phases 1-6. No mesh privileges except config-fetch after Phase 4.
+    - name: Trusted
+      description: All phases complete. Agent holds capabilities scoped by config bundle.
+    - name: Suspended
+      description: Previously Trusted but trust revoked (attestation refresh failed, budget exhausted, policy violation). Retains agent_id but cannot act on mesh.
+  transitions:
+    - { from: Untrusted, to: Establishing, trigger: agent initiates Phase 1 }
+    - { from: Establishing, to: Trusted, trigger: Phase 6 gate passes }
+    - { from: Establishing, to: Untrusted, trigger: any phase gate fails }
+    - { from: Trusted, to: Suspended, trigger: attestation refresh failure or budget exhaustion or policy violation }
+    - { from: Suspended, to: Establishing, trigger: agent initiates re-attestation (Phase 2 with existing device key) }
+    - { from: Suspended, to: Untrusted, trigger: orchestrator hard-revokes agent_id }
+
+# Re-attestation
+trust_refresh:
+  trigger: attestation TTL expiry or orchestrator-initiated challenge
+  shortcut_entry_phase: 2
+  preserves: [device_public_key, agent_id]
+  invalidates: [auth_token, active_config]
+
+# Keypair architecture
+keypair_architecture:
+  device_key:
+    algorithm: Ed25519
+    persisted: true
+    storage: platform-appropriate secure storage (Keychain, keyring, file with 0600)
+    purpose: Phase 1 identity anchor, DID derivation, attestation binding, orchestrator registration
+    crate: arkavo-device-identity (storage), arkavo-crypto (operations)
+  gossip_key:
+    algorithm: Ed25519
+    persisted: false
+    purpose: Session-scoped gossip message signing; ephemeral to limit compromise blast radius
+    crate: arkavo-server (LearningBus)
+    note: Intentionally separate from device key; attacker compromising gossip gets a throwaway key
+  tdf_key:
+    algorithm: P-256 ECDSA
+    persisted: false
+    purpose: TDF config bundle encryption/decryption, KAS key wrapping
+    crate: arkavo-config-encryption (AgentCredential)
+    note: Different algorithm (P-256) required by TDF/KAS spec and iOS Secure Enclave compatibility
+
+# Security considerations
+security:
+  - id: SEC-TA-001
+    name: No self-attestation
+    description: Agent never evaluates its own gate conditions. Orchestrator or platform hardware verifies.
+  - id: SEC-TA-002
+    name: Token capability escalation prevention
+    description: Auth tokens must not carry capabilities beyond their source of truth (Phase 4 config-fetch only; Phase 6 config-defined only).
+  - id: SEC-TA-003
+    name: Replay prevention
+    description: Attestation evidence must include a freshness nonce; stale evidence is rejected.
+  - id: SEC-TA-004
+    name: Config confidentiality
+    description: Config bundle contains sensitive operational data; encrypted via OpenTDF and must not be readable by other agents or transport.
+  - id: SEC-TA-005
+    name: Revocation propagation
+    description: Revoked agent_id tokens must be invalidated across the mesh within a configurable window.
+
+# Failure modes
+failure_modes:
+  - id: TA-FAIL-IDENTITY
+    phase: 1
+    description: Device key generation or unlock failed
+    agent_action: Retry with backoff; surface to operator if persistent
+  - id: TA-FAIL-ATTESTATION
+    phase: 2
+    description: Platform attestation collection or key binding failed
+    agent_action: Return to Untrusted; log platform diagnostics
+  - id: TA-FAIL-REGISTRATION
+    phase: 3
+    description: Orchestrator rejected attestation (unsupported platform, stale evidence, revoked key)
+    agent_action: Return to Untrusted; surface rejection reason
+  - id: TA-FAIL-AUTH
+    phase: 4
+    description: Authentication handshake failed after successful registration
+    agent_action: Return to Untrusted; orchestrator increments failed-auth counter
+  - id: TA-WAIT-CONFIG
+    phase: 5
+    description: Config bundle preparation failed on orchestrator side
+    agent_action: Remain in Establishing with config-fetch capability; poll with exponential backoff
+  - id: TA-FAIL-CONFIG-ACTIVATE
+    phase: 6
+    description: Config decryption or validation failed (key mismatch, corruption, schema violation)
+    agent_action: Return to Untrusted; log decryption diagnostics
+
+# Composed specs
+composed_specs:
+  - { spec: device-identity.spec.yaml, phases: [1] }
+  - { spec: attestation.spec.yaml, phases: [2] }
+  - { spec: registration.spec.yaml, phases: [3] }
+  - { spec: agent-auth.spec.yaml, phases: [4] }
+  - { spec: config-encryption.spec.yaml, phases: [5] }
+  - { spec: config-transport.spec.yaml, phases: [6] }
+
+scenarios:
+  - id: TA-001
+    name: Happy path first boot trust establishment
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Fresh device with no prior registration
+      - Orchestrator is reachable and accepting registrations
+      - Platform supports attestation (macOS, Linux)
+    when: Agent starts and initiates trust establishment
+    then:
+      - Device key pair generated and persisted (Phase 1)
+      - Platform evidence collected and bound to device key (Phase 2)
+      - Orchestrator verifies attestation and registers device, assigns agent_id (Phase 3)
+      - Agent authenticates and receives config-fetch-only auth token (Phase 4)
+      - Orchestrator encrypts config bundle to agent identity (Phase 5)
+      - Agent fetches, decrypts, validates config; token upgraded with full capabilities (Phase 6)
+      - Agent state transitions Untrusted -> Establishing -> Trusted
+      - Agent can send and receive routed messages on the mesh
+    refs:
+      - crates/arkavo-device-identity/src/lib.rs
+      - crates/arkavo-attestation/src/lib.rs
+      - crates/arkavo-protocol/src/registration/mod.rs
+      - crates/arkavo-agent-auth/src/client.rs
+      - crates/arkavo-config-encryption/src/lib.rs
+      - crates/arkavo-config-transport/src/lib.rs
+    changed: "2026-03-22"
+
+  - id: TA-002
+    name: Attestation rejection blocks mesh access
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent completed Phase 1 (device key exists)
+      - Platform evidence has tampered measurements or unsupported platform
+    when: Agent presents attestation to orchestrator (Phase 3 gate)
+    then:
+      - Orchestrator rejects attestation evidence
+      - Agent transitions to Untrusted
+      - Agent has zero mesh capabilities
+      - Rejection reason logged by orchestrator
+    refs:
+      - crates/arkavo-attestation/src/lib.rs
+      - crates/arkavo-attestation/src/platform/macos.rs
+    edge_cases:
+      - condition: Attestation timestamp outside freshness window
+        expected: Rejected with stale-evidence reason
+      - condition: Device key binding missing from evidence
+        expected: Rejected with missing-binding reason
+    changed: "2026-03-22"
+
+  - id: TA-003
+    name: Re-attestation refresh for trusted agent
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent is in Trusted state
+      - Attestation TTL approaching expiry
+    when: Orchestrator sends re-attestation challenge
+    then:
+      - Agent re-executes Phases 2-6 using existing device key (skips Phase 1)
+      - New config bundle may contain updated policy
+      - Previous auth token invalidated
+      - New upgraded auth token issued
+      - Agent remains Trusted with updated config
+    refs:
+      - crates/arkavo-attestation/src/evidence.rs
+      - crates/arkavo-agent-auth/src/client.rs
+    edge_cases:
+      - condition: Re-attestation fails
+        expected: Agent transitions to Suspended
+      - condition: Re-attestation not completed within refresh window
+        expected: Agent transitions to Suspended
+    changed: "2026-03-22"
+
+  - id: TA-004
+    name: Budget exhaustion suspends trusted agent
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent is in Trusted state
+      - Budget remaining is near zero
+    when: Agent attempts a routed request exceeding remaining budget
+    then:
+      - Router rejects request before model selection
+      - Agent transitions to Suspended
+      - Auth token capabilities revoked
+      - Agent must re-establish via Phases 2-6 after budget replenished by orchestrator
+    edge_cases:
+      - condition: Budget replenished via new config bundle
+        expected: Agent can re-attest and return to Trusted
+    changed: "2026-03-22"
+
+  - id: TA-005
+    name: Hard revocation of agent
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent has exceeded failed-auth threshold
+      - Orchestrator decides to hard-revoke agent_id
+    when: Orchestrator issues revocation
+    then:
+      - Agent transitions to Untrusted
+      - agent_id is invalidated
+      - Revocation propagates to mesh nodes
+      - Cached tokens for revoked agent_id rejected by mesh nodes
+      - Agent must generate new device key (Phase 1) to re-register
+    edge_cases:
+      - condition: Mesh nodes cannot reach orchestrator to verify revocation
+        expected: Deny agent until connectivity restored
+    changed: "2026-03-22"
+
+  - id: TA-006
+    name: Config transport failure with retry
+    criticality: medium
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent completed Phases 1-4 successfully
+      - Orchestrator prepared config bundle (Phase 5)
+      - Network is intermittent
+    when: Agent attempts config fetch and transport fails
+    then:
+      - Agent remains in Establishing state with config-fetch capability
+      - Agent retries with exponential backoff
+      - Retry eventually succeeds
+      - Agent decrypts and activates config
+      - Agent transitions to Trusted
+    refs:
+      - crates/arkavo-config-transport/src/client.rs
+    edge_cases:
+      - condition: All retries exhausted
+        expected: Agent transitions to Untrusted and must restart from Phase 1
+    changed: "2026-03-22"
+
+  - id: TA-007
+    name: Offline agent has no mesh trust
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/558
+    given:
+      - Agent has a previously registered device key
+      - Orchestrator is unreachable
+    when: Agent starts and attempts trust establishment
+    then:
+      - Phase 1 succeeds (device key unlocked from local storage)
+      - Phases 2-3 fail (orchestrator unreachable)
+      - Agent remains in Untrusted state
+      - Agent has zero mesh capabilities
+      - Agent may operate in local-only mode but must not claim mesh trust
+      - When connectivity restored, agent resumes from Phase 2
+    refs:
+      - crates/arkavo-device-identity/src/lib.rs
+    edge_cases:
+      - condition: Agent had a valid cached auth token from previous session
+        expected: Cached token must be re-validated with orchestrator; cannot be trusted offline
+    changed: "2026-03-22"

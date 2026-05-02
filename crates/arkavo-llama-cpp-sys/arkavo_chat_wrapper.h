@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,6 +43,9 @@ typedef struct {
     int num_triggers;
     char **additional_stops;
     int num_additional_stops;
+    int format;              // common_chat_format enum value for output parsing
+    char *parser_str;        // PEG parser string for output parsing
+    char *generation_prompt; // generation prompt for grammar prefilling
 } arkavo_chat_result;
 
 arkavo_chat_templates *arkavo_chat_templates_init(
@@ -58,6 +63,44 @@ arkavo_chat_result arkavo_chat_templates_apply(
     int add_generation_prompt);
 
 void arkavo_chat_result_free(arkavo_chat_result *result);
+
+// Parsed tool call from model output
+typedef struct {
+    const char *name;
+    const char *arguments;   // JSON string
+    const char *id;
+} arkavo_tool_call;
+
+// Result from parsing model output
+typedef struct {
+    char *content;
+    char *reasoning_content;
+    arkavo_tool_call *tool_calls;
+    int num_tool_calls;
+} arkavo_chat_parse_result;
+
+// Parse model output text into structured content + tool calls.
+// Uses llama.cpp's built-in PEG parser (supports Gemma 4, Mistral, etc.)
+// `format` and `parser_str` come from the arkavo_chat_result of template application.
+arkavo_chat_parse_result arkavo_chat_parse(
+    const char *output_text,
+    int format,
+    const char *parser_str,
+    int is_partial);
+
+void arkavo_chat_parse_result_free(arkavo_chat_parse_result *result);
+
+// Grammar sampler with both pattern and token triggers.
+// trigger_patterns: regex patterns matched against generated text (Word/Pattern types)
+// trigger_tokens: token IDs that activate the grammar when sampled (Token type)
+struct llama_sampler *arkavo_sampler_init_grammar_lazy_with_tokens(
+    const struct llama_vocab *vocab,
+    const char *grammar_str,
+    const char *grammar_root,
+    const char **trigger_patterns,
+    int num_trigger_patterns,
+    const int32_t *trigger_tokens,
+    int num_trigger_tokens);
 
 #ifdef __cplusplus
 }

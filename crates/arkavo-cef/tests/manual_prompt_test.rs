@@ -1,7 +1,7 @@
 /// Test to debug manual prompt entry vs --prompt
 use arkavo_cef::{ReceivedMessage, UdsTransport};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
 
 /// Simulates what happens when user manually enters a prompt:
@@ -31,7 +31,7 @@ async fn test_manual_prompt_entry() {
         eprintln!("[TEST SERVER] Event sent");
 
         // Keep connection alive
-        tokio::time::sleep(Duration::from_millis(2000)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -63,13 +63,13 @@ async fn test_manual_prompt_entry() {
                 break;
             }
             Ok(Some(other)) => {
-                eprintln!("[TEST CLIENT] Got other message: {:?}", other);
+                eprintln!("[TEST CLIENT] Got other message: {other:?}");
             }
             Ok(None) => {
-                eprintln!("[TEST CLIENT] No message on poll #{}", poll_num);
+                eprintln!("[TEST CLIENT] No message on poll #{poll_num}");
             }
             Err(e) => {
-                eprintln!("[TEST CLIENT] Error on poll #{}: {}", poll_num, e);
+                eprintln!("[TEST CLIENT] Error on poll #{poll_num}: {e}");
                 break;
             }
         }
@@ -105,7 +105,7 @@ async fn test_events_arrive_before_polling_starts() {
         stream.write_all(&event_data).await.unwrap();
         eprintln!("[TEST SERVER EARLY] Event sent immediately");
 
-        tokio::time::sleep(Duration::from_millis(2000)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -115,13 +115,13 @@ async fn test_events_arrive_before_polling_starts() {
 
     // Simulate the 2-second sleep from ui.rs (line 89)
     eprintln!("[TEST CLIENT EARLY] Sleeping 2 seconds (like ui.rs does)...");
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     eprintln!("[TEST CLIENT EARLY] Starting event loop now");
 
     // Now start polling - the event should still be available
     let mut event_received = false;
     for poll_num in 1..=5 {
-        eprintln!("[TEST CLIENT EARLY] Poll #{}", poll_num);
+        eprintln!("[TEST CLIENT EARLY] Poll #{poll_num}");
 
         match transport.try_recv_message().await {
             Ok(Some(ReceivedMessage::Event(event))) => {
@@ -136,10 +136,10 @@ async fn test_events_arrive_before_polling_starts() {
             }
             Ok(Some(_)) => {}
             Ok(None) => {
-                eprintln!("[TEST CLIENT EARLY] No message on poll #{}", poll_num);
+                eprintln!("[TEST CLIENT EARLY] No message on poll #{poll_num}");
             }
             Err(e) => {
-                eprintln!("[TEST CLIENT EARLY] Error: {}", e);
+                eprintln!("[TEST CLIENT EARLY] Error: {e}");
                 break;
             }
         }
@@ -172,15 +172,15 @@ async fn test_rapid_manual_submits() {
 
         // Send 3 events rapidly (user clicking submit button multiple times)
         for i in 1..=3 {
-            eprintln!("[TEST SERVER RAPID] Sending event #{}", i);
+            eprintln!("[TEST SERVER RAPID] Sending event #{i}");
             let event_data =
-                create_event_message("submit", "#prompt-input", &format!("message {}", i));
+                create_event_message("submit", "#prompt-input", &format!("message {i}"));
             stream.write_all(&event_data).await.unwrap();
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         eprintln!("[TEST SERVER RAPID] All 3 events sent");
 
-        tokio::time::sleep(Duration::from_millis(2000)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -203,7 +203,7 @@ async fn test_rapid_manual_submits() {
             Ok(Some(_)) => {}
             Ok(None) => {}
             Err(e) => {
-                eprintln!("[TEST CLIENT RAPID] Error: {}", e);
+                eprintln!("[TEST CLIENT RAPID] Error: {e}");
                 break;
             }
         }
@@ -213,9 +213,8 @@ async fn test_rapid_manual_submits() {
 
     // Should receive all 3 events (but UI should probably debounce/dedupe them)
     assert!(
-        events_received.len() >= 1,
-        "Should receive at least 1 event, got: {:?}",
-        events_received
+        !events_received.is_empty(),
+        "Should receive at least 1 event, got: {events_received:?}"
     );
     eprintln!(
         "[TEST CLIENT RAPID] Received {} events: {:?}",

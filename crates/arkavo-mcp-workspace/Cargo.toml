@@ -1,0 +1,15 @@
+[package]
+name = "arkavo-mcp-workspace"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Workspace and project management utilities for Arkavo Edge"
+repository.workspace = true
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "process", "time", "macros"] }

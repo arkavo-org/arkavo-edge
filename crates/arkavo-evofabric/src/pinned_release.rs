@@ -65,7 +65,9 @@ impl ReleaseRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("EVO-006")]
     #[test]
     fn empty_registry() {
         let reg = ReleaseRegistry::new();
@@ -74,6 +76,7 @@ mod tests {
         assert!(reg.list().is_empty());
     }
 
+    #[spec("EVO-006")]
     #[test]
     fn pin_and_rollback() {
         let mut reg = ReleaseRegistry::new();
@@ -82,12 +85,14 @@ mod tests {
         assert_eq!(reg.rollback_to("v1.0"), Some(hash));
     }
 
+    #[spec("EVO-006")]
     #[test]
     fn rollback_missing_returns_none() {
         let reg = ReleaseRegistry::new();
         assert_eq!(reg.rollback_to("v1.0"), None);
     }
 
+    #[spec("EVO-006")]
     #[test]
     fn pin_overwrites() {
         let mut reg = ReleaseRegistry::new();
@@ -97,6 +102,7 @@ mod tests {
         assert_eq!(reg.len(), 1);
     }
 
+    #[spec("EVO-006")]
     #[test]
     fn list_sorted_by_name() {
         let mut reg = ReleaseRegistry::new();
@@ -107,6 +113,7 @@ mod tests {
         assert_eq!(names, vec!["alpha", "beta", "stable"]);
     }
 
+    #[spec("EVO-006")]
     #[test]
     fn unpin_removes() {
         let mut reg = ReleaseRegistry::new();

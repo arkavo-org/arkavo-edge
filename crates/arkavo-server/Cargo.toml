@@ -99,6 +99,7 @@ arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-trust = { path = "../arkavo-trust" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
@@ -123,6 +124,7 @@ claude-agent = ["dep:arkavo-mcp-claude"]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

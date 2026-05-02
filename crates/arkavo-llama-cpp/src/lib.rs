@@ -60,6 +60,8 @@ static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 pub enum ModelFormat {
     /// Gemma-3 format: <start_of_turn>user\n...<end_of_turn>
     Gemma3,
+    /// Gemma-4 format: same base template as Gemma-3, tool-call extensions via GGUF Jinja
+    Gemma4,
     /// Mistral V3 format: [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] [INST]...[/INST]
     MistralV3,
     /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
@@ -78,6 +80,8 @@ pub fn detect_model_format(model_name: &str) -> ModelFormat {
         ModelFormat::Qwen3
     } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
+    } else if name_lower.contains("gemma-4") || name_lower.contains("gemma4") {
+        ModelFormat::Gemma4
     } else if name_lower.contains("gemma") {
         ModelFormat::Gemma3
     } else {
@@ -711,7 +715,7 @@ pub fn apply_chat_template_with_format(
     format: ModelFormat,
 ) -> Result<Vec<u8>, String> {
     let template = match format {
-        ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
+        ModelFormat::Gemma3 | ModelFormat::Gemma4 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
         ModelFormat::Qwen3 => QWEN3_TEMPLATE,
         ModelFormat::GLM4 => GLM4_TEMPLATE,
@@ -744,6 +748,19 @@ pub fn apply_chat_template_with_format(
         let need = wrote.checked_neg().unwrap_or(128 * 1024) as usize;
         buf.resize(need, 0);
     }
+}
+
+/// Escape regex metacharacters in a string (matching sampling.cpp:210)
+#[cfg(not(target_env = "musl"))]
+fn regex_escape(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        if "\\^$.|?*+()[]{}".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 /// Grammar trigger type from llama.cpp's template engine
@@ -785,6 +802,118 @@ pub struct ChatResult {
     pub thinking_forced_open: bool,
     pub grammar_triggers: Vec<GrammarTrigger>,
     pub additional_stops: Vec<String>,
+    /// Chat format enum from llama.cpp (for output parsing)
+    pub format: i32,
+    /// Serialized PEG parser string (for output parsing)
+    pub parser_str: Option<String>,
+    /// Generation prompt for non-lazy grammar prefilling
+    pub generation_prompt: Option<String>,
+}
+
+/// Parsed tool call from llama.cpp's native output parser
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone)]
+pub struct ParsedToolCall {
+    pub name: String,
+    pub arguments: String,
+    pub id: String,
+}
+
+/// Maximum tool calls accepted from a single inference.
+/// Gemma4's PEG grammar allows unlimited repetition; without a cap the model
+/// can enter a degenerate loop producing 100-200 identical calls.
+#[cfg(not(target_env = "musl"))]
+pub const MAX_TOOL_CALLS_PER_INFERENCE: usize = 10;
+
+/// Truncate a tool call vec to the per-inference cap.
+#[cfg(not(target_env = "musl"))]
+pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
+    if calls.len() > MAX_TOOL_CALLS_PER_INFERENCE {
+        eprintln!(
+            "[WARN] Truncating degenerate tool call batch: {} -> {}",
+            calls.len(),
+            MAX_TOOL_CALLS_PER_INFERENCE
+        );
+        calls.truncate(MAX_TOOL_CALLS_PER_INFERENCE);
+    }
+}
+
+/// Parse model output using llama.cpp's built-in PEG parser.
+/// Supports Gemma 4, Mistral, Hermes, and other native tool-call formats.
+#[cfg(not(target_env = "musl"))]
+pub fn parse_tool_calls(
+    output: &str,
+    format: i32,
+    parser_str: Option<&str>,
+) -> (String, Option<String>, Vec<ParsedToolCall>) {
+    let c_output = CString::new(output).unwrap_or_default();
+    let c_parser = parser_str.and_then(|s| CString::new(s).ok());
+    let parser_ptr = c_parser.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+
+    let mut result = unsafe { ffi::arkavo_chat_parse(c_output.as_ptr(), format, parser_ptr, 0) };
+
+    let content = if result.content.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(result.content) }
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let reasoning = if result.reasoning_content.is_null() {
+        None
+    } else {
+        let s = unsafe { std::ffi::CStr::from_ptr(result.reasoning_content) }
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    };
+
+    let mut tool_calls = Vec::new();
+    for i in 0..result.num_tool_calls {
+        let tc = unsafe { &*result.tool_calls.add(i as usize) };
+        let name = if tc.name.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.name) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        let arguments = if tc.arguments.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.arguments) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        let id = if tc.id.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(tc.id) }
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        tool_calls.push(ParsedToolCall {
+            name,
+            arguments,
+            id,
+        });
+    }
+
+    unsafe { ffi::arkavo_chat_parse_result_free(&mut result) };
+
+    cap_tool_calls(&mut tool_calls);
+
+    (content, reasoning, tool_calls)
 }
 
 /// Tool definition for template rendering
@@ -1000,6 +1129,35 @@ impl ChatTemplates {
             }
         }
 
+        // Extract format, parser string, and generation prompt for output parsing
+        let format = result.format;
+        let parser_str = if result.parser_str.is_null() {
+            None
+        } else {
+            let s = unsafe { std::ffi::CStr::from_ptr(result.parser_str) }
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+        let generation_prompt = if result.generation_prompt.is_null() {
+            None
+        } else {
+            let s = unsafe { std::ffi::CStr::from_ptr(result.generation_prompt) }
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
         let chat_result = ChatResult {
             prompt,
             grammar,
@@ -1007,6 +1165,9 @@ impl ChatTemplates {
             thinking_forced_open: result.thinking_forced_open != 0,
             grammar_triggers,
             additional_stops,
+            format,
+            parser_str,
+            generation_prompt,
         };
 
         // Free the C-allocated result
@@ -1503,6 +1664,83 @@ impl LlamaSampler {
         }
     }
 
+    /// Add a lazy grammar sampler with both pattern and token triggers.
+    ///
+    /// Separates `GrammarTrigger` objects by type:
+    /// - Token triggers (type 0): passed as token IDs for single-token activation
+    /// - Word triggers (type 1): regex-escaped and passed as patterns
+    /// - Pattern/PatternFull triggers (type 2, 3): passed as regex patterns
+    ///
+    /// # Safety
+    /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
+    #[cfg(not(target_env = "musl"))]
+    pub unsafe fn add_grammar_lazy_with_triggers(
+        &self,
+        vocab: *const ffi::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+        triggers: &[GrammarTrigger],
+    ) {
+        let Ok(grammar_cstr) = CString::new(grammar_str) else {
+            return;
+        };
+        let Ok(root_cstr) = CString::new(grammar_root) else {
+            return;
+        };
+
+        // Convert ALL triggers to pattern/word type. Token triggers cause
+        // GGML_ASSERT crashes because the grammar rules don't contain the
+        // trigger literal text — the grammar starts after the trigger, but
+        // llama_grammar_accept tries to match the trigger text character-by-
+        // character against rules that expect JSON. Word/pattern triggers
+        // buffer text and match from the correct position, avoiding this.
+        let mut pattern_strings: Vec<String> = Vec::new();
+
+        for trigger in triggers {
+            match trigger.trigger_type {
+                GrammarTriggerType::Token => {
+                    // Convert token trigger to word trigger using the text value
+                    if !trigger.value.is_empty() {
+                        let escaped = regex_escape(&trigger.value);
+                        pattern_strings.push(escaped);
+                    }
+                }
+                GrammarTriggerType::Word => {
+                    let escaped = regex_escape(&trigger.value);
+                    pattern_strings.push(escaped);
+                }
+                GrammarTriggerType::Pattern => {
+                    pattern_strings.push(trigger.value.clone());
+                }
+                GrammarTriggerType::PatternFull => {
+                    pattern_strings.push(format!("^{}$", trigger.value));
+                }
+            }
+        }
+
+        let pattern_cstrings: Vec<CString> = pattern_strings
+            .iter()
+            .filter_map(|p| CString::new(p.as_str()).ok())
+            .collect();
+        let mut pattern_ptrs: Vec<*const std::os::raw::c_char> =
+            pattern_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+
+        let grammar_sampler = unsafe {
+            ffi::arkavo_sampler_init_grammar_lazy(
+                vocab,
+                grammar_cstr.as_ptr(),
+                root_cstr.as_ptr(),
+                pattern_ptrs.as_mut_ptr(),
+                pattern_ptrs.len() as i32,
+            )
+        };
+        if grammar_sampler.is_null() {
+            eprintln!("Grammar sampler creation failed, proceeding without grammar");
+        } else {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, grammar_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
         // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
         unsafe { ffi::arkavo_sampler_sample(self.ptr, ctx.ptr, idx) }
@@ -1750,7 +1988,9 @@ pub fn test_minimal_init() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_mistral() {
         assert_eq!(
@@ -1771,6 +2011,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_gemma() {
         assert_eq!(detect_model_format("gemma-3-4b"), ModelFormat::Gemma3);
@@ -1778,8 +2019,17 @@ mod tests {
             detect_model_format("google/gemma-3-27b-it"),
             ModelFormat::Gemma3
         );
+        assert_eq!(detect_model_format("gemma-4-E4B-it"), ModelFormat::Gemma4);
+        assert_eq!(detect_model_format("gemma-4-E2B-it"), ModelFormat::Gemma4);
+        assert_eq!(
+            detect_model_format("unsloth/gemma-4-26B-A4B-it-GGUF"),
+            ModelFormat::Gemma4
+        );
+        assert_eq!(detect_model_format("gemma-4-31B-it"), ModelFormat::Gemma4);
+        assert_eq!(detect_model_format("gemma4-e4b"), ModelFormat::Gemma4);
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_unknown_defaults_to_qwen3() {
         // Unknown models should default to Qwen3 (TØRG-compatible)
@@ -1789,6 +2039,7 @@ mod tests {
         assert_eq!(detect_model_format("unknown-model"), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_qwen() {
         assert_eq!(detect_model_format("qwen2.5-7b"), ModelFormat::Qwen3);
@@ -1799,6 +2050,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_case_insensitive() {
         assert_eq!(detect_model_format("MINISTRAL-3B"), ModelFormat::MistralV3);
@@ -1806,17 +2058,20 @@ mod tests {
         assert_eq!(detect_model_format("QWEN3-1B"), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_model_format_default() {
         assert_eq!(ModelFormat::default(), ModelFormat::Qwen3);
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_gemma3_template_contains_markers() {
         assert!(GEMMA3_TEMPLATE.contains("<start_of_turn>"));
         assert!(GEMMA3_TEMPLATE.contains("<end_of_turn>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_mistral_v3_template_contains_markers() {
         assert!(MISTRAL_V3_TEMPLATE.contains("{{ bos_token }}"));
@@ -1827,6 +2082,7 @@ mod tests {
         assert!(MISTRAL_V3_TEMPLATE.contains("</s>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_qwen3_template_contains_markers() {
         assert!(QWEN3_TEMPLATE.contains("<|im_start|>"));
@@ -1836,6 +2092,7 @@ mod tests {
         assert!(QWEN3_TEMPLATE.contains("assistant"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_glm4_template_contains_markers() {
         assert!(GLM4_TEMPLATE.contains("[gMASK]<sop>"));
@@ -1845,6 +2102,7 @@ mod tests {
         assert!(GLM4_TEMPLATE.contains("<|observation|>"));
     }
 
+    #[spec("LLAMA-004")]
     #[test]
     fn test_glm4_observation_role_no_trailing_newline() {
         // CRITICAL: GLM-4 expects content immediately after <|observation|>
@@ -1863,6 +2121,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-006")]
     #[test]
     fn test_detect_model_format_glm() {
         assert_eq!(detect_model_format("GLM-4.7-Flash"), ModelFormat::GLM4);
@@ -1873,6 +2132,7 @@ mod tests {
         );
     }
 
+    #[spec("LLAMA-007")]
     #[test]
     fn test_dry_sampling_config_defaults() {
         let config = DrySamplingConfig::default();
@@ -1884,6 +2144,7 @@ mod tests {
         assert!(glm_config.is_enabled());
     }
 
+    #[spec("LLAMA-002")]
     #[cfg(not(target_env = "musl"))]
     #[test]
     fn test_reset_gpu_status() {
@@ -1894,5 +2155,35 @@ mod tests {
         // Reset should restore to Unknown (allowing retry)
         reset_gpu_status();
         assert_eq!(gpu_status(), GpuStatus::Unknown);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn parse_tool_calls_caps_at_max() {
+        let mut calls: Vec<ParsedToolCall> = (0..50)
+            .map(|i| ParsedToolCall {
+                name: "game-rl:step".to_string(),
+                arguments: format!(r#"{{"action":"move","id":"{}"}}"#, i),
+                id: format!("call_{i}"),
+            })
+            .collect();
+
+        cap_tool_calls(&mut calls);
+        assert_eq!(calls.len(), MAX_TOOL_CALLS_PER_INFERENCE);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn parse_tool_calls_preserves_small_batch() {
+        let mut calls: Vec<ParsedToolCall> = (0..3)
+            .map(|i| ParsedToolCall {
+                name: "game-rl:step".to_string(),
+                arguments: "{}".to_string(),
+                id: format!("call_{i}"),
+            })
+            .collect();
+
+        cap_tool_calls(&mut calls);
+        assert_eq!(calls.len(), 3);
     }
 }

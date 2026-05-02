@@ -130,7 +130,7 @@ impl DecisionCache {
     }
 
     pub fn calculate_ttl_from_token(token_exp: Option<i64>) -> Duration {
-        const MAX_TTL: Duration = Duration::from_secs(60);
+        const MAX_TTL: Duration = Duration::from_mins(1);
 
         if let Some(exp) = token_exp {
             let now = chrono::Utc::now().timestamp();

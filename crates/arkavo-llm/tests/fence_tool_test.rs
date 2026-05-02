@@ -99,6 +99,8 @@ mod tests {
             role: Role::User,
             content: "What's the weather in New York?".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }];
 
         println!("\n=== Testing: What's the weather in New York? ===");
@@ -158,6 +160,8 @@ mod tests {
             role: Role::User,
             content: "Read the file at /tmp/test.txt".to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }];
 
         println!("\n=== Testing: Read the file at /tmp/test.txt ===");
@@ -222,6 +226,8 @@ mod tests {
                 role: Role::User,
                 content: prompt.to_string(),
                 images: None,
+                tool_call_id: None,
+                tool_name: None,
             }];
 
             let fence_result = fence_provider

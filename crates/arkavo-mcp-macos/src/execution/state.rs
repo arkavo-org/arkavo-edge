@@ -78,7 +78,7 @@ impl StateManager {
             .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {e}")))?;
 
         let mut list: Vec<StateSnapshot> = snapshots.values().cloned().collect();
-        list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        list.sort_by_key(|s| std::cmp::Reverse(s.timestamp));
 
         Ok(list)
     }

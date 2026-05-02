@@ -4,6 +4,7 @@
 //! → render → verify the rendered output is valid Rust that could compile.
 
 use arkavo_evofabric::{OpBundle, RustOp, render_file};
+use arkavo_test_macros::spec;
 
 /// Realistic source file used as the target for integration tests.
 /// Mirrors the structure of a real crate module with structs, impls, and free fns.
@@ -52,6 +53,7 @@ fn process(cfg: &PipelineConfig) -> bool {
 }
 "##;
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_add_inline_to_free_function() {
     let bundle_json = r##"{
@@ -84,6 +86,7 @@ fn end_to_end_add_inline_to_free_function() {
     RustOp::parse(&rendered).expect("re-parse rendered output");
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_replace_method_body() {
     let bundle_json = r##"{
@@ -115,6 +118,7 @@ fn end_to_end_replace_method_body() {
     RustOp::parse(&rendered).expect("re-parse rendered output");
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_multi_op_bundle() {
     let bundle_json = r##"{
@@ -156,6 +160,7 @@ fn end_to_end_multi_op_bundle() {
     RustOp::parse(&rendered).expect("re-parse rendered output");
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_insert_new_method() {
     let bundle_json = r##"{
@@ -185,6 +190,7 @@ fn end_to_end_insert_new_method() {
     RustOp::parse(&rendered).expect("re-parse rendered output");
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_from_json_with_markdown_fences() {
     let llm_output = r##"```json
@@ -214,6 +220,7 @@ fn end_to_end_from_json_with_markdown_fences() {
     RustOp::parse(&rendered).expect("re-parse rendered output");
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_bundle_rejection_on_invalid_body() {
     let bundle_json = r##"{
@@ -241,6 +248,7 @@ fn end_to_end_bundle_rejection_on_invalid_body() {
     );
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_bundle_rejection_on_missing_target() {
     let bundle_json = r##"{
@@ -267,6 +275,7 @@ fn end_to_end_bundle_rejection_on_missing_target() {
     );
 }
 
+#[spec("EVO-001")]
 #[test]
 fn end_to_end_replace_item_whole_function() {
     let bundle_json = r##"{

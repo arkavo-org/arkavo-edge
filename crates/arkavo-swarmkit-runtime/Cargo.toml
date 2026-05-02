@@ -1,0 +1,46 @@
+[package]
+name = "arkavo-swarmkit-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SwarmFlight runtime — per-role ARP runtime provisioning and DecisionTrace isolation"
+
+[features]
+default = []
+# Wrap/unwrap SwarmKit manifests through the OpenTDF envelope. Pulls in
+# opentdf-rs via arkavo-tdf for AES-256-GCM + RSA-OAEP key wrap. Also
+# pulls in arkavo-agent-auth so role policies can bind to the running
+# agent's StoredToken DID (spec §6.3 dissemination list). Keep disabled
+# for headless / in-process flight orchestration.
+tdf = ["dep:arkavo-tdf", "dep:arkavo-agent-auth", "dep:base64"]
+
+[dependencies]
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-arp = { path = "../arkavo-arp" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
+arkavo-agent-auth = { path = "../arkavo-agent-auth", optional = true }
+base64 = { workspace = true, optional = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+arkavo-agui = { path = "../arkavo-agui", default-features = false }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf", "testing"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[[example]]
+name = "swarm_flight_demo"
+required-features = []
+
+[[example]]
+name = "swarmkit_agui_demo"
+required-features = []

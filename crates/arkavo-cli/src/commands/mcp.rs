@@ -1,3 +1,4 @@
+use arkavo_mcp_identity::McpIdentitySession;
 use arkavo_mcp_macos::TestHarness;
 use arkavo_mcp_macos::mcp::server::ToolRequest;
 use jsonschema::{Draft, ValidationOptions, Validator};
@@ -166,7 +167,7 @@ fn validate_request(request: &Value) -> Result<(), String> {
     if validator.validate(request).is_err() {
         let error_messages: Vec<String> = validator
             .iter_errors(request)
-            .map(|e| format!("{}: {}", e.instance_path, e))
+            .map(|e| format!("{}: {}", e.instance_path(), e))
             .collect();
         return Err(format!(
             "Request validation failed: {}",
@@ -183,7 +184,7 @@ fn validate_response(response: &Value) -> Result<(), String> {
     if validator.validate(response).is_err() {
         let error_messages: Vec<String> = validator
             .iter_errors(response)
-            .map(|e| format!("{}: {}", e.instance_path, e))
+            .map(|e| format!("{}: {}", e.instance_path(), e))
             .collect();
         return Err(format!(
             "Response validation failed: {}",
@@ -292,6 +293,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| anyhow::anyhow!("Failed to initialize test harness: {e}"))?;
 
     let mcp_server = harness.mcp_server();
+
+    // Initialize MCP-I identity session for signed proofs
+    let mcpi_session = McpIdentitySession::from_device_keypair()
+        .unwrap_or_else(|_| McpIdentitySession::ephemeral());
+    eprintln!("MCP-I session: did={}", mcpi_session.did());
 
     // Initialize memory tools
     if let Err(e) = mcp_server.initialize_memory_tools().await {
@@ -442,14 +448,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             result_str
                                         };
 
-                                        // Normal successful response
+                                        // Normal successful response with MCP-I proof
+                                        let meta = mcpi_session
+                                            .sign_response(tool_name, &tool_response.result);
                                         success_response(
                                             request_id.clone(),
                                             json!({
                                                 "content": [{
                                                     "type": "text",
                                                     "text": trimmed_result
-                                                }]
+                                                }],
+                                                "_meta": meta,
                                             }),
                                         )
                                     } else {
@@ -493,14 +502,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         result_str
                                     };
 
-                                    // Normal successful response
+                                    // Normal successful response with MCP-I proof
+                                    let meta = mcpi_session
+                                        .sign_response(tool_name, &tool_response.result);
                                     success_response(
                                         request_id.clone(),
                                         json!({
                                             "content": [{
                                                 "type": "text",
                                                 "text": trimmed_result
-                                            }]
+                                            }],
+                                            "_meta": meta,
                                         }),
                                     )
                                 }

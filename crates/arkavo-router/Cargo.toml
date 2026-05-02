@@ -61,6 +61,7 @@ persistence = ["sqlx"]
 windows = ["gemini", "llm-remote", "deepseek", "kimi"]
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 

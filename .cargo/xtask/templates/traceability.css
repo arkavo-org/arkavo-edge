@@ -1,0 +1,165 @@
+:root {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #12121a;
+    --bg-tertiary: #1a1a2e;
+    --border-color: #2a2a3e;
+    --text-primary: #e0e0e8;
+    --text-secondary: #8888a0;
+    --accent: #6366f1;
+    --success: #22c55e;
+    --warning: #eab308;
+    --error: #ef4444;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 16px;
+}
+
+h1 {
+    font-size: 18px;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
+.summary-bar {
+    display: flex;
+    gap: 24px;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+
+.summary-stat { text-align: center; }
+.summary-stat-value { font-size: 20px; font-weight: 700; }
+.summary-stat-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
+
+.slope-up { color: var(--success); }
+.slope-flat { color: var(--warning); }
+.slope-down { color: var(--error); }
+
+.traceability-wrapper {
+    display: flex;
+    position: relative;
+    gap: 0;
+    min-height: 420px;
+}
+
+.treemap-container {
+    width: 48%;
+    min-height: 400px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.treemap-svg { display: block; }
+
+.treemap-leaf {
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.treemap-group-label {
+    font-size: 9px;
+    fill: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.treemap-leaf-label {
+    font-size: 8px;
+    fill: var(--bg-primary);
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.bridge-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.bridge-curve {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-opacity: 0.7;
+    stroke-dasharray: 6 3;
+    animation: bridgeDash 1s linear infinite;
+}
+
+@keyframes bridgeDash {
+    0% { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: 9; }
+}
+
+.traceability-detail { padding: 12px 0; }
+
+.trace-detail-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.trace-detail-header { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.trace-detail-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; text-transform: capitalize; }
+.trace-detail-section { margin-bottom: 8px; font-size: 12px; }
+.trace-detail-section strong { color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+.trace-detail-item { padding: 2px 0 2px 12px; color: var(--text-primary); font-size: 12px; }
+
+.empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
+
+.active-label-text {
+    font-size: 8px;
+    fill: #e0e0e8;
+    font-weight: 700;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0a0a0f;
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.active-group-text {
+    font-size: 10px;
+    fill: #e0e0e8;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: #0a0a0f;
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+
+.treemap-tooltip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 100;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: none;
+}

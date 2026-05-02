@@ -1,9 +1,11 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
+use crate::arp_handler::ArpHandler;
 use crate::budget_handler::BudgetHandler;
 use crate::cost_handler::CostHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
 use crate::security_handler::SecurityHandler;
+use crate::swarm_flight_registry::{SwarmFlightRegistry, auto_launch_from_environment};
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
@@ -61,6 +63,15 @@ pub struct AppState {
     pub routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     pub lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     pub lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    /// Latest context topology push from each agent (keyed by agent_id)
+    pub context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    /// Agent Runtime Policy (ARP) document + runtime snapshot.
+    pub arp_handler: Arc<ArpHandler>,
+    /// Active SwarmFlights running in this gateway process. Each role of
+    /// a registered flight surfaces in `arp_handler` under
+    /// `flight:<flight_id>:<role_id>` so the AG-UI ARP panel can render
+    /// per-role runtime state alongside regular mesh agents.
+    pub swarm_flights: Arc<SwarmFlightRegistry>,
 }
 
 pub struct AgUiGateway {
@@ -138,12 +149,20 @@ impl AgUiGateway {
         // Start mDNS discovery
         let agent_connections_for_mdns = self.agent_connections.clone();
         let telemetry_tx_for_mdns = self.telemetry_tx.clone();
+        let browser_connections_for_mdns = self.connections.clone();
+        let security_handler_for_mdns = self.security_handler.clone();
+        let context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let topo_cache_for_mdns = context_topology_cache.clone();
         tokio::spawn(async move {
             println!("AG-UI: Starting mDNS discovery...");
             match crate::gateway_mdns::run_mdns_discovery(
                 agents_clone,
                 agent_connections_for_mdns,
                 telemetry_tx_for_mdns,
+                browser_connections_for_mdns,
+                security_handler_for_mdns,
+                topo_cache_for_mdns,
             )
             .await
             {
@@ -379,7 +398,27 @@ impl AgUiGateway {
             routing_history: Arc::new(RwLock::new(VecDeque::new())),
             lesson_tx: Some(lesson_tx),
             lesson_store,
+            context_topology_cache,
+            arp_handler: {
+                let handler = Arc::new(ArpHandler::new());
+                handler.load_from_environment().await;
+                handler
+            },
+            swarm_flights: Arc::new(SwarmFlightRegistry::new()),
         };
+
+        // Auto-launch a SwarmFlight when ARKAVO_SWARMKIT_PATH points at a
+        // manifest. Mirrors the ARKAVO_ARP_PATH pattern: errors are logged
+        // but never fatal, so a misconfigured env var doesn't kill the
+        // gateway.
+        match auto_launch_from_environment(&state.swarm_flights, &state.arp_handler).await {
+            Ok(Some(flight_id)) => tracing::info!(
+                flight_id = %flight_id,
+                "auto-launched SwarmFlight from ARKAVO_SWARMKIT_PATH"
+            ),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "failed to auto-launch SwarmFlight"),
+        }
 
         // Register learning pipeline health reporter (uses gateway shared stores)
         {

@@ -83,7 +83,7 @@ impl SecureClientBuilder {
     /// Create a new secure client builder
     pub fn new() -> Self {
         let builder = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_mins(1))
             .connect_timeout(Duration::from_secs(10))
             .pool_idle_timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
@@ -181,7 +181,7 @@ impl SecureClient {
         self.check_egress(&url)?;
 
         // Execute with timeout
-        let response = timeout(Duration::from_secs(60), self.inner.execute(request))
+        let response = timeout(Duration::from_mins(1), self.inner.execute(request))
             .await
             .map_err(|_| SecureHttpError::Timeout)??;
 
@@ -229,7 +229,7 @@ pub fn create_secure_client() -> Client {
     init_egress_filter();
 
     Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_mins(1))
         .connect_timeout(Duration::from_secs(10))
         .https_only(true)
         .build()
@@ -247,7 +247,7 @@ where
     init_egress_filter();
 
     let builder = Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_mins(1))
         .connect_timeout(Duration::from_secs(10))
         .https_only(true);
 

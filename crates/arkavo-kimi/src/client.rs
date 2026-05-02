@@ -35,7 +35,7 @@ impl Default for KimiConfig {
             api_key: String::new(),
             base_url: "https://api.moonshot.ai/v1".to_string(),
             model: Model::KimiK2_5, // Default to K2.5
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_mins(1),
             retry_config: RetryConfig::default(),
             buffer_size: 1024,
             user_agent: "arkavo-edge/0.58".to_string(),

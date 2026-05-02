@@ -237,7 +237,8 @@ async fn execute_subtask(
     }
     messages.push(arkavo_llm::Message::user(task_content));
 
-    match super::conductor_tool_loop::run_tool_loop(
+    // Use parallel loop for subtask execution when MCP tools are available
+    match super::conductor_parallel::run_tool_loop_parallel(
         router,
         registry_arc,
         mcp_registry,

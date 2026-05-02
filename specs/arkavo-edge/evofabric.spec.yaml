@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: AST-Level Code Evolution
+module: arkavo_evofabric
+version: 0.67.1
+
+invariants:
+  - OpBundles are cryptographically signed
+  - CRDT convergence guarantees eventual consistency
+  - Conflict detection is deterministic
+  - Materialized code compiles after applying ops
+  - Merkle proofs verify integrity of canonical store
+  - Capability tokens scope allowed mutations
+  - Vector clocks order concurrent operations
+
+scenarios:
+  - id: EVO-001
+    name: Apply OpBundle to AST CRDT
+    criticality: critical
+    given:
+      - AstCrdt initialized with source
+      - OpBundle with valid operations
+    when: OpBundle applied to CRDT
+    then:
+      - Operations applied in order
+      - AcceptedOps recorded
+      - AST state updated
+      - Vector clock advanced
+    refs: [crates/arkavo-evofabric/src/ast_crdt.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Conflicting operations
+        expected: ConflictPair detected and reported
+      - condition: Invalid operation target
+        expected: PendingOp queued for resolution
+
+  - id: EVO-002
+    name: Detect and resolve conflicts
+    criticality: critical
+    given:
+      - Two concurrent OpBundles modify same AST node
+    when: detect_conflict() called
+    then:
+      - ConflictResult identifies conflicting ops
+      - Disjoint conflicts resolved automatically
+      - Overlapping conflicts flagged for review
+    refs: [crates/arkavo-evofabric/src/conflict_detector.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-003
+    name: Merkle proof verification
+    criticality: critical
+    given:
+      - CanonicalStore with committed versions
+      - MerkleTree built from store
+    when: MerkleProof generated and verified
+    then:
+      - Proof covers requested content
+      - Verification succeeds for valid proofs
+      - Tampered proofs rejected
+    refs: [crates/arkavo-evofabric/src/merkle_tree.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-004
+    name: Canonical version DAG management
+    criticality: high
+    given:
+      - VersionDag with history
+    when: New CanonicalVersion committed
+    then:
+      - Version linked to parent
+      - DAG remains acyclic
+      - History traversable
+    refs: [crates/arkavo-evofabric/src/canonical_version.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-005
+    name: Capability token scoping
+    criticality: high
+    given:
+      - CapabilityToken with CapScope
+    when: Operation attempted outside scope
+    then:
+      - Operation rejected
+      - Token scope enforced
+      - Audit trail recorded
+    refs: [crates/arkavo-evofabric/src/capability_token.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-006
+    name: Pinned release creation
+    criticality: high
+    given:
+      - CanonicalStore at stable state
+      - ReleaseRegistry available
+    when: PinnedRelease created
+    then:
+      - Release captures current canonical state
+      - Registry indexes release
+      - Release immutable after creation
+    refs: [crates/arkavo-evofabric/src/pinned_release.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-007
+    name: Provenance query
+    criticality: medium
+    given:
+      - ProvenanceQuery with target
+      - History available in store
+    when: Query executed
+    then:
+      - ProvenanceRecords returned
+      - Full operation history traced
+      - Records include timestamps and authors
+    refs: [crates/arkavo-evofabric/src/provenance_query.rs]
+    changed: "2026-03-19"
+
+  - id: EVO-008
+    name: Materializer build and verify
+    criticality: critical
+    given:
+      - AST state after operations
+      - TempWorkspace available
+    when: Materializer generates code
+    then:
+      - Source files rendered from AST
+      - BuildReceipt captures result
+      - VerificationResult confirms compilability
+    refs: [crates/arkavo-evofabric/src/materializer.rs]
+    changed: "2026-03-19"

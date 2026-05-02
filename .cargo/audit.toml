@@ -12,4 +12,10 @@ ignore = [
     "RUSTSEC-2024-0388",
     # number_prefix unmaintained — transitive via fastembed -> hf-hub -> indicatif
     "RUSTSEC-2025-0119",
+    # hickory-proto O(n²) name compression CPU exhaustion.
+    # iroh 0.98.2 hard-pins hickory-resolver =0.26.0-beta.4 (still affected); fix is in
+    # hickory-proto 0.26.1 stable. Blocked on iroh shipping a release that adopts 0.26.1.
+    "RUSTSEC-2026-0119",
+    # hickory-net NSEC3 closest-encloser proof unbounded loop. Same blocker as above.
+    "RUSTSEC-2026-0120",
 ]

@@ -7,7 +7,7 @@ use super::HookManager;
 
 impl HookManager {
     /// Default timeout for hook callbacks (60 seconds, matching TypeScript SDK)
-    pub const DEFAULT_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+    pub const DEFAULT_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
     /// Invoke hooks for a specific event type
     ///

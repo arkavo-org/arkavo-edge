@@ -115,6 +115,8 @@ mod discover_features_tests {
                 "test-agent".to_string(),
                 "Test agent for discover features".to_string(),
                 "test-model".to_string(),
+                Default::default(),
+                None,
             )
             .await;
 

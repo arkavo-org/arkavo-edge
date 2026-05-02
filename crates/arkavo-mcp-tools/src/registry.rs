@@ -497,7 +497,7 @@ impl ToolRegistry {
             .collect();
 
         // Sort by priority (highest first)
-        scored_results.sort_by(|a, b| b.0.cmp(&a.0));
+        scored_results.sort_by_key(|e| std::cmp::Reverse(e.0));
 
         let results: Vec<MinimalToolInfo> =
             scored_results.into_iter().map(|(_, info)| info).collect();

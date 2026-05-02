@@ -226,7 +226,7 @@ pub struct Policy {
 }
 
 /// Attribute requirement for policy evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Attribute {
     /// Fully qualified attribute name (FQN)
     /// e.g., "https://arkavo.net/attr/role"
@@ -234,6 +234,27 @@ pub struct Attribute {
 
     /// Required values for this attribute
     pub values: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for Attribute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AttributeRaw {
+            attribute: String,
+            values: Vec<String>,
+        }
+        let raw = AttributeRaw::deserialize(deserializer)?;
+        if raw.attribute.is_empty() {
+            return Err(serde::de::Error::custom("attribute FQN cannot be empty"));
+        }
+        Ok(Attribute {
+            attribute: raw.attribute,
+            values: raw.values,
+        })
+    }
 }
 
 impl Attribute {

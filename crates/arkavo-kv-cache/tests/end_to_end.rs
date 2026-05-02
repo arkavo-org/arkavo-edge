@@ -19,6 +19,7 @@ use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_free, batch_init_with_tokens_seq, create_sampler_chain,
     decode_batch, init_llama_logging, set_debug_logging, token_to_bytes, tokenize_with_model,
 };
+use arkavo_test_macros::spec;
 
 const LEARNING_SEQ: i32 = 0;
 const CONVERSATION_SEQ: i32 = 1;
@@ -60,6 +61,7 @@ fn generate(
     output
 }
 
+#[spec("KVC-002")]
 #[test]
 #[ignore] // requires model file
 fn end_to_end_context_slots() {

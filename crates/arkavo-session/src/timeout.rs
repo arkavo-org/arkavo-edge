@@ -23,14 +23,26 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            absolute_timeout: Duration::from_secs(3600), // 1 hour
-            idle_timeout: Duration::from_secs(900),      // 15 minutes
-            check_interval: Duration::from_secs(60),     // 1 minute
+            absolute_timeout: Duration::from_hours(1),
+            idle_timeout: Duration::from_mins(15),
+            check_interval: Duration::from_mins(1),
         }
     }
 }
 
 impl TimeoutConfig {
+    /// Create a timeout config from an ARP session section (§15.3).
+    /// Uses ARP defaults if present, otherwise falls back to hardcoded defaults.
+    /// Still applies validation rules from SESS-003.
+    pub fn from_arp(arp: &arkavo_arp::constraints::Session) -> Result<Self, TimeoutConfigError> {
+        let absolute = arp
+            .defaults
+            .and_then(|d| d.absolute_timeout_sec)
+            .unwrap_or(3600);
+        let idle = arp.defaults.and_then(|d| d.idle_timeout_sec).unwrap_or(900);
+        Self::new(absolute, idle)
+    }
+
     /// Creates a new timeout config with validation
     ///
     /// ## Errors
@@ -73,7 +85,7 @@ impl TimeoutConfig {
         Ok(Self {
             absolute_timeout: Duration::from_secs(absolute_timeout_secs),
             idle_timeout: Duration::from_secs(idle_timeout_secs),
-            check_interval: Duration::from_secs(60),
+            check_interval: Duration::from_mins(1),
         })
     }
 }
@@ -363,6 +375,50 @@ mod tests {
         assert_eq!(config.absolute_timeout, Duration::from_secs(3600));
         assert_eq!(config.idle_timeout, Duration::from_secs(900));
         assert_eq!(config.check_interval, Duration::from_secs(60));
+    }
+
+    // ============================================================================
+    // ARP integration tests
+    // ============================================================================
+
+    #[test]
+    fn test_timeout_from_arp_defaults() {
+        let arp_session = arkavo_arp::constraints::Session {
+            timeout_bounds: None,
+            defaults: None,
+            sensitivity_proportional: None,
+        };
+        let config = TimeoutConfig::from_arp(&arp_session).unwrap();
+        assert_eq!(config.absolute_timeout, Duration::from_secs(3600));
+        assert_eq!(config.idle_timeout, Duration::from_secs(900));
+    }
+
+    #[test]
+    fn test_timeout_from_arp_overrides() {
+        let arp_session = arkavo_arp::constraints::Session {
+            timeout_bounds: None,
+            defaults: Some(arkavo_arp::constraints::SessionDefaults {
+                absolute_timeout_sec: Some(7200),
+                idle_timeout_sec: Some(1800),
+            }),
+            sensitivity_proportional: None,
+        };
+        let config = TimeoutConfig::from_arp(&arp_session).unwrap();
+        assert_eq!(config.absolute_timeout, Duration::from_secs(7200));
+        assert_eq!(config.idle_timeout, Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn test_timeout_from_arp_invalid_rejected() {
+        let arp_session = arkavo_arp::constraints::Session {
+            timeout_bounds: None,
+            defaults: Some(arkavo_arp::constraints::SessionDefaults {
+                absolute_timeout_sec: Some(10),
+                idle_timeout_sec: Some(5),
+            }),
+            sensitivity_proportional: None,
+        };
+        assert!(TimeoutConfig::from_arp(&arp_session).is_err());
     }
 
     // ============================================================================

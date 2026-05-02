@@ -1,24 +1,52 @@
 use crate::{AgentDescriptor, RegistrationError};
-use qrcode::QrCode;
-use qrcode::render::unicode;
+use fast_qr::QRBuilder;
 
-pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
-    let url = descriptor.to_url();
-    let code = QrCode::new(url.as_bytes())
+/// Convert QR code matrix to Unicode string using dense 1x2 blocks.
+/// Uses inverted polarity (dark modules render as spaces) for correct
+/// dark-on-light appearance on dark terminals, matching QR scanner expectations.
+fn render_qr_unicode(qr: &fast_qr::QRCode) -> String {
+    let size = qr.size;
+    let mut result = String::new();
+
+    for row in (0..size).step_by(2) {
+        for col in 0..size {
+            let top_idx = row * size + col;
+            let top = qr.data.get(top_idx).map(|m| m.value()).unwrap_or(false);
+
+            let bottom = if row + 1 < size {
+                let bottom_idx = (row + 1) * size + col;
+                qr.data.get(bottom_idx).map(|m| m.value()).unwrap_or(false)
+            } else {
+                false
+            };
+
+            // Inverted polarity: dark QR modules → space, light → block
+            let ch = match (top, bottom) {
+                (false, false) => '█', // Light+Light → full block
+                (false, true) => '▀',  // Light+Dark → top half
+                (true, false) => '▄',  // Dark+Light → bottom half
+                (true, true) => ' ',   // Dark+Dark → space
+            };
+            result.push(ch);
+        }
+        result.push('\n');
+    }
+
+    result
+}
+
+fn generate_qr_with_overlay(url: String, short_sha: &str) -> Result<String, RegistrationError> {
+    let qr = QRBuilder::new(url)
+        .build()
         .map_err(|e| RegistrationError::QrCodeGeneration(e.to_string()))?;
 
-    let short_sha = &descriptor.agent_id_short_sha;
+    let image = render_qr_unicode(&qr).trim_end().to_string();
+
     let overlay = if short_sha.len() <= 7 {
-        short_sha.clone()
+        short_sha.to_string()
     } else {
         short_sha[..7].to_string()
     };
-
-    let image = code
-        .render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .build();
 
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
@@ -52,6 +80,10 @@ pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, Regist
     }
 
     Ok(modified_lines.join("\n"))
+}
+
+pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
+    generate_qr_with_overlay(descriptor.to_url(), &descriptor.agent_id_short_sha)
 }
 
 pub fn display_qr(descriptor: &AgentDescriptor) -> Result<(), RegistrationError> {
@@ -68,59 +100,14 @@ pub fn display_qr(descriptor: &AgentDescriptor) -> Result<(), RegistrationError>
 
 /// Generate QR code string for the authorization URL format.
 ///
-/// Uses the new `arkavo://agent/authorize?did=...&name=...&entitlements=...` format.
+/// Uses the `arkavo://agent/authorize?did=...&name=...&entitlements=...` format.
 pub fn generate_authorization_qr_string(
     descriptor: &AgentDescriptor,
 ) -> Result<String, RegistrationError> {
-    let url = descriptor.to_authorization_url();
-    let code = QrCode::new(url.as_bytes())
-        .map_err(|e| RegistrationError::QrCodeGeneration(e.to_string()))?;
-
-    let short_sha = &descriptor.agent_id_short_sha;
-    let overlay = if short_sha.len() <= 7 {
-        short_sha.clone()
-    } else {
-        short_sha[..7].to_string()
-    };
-
-    let image = code
-        .render::<unicode::Dense1x2>()
-        .dark_color(unicode::Dense1x2::Light)
-        .light_color(unicode::Dense1x2::Dark)
-        .build();
-
-    let lines: Vec<&str> = image.lines().collect();
-    let height = lines.len();
-    let width_chars = if height > 0 {
-        lines[0].chars().count()
-    } else {
-        0
-    };
-
-    if height < 5 || width_chars < overlay.len() {
-        return Ok(image);
-    }
-
-    let center_row = height / 2;
-    let center_col = (width_chars - overlay.len()) / 2;
-
-    let mut modified_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-
-    if center_row < modified_lines.len() {
-        let line = &mut modified_lines[center_row];
-        let mut chars: Vec<char> = line.chars().collect();
-
-        for (i, ch) in overlay.chars().enumerate() {
-            let pos = center_col + i;
-            if pos < chars.len() {
-                chars[pos] = ch;
-            }
-        }
-
-        modified_lines[center_row] = chars.into_iter().collect();
-    }
-
-    Ok(modified_lines.join("\n"))
+    generate_qr_with_overlay(
+        descriptor.to_authorization_url(),
+        &descriptor.agent_id_short_sha,
+    )
 }
 
 /// Display authorization QR code for mobile app scanning.
@@ -148,7 +135,9 @@ pub fn display_authorization_qr(descriptor: &AgentDescriptor) -> Result<(), Regi
 mod tests {
     use super::*;
     use arkavo_crypto::AgentKeypair;
+    use arkavo_test_macros::spec;
 
+    #[spec("QREG-002")]
     #[test]
     fn test_qr_generation() {
         let keypair = AgentKeypair::generate();
@@ -170,6 +159,7 @@ mod tests {
         assert!(url.contains("arkavo._tcp.local."));
     }
 
+    #[spec("QREG-002")]
     #[test]
     fn test_qr_with_short_sha() {
         let keypair = AgentKeypair::generate();
@@ -185,6 +175,7 @@ mod tests {
         assert!(!qr_string.is_empty());
     }
 
+    #[spec("QREG-002")]
     #[test]
     fn test_display_qr() {
         let keypair = AgentKeypair::generate();
@@ -200,6 +191,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("QREG-002", "QREG-003")]
     #[test]
     fn test_authorization_qr_generation() {
         let keypair = AgentKeypair::generate();
@@ -221,6 +213,7 @@ mod tests {
         assert!(qr_string.contains("auth123"));
     }
 
+    #[spec("QREG-001", "QREG-003")]
     #[test]
     fn test_authorization_url_format() {
         let keypair = AgentKeypair::generate();
@@ -241,6 +234,7 @@ mod tests {
         assert!(url.contains("entitlements=agent.capability.chat"));
     }
 
+    #[spec("QREG-002")]
     #[test]
     fn test_display_authorization_qr() {
         let keypair = AgentKeypair::generate();

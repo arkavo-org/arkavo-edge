@@ -128,6 +128,7 @@ mod hex_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn make_token(scopes: &[CapScope]) -> CapabilityToken {
         CapabilityToken::new(
@@ -138,6 +139,7 @@ mod tests {
         )
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn sign_and_verify() {
         let keypair = AgentKeypair::generate();
@@ -146,6 +148,7 @@ mod tests {
         assert!(token.verify(&keypair.public_key()).is_ok());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn verify_fails_wrong_key() {
         let keypair = AgentKeypair::generate();
@@ -155,6 +158,7 @@ mod tests {
         assert!(token.verify(&other.public_key()).is_err());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn has_scope_checks() {
         let token = make_token(&[CapScope::Edit, CapScope::Verify]);
@@ -164,6 +168,7 @@ mod tests {
         assert!(!token.has_scope(CapScope::Test));
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn expired_token() {
         let mut token = make_token(&[CapScope::Edit]);
@@ -171,12 +176,14 @@ mod tests {
         assert!(token.is_expired());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn not_expired_token() {
         let token = make_token(&[CapScope::Edit]);
         assert!(!token.is_expired());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn validate_issuance_ok() {
         let issuer: BTreeSet<_> = [CapScope::Edit, CapScope::Test, CapScope::Merge]
@@ -186,6 +193,7 @@ mod tests {
         assert!(CapabilityToken::validate_issuance(&issuer, &granted).is_ok());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn validate_issuance_escalation_denied() {
         let issuer: BTreeSet<_> = [CapScope::Edit].into_iter().collect();
@@ -194,12 +202,14 @@ mod tests {
         assert!(err.contains("Merge"));
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn content_to_sign_deterministic() {
         let token = make_token(&[CapScope::Edit, CapScope::Test]);
         assert_eq!(token.content_to_sign(), token.content_to_sign());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn content_to_sign_differs_by_scope() {
         let a = make_token(&[CapScope::Edit]);
@@ -207,6 +217,7 @@ mod tests {
         assert_ne!(a.content_to_sign(), b.content_to_sign());
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn serde_roundtrip() {
         let keypair = AgentKeypair::generate();

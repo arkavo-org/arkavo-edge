@@ -1,4 +1,5 @@
 use crate::agent_connection::AgentConnection;
+use crate::arp_handler::ArpHandler;
 use crate::budget_handler::BudgetHandler;
 use crate::types::*;
 use crate::{gateway_config, gateway_events, gateway_routing, gateway_task_dispatch};
@@ -28,6 +29,9 @@ pub async fn websocket_handler(
             state.routing_history,
             state.lesson_tx,
             state.lesson_store,
+            state.context_topology_cache,
+            state.arp_handler,
+            state.swarm_flights,
         )
     })
 }
@@ -47,6 +51,9 @@ async fn handle_websocket(
     routing_history: Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    arp_handler: Arc<ArpHandler>,
+    swarm_flights: Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -103,6 +110,9 @@ async fn handle_websocket(
             &routing_history,
             &lesson_tx,
             &lesson_store,
+            &context_topology_cache,
+            &arp_handler,
+            &swarm_flights,
             &tx,
         )
         .await
@@ -130,6 +140,9 @@ async fn handle_websocket(
                         &routing_history,
                         &lesson_tx,
                         &lesson_store,
+                        &context_topology_cache,
+                        &arp_handler,
+                        &swarm_flights,
                         &tx,
                     )
                     .await
@@ -180,6 +193,9 @@ async fn dispatch_event(
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
+    context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    arp_handler: &Arc<ArpHandler>,
+    swarm_flights: &Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -317,6 +333,53 @@ async fn dispatch_event(
                 tx,
             )
             .await?;
+        }
+        AgUiEvent::RequestContextTopology { selected_agent } => {
+            crate::gateway_context::handle_request_context_topology(
+                learning_module,
+                agents,
+                context_topology_cache,
+                selected_agent,
+                tx,
+            )
+            .await?;
+        }
+        AgUiEvent::RequestArpStatus => {
+            let snapshot = arp_handler.snapshot().await;
+            tx.send(AgUiEvent::ArpStatusUpdate {
+                snapshot,
+                event_id: uuid::Uuid::new_v4().to_string(),
+            })
+            .await?;
+        }
+        AgUiEvent::RequestStopFlight { flight_id } => {
+            let response = match uuid::Uuid::parse_str(&flight_id) {
+                Ok(parsed_id) => {
+                    swarm_flights.deregister(parsed_id, arp_handler).await;
+                    AgUiEvent::FlightStopped {
+                        flight_id,
+                        error: None,
+                    }
+                }
+                Err(e) => AgUiEvent::FlightStopped {
+                    flight_id,
+                    error: Some(format!("invalid flight_id: {e}")),
+                },
+            };
+            tx.send(response).await?;
+
+            // Also push a fresh ArpStatusUpdate so any panel that has the
+            // stopped flight selected drops it on the same render cycle
+            // instead of waiting for the next 5s poll.
+            let snapshot = arp_handler.snapshot().await;
+            tx.send(AgUiEvent::ArpStatusUpdate {
+                snapshot,
+                event_id: uuid::Uuid::new_v4().to_string(),
+            })
+            .await?;
+        }
+        AgUiEvent::FlightStopped { .. } => {
+            // Server-emitted event; ignore if it ever round-trips back.
         }
         AgUiEvent::RequestLearningStatus => {
             let lesson_count = lesson_store.read().await.len();

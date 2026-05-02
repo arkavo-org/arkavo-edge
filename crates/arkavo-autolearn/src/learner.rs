@@ -50,7 +50,7 @@ pub struct AutoLearnConfig {
 impl Default for AutoLearnConfig {
     fn default() -> Self {
         Self {
-            probe_interval: Duration::from_secs(60),
+            probe_interval: Duration::from_mins(1),
             synthesis_threshold: 0.5,
             synthesis_timeout: Duration::from_secs(30),
             max_concurrent_synthesis: 2,

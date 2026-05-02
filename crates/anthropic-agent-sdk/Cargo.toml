@@ -53,6 +53,7 @@ default = []
 rmcp = ["dep:rmcp", "dep:schemars"]
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 

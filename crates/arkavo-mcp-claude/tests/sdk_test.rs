@@ -43,7 +43,7 @@ async fn test_simple_query() {
     let result = timeout(Duration::from_secs(30), async {
         let stream = match query(prompt, Some(options)).await {
             Ok(s) => s,
-            Err(e) => return Err(format!("Query error: {}", e)),
+            Err(e) => return Err(format!("Query error: {e}")),
         };
         let mut stream = Box::pin(stream);
         let mut response_text = String::new();
@@ -51,15 +51,15 @@ async fn test_simple_query() {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(Message::Assistant { message, .. }) => {
-                    response_text.push_str(&format!("{:?}", message));
+                    response_text.push_str(&format!("{message:?}"));
                 }
                 Ok(Message::Result { result, .. }) => {
                     if let Some(r) = result {
-                        response_text.push_str(&format!("{:?}", r));
+                        response_text.push_str(&format!("{r:?}"));
                     }
                 }
                 Err(e) => {
-                    return Err(format!("Stream error: {}", e));
+                    return Err(format!("Stream error: {e}"));
                 }
                 _ => {}
             }
@@ -71,13 +71,13 @@ async fn test_simple_query() {
 
     match result {
         Ok(Ok(response)) => {
-            println!("Response: {}", response);
+            println!("Response: {response}");
             assert!(
                 response.contains("HELLO") || response.contains("SDK") || response.contains("TEST"),
                 "Expected response to contain test string"
             );
         }
-        Ok(Err(e)) => panic!("Query failed: {}", e),
+        Ok(Err(e)) => panic!("Query failed: {e}"),
         Err(_) => panic!("Query timed out after 30 seconds"),
     }
 }
@@ -95,17 +95,17 @@ async fn test_code_generation() {
     let prompt = r#"Write a simple Python function called 'add' that takes two numbers and returns their sum.
 Output only the Python code, no explanation."#;
 
-    let result = timeout(Duration::from_secs(60), async {
+    let result = timeout(Duration::from_mins(1), async {
         let stream = match query(prompt, Some(options)).await {
             Ok(s) => s,
-            Err(e) => return Err(format!("Query error: {}", e)),
+            Err(e) => return Err(format!("Query error: {e}")),
         };
         let mut stream = Box::pin(stream);
         let mut code = String::new();
 
         while let Some(result) = stream.next().await {
             if let Ok(Message::Assistant { message, .. }) = result {
-                code.push_str(&format!("{:?}", message));
+                code.push_str(&format!("{message:?}"));
             }
         }
 
@@ -115,13 +115,13 @@ Output only the Python code, no explanation."#;
 
     match result {
         Ok(Ok(code)) => {
-            println!("Generated code:\n{}", code);
+            println!("Generated code:\n{code}");
             assert!(
                 code.contains("def") || code.contains("add") || code.contains("return"),
                 "Expected Python code"
             );
         }
-        Ok(Err(e)) => panic!("Code generation failed: {}", e),
+        Ok(Err(e)) => panic!("Code generation failed: {e}"),
         Err(_) => panic!("Code generation timed out"),
     }
 }

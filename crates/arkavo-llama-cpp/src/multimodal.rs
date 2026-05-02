@@ -50,9 +50,10 @@ impl MtmdContext {
         unsafe { ffi::mtmd_support_audio(self.ptr) }
     }
 
-    pub fn decode_use_non_causal(&self) -> bool {
-        // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
-        unsafe { ffi::mtmd_decode_use_non_causal(self.ptr) }
+    /// # Safety
+    /// `chunk` must be a valid pointer to an `mtmd_input_chunk` allocated by llama.cpp.
+    pub unsafe fn decode_use_non_causal(&self, chunk: *const ffi::mtmd_input_chunk) -> bool {
+        ffi::mtmd_decode_use_non_causal(self.ptr, chunk)
     }
 
     pub fn decode_use_mrope(&self) -> bool {
@@ -315,13 +316,16 @@ pub fn preprocess_image_for_clip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("LLAMA-010")]
     #[test]
     fn test_default_media_marker() {
         let marker = default_media_marker();
         assert!(marker.contains("media") || marker.contains("image"));
     }
 
+    #[spec("LLAMA-010")]
     #[test]
     fn test_preprocess_image_size() {
         let fake_png = vec![

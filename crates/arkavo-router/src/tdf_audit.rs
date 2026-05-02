@@ -115,6 +115,8 @@ mod tests {
             role: Role::User,
             content: content.to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 
@@ -123,6 +125,8 @@ mod tests {
             role: Role::System,
             content: content.to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 
@@ -131,6 +135,8 @@ mod tests {
             role: Role::Assistant,
             content: content.to_string(),
             images: None,
+            tool_call_id: None,
+            tool_name: None,
         }
     }
 

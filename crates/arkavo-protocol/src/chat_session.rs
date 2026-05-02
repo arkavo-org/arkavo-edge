@@ -389,6 +389,36 @@ impl ChatSessionManager {
         }
     }
 
+    /// Push a pre-built delta directly onto a session's broadcast channel.
+    /// Used for introspection responses (e.g. `@context`) that bypass LLM inference.
+    pub async fn push_system_delta(&self, session_id: &str, text: String) -> Result<()> {
+        let sessions = self.sessions.read().await;
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| A2aError::SessionNotFound(session_id.to_string()))?;
+
+        let delta = MessageDelta {
+            session_id: session_id.to_string(),
+            message_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 0,
+            delta: MessageDeltaContent::Text { text },
+            timestamp: chrono::Utc::now(),
+        };
+        let _ = state.delta_tx.send(delta);
+
+        let end = MessageDelta {
+            session_id: session_id.to_string(),
+            message_id: uuid::Uuid::new_v4().to_string(),
+            sequence: 1,
+            delta: MessageDeltaContent::StreamEnd {
+                reason: StreamEndReason::Complete,
+            },
+            timestamp: chrono::Utc::now(),
+        };
+        let _ = state.delta_tx.send(end);
+        Ok(())
+    }
+
     /// Get a receiver for session deltas
     #[instrument(skip(self), fields(session.id = %session_id))]
     pub async fn get_delta_stream(&self, session_id: &str) -> Option<mpsc::Receiver<MessageDelta>> {
@@ -1152,7 +1182,7 @@ impl ChatSessionManager {
 
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
-                                        std::time::Duration::from_secs(120),
+                                        std::time::Duration::from_mins(2),
                                         router.route_chat(conversation_context.clone(), None, model_override.as_ref()),
                                     )
                                     .await;
@@ -1263,7 +1293,7 @@ impl ChatSessionManager {
 
                                         // Retry with tool hints
                                         let hint_result = tokio::time::timeout(
-                                            std::time::Duration::from_secs(120),
+                                            std::time::Duration::from_mins(2),
                                             router.route_with_tools(
                                                 &user_message.content,
                                                 conversation_context.clone(),

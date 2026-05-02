@@ -46,6 +46,7 @@ pub mod registration;
 pub mod security;
 pub mod security_fixes;
 pub mod session_persistence;
+pub mod task_contract;
 pub mod task_executor;
 pub mod task_store;
 pub mod transport;

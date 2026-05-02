@@ -59,6 +59,7 @@ crossbeam-queue = "0.3"
 [dev-dependencies]
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

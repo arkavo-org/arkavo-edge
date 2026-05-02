@@ -650,7 +650,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "mock_judge"
         }
     }

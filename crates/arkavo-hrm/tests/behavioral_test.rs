@@ -212,7 +212,7 @@ async fn test_store_list_by_status() {
     let pending = store_ref.list_by_status(TaskStatus::Pending).await.unwrap();
 
     assert_eq!(completed.len(), 1);
-    assert!(pending.len() >= 1);
+    assert!(!pending.is_empty());
 }
 
 // --- HRM-004: Loop detection integration ---

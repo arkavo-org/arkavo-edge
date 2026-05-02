@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent Lifecycle Management
+module: arkavo_agent
+version: 0.67.1
+
+invariants:
+  - Agents follow config -> register -> discover -> operate lifecycle
+  - AgentConfig validated before use
+  - Registry tracks agent state
+  - Discovery supports mDNS and directory methods
+  - Device capabilities reported accurately
+
+scenarios:
+  - id: AGENT-001
+    name: Load and validate agent configuration
+    criticality: critical
+    given:
+      - Configuration file or environment available
+    when: parse_agents_config() called
+    then:
+      - AgentConfig parsed and validated
+      - MCP server configs loaded
+      - Runtime config resolved
+    refs: [crates/arkavo-agent/src/lib.rs:28-37]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Missing required fields
+        expected: Validation error with field name
+      - condition: Invalid workspace paths
+        expected: Path validation error
+
+  - id: AGENT-002
+    name: Register agent with control plane
+    criticality: critical
+    given:
+      - AgentConfig valid
+      - RegistrationService available
+    when: Registration initiated with challenge-response
+    then:
+      - ChallengeRequest sent
+      - ChallengeResponse verified
+      - RegistrationStatus updated
+    refs: [crates/arkavo-agent/src/lib.rs:40-43]
+    changed: "2026-03-19"
+
+  - id: AGENT-003
+    name: Discover peers via mDNS
+    criticality: high
+    given:
+      - DiscoveryService initialized
+      - DiscoveryMethod set to mDNS
+    when: Discovery scan triggered
+    then:
+      - Local network scanned
+      - AgentInfo collected for peers
+      - Registry updated with discovered agents
+    refs: [crates/arkavo-agent/src/lib.rs:39]
+    changed: "2026-03-19"
+
+  - id: AGENT-004
+    name: Report device capabilities
+    criticality: medium
+    given:
+      - Agent running on device
+    when: Capabilities requested
+    then:
+      - DeviceCapabilities populated
+      - MCP tool info collected
+      - AgentCapabilitiesGetResponse returned
+    refs: [crates/arkavo-agent/src/types.rs]
+    changed: "2026-03-19"
+
+  - id: AGENT-005
+    name: Handle agent errors
+    criticality: high
+    given:
+      - Agent operation fails
+    when: Error propagated
+    then:
+      - AgentError created with context
+      - Error chain preserved
+      - No panics on recoverable errors
+    refs: [crates/arkavo-agent/src/error.rs]
+    changed: "2026-03-19"

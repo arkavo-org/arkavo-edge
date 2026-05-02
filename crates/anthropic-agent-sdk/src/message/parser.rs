@@ -37,8 +37,10 @@ pub fn parse_message(data: serde_json::Value) -> Result<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_parse_user_message() {
         let data = json!({
@@ -53,6 +55,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-001")]
     #[test]
     fn test_parse_invalid_message() {
         let data = json!({

@@ -396,6 +396,9 @@ pub enum AgUiEvent {
         preflight_enabled: bool,
         #[serde(rename = "preflightPolicies")]
         preflight_policies: u32,
+        /// Per-agent security posture
+        #[serde(default)]
+        agents: Vec<AgentSecurityInfo>,
         timestamp: String,
     },
     TdfAuditEvent {
@@ -511,6 +514,57 @@ pub enum AgUiEvent {
         timestamp: String,
     },
 
+    // Context Topology events
+    RequestContextTopology {
+        #[serde(rename = "selectedAgent")]
+        #[serde(default)]
+        selected_agent: Option<String>,
+    },
+    ContextTopologyUpdate {
+        rlm: RlmSnapshot,
+        #[serde(rename = "contextStrategies")]
+        context_strategies: Vec<ContextStrategySnapshot>,
+        #[serde(rename = "toolMemory")]
+        tool_memory: ToolMemorySnapshot,
+        #[serde(rename = "decisionTraces")]
+        decision_traces: Vec<DecisionTraceSnapshot>,
+        #[serde(rename = "antiPatterns")]
+        anti_patterns: Vec<AntiPatternSnapshot>,
+        #[serde(rename = "memoryLifecycle")]
+        memory_lifecycle: MemoryLifecycleSnapshot,
+        gossip: GossipSnapshot,
+        agents: Vec<AgentContextInfo>,
+        #[serde(rename = "conversationWindow")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conversation_window: Option<serde_json::Value>,
+        timestamp: String,
+    },
+
+    // Agent Runtime Policy (ARP) events
+    RequestArpStatus,
+    ArpStatusUpdate {
+        snapshot: ArpStatusSnapshot,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+
+    /// Operator request to stop an active SwarmFlight. The gateway
+    /// deregisters every role of the flight from the ArpHandler and
+    /// drops the flight from the registry. Stopping a non-existent or
+    /// already-stopped flight is a no-op (`FlightStopped` reports success).
+    RequestStopFlight {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+    },
+    FlightStopped {
+        #[serde(rename = "flightId")]
+        flight_id: String,
+        /// `None` on success; `Some(message)` if the flight_id failed to
+        /// parse as a UUID or some other server-side error occurred.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
     // Task management events
     RequestTaskList,
     TaskList {
@@ -584,6 +638,19 @@ pub struct UiPlanPart {
     pub id: String,
     pub name: String,
     pub description: String,
+}
+
+/// Per-agent security and data plane posture.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSecurityInfo {
+    pub id: String,
+    #[serde(rename = "kasEnabled")]
+    pub kas_enabled: bool,
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+    pub algorithm: String,
+    #[serde(rename = "irohActive")]
+    pub iroh_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -901,4 +968,326 @@ pub enum NotificationSeverity {
     Info,
     Warning,
     Error,
+}
+
+// Context Topology snapshot types
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RlmSnapshot {
+    #[serde(rename = "manifestCount")]
+    pub manifest_count: usize,
+    #[serde(rename = "totalChunks")]
+    pub total_chunks: usize,
+    #[serde(rename = "totalTokens")]
+    pub total_tokens: usize,
+    #[serde(rename = "activationThreshold")]
+    pub activation_threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextStrategySnapshot {
+    pub strategy: String,
+    #[serde(rename = "completionRate")]
+    pub completion_rate: f64,
+    #[serde(rename = "loopAvoidanceRate")]
+    pub loop_avoidance_rate: f64,
+    #[serde(rename = "avgContextBytes")]
+    pub avg_context_bytes: usize,
+    #[serde(rename = "compositeScore")]
+    pub composite_score: f64,
+    #[serde(rename = "burstCount")]
+    pub burst_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolMemorySnapshot {
+    #[serde(rename = "entryCount")]
+    pub entry_count: usize,
+    #[serde(rename = "maxEntries")]
+    pub max_entries: usize,
+    #[serde(rename = "errorCount")]
+    pub error_count: usize,
+    #[serde(rename = "duplicateCount")]
+    pub duplicate_count: usize,
+    #[serde(rename = "recentActionTypes")]
+    pub recent_action_types: Vec<String>,
+    #[serde(rename = "consecutiveSameType")]
+    pub consecutive_same_type: usize,
+    #[serde(rename = "hasObserveData")]
+    pub has_observe_data: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionTraceSnapshot {
+    #[serde(rename = "traceId")]
+    pub trace_id: String,
+    #[serde(rename = "agentId", default, skip_serializing_if = "String::is_empty")]
+    pub agent_id: String,
+    #[serde(rename = "taskCategory")]
+    pub task_category: String,
+    #[serde(rename = "selectedModel")]
+    pub selected_model: String,
+    #[serde(rename = "selectionReason")]
+    pub selection_reason: String,
+    #[serde(rename = "budgetUsagePct")]
+    pub budget_usage_pct: f64,
+    #[serde(rename = "feasibleCount")]
+    pub feasible_count: usize,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntiPatternSnapshot {
+    pub model: String,
+    pub category: String,
+    #[serde(rename = "failureSignature")]
+    pub failure_signature: String,
+    #[serde(rename = "failureCount")]
+    pub failure_count: u32,
+    #[serde(rename = "decayedWeight")]
+    pub decayed_weight: f64,
+    #[serde(rename = "lastSeen")]
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryLifecycleSnapshot {
+    pub promoted: usize,
+    pub distilled: usize,
+    pub expired: usize,
+    pub demoted: usize,
+    #[serde(rename = "transientTtlDays")]
+    pub transient_ttl_days: u32,
+    #[serde(rename = "promotionThreshold")]
+    pub promotion_threshold: u32,
+    #[serde(rename = "canonicalThreshold")]
+    pub canonical_threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GossipSnapshot {
+    #[serde(rename = "eventsReceived")]
+    pub events_received: u64,
+    #[serde(rename = "episodesSynthesized")]
+    pub episodes_synthesized: u64,
+    #[serde(rename = "lessonsStored")]
+    pub lessons_stored: u64,
+    #[serde(rename = "gossipPeers")]
+    pub gossip_peers: usize,
+    #[serde(rename = "lastEventSecsAgo", skip_serializing_if = "Option::is_none")]
+    pub last_event_secs_ago: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentContextInfo {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(
+        rename = "contextUtilizationPct",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_utilization_pct: Option<f64>,
+    pub alpha: f64,
+    #[serde(rename = "betaParam")]
+    pub beta_param: f64,
+    #[serde(rename = "expectedValue")]
+    pub expected_value: f64,
+    #[serde(rename = "totalObservations")]
+    pub total_observations: u64,
+    #[serde(
+        rename = "categoryStats",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub category_stats: Vec<CategoryStat>,
+}
+
+/// Mesh-wide ARP snapshot — one entry per agent.
+///
+/// Each agent in the mesh owns its own Agent Runtime Policy, so the panel
+/// is keyed by agent. The gateway includes its locally-loaded document as
+/// a synthetic `(local)` agent until per-agent A2A polling is wired.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpStatusSnapshot {
+    pub agents: Vec<AgentArpStatus>,
+    pub timestamp: String,
+}
+
+/// Per-agent ARP state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentArpStatus {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    /// Path the ARP document was loaded from (None if no document configured).
+    #[serde(rename = "documentPath", skip_serializing_if = "Option::is_none")]
+    pub document_path: Option<String>,
+    /// Whether the loaded document parsed and validated successfully.
+    #[serde(rename = "documentValid")]
+    pub document_valid: bool,
+    /// Parse / validation error if loading failed.
+    #[serde(rename = "loadError", skip_serializing_if = "Option::is_none")]
+    pub load_error: Option<String>,
+    /// Document summary (None if no document loaded).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<ArpDocumentSummary>,
+    /// Runtime PolicyCache state (None if cache not instantiated).
+    #[serde(rename = "policyCache", skip_serializing_if = "Option::is_none")]
+    pub policy_cache: Option<ArpPolicyCacheSnapshot>,
+    /// Adaptation engine state (None if engine not instantiated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adaptation: Option<ArpAdaptationSnapshot>,
+    /// Most recent decision-trace entries from arkavo-observability.
+    #[serde(
+        rename = "decisionTraces",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub decision_traces: Vec<ArpDecisionTraceEntry>,
+    /// Set when this agent entry represents a role within a SwarmFlight.
+    /// The UI uses this to label the entry with kit + role metadata
+    /// rather than the synthetic agent_id used for storage.
+    #[serde(rename = "flightContext", skip_serializing_if = "Option::is_none")]
+    pub flight_context: Option<FlightContext>,
+}
+
+/// Identifies a SwarmFlight role surfaced through the AG-UI ARP panel.
+///
+/// SwarmKit's `agent_provisioning` block hands off to the companion ARP
+/// specification at SwarmFlight start. When the gateway registers a flight,
+/// each role becomes addressable in the panel's agent dropdown; this struct
+/// carries enough metadata for the UI to render the role meaningfully
+/// instead of showing the synthetic per-role agent_id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightContext {
+    #[serde(rename = "flightId")]
+    pub flight_id: String,
+    #[serde(rename = "kitId")]
+    pub kit_id: String,
+    #[serde(rename = "kitName")]
+    pub kit_name: String,
+    #[serde(rename = "roleId")]
+    pub role_id: String,
+    #[serde(rename = "roleType")]
+    pub role_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpDocumentSummary {
+    #[serde(rename = "arpSpec")]
+    pub arp_spec: String,
+    #[serde(rename = "adlUri", skip_serializing_if = "Option::is_none")]
+    pub adl_uri: Option<String>,
+    #[serde(rename = "adlHash", skip_serializing_if = "Option::is_none")]
+    pub adl_hash: Option<String>,
+    #[serde(rename = "integritySigned")]
+    pub integrity_signed: bool,
+    #[serde(rename = "adaptationMethod")]
+    pub adaptation_method: String,
+    #[serde(rename = "qualityGate", skip_serializing_if = "Option::is_none")]
+    pub quality_gate: Option<ArpQualityGateSummary>,
+    #[serde(rename = "policyCacheConfig", skip_serializing_if = "Option::is_none")]
+    pub policy_cache_config: Option<ArpPolicyCacheConfigSummary>,
+    pub budget: ArpBudgetSummary,
+    #[serde(rename = "sectionsPresent")]
+    pub sections_present: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpQualityGateSummary {
+    pub threshold: f64,
+    pub metric: String,
+    #[serde(rename = "onFailure")]
+    pub on_failure: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheConfigSummary {
+    #[serde(rename = "ttlSec")]
+    pub ttl_sec: u64,
+    #[serde(rename = "decayStrategy")]
+    pub decay_strategy: String,
+    #[serde(rename = "halfLifeSec", skip_serializing_if = "Option::is_none")]
+    pub half_life_sec: Option<u64>,
+    #[serde(rename = "humanExempt")]
+    pub human_exempt: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpBudgetSummary {
+    #[serde(rename = "taskCeilingUsd")]
+    pub task_ceiling_usd: f64,
+    #[serde(rename = "onExhaustion")]
+    pub on_exhaustion: String,
+    #[serde(
+        rename = "maxSpendPerMinuteUsd",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_spend_per_minute_usd: Option<f64>,
+    #[serde(
+        rename = "maxToolCallsPerMinute",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_tool_calls_per_minute: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheSnapshot {
+    #[serde(rename = "entryCount")]
+    pub entry_count: usize,
+    #[serde(rename = "chainValid")]
+    pub chain_valid: bool,
+    pub entries: Vec<ArpPolicyCacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpPolicyCacheEntry {
+    pub key: String,
+    pub source: String,
+    pub influence: f64,
+    #[serde(rename = "ageSec")]
+    pub age_sec: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpAdaptationSnapshot {
+    pub method: String,
+    pub entities: Vec<ArpAdaptationEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpAdaptationEntity {
+    pub id: String,
+    pub alpha: f64,
+    pub beta: f64,
+    pub mean: f64,
+    pub observations: u32,
+    #[serde(rename = "inWarmup")]
+    pub in_warmup: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpDecisionTraceEntry {
+    #[serde(rename = "traceId")]
+    pub trace_id: String,
+    pub layer: String,
+    #[serde(rename = "eventType")]
+    pub event_type: String,
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "chosenEntity", skip_serializing_if = "Option::is_none")]
+    pub chosen_entity: Option<String>,
+    #[serde(rename = "selectionMethod", skip_serializing_if = "Option::is_none")]
+    pub selection_method: Option<String>,
+    /// Outcome.success from the trace; `false` indicates an attempted
+    /// policy violation that was blocked or denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+    /// Free-form denial reason or error type, when present.
+    #[serde(rename = "deniedReason", skip_serializing_if = "Option::is_none")]
+    pub denied_reason: Option<String>,
+    pub timestamp: String,
 }

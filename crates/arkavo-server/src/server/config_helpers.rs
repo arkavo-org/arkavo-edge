@@ -10,8 +10,16 @@ pub struct AgentMetadata {
     pub name: String,
     pub purpose: String,
     pub model: String,
+    pub mode: arkavo_protocol::agent_config::AgentMode,
     pub endpoint: String,
     pub api_keys: std::collections::HashMap<String, String>,
+    /// DID:key identifier derived from the agent's device keypair.
+    /// Shared across all protocols (A2A, gossip, metrics, UCP).
+    pub did: Option<String>,
+    /// ES256-signed delegation JWT binding human DID → agent DID.
+    pub delegation_jwt: Option<String>,
+    /// Entitlements granted via human delegation (from JWT scope claim).
+    pub delegated_entitlements: Vec<String>,
 }
 
 /// Simple agent configuration structure for validation
@@ -191,7 +199,7 @@ pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count
         }
 
         // Sort by modification time, newest first
-        backups.sort_by(|a, b| b.1.cmp(&a.1));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Remove old backups
         for (path, _) in backups.iter().skip(keep_count) {

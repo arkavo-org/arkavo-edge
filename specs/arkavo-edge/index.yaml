@@ -1,9 +1,21 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.58.0
-last_updated: 2025-02-05
+version: 0.67.6
+last_updated: 2026-03-22
 
 components:
+  - name: trusted-agent
+    file: trusted-agent.spec.yaml
+    module: cross_cutting
+    description: End-to-end trust establishment for agent mesh participation
+    criticality: critical
+    scenario_count: 7
+    invariants:
+      - Deny-by-default mesh access
+      - Forward-only trust chain
+      - No ambient authority from mesh membership
+      - Attestation binds to device identity
+
   - name: registration
     file: registration.spec.yaml
     module: arkavo_protocol::registration
@@ -253,9 +265,9 @@ components:
       - Token usage tracked
       - Context length respected
 
-  - name: workspace
+  - name: mcp-workspace
     file: workspace.spec.yaml
-    module: arkavo_workspace
+    module: arkavo_mcp_workspace
     description: Containerized workspace management
     criticality: high
     scenario_count: 6
@@ -385,9 +397,9 @@ components:
       - secp256k1 for signing
       - EIP-55 checksum compliance
 
-  - name: code-search
+  - name: mcp-code-search
     file: code-search.spec.yaml
-    module: arkavo_code_search
+    module: arkavo_mcp_code_search
     description: Code search and refactoring tools
     criticality: medium
     scenario_count: 5
@@ -540,11 +552,32 @@ components:
     module: arkavo_agui
     description: Arkavo GUI application gateway
     criticality: high
-    scenario_count: 8
+    scenario_count: 12
     invariants:
       - AgUiGateway manages connections
       - mDNS discovery for peers
       - Health and ROI metrics
+      - Context topology aggregated from pushed telemetry
+
+  - name: swarmkit
+    file: swarmkit.spec.yaml
+    module: arkavo_swarmkit
+    description: SwarmKit manifest, runtime, and AG-UI gateway integration
+    criticality: high
+    scenario_count: 35
+    invariants:
+      - kit.id equals BLAKE3 of canonical manifest
+      - SwarmFlight builds one ArpRuntime per role at launch
+      - Per-role DecisionTrace and PolicyCache are isolated
+      - ARKAVO_SWARMKIT_PATH auto-launch failures are non-fatal
+      - requestStopFlight deregisters every role of a flight in one call
+      - Identical ArpStatusUpdate payloads do not cause panel re-renders
+      - TDF envelope round-trips the manifest losslessly under canonical-form serialization
+      - role_policy splits attributes at the last "/" into (fqn, value)
+      - Per-role policies bind to agent DIDs via the dissemination list (spec §6.3 example)
+      - .swarmkit.tdf file format is canonical JSON of the TdfManifest struct
+      - unwrap_manifest_kas_gated fails fast on unhealthy KAS or policy mismatch before invoking the decryptor
+      - Auto-launch dispatches on file extension (.tdf vs .yaml / .json)
 
   - name: ui-core
     file: ui-core.spec.yaml
@@ -702,10 +735,147 @@ components:
       - Sessions can be revoked immediately
       - Logs never contain secrets or PII
 
+  - name: agent-sdk
+    file: agent-sdk.spec.yaml
+    module: anthropic_agent_sdk
+    description: Claude Agent SDK streaming and client
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Streaming messages yield in-order
+      - ClaudeSDKClient manages bidirectional communication
+      - Options builder validates required fields before build
+
+  - name: agent
+    file: agent.spec.yaml
+    module: arkavo_agent
+    description: Agent lifecycle management
+    criticality: critical
+    scenario_count: 5
+    invariants:
+      - Agent card describes capabilities
+      - Lifecycle transitions are valid
+      - Health checks report accurate state
+
+  - name: evofabric
+    file: evofabric.spec.yaml
+    module: arkavo_evofabric
+    description: AST-level code evolution
+    criticality: high
+    scenario_count: 8
+    invariants:
+      - AST edits preserve semantics
+      - Conflict detection before merge
+      - Rollback on failed evolution
+
+  - name: kv-cache
+    file: kv-cache.spec.yaml
+    module: arkavo_kv_cache
+    description: KV cache context slots
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - Slot allocation bounded
+      - Eviction respects priority
+      - Cache coherent across requests
+
+  - name: llama-cpp
+    file: llama-cpp.spec.yaml
+    module: arkavo_llama_cpp
+    description: Local LLM inference engine
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Model loading validates GGUF format
+      - GPU layers auto-detected
+      - Context size bounded by model
+
+  - name: mcp-traits
+    file: mcp-traits.spec.yaml
+    module: arkavo_mcp
+    description: MCP core traits and types
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Tool trait defines execution contract
+      - Schema validation on parameters
+      - Error types propagate context
+
+  - name: openclaw
+    file: openclaw.spec.yaml
+    module: arkavo_openclaw
+    description: OpenClaw protocol adapter
+    criticality: high
+    scenario_count: 6
+    invariants:
+      - Protocol messages validated
+      - Connection lifecycle managed
+      - Retry with backoff
+
+  - name: qr-registration
+    file: qr-registration.spec.yaml
+    module: arkavo_registration
+    description: Agent QR registration and authorization URLs
+    criticality: high
+    scenario_count: 5
+    invariants:
+      - QR encodes valid URL
+      - Short SHA identifies agent
+      - Terminal rendering scannable
+
+  - name: security
+    file: security.spec.yaml
+    module: arkavo_security
+    description: Security services
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Input sanitization on boundaries
+      - Rate limiting enforced
+      - Secrets never logged
+
+  - name: sequence-integrity
+    file: sequence-integrity.spec.yaml
+    module: arkavo_sequence_integrity
+    description: Agent behavioral sequence integrity and taint tracking
+    criticality: critical
+    scenario_count: 17
+    invariants:
+      - Every tool call is taint-tracked from data source to data sink
+      - Action sequences are evaluated as directed graphs, not isolated calls
+      - Cross-session decomposition detected via persistent sequence ledger
+      - Sensitive data classification propagates through transformation steps
+      - Pre-execution gates enforce sequence-aware policy
+      - Sequence anomaly detection adds <50μs overhead per tool call
+      - CriticPipeline CircuitCheck evaluates sequence context
+      - Egress decisions incorporate data provenance
+
+  - name: server
+    file: server.spec.yaml
+    module: arkavo_server
+    description: A2A server and runtime orchestration
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Server binds localhost by default
+      - JSON-RPC 2.0 protocol
+      - Graceful shutdown
+
+  - name: validation
+    file: validation.spec.yaml
+    module: arkavo_validation
+    description: Centralized input validation
+    criticality: high
+    scenario_count: 7
+    invariants:
+      - All external input validated
+      - Validation errors descriptive
+      - Schema-driven validation
+
 stats:
-  total_specs: 61
-  total_scenarios: 531
-  critical_scenarios: 123
+  total_specs: 73
+  total_scenarios: 621
+  critical_scenarios: 160
   coverage_areas:
     - authentication
     - authorization
@@ -759,6 +929,11 @@ stats:
     - rlm_activation
     - response_processing
     - sampling_parameters
+    - sequence_integrity
+    - data_provenance
+    - taint_tracking
+    - behavioral_baseline
+    - cross_session_analysis
 
 # Cross-component behaviors
 integration_points:
@@ -1042,6 +1217,26 @@ integration_points:
     description: Response analysis improves conversation quality
     specs: [CRIT-011, CRIT-012, CHAT-017]
 
+  - name: Sequence Integrity → Titan
+    description: Sequence integrity uses Titan for drift detection
+    specs: [SEQ-013, TITAN-001]
+
+  - name: Sequence Integrity → Validation
+    description: Egress filter enhanced with provenance tracking
+    specs: [SEQ-014, VAL-005]
+
+  - name: Sequence Integrity → Events
+    description: Security events include sequence evidence
+    specs: [SEQ-015, EVENT-003]
+
+  - name: Sequence Integrity → Critic
+    description: CircuitCheck evaluates sequence context
+    specs: [SEQ-010, CRIT-003]
+
+  - name: Sequence Integrity → Session Security
+    description: Session security enhanced with taint tracking
+    specs: [SEQ-001, SEQ-003, SESS-010]
+
   - name: Memory → Context
     description: Context ledger uses memory storage
     specs: [MEM-003, MEM-004, CTX-009, CTX-010]
@@ -1049,3 +1244,27 @@ integration_points:
   - name: Router → Chat Session
     description: Response processing sanitizes chat output
     specs: [ROUTER-011, ROUTER-012, ROUTER-013, CHAT-024]
+
+  - name: Trusted Agent → Device Identity
+    description: Trust chain Phase 1 uses device identity key generation
+    specs: [TA-001, DEVICE-001]
+
+  - name: Trusted Agent → Attestation
+    description: Trust chain Phase 2 uses platform attestation
+    specs: [TA-001, TA-002, ATT-002, ATT-003]
+
+  - name: Trusted Agent → Registration
+    description: Trust chain Phase 3 uses challenge-response registration
+    specs: [TA-001, REG-001, REG-002]
+
+  - name: Trusted Agent → Agent Auth
+    description: Trust chain Phase 4 uses token authentication
+    specs: [TA-001, TA-003, AAUTH-001]
+
+  - name: Trusted Agent → Config Encryption
+    description: Trust chain Phase 5 encrypts config bundle via OpenTDF
+    specs: [TA-001, CFGE-002]
+
+  - name: Trusted Agent → Config Transport
+    description: Trust chain Phase 6 delivers encrypted config over A2A
+    specs: [TA-001, TA-006, CFGT-002, CFGT-003]

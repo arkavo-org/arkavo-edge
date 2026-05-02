@@ -49,7 +49,7 @@ impl TaskCategory {
             "refactoring" | "refactor" => Self::Refactoring,
             "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
-            "game_simulation" | "game" | "colony" | "simulation" => Self::GameSimulation,
+            "game_simulation" | "game" | "simulation" | "environment" => Self::GameSimulation,
             _ => Self::General,
         }
     }
@@ -228,11 +228,11 @@ impl Classification {
         // Sentence count
         let sentence_count = task.matches(". ").count() + task.matches("? ").count() + 1;
 
-        // Determine if multi-step
-        let is_multi_step = step_count >= 2
-            || has_complexity_keyword
-            || (verb_count >= 3 && sentence_count >= 3)
-            || task.len() > 300;
+        // Determine if multi-step — require strong signal, not just length.
+        // Agent cycle prompts contain ToolMemory output and specialist context
+        // that routinely exceed 300 chars without being multi-step tasks.
+        let is_multi_step =
+            step_count >= 2 || has_complexity_keyword || (verb_count >= 3 && sentence_count >= 3);
 
         // Estimate subtasks
         let estimated_subtasks = if is_multi_step {
@@ -308,18 +308,14 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
         || lower.contains("ui from")
     {
         TaskCategory::VisionAnalysis
-    } else if lower.contains("colony")
-        || lower.contains("colonist")
-        || contains_word(&lower, "zone")
+    } else if contains_word(&lower, "zone")
         || lower.contains("defend")
         || contains_word(&lower, "raid")
         || lower.contains("harvest")
         || contains_word(&lower, "craft")
-        || lower.contains("caravan")
-        || lower.contains("rimworld")
-        || lower.contains("pawns")
-        || lower.contains("plant_")
         || lower.contains("stockpile")
+        || lower.contains("simulation")
+        || lower.contains("environment")
     {
         TaskCategory::GameSimulation
     } else {
@@ -525,18 +521,14 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
-        } else if task_lower.contains("colony")
-            || task_lower.contains("colonist")
-            || contains_word(&task_lower, "zone")
+        } else if contains_word(&task_lower, "zone")
             || task_lower.contains("defend")
             || contains_word(&task_lower, "raid")
             || task_lower.contains("harvest")
             || contains_word(&task_lower, "craft")
-            || task_lower.contains("caravan")
-            || task_lower.contains("rimworld")
-            || task_lower.contains("pawns")
-            || task_lower.contains("plant_")
             || task_lower.contains("stockpile")
+            || task_lower.contains("simulation")
+            || task_lower.contains("environment")
         {
             (
                 TaskCategory::GameSimulation,
@@ -769,18 +761,14 @@ impl TaskClassifier {
                 0.90,
                 "Keywords match vision/screenshot analysis".to_string(),
             )
-        } else if task_lower.contains("colony")
-            || task_lower.contains("colonist")
-            || contains_word(&task_lower, "zone")
+        } else if contains_word(&task_lower, "zone")
             || task_lower.contains("defend")
             || contains_word(&task_lower, "raid")
             || task_lower.contains("harvest")
             || contains_word(&task_lower, "craft")
-            || task_lower.contains("caravan")
-            || task_lower.contains("rimworld")
-            || task_lower.contains("pawns")
-            || task_lower.contains("plant_")
             || task_lower.contains("stockpile")
+            || task_lower.contains("simulation")
+            || task_lower.contains("environment")
         {
             (
                 TaskCategory::GameSimulation,
@@ -907,19 +895,19 @@ mod tests {
         );
         // Game/simulation tasks
         assert_eq!(
-            classify_task_keywords("Build a defensive perimeter around the colony"),
+            classify_task_keywords("Build a defensive perimeter in the zone"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Plant_Rice in growing zone 1"),
+            classify_task_keywords("Set up a stockpile for resources"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Manage colonist work priorities"),
+            classify_task_keywords("Defend against the raid"),
             TaskCategory::GameSimulation
         );
         assert_eq!(
-            classify_task_keywords("Send a caravan to trade"),
+            classify_task_keywords("Harvest crops from the field"),
             TaskCategory::GameSimulation
         );
     }
@@ -956,10 +944,12 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_complexity_long_task() {
-        let task = "a ".repeat(200); // 400 chars > 300 threshold
+    fn test_detect_complexity_long_task_not_complex() {
+        // Length alone should not trigger complexity — agent cycle prompts
+        // routinely exceed 300 chars with ToolMemory output.
+        let task = "a ".repeat(200); // 400 chars of repetitive text
         let (is_complex, _) = Classification::detect_complexity(&task);
-        assert!(is_complex);
+        assert!(!is_complex);
     }
 
     #[test]

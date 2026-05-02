@@ -13,7 +13,7 @@ use crate::message::PatchVote;
 pub const DEFAULT_QUORUM_THRESHOLD: f64 = 0.67;
 
 /// Default vote timeout
-pub const DEFAULT_VOTE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_VOTE_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Configuration for quorum consensus
 #[derive(Debug, Clone, Serialize, Deserialize)]

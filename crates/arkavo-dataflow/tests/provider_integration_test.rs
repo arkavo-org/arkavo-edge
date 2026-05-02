@@ -210,11 +210,11 @@ async fn test_provider_error_handling() {
 
     // Test rate limit error
     let error = ProviderError::RateLimited {
-        retry_after: Some(Duration::from_secs(60)),
+        retry_after: Some(Duration::from_mins(1)),
         message: Some("Too many requests".to_string()),
     };
     assert!(error.is_retryable());
-    assert_eq!(error.retry_delay(), Some(Duration::from_secs(60)));
+    assert_eq!(error.retry_delay(), Some(Duration::from_mins(1)));
 
     // Test authentication error
     let error = ProviderError::AuthenticationFailed {

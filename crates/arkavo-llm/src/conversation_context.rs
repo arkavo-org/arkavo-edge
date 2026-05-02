@@ -78,7 +78,7 @@ pub struct ConversationContextManager {
 impl ConversationContextManager {
     /// Create a new manager with the given context pool
     pub fn new(pool: Arc<ContextPool>) -> Self {
-        Self::with_timeout(pool, Duration::from_secs(300)) // 5 minute default
+        Self::with_timeout(pool, Duration::from_mins(5))
     }
 
     /// Create a new manager with custom idle timeout

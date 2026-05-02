@@ -288,7 +288,7 @@ pub fn spawn_cleanup_task(
     metrics_callback: Option<MetricsCallback>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut cleanup_interval = interval(Duration::from_secs(60)); // Run every minute
+        let mut cleanup_interval = interval(Duration::from_mins(1));
         cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -310,7 +310,9 @@ pub fn spawn_cleanup_task(
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SEC-003")]
     #[test]
     fn test_rate_limit_config_default() {
         let config = RateLimitConfig::default();
@@ -321,12 +323,14 @@ mod tests {
         assert_eq!(config.ip_entry_ttl_seconds, 3600);
     }
 
+    #[spec("SEC-003")]
     #[test]
     fn test_rate_limiter_creation() {
         let config = RateLimitConfig::default();
         let _limiter = RateLimiter::new(config);
     }
 
+    #[spec("SEC-003")]
     #[test]
     fn test_rate_limiter_disabled() {
         let mut config = RateLimitConfig::default();
@@ -337,6 +341,7 @@ mod tests {
         assert!(limiter.check_rate_limit().is_ok());
     }
 
+    #[spec("SEC-003")]
     #[test]
     fn test_rate_limiter_basic() {
         let mut config = RateLimitConfig::default();
@@ -356,6 +361,7 @@ mod tests {
         ));
     }
 
+    #[spec("SEC-003")]
     #[test]
     fn test_ip_rate_limiter() {
         let config = RateLimitConfig {
@@ -380,6 +386,7 @@ mod tests {
         assert!(limiter.check_rate_limit(ip2).is_ok());
     }
 
+    #[spec("SEC-003")]
     #[test]
     fn test_rate_limit_status() {
         let config = RateLimitConfig::default();

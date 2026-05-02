@@ -103,6 +103,14 @@ pub enum LearningEvent {
         /// DecisionTrace ID of the action being reinforced
         trace_id: Option<Uuid>,
     },
+    /// Contract negotiation outcome (feeds Thompson Sampling)
+    ContractOutcome {
+        contract_id: Uuid,
+        /// Which outcome: FirstRound, Revised, or Escalated
+        outcome: arkavo_router::learning::ContractOutcome,
+        /// Which model was the operator
+        model_name: Option<String>,
+    },
 }
 
 /// Behavior advice based on learned lessons
@@ -176,6 +184,13 @@ pub struct LearningBus {
     pain_tx: Option<mpsc::Sender<PainSignal>>,
     /// Lock-free bridge for patchlet message forwarding (set once at startup)
     patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
+    /// Task completions received via gossip (pushed by specialists)
+    pub(super) task_completions: Arc<RwLock<Vec<arkavo_gossip::TaskCompletionNotice>>>,
+    /// Peer GPU inference state (updated via gossip broadcasts)
+    pub(super) peer_inference_state:
+        Arc<RwLock<HashMap<String, arkavo_gossip::InferenceStateBroadcast>>>,
+    /// Task counter for periodic consolidation
+    tasks_since_consolidation: Arc<AtomicU64>,
 }
 
 impl LearningBus {
@@ -255,7 +270,20 @@ impl LearningBus {
             last_event_at: Arc::new(RwLock::new(None)),
             pain_tx: None,
             patchlet_bridge: OnceLock::new(),
+            task_completions: Arc::new(RwLock::new(Vec::new())),
+            peer_inference_state: Arc::new(RwLock::new(HashMap::new())),
+            tasks_since_consolidation: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Increment task counter and return true if consolidation is due.
+    pub fn should_consolidate(&self) -> bool {
+        const CONSOLIDATION_INTERVAL: u64 = 50;
+        let count = self
+            .tasks_since_consolidation
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        count.is_multiple_of(CONSOLIDATION_INTERVAL)
     }
 
     /// Initialize the persistent learning store and load existing lessons
@@ -391,6 +419,81 @@ impl LearningBus {
     /// Get address for a peer
     pub async fn get_peer_address(&self, peer_id: &str) -> Option<String> {
         self.peer_addresses.read().await.get(peer_id).cloned()
+    }
+
+    /// Drain task completions received via gossip push.
+    pub async fn drain_task_completions(&self) -> Vec<arkavo_gossip::TaskCompletionNotice> {
+        self.task_completions.write().await.drain(..).collect()
+    }
+
+    /// Count GPU-active peers on a given device, expiring entries older than 30s.
+    pub async fn gpu_peers_active(&self, device_id: &str) -> u32 {
+        let now = chrono::Utc::now();
+        let state = self.peer_inference_state.read().await;
+        state
+            .values()
+            .filter(|s| {
+                s.device_id == device_id
+                    && s.active_count > 0
+                    && (now - s.timestamp).num_seconds() < 30
+            })
+            .map(|s| s.active_count)
+            .sum()
+    }
+
+    /// Write a corrective lesson directly to PolicyCache, bypassing the
+    /// observation → episode → lesson accumulation pipeline. Used for tool
+    /// errors where the error message is ground truth (no synthesis needed).
+    pub async fn add_fast_lesson(&self, tool_name: &str, error_msg: &str) {
+        use arkavo_router::learning::{Lesson, LessonPattern};
+
+        let condition = format!("calling {tool_name}");
+        let action = format!("avoid: {error_msg}");
+
+        // Dedup via normalized failure mode key
+        {
+            let pattern = LessonPattern::new(condition.clone(), action.clone(), String::new());
+            let failure_key = pattern.failure_mode_key();
+            let cache = self.policy_cache.read().await;
+            if cache.has_failure_mode(&failure_key, "tool_error") {
+                tracing::debug!(tool = tool_name, "Skipping duplicate fast-path lesson");
+                return;
+            }
+        }
+
+        let pattern = LessonPattern::new(
+            condition,
+            action,
+            "prevent repeated tool failures".to_string(),
+        );
+        let lesson = Lesson::new(
+            self.agent_id.clone(),
+            self.swarm_id.clone(),
+            "tool_error".to_string(),
+            pattern,
+            0.9,
+            1,
+        );
+        // Persist to SQLite so lessons survive restarts
+        if let Some(ref store) = *self.learning_store.read().await
+            && let Err(e) = store.store_lesson(&lesson).await
+        {
+            tracing::warn!(tool = tool_name, "Failed to persist fast-path lesson: {e}");
+        }
+        let mut cache = self.policy_cache.write().await;
+        cache.add_lesson(lesson);
+        tracing::info!(tool = tool_name, "Fast-path lesson added from tool error");
+    }
+
+    /// Broadcast a gossip message to all connected peers.
+    pub async fn broadcast_to_peers(&self, message: GossipMessage) {
+        let gossip = self.gossip.read().await;
+        let peers = gossip.select_propagation_peers(None).await;
+        drop(gossip);
+
+        for peer_id in &peers {
+            let _ = self.gossip_out_tx.send((peer_id.clone(), message.clone()));
+        }
     }
 
     /// Get all peer addresses
@@ -565,6 +668,7 @@ impl arkavo_observability::health_reporter::HealthReporter for LearningPipelineR
 mod tests {
     use super::*;
     use arkavo_router::learning::{Lesson, LessonPattern};
+    use arkavo_test_macros::spec;
 
     fn make_bus() -> LearningBus {
         let keypair = Arc::new(AgentKeypair::generate());
@@ -576,6 +680,7 @@ mod tests {
         )
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_learning_bus_creation() {
         let bus = make_bus();
@@ -585,6 +690,7 @@ mod tests {
         assert_eq!(bus.peer_count().await, 0);
     }
 
+    #[spec("SRV-005")]
     #[tokio::test]
     async fn test_peer_management() {
         let keypair = Arc::new(AgentKeypair::generate());
@@ -603,6 +709,7 @@ mod tests {
         assert_eq!(bus.peer_count().await, 0);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_behavior_guidance_via_bus() {
         let bus = make_bus();
@@ -626,6 +733,7 @@ mod tests {
         assert!(guidance.contains("generic non-answers"));
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_record_quality_via_bus() {
         let bus = make_bus();
@@ -637,6 +745,7 @@ mod tests {
         assert_eq!(trends[0].scores, vec![0.5]);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_behavior_lesson_count_via_bus() {
         let bus = make_bus();
@@ -660,6 +769,7 @@ mod tests {
         assert_eq!(bus.behavior_lesson_count().await, 3);
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_lesson_receiver_stores_in_policy_cache() {
         let bus = make_bus();
@@ -695,6 +805,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_stats_initial() {
         let bus = make_bus();
@@ -706,6 +817,7 @@ mod tests {
         assert!(stats.last_event_secs_ago.is_none());
     }
 
+    #[spec("SRV-004")]
     #[tokio::test]
     async fn test_stats_after_events() {
         let bus = make_bus();

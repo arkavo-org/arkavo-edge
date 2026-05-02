@@ -20,18 +20,17 @@ async fn test_socket_path_validation_rejects_invalid_paths() {
 
         assert!(
             result.is_err(),
-            "Path '{}' should be rejected but was accepted",
-            path
+            "Path '{path}' should be rejected but was accepted"
         );
 
         match result {
             Err(CefError::InvalidSocketPath(_)) => {
-                println!("✓ Path '{}' correctly rejected", path);
+                println!("✓ Path '{path}' correctly rejected");
             }
             Err(other) => {
-                println!("Path '{}' rejected with error: {:?}", path, other);
+                println!("Path '{path}' rejected with error: {other:?}");
             }
-            Ok(_) => panic!("Path '{}' should have been rejected", path),
+            Ok(_) => panic!("Path '{path}' should have been rejected"),
         }
     }
 }
@@ -49,19 +48,16 @@ async fn test_socket_path_validation_accepts_valid_paths() {
 
         match result {
             Err(CefError::InvalidSocketPath(msg)) => {
-                panic!("Valid path '{}' rejected: {}", path, msg);
+                panic!("Valid path '{path}' rejected: {msg}");
             }
-            Err(CefError::UdsConnectionFailed(_)) | Err(CefError::ConnectionTimeout) => {
-                println!(
-                    "✓ Path '{}' passed validation (connection failed as expected)",
-                    path
-                );
+            Err(CefError::UdsConnectionFailed(_) | CefError::ConnectionTimeout) => {
+                println!("✓ Path '{path}' passed validation (connection failed as expected)");
             }
             Ok(_) => {
-                println!("✓ Path '{}' connected successfully", path);
+                println!("✓ Path '{path}' connected successfully");
             }
             Err(other) => {
-                println!("Path '{}' failed with: {:?}", path, other);
+                println!("Path '{path}' failed with: {other:?}");
             }
         }
     }
@@ -81,8 +77,7 @@ async fn test_socket_path_too_long() {
     if let Err(CefError::InvalidSocketPath(msg)) = result {
         assert!(
             msg.contains("too long"),
-            "Error message should mention length: {}",
-            msg
+            "Error message should mention length: {msg}"
         );
     }
 }
@@ -99,7 +94,7 @@ async fn test_connection_timeout_on_nonexistent_socket() {
 
     let elapsed = start.elapsed();
 
-    println!("Connection attempt took: {:?}", elapsed);
+    println!("Connection attempt took: {elapsed:?}");
 
     match result {
         Ok(Ok(_)) => panic!("Should not successfully connect to non-existent socket"),
@@ -107,15 +102,14 @@ async fn test_connection_timeout_on_nonexistent_socket() {
             println!("✓ Connection correctly timed out");
             assert!(
                 elapsed < Duration::from_secs(12),
-                "Timeout should occur within 12 seconds, took {:?}",
-                elapsed
+                "Timeout should occur within 12 seconds, took {elapsed:?}"
             );
         }
         Ok(Err(CefError::UdsConnectionFailed(_))) => {
             println!("✓ Connection correctly failed immediately");
         }
         Ok(Err(other)) => {
-            println!("Connection failed with: {:?}", other);
+            println!("Connection failed with: {other:?}");
         }
         Err(_) => {
             panic!("Test timeout - internal connection timeout may not be working");
@@ -218,7 +212,7 @@ async fn test_event_deserialization() {
 async fn test_invalid_event_deserialization() {
     use arkavo_cef::protocol::Protocol;
 
-    let invalid_events = vec![
+    let invalid_events = [
         vec![],
         vec![0x01],
         vec![0x02],
@@ -229,10 +223,9 @@ async fn test_invalid_event_deserialization() {
         let result = Protocol::deserialize_event(data);
         assert!(
             result.is_err(),
-            "Invalid event #{} should fail deserialization",
-            i
+            "Invalid event #{i} should fail deserialization"
         );
-        println!("✓ Invalid event #{} correctly rejected", i);
+        println!("✓ Invalid event #{i} correctly rejected");
     }
 }
 
@@ -261,9 +254,9 @@ async fn test_sequential_transport_operations() {
     let mut transport = UdsTransport::connect(&socket_path).await.unwrap();
 
     for i in 0..10 {
-        let data = format!("message_{}", i).into_bytes();
+        let data = format!("message_{i}").into_bytes();
         let result = transport.send_raw(&data).await;
-        assert!(result.is_ok(), "Send operation {} should succeed", i);
+        assert!(result.is_ok(), "Send operation {i} should succeed");
     }
 
     println!("✓ Sequential operations completed");

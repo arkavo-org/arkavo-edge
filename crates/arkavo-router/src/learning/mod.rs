@@ -35,11 +35,13 @@
 
 mod agent_utility;
 mod config;
+pub mod continuous_signal;
 pub mod coordination;
 pub mod decision_trace;
 mod feedback_types;
 pub mod human_teaching;
 mod module;
+pub mod normalization;
 mod persistence;
 mod planner_score;
 mod store;
@@ -49,6 +51,7 @@ pub mod velocity;
 
 pub use agent_utility::{AgentUtility, BetaPrior};
 pub use config::LearningConfig;
+pub use continuous_signal::{ContractOutcome, contract_outcome_to_feedback, rubric_to_feedback};
 pub use coordination::{CoordinationMetrics, MetricsCollector, MovingAverage};
 pub use decision_trace::{DecisionTrace, SelectionReason};
 pub use feedback_types::{AgentContribution, BurstFeedback, FinalTaskReport, QualityMetrics};

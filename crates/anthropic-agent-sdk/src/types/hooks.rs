@@ -410,7 +410,9 @@ impl std::fmt::Debug for HookMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_post_tool_use_hook_input_with_tool_use_id() {
         // CLI < 2.0.75 format with tool_use_id
@@ -430,6 +432,7 @@ mod tests {
         assert_eq!(input.tool_use_id, Some("tool_123".to_string()));
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_post_tool_use_hook_input_without_tool_use_id() {
         // CLI >= 2.0.75 format without tool_use_id
@@ -448,6 +451,7 @@ mod tests {
         assert!(input.tool_use_id.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_post_tool_use_failure_hook_input_with_tool_use_id() {
         let json = serde_json::json!({
@@ -466,6 +470,7 @@ mod tests {
         assert_eq!(input.tool_use_id, Some("tool_456".to_string()));
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_post_tool_use_failure_hook_input_without_tool_use_id() {
         // CLI >= 2.0.75 format
@@ -484,6 +489,7 @@ mod tests {
         assert!(input.tool_use_id.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_subagent_stop_hook_input_with_agent_fields() {
         // CLI < 2.0.75 format with agent_id and agent_transcript_path
@@ -506,6 +512,7 @@ mod tests {
         );
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_subagent_stop_hook_input_without_agent_fields() {
         // CLI >= 2.0.75 format without agent_id and agent_transcript_path
@@ -523,6 +530,7 @@ mod tests {
         assert!(input.agent_transcript_path.is_none());
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_hook_output_serialization_omits_none() {
         let output = HookOutput::default();
@@ -531,6 +539,7 @@ mod tests {
         assert_eq!(json, "{}");
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_hook_output_with_decision() {
         let output = HookOutput {
@@ -544,6 +553,7 @@ mod tests {
         assert!(json.contains("\"systemMessage\":\"Blocked for safety\""));
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_hook_event_serde() {
         let event = HookEvent::PreToolUse;
@@ -554,6 +564,7 @@ mod tests {
         assert_eq!(parsed, HookEvent::PreToolUse);
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_session_start_source_serde() {
         let source = SessionStartSource::Resume;
@@ -564,6 +575,7 @@ mod tests {
         assert_eq!(parsed, SessionStartSource::Startup);
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_session_end_reason_serde() {
         let reason = SessionEndReason::PromptInputExit;
@@ -574,6 +586,7 @@ mod tests {
         assert_eq!(parsed, SessionEndReason::Clear);
     }
 
+    #[spec("CASDK-005")]
     #[test]
     fn test_compact_trigger_serde() {
         let trigger = CompactTrigger::Auto;

@@ -1,0 +1,18 @@
+[package]
+name = "arkavo-adaptation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Thompson Sampling adaptation engine for Agent Runtime Policy"
+
+[dependencies]
+arkavo-arp = { path = "../arkavo-arp" }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]

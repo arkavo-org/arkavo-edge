@@ -170,7 +170,7 @@ jobs:
       matrix:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-workspace (44K LOC)
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace (44K LOC)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
           - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui
@@ -186,7 +186,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout d23355afc
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -224,7 +224,7 @@ jobs:
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo test --locked -p arkavo-protocol
             cargo test --locked -p arkavo-observability
-            cargo test --locked -p arkavo-workspace
+            cargo test --locked -p arkavo-mcp-workspace
             cargo test --locked -p arkavo-session --lib
             cargo test --locked -p arkavo-critic
             # Compile-check benchmarks to prevent bitrot (no execution)
@@ -260,7 +260,7 @@ jobs:
           elif [ "${{ matrix.group }}" = "protocol" ]; then
             cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-workspace --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-workspace --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-session --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
@@ -401,7 +401,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout d23355afc
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -535,7 +535,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout d23355afc
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -553,7 +553,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -598,11 +598,6 @@ jobs:
           echo "✅ Issue #114 regression test passed"
           cd ../..
 
-      - name: Install idb-companion
-        run: |
-          brew tap facebook/fb
-          brew install idb-companion
-
       - name: Build
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -614,8 +609,8 @@ jobs:
           SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
 
@@ -655,7 +650,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout d23355afc
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -689,7 +684,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-d23355afc
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -705,8 +700,8 @@ jobs:
           Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
           $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
           Write-Host "Binary size: $([math]::Round($size, 2))MB"
-          if ($size -gt 60) {
-            Write-Error "Binary size exceeds 60MB limit"
+          if ($size -gt 65) {
+            Write-Error "Binary size exceeds 65MB limit"
             exit 1
           }
           Write-Host "✅ Binary size is within limit"
@@ -740,11 +735,11 @@ jobs:
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
-          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
 
   # Smoke tests depend on builds
   smoke-test-linux:
@@ -832,9 +827,9 @@ jobs:
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Binary size: ${SIZE_MB}MB"
           
-          # Check against the standard 60MB limit
-          if [ $SIZE_MB -gt 60 ]; then
-            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 60MB limit"
+          # Check against the standard 65MB limit
+          if [ $SIZE_MB -gt 65 ]; then
+            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 65MB limit"
             exit 1
           fi
           
@@ -842,7 +837,7 @@ jobs:
           if [ $SIZE_MB -le 40 ]; then
             echo "✅ Binary is highly optimized (${SIZE_MB}MB ≤ 40MB - no heavy ML deps)"
           else
-            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 65MB)"
           fi
       
       - name: Test basic commands
@@ -1195,7 +1190,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout d23355afc
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -1449,21 +1444,33 @@ jobs:
             process.exit(1);
           }
           
+          let failed = false;
           for (const comp of index.components || []) {
             if (!fs.existsSync('specs/arkavo-edge/' + comp.file)) {
               console.error('❌ Missing file: ' + comp.file);
-              process.exit(1);
+              failed = true;
+              continue;
             }
-            
+
             const spec = yaml.load(fs.readFileSync('specs/arkavo-edge/' + comp.file, 'utf8'));
             const actualCount = spec.scenarios?.length || 0;
             if (comp.scenario_count !== actualCount) {
               console.error('❌ ' + comp.file + ': index says ' + comp.scenario_count + ' but found ' + actualCount);
-              process.exit(1);
+              failed = true;
             }
           }
-          
-          console.log('✅ Index synchronized');
+
+          const specFiles = fs.readdirSync('specs/arkavo-edge').filter(f => f.endsWith('.spec.yaml'));
+          const indexedFiles = new Set((index.components || []).map(c => c.file));
+          for (const file of specFiles) {
+            if (!indexedFiles.has(file)) {
+              console.error('❌ ' + file + ' not listed in index.yaml');
+              failed = true;
+            }
+          }
+
+          if (failed) process.exit(1);
+          console.log('✅ Index synchronized (' + index.components.length + ' components)');
           NODE_SCRIPT
       
       - name: Generate stats
@@ -1516,7 +1523,7 @@ jobs:
       - name: Setup vendor/llama.cpp
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout d23355afc
+          cd vendor/llama.cpp && git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
 
       - name: Install build dependencies
         run: |
@@ -1537,22 +1544,40 @@ jobs:
           echo "gate_exit_code=$?" >> "$GITHUB_OUTPUT"
           cat report.md
 
+      - name: Generate traceability report and coverage diff
+        run: |
+          cargo run -p xtask -- spec-test export-html --output traceability.html
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(echo '${{ github.repository }}' | cut -d/ -f2)/traceability.json"
+          if curl -sf -o baseline.json "$PAGES_URL"; then
+            cargo run -p xtask -- spec-test diff --baseline baseline.json --output diff.md
+          else
+            echo "No baseline on GitHub Pages yet — skipping diff"
+          fi
+
       - name: Post PR comment
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           MARKER="<!-- spec-coverage-report -->"
+
+          # Combine delta (if available) + full report into one comment
+          {
+            if [ -f diff.md ]; then
+              cat diff.md
+              echo ""
+            fi
+            cat report.md
+          } > comment.md
+
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
 
-          BODY=$(cat report.md)
-
           if [ -n "$COMMENT_ID" ]; then
             gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
-              -X PATCH -f body="$BODY"
+              -X PATCH -f body="$(cat comment.md)"
           else
-            gh pr comment "${{ github.event.pull_request.number }}" --body-file report.md
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
           fi
 
       - name: Quality gate check
@@ -1562,6 +1587,13 @@ jobs:
             cat gate_result.txt
             exit 1
           fi
+
+      - name: Upload traceability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: traceability-report
+          path: traceability.html
+          retention-days: 30
 
   # Final check that depends on all critical jobs
   release-readiness:

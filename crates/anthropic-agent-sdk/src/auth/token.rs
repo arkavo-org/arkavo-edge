@@ -234,8 +234,10 @@ impl TokenStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use tempfile::TempDir;
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_token_info_new() {
         let token = TokenInfo::new(
@@ -252,6 +254,7 @@ mod tests {
         assert!(!token.is_expired());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_token_expired() {
         let mut token = TokenInfo::new("access123".to_string(), None, Some(3600), None);
@@ -268,12 +271,14 @@ mod tests {
         assert!(token.is_expired());
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_authorization_header() {
         let token = TokenInfo::new("access123".to_string(), None, None, None);
         assert_eq!(token.authorization_header(), "Bearer access123");
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_token_storage_save_load() {
         let temp_dir = TempDir::new().unwrap();
@@ -294,6 +299,7 @@ mod tests {
         assert_eq!(loaded.refresh_token, Some("test_refresh".to_string()));
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_token_storage_not_found() {
         let temp_dir = TempDir::new().unwrap();
@@ -304,6 +310,7 @@ mod tests {
         assert!(matches!(result, Err(TokenError::NotFound)));
     }
 
+    #[spec("CASDK-002")]
     #[test]
     fn test_has_valid_token() {
         let temp_dir = TempDir::new().unwrap();

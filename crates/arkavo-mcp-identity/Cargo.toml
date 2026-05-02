@@ -1,0 +1,27 @@
+[package]
+name = "arkavo-mcp-identity"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MCP-I (Model Context Protocol - Identity) Level 1: cryptographic identity and signed proofs for MCP tool calls"
+
+[dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

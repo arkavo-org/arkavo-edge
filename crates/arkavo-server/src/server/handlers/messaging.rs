@@ -34,6 +34,12 @@ pub async fn handle_message_send(
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
+    agent_event_tx: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
+        >,
+    >,
+    #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -77,6 +83,94 @@ pub async fn handle_message_send(
         info!("Message contains {} image attachment(s)", images.len());
         Some(images)
     };
+
+    // Task Contract Protocol: extract contract data parts or auto-propose
+    let contract_context = {
+        use super::super::contract_negotiation::{
+            ContractAction, ContractNegotiator, contract_to_verification_context,
+        };
+        use arkavo_protocol::task_contract::{ContractProposal, SCHEMA_CONTRACT_PROPOSAL};
+
+        let contract_parts: Vec<(String, serde_json::Value)> = request
+            .message
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                MessagePart::Data { schema, content }
+                    if schema.starts_with("urn:arkavo:contract:") =>
+                {
+                    Some((schema.clone(), content.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let mut negotiator = ContractNegotiator::new();
+
+        if let Some((schema, content)) = contract_parts.first() {
+            // Explicit contract proposal in message
+            if schema == SCHEMA_CONTRACT_PROPOSAL {
+                if let Ok(proposal) = serde_json::from_value::<ContractProposal>(content.clone()) {
+                    let review = negotiator.review(&proposal);
+                    match negotiator.advance(proposal.contract_id, &review) {
+                        ContractAction::Approved(contract) => {
+                            info!(contract_id = %contract.contract_id, "Contract approved");
+                            let ctx = contract_to_verification_context(&contract);
+                            negotiator.cleanup(contract.contract_id);
+                            Some(ctx)
+                        }
+                        ContractAction::RequestRevision(review) => {
+                            info!(
+                                contract_id = %proposal.contract_id,
+                                round = review.round,
+                                "Contract needs revision"
+                            );
+                            None
+                        }
+                        ContractAction::Escalate {
+                            contract_id,
+                            reason,
+                        } => {
+                            info!(%contract_id, %reason, "Contract escalated");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if task_content.lines().count() > 3 {
+            // Auto-propose for complex tasks (>3 lines with structured criteria)
+            let proposal = negotiator.propose("auto", &task_content);
+            if !proposal.acceptance_criteria.is_empty() {
+                let review = negotiator.review(&proposal);
+                if review.approved {
+                    if let ContractAction::Approved(contract) =
+                        negotiator.advance(proposal.contract_id, &review)
+                    {
+                        info!(
+                            criteria = proposal.acceptance_criteria.len(),
+                            "Auto-proposed contract approved"
+                        );
+                        let ctx = contract_to_verification_context(&contract);
+                        negotiator.cleanup(contract.contract_id);
+                        Some(ctx)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+    let _ = contract_context;
 
     // Preflight moderation: reject policy-violating requests before task submission
     if let Some(router) = router
@@ -151,94 +245,216 @@ pub async fn handle_message_send(
     // receive their AGENTS.md identity when processing delegated tasks.
     let purpose = agent_metadata.read().await.purpose.clone();
 
+    // Save metadata before submit_task consumes request.message
+    let request_metadata_ref = request.message.metadata.clone();
+
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {
             if let Some(router) = router {
-                let router = router.clone();
-                let conductor = conductor.clone();
-                let mcp_registry = mcp_registry.clone();
-                let task_executor = task_executor.clone();
-                let task_store = task_store.clone();
                 let task_id_clone = task_id;
-                let learning_bus = learning_bus.cloned();
-                let compute_budget = compute_budget.clone();
-                let mesh_state = mesh_state.cloned();
-                let agent_memory = agent_memory.clone();
 
-                tokio::spawn(async move {
-                    if let Err(e) = task_executor
-                        .update_task_status(&task_id_clone, TaskStatus::Working)
+                if let Some(event_tx) = agent_event_tx.lock().await.clone() {
+                    // Orchestrator path: route through the agent event loop
+                    use super::super::agent_event::{AgentEvent, CorrelationId};
+
+                    let correlation_id = CorrelationId(uuid::Uuid::new_v4());
+                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+
+                    let sender_did = request_metadata_ref
+                        .as_ref()
+                        .and_then(|m| m.get("sender_did"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+
+                    let _ = event_tx
+                        .send(AgentEvent::IncomingMessage {
+                            sender: sender_did,
+                            content: task_content,
+                            task_id: task_id_clone,
+                            correlation_id,
+                            reply: reply_tx,
+                        })
+                        .await;
+
+                    tokio::spawn(async move {
+                        match tokio::time::timeout(std::time::Duration::from_mins(2), reply_rx)
+                            .await
+                        {
+                            Ok(Ok(receipt)) => {
+                                info!(
+                                    correlation_id = %receipt.correlation_id.0,
+                                    cycle = receipt.cycle_id.0,
+                                    "Message incorporated into orchestrator cycle"
+                                );
+                            }
+                            Ok(Err(_canceled)) => {
+                                warn!("Agent loop dropped message — event channel closed");
+                            }
+                            Err(_timeout) => {
+                                warn!("Message not processed within 120s");
+                            }
+                        }
+                    });
+                } else {
+                    // Specialist path: execute directly via conductor
+                    let router = router.clone();
+                    let conductor = conductor.clone();
+                    let mcp_registry = mcp_registry.clone();
+                    let task_executor = task_executor.clone();
+                    let task_store = task_store.clone();
+                    let learning_bus = learning_bus.cloned();
+                    let compute_budget = compute_budget.clone();
+                    let mesh_state = mesh_state.cloned();
+                    let agent_memory = agent_memory.clone();
+                    let specialist_id = agent_metadata.read().await.name.clone();
+                    let task_start = std::time::Instant::now();
+                    #[cfg(feature = "iroh")]
+                    let iroh_node = iroh_node.cloned();
+
+                    tokio::spawn(async move {
+                        if let Err(e) = task_executor
+                            .update_task_status(&task_id_clone, TaskStatus::Working)
+                            .await
+                        {
+                            warn!("Failed to update task {} to Working: {}", task_id_clone, e);
+                            return;
+                        }
+
+                        info!("Executing task {} via HRM Conductor", task_id_clone);
+
+                        // Build a registry with mesh tools so specialists can
+                        // use send_task/list_agents to communicate with the swarm.
+                        let specialist_registry = {
+                            let mut reg = arkavo_mcp_tools::ToolRegistry::empty();
+                            if let Some(ref ms) = mesh_state {
+                                arkavo_mcp_mesh::register_tools(&mut reg, ms.clone());
+                            }
+                            if let Ok(mcp_tools) = mcp_registry.list_all_tools().await {
+                                for tool in mcp_tools {
+                                    let name = tool.name.clone();
+                                    let bridge = super::super::mcp_bridge::McpBridgeTool::new(
+                                        mcp_registry.clone(),
+                                        tool,
+                                    );
+                                    reg.register(&name, Box::new(bridge));
+                                }
+                            }
+                            Arc::new(reg)
+                        };
+
+                        match execute_with_conductor_and_learning(
+                            &conductor,
+                            &router,
+                            &mcp_registry,
+                            task_content,
+                            Some(task_id_clone),
+                            Some(&task_executor),
+                            learning_bus.as_ref(),
+                            Some(&agent_memory),
+                            if purpose.is_empty() {
+                                None
+                            } else {
+                                Some(purpose.as_str())
+                            },
+                            mesh_state.as_ref(),
+                            model_hint.as_ref(),
+                            images,
+                            Some(&compute_budget),
+                            None,
+                            false, // specialists may need complexity assessment
+                            Some(specialist_registry),
+                            #[cfg(feature = "iroh")]
+                            iroh_node.as_ref(),
+                        )
                         .await
-                    {
-                        warn!("Failed to update task {} to Working: {}", task_id_clone, e);
-                        return;
-                    }
+                        {
+                            Ok(result_content) => {
+                                let result_for_notice = result_content.clone();
+                                let result_message = Message {
+                                    parts: vec![arkavo_protocol::types::MessagePart::Text {
+                                        content: result_content,
+                                    }],
+                                    metadata: None,
+                                };
+                                let result_value = serde_json::to_value(&result_message)
+                                    .unwrap_or(serde_json::Value::Null);
 
-                    info!("Executing task {} via HRM Conductor", task_id_clone);
+                                if let Err(e) = task_executor
+                                    .complete_task(&task_id_clone, result_value)
+                                    .await
+                                {
+                                    warn!("Failed to complete task {}: {}", task_id_clone, e);
+                                } else {
+                                    info!("Task {} completed successfully via HRM", task_id_clone);
 
-                    match execute_with_conductor_and_learning(
-                        &conductor,
-                        &router,
-                        &mcp_registry,
-                        task_content,
-                        Some(task_id_clone),
-                        Some(&task_executor),
-                        learning_bus.as_ref(),
-                        Some(&agent_memory),
-                        if purpose.is_empty() {
-                            None
-                        } else {
-                            Some(purpose.as_str())
-                        },
-                        mesh_state.as_ref(),
-                        model_hint.as_ref(),
-                        images,
-                        Some(&compute_budget),
-                    )
-                    .await
-                    {
-                        Ok(result_content) => {
-                            let result_message = Message {
-                                parts: vec![arkavo_protocol::types::MessagePart::Text {
-                                    content: result_content,
-                                }],
-                                metadata: None,
-                            };
-                            let result_value = serde_json::to_value(&result_message)
-                                .unwrap_or(serde_json::Value::Null);
+                                    // Push completion to commander via gossip
+                                    if let Some(ref bus) = learning_bus {
+                                        let snapshot = {
+                                            let b = compute_budget.read().await;
+                                            serde_json::to_value(b.snapshot()).ok()
+                                        };
+                                        let notice = arkavo_gossip::TaskCompletionNotice {
+                                            task_id: task_id_clone.to_string(),
+                                            specialist_id: specialist_id.clone(),
+                                            succeeded: true,
+                                            content: result_for_notice,
+                                            budget_snapshot: snapshot,
+                                            completion_ms: task_start.elapsed().as_millis() as u64,
+                                        };
+                                        bus.broadcast_to_peers(
+                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+                            Err(error_msg) => {
+                                let error = TaskError {
+                                    code: "HRM_EXECUTION_ERROR".to_string(),
+                                    message: error_msg.clone(),
+                                    details: None,
+                                };
 
-                            if let Err(e) = task_executor
-                                .complete_task(&task_id_clone, result_value)
-                                .await
-                            {
-                                warn!("Failed to complete task {}: {}", task_id_clone, e);
-                            } else {
-                                info!("Task {} completed successfully via HRM", task_id_clone);
+                                if let Ok(Some(mut task)) =
+                                    task_store.get_task(&task_id_clone).await
+                                {
+                                    task.error = Some(error);
+                                    let _ = task_store.create_task(task).await;
+                                }
+
+                                if let Err(e) = task_executor
+                                    .update_task_status(&task_id_clone, TaskStatus::Failed)
+                                    .await
+                                {
+                                    warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
+                                } else {
+                                    warn!("Task {} failed: {}", task_id_clone, error_msg);
+
+                                    // Push failure to commander via gossip
+                                    if let Some(ref bus) = learning_bus {
+                                        let snapshot = {
+                                            let b = compute_budget.read().await;
+                                            serde_json::to_value(b.snapshot()).ok()
+                                        };
+                                        let notice = arkavo_gossip::TaskCompletionNotice {
+                                            task_id: task_id_clone.to_string(),
+                                            specialist_id: specialist_id.clone(),
+                                            succeeded: false,
+                                            content: error_msg,
+                                            budget_snapshot: snapshot,
+                                            completion_ms: task_start.elapsed().as_millis() as u64,
+                                        };
+                                        bus.broadcast_to_peers(
+                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
+                                        )
+                                        .await;
+                                    }
+                                }
                             }
                         }
-                        Err(error_msg) => {
-                            let error = TaskError {
-                                code: "HRM_EXECUTION_ERROR".to_string(),
-                                message: error_msg.clone(),
-                                details: None,
-                            };
-
-                            if let Ok(Some(mut task)) = task_store.get_task(&task_id_clone).await {
-                                task.error = Some(error);
-                                let _ = task_store.create_task(task).await;
-                            }
-
-                            if let Err(e) = task_executor
-                                .update_task_status(&task_id_clone, TaskStatus::Failed)
-                                .await
-                            {
-                                warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
-                            } else {
-                                warn!("Task {} failed: {}", task_id_clone, error_msg);
-                            }
-                        }
-                    }
-                });
+                    });
+                }
             }
 
             let response = MessageSendResponse {

@@ -69,7 +69,9 @@ impl Materializer {
 mod tests {
     use super::*;
     use crate::canonical_store::CanonicalStore;
+    use arkavo_test_macros::spec;
 
+    #[spec("EVO-008")]
     #[test]
     fn verify_determinism_valid_source() {
         let mut store = CanonicalStore::new();
@@ -83,6 +85,7 @@ mod tests {
         assert!(mat.verify_determinism(&hash).unwrap());
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn verify_determinism_missing_version() {
         let store = CanonicalStore::new();
@@ -91,6 +94,7 @@ mod tests {
         assert!(err.to_string().contains("version not found"));
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn store_access() {
         let mut store = CanonicalStore::new();
@@ -100,6 +104,7 @@ mod tests {
         assert_eq!(mat.project_root(), &PathBuf::from("/project"));
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn store_mut_access() {
         let store = CanonicalStore::new();
@@ -108,6 +113,7 @@ mod tests {
         assert_eq!(mat.store().len(), 1);
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn determinism_after_reparse() {
         let mut store = CanonicalStore::new();
@@ -122,6 +128,7 @@ mod tests {
         assert!(mat.verify_determinism(&hash).unwrap());
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn build_receipt_fields() {
         let receipt = BuildReceipt {
@@ -136,6 +143,7 @@ mod tests {
         assert_eq!(receipt.duration.as_secs(), 5);
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn verify_complex_source() {
         let mut store = CanonicalStore::new();
@@ -158,6 +166,7 @@ mod tests {
         assert!(mat.verify_determinism(&hash).unwrap());
     }
 
+    #[spec("EVO-008")]
     #[test]
     fn verify_source_with_attributes() {
         let mut store = CanonicalStore::new();

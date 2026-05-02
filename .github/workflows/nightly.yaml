@@ -1,0 +1,98 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 2 AM UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_TIME: 600 # 10 minutes per target
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_rate_limit
+          - fuzz_rate_limit_concurrent
+          - fuzz_json_rpc
+          - fuzz_a2a_message
+          - fuzz_tdf_policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+
+      - name: Install build dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache corpus
+        uses: actions/cache@v4
+        with:
+          path: crates/arkavo-protocol/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Run fuzzer
+        working-directory: crates/arkavo-protocol/fuzz
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=${{ env.FUZZ_TIME }}
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: crates/arkavo-protocol/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+
+  fuzz-lockfile-check:
+    name: Fuzz Cargo.lock Freshness
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Check fuzz lockfile is current
+        working-directory: crates/arkavo-protocol/fuzz
+        run: |
+          cargo +nightly update --dry-run 2>&1 | tee update-check.txt
+          if grep -q "Updating" update-check.txt; then
+            echo "::warning::Fuzz Cargo.lock has outdated dependencies"
+            cat update-check.txt
+          fi

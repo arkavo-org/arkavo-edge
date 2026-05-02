@@ -271,7 +271,9 @@ fn hash_file(path: &str) -> Result<[u8; 32], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("KVC-001")]
     #[test]
     fn test_context_manager_new() {
         let cm = ContextManager::new(0, 1);
@@ -281,6 +283,7 @@ mod tests {
         assert_eq!(cm.seq_conversation(), 1);
     }
 
+    #[spec("KVC-001")]
     #[test]
     fn test_slot_len() {
         let slot = ContextSlot {
@@ -295,6 +298,7 @@ mod tests {
         assert!(!slot.is_empty());
     }
 
+    #[spec("KVC-001")]
     #[test]
     fn test_slot_empty() {
         let slot = ContextSlot {
@@ -309,12 +313,14 @@ mod tests {
         assert_eq!(slot.len(), 0);
     }
 
+    #[spec("KVC-001")]
     #[test]
     fn test_get_slot_not_found() {
         let cm = ContextManager::new(0, 1);
         assert!(cm.get_slot("nonexistent").is_none());
     }
 
+    #[spec("KVC-001")]
     #[test]
     fn test_context_error_display() {
         let err = ContextError::SlotNotFound("agent-role".to_string());
@@ -324,12 +330,14 @@ mod tests {
         assert_eq!(err.to_string(), "slot 'policy' already loaded");
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_hash_file_nonexistent() {
         let result = hash_file("/nonexistent/file.bin");
         assert!(result.is_err());
     }
 
+    #[spec("KVC-004")]
     #[test]
     fn test_hash_file_real() {
         let dir = tempfile::tempdir().unwrap();
@@ -340,6 +348,7 @@ mod tests {
         assert_ne!(hash, [0u8; 32]);
     }
 
+    #[spec("KVC-002")]
     #[test]
     fn test_context_manager_default_sequences() {
         let cm = ContextManager::new(0, 1);
@@ -347,6 +356,7 @@ mod tests {
         assert_eq!(cm.seq_conversation(), 1);
     }
 
+    #[spec("KVC-003")]
     #[test]
     fn test_is_trusted_tiers() {
         let make = |trust| ContextSlot {
@@ -362,6 +372,7 @@ mod tests {
         assert!(!make(TrustTier::Untrusted).is_trusted());
     }
 
+    #[spec("KVC-003")]
     #[test]
     fn test_untrusted_slots_filtering() {
         let mut cm = ContextManager::new(0, 1);

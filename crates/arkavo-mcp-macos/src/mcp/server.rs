@@ -59,6 +59,8 @@ pub struct ToolResponse {
     pub tool_name: String,
     pub result: Value,
     pub success: bool,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<Value>,
 }
 
 pub struct McpTestServer {
@@ -590,6 +592,7 @@ impl McpTestServer {
             result,
             tool_name: request.tool_name,
             success: true,
+            meta: None,
         })
     }
 

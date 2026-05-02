@@ -150,7 +150,7 @@ pub async fn send_and_poll_agent(
 
     // Poll for completion (2s intervals, 5min timeout)
     let start = std::time::Instant::now();
-    let timeout = Duration::from_secs(300);
+    let timeout = Duration::from_mins(5);
     loop {
         if start.elapsed() > timeout {
             return Err("Response timed out after 5 minutes".into());

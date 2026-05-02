@@ -89,6 +89,12 @@ function routeEvent(event) {
         case 'lessonExtracted':
             handleLessonExtracted(event);
             break;
+        case 'contextTopologyUpdate':
+            handleContextTopologyUpdate(event);
+            break;
+        case 'arpStatusUpdate':
+            handleArpStatusUpdate(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;
@@ -136,11 +142,23 @@ function switchView(viewId) {
     } else if (viewId === 'learning' || viewId === 'router') {
         wsSend({ type: 'requestLearningStatus' });
         startLearningPolling();
+    } else if (viewId === 'context') {
+        wsSend({ type: 'requestContextTopology' });
+        startContextPolling();
+    } else if (viewId === 'arp') {
+        wsSend({ type: 'requestArpStatus' });
+        startArpPolling();
     }
 
-    // Stop learning polling when navigating away
+    // Stop polling when navigating away
     if (viewId !== 'learning' && viewId !== 'router') {
         stopLearningPolling();
+    }
+    if (viewId !== 'context') {
+        stopContextPolling();
+    }
+    if (viewId !== 'arp') {
+        stopArpPolling();
     }
 }
 

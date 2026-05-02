@@ -46,7 +46,7 @@ impl Default for GossipConfig {
             fanout: DEFAULT_FANOUT,
             quorum: QuorumConfig::default(),
             anti_entropy_interval: DEFAULT_ANTI_ENTROPY_INTERVAL,
-            max_message_age: Duration::from_secs(300),
+            max_message_age: Duration::from_mins(5),
         }
     }
 }
@@ -88,7 +88,7 @@ const MAX_SEEN_SIZE: usize = 10000;
 const DEFAULT_MAX_MESSAGES_PER_PEER: usize = 100;
 
 /// Default rate limit window
-const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const DEFAULT_RATE_LIMIT_WINDOW: Duration = Duration::from_mins(1);
 
 /// The gossip protocol handler
 pub struct GossipProtocol {
@@ -260,6 +260,24 @@ impl GossipProtocol {
             GossipMessage::EvoFabricAnchor(a) => {
                 tracing::debug!(block = a.block_number, "evofabric anchor committed");
                 Ok(vec![GossipMessage::EvoFabricAnchor(a)])
+            }
+            GossipMessage::TaskCompleted(notice) => {
+                tracing::debug!(
+                    task_id = %notice.task_id,
+                    specialist = %notice.specialist_id,
+                    succeeded = notice.succeeded,
+                    "task completion notice received"
+                );
+                Ok(vec![])
+            }
+            GossipMessage::InferenceState(state) => {
+                tracing::debug!(
+                    agent_id = %state.agent_id,
+                    active_count = state.active_count,
+                    model = %state.model_name,
+                    "inference state broadcast received"
+                );
+                Ok(vec![])
             }
         }
     }

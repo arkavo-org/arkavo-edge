@@ -19,5 +19,9 @@ anyhow.workspace = true
 sha2 = { workspace = true }
 toml = { workspace = true }
 regex = { workspace = true }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 [lints]
 workspace = true

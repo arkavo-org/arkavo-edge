@@ -3,6 +3,7 @@
 //! Manages an embedded Iroh endpoint with blob protocol support.
 
 use iroh::Endpoint;
+use iroh::endpoint::presets::N0;
 use iroh::protocol::Router;
 use iroh_base::EndpointId;
 use iroh_blobs::BlobsProtocol;
@@ -92,8 +93,8 @@ impl IrohNode {
 
         info!("Starting Iroh node");
 
-        // Create endpoint
-        let endpoint = Endpoint::builder()
+        // Create endpoint with iroh's default n0.computer relay/DNS preset.
+        let endpoint = Endpoint::builder(N0)
             .bind()
             .await
             .map_err(|e| IrohError::EndpointInit(e.to_string()))?;

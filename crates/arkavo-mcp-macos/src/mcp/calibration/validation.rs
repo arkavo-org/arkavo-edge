@@ -147,15 +147,15 @@ impl CalibrationValidator {
             StateChange::None => {
                 // No state change expected
             }
-            StateChange::ValueChange { from: _, to } => {
-                if !test_result.post_interaction_state.contains(to) {
-                    return ValidationOutcome::Failure(ValidationIssue {
-                        element_id: test_result.element_id.clone(),
-                        expected_result: format!("Value changed to '{to}'"),
-                        actual_result: "Value unchanged or different".to_string(),
-                        severity: IssueSeverity::Major,
-                    });
-                }
+            StateChange::ValueChange { from: _, to }
+                if !test_result.post_interaction_state.contains(to) =>
+            {
+                return ValidationOutcome::Failure(ValidationIssue {
+                    element_id: test_result.element_id.clone(),
+                    expected_result: format!("Value changed to '{to}'"),
+                    actual_result: "Value unchanged or different".to_string(),
+                    severity: IssueSeverity::Major,
+                });
             }
             _ => {
                 // Other state changes would be validated here

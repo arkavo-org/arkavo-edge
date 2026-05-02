@@ -30,6 +30,10 @@ pub struct Scenario {
     pub refs: Vec<String>,
     #[serde(default)]
     pub edge_cases: Vec<EdgeCase>,
+    #[serde(default)]
+    pub wip: bool,
+    #[serde(default)]
+    pub issue: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -344,6 +348,8 @@ scenarios:
             then: vec!["result happens".into()],
             refs: vec![],
             edge_cases: vec![],
+            wip: false,
+            issue: None,
         };
         let stub = TestGenerator::generate_stub(&spec, &scenario);
         assert!(stub.contains(r#"#[spec("TEST-001")]"#));

@@ -15,6 +15,10 @@ mdns = ["dep:mdns-sd"]
 llama-cpp = ["arkavo-router/llama-cpp"]
 # Windows compatible features (no C++ dependencies)
 windows = ["mdns", "arkavo-router/windows"]
+# Auto-launch can decrypt .swarmkit.tdf files at gateway boot via opentdf-rs.
+# Pulls in arkavo-tdf + arkavo-swarmkit-runtime/tdf. Off by default so
+# headless deployments don't drag in opentdf-rs unnecessarily.
+tdf = ["arkavo-swarmkit-runtime/tdf"]
 
 [dependencies]
 # Core dependencies
@@ -42,7 +46,14 @@ arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-validation = { path = "../arkavo-validation" }
+arkavo-arp = { path = "../arkavo-arp" }
+arkavo-policy-cache = { path = "../arkavo-policy-cache" }
+arkavo-adaptation = { path = "../arkavo-adaptation" }
+arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-swarmkit-runtime = { path = "../arkavo-swarmkit-runtime" }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 async-trait = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
@@ -65,3 +76,5 @@ tempfile = { workspace = true }
 chrono = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-router = { path = "../arkavo-router", default-features = false }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+serial_test = "3"

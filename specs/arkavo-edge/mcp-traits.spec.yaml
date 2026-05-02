@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: MCP Core Traits and Types
+module: arkavo_mcp
+version: 0.67.1
+
+invariants:
+  - Tool trait requires Send + Sync for thread safety
+  - ToolSchema names must be unique within a registry
+  - RPC follows JSON-RPC 2.0 specification
+  - Integrity module validates tool outputs
+  - Error codes follow JSON-RPC 2.0 standard codes
+
+scenarios:
+  - id: MCPD-001
+    name: Implement Tool trait
+    criticality: critical
+    given:
+      - Struct implements Tool trait
+      - Schema defined with name and parameters
+    when: Tool registered in system
+    then:
+      - execute() available as async method
+      - schema() returns valid ToolSchema
+      - Tool is Send + Sync
+    refs: [crates/arkavo-mcp/src/lib.rs:28-38]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Tool with duplicate name
+        expected: Registration conflict detected
+      - condition: Schema with no parameters
+        expected: Valid schema with empty params
+
+  - id: MCPD-002
+    name: JSON-RPC request/response cycle
+    criticality: critical
+    given:
+      - RpcRequest with method and params
+    when: Request processed
+    then:
+      - RpcResponse returned with matching id
+      - Result or error populated
+      - JSON-RPC 2.0 version field present
+    refs: [crates/arkavo-mcp/src/lib.rs:61-95]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Missing method field
+        expected: INVALID_REQUEST error code
+      - condition: Unknown method
+        expected: METHOD_NOT_FOUND error code
+
+  - id: MCPD-003
+    name: Tool schema validation
+    criticality: high
+    given:
+      - ToolSchema with name and parameters
+    when: Schema validated
+    then:
+      - Name is non-empty
+      - Parameters are valid JSON schema
+      - Aliases resolved correctly
+    refs: [crates/arkavo-mcp/src/lib.rs:14-25]
+    changed: "2026-03-19"
+
+  - id: MCPD-004
+    name: Integrity verification of tool output
+    criticality: high
+    given:
+      - Tool execution produces output
+    when: Integrity check run on ToolResponse
+    then:
+      - Output hash verified
+      - Tampering detected if modified
+      - Success flag reflects actual result
+    refs: [crates/arkavo-mcp/src/integrity.rs]
+    changed: "2026-03-19"
+
+  - id: MCPD-005
+    name: Code scanner static analysis
+    criticality: medium
+    given:
+      - Source code available for scanning
+    when: code_scanner invoked
+    then:
+      - Static analysis performed
+      - Results returned as structured data
+      - No false positives on safe patterns
+    refs: [crates/arkavo-mcp/src/code_scanner.rs]
+    changed: "2026-03-19"
+
+  - id: MCPD-006
+    name: McpClient remote tool discovery
+    criticality: high
+    given:
+      - McpClient connected to remote server
+    when: list_tools() called
+    then:
+      - McpTool list returned
+      - Each tool has name and schema
+      - call_tool() can invoke discovered tools
+    refs: [crates/arkavo-mcp/src/lib.rs:109-140]
+    changed: "2026-03-19"

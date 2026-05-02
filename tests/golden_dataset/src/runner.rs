@@ -284,6 +284,7 @@ impl GoldenRunner {
                     reasoning_content: None,
                     tool_calls: vec![],
                     finish_reason: None,
+                    ..Default::default()
                 };
 
                 let input = VerificationInput::new(spec.input.objective.clone(), response, vec![]);

@@ -138,19 +138,33 @@ pub(super) async fn synthesize_lesson(
     category: &str,
     min_confidence: f64,
 ) -> Result<Option<Lesson>, String> {
-    // Build prompt for LLM
-    let eps_json = episodes
+    // Build action→outcome pairs, stripping observation/read-only calls.
+    // The synthesis model should reason about which actions produce good
+    // outcomes under which conditions — not about tool-calling mechanics.
+    let action_outcomes: Vec<_> = episodes
         .iter()
         .map(|e| {
+            // Filter tools to only action tools (exclude read-only observe/list)
+            let action_tools: Vec<_> = e
+                .observation
+                .tools_used
+                .iter()
+                .filter(|t| {
+                    let lower = t.to_lowercase();
+                    !lower.contains("observe")
+                        && !lower.contains("list")
+                        && !lower.contains("hash")
+                        && !lower.contains("summary")
+                })
+                .cloned()
+                .collect();
             serde_json::json!({
-                "category": e.task_category,
-                "action": e.observation.action_taken,
+                "actions": action_tools,
                 "success": e.outcome.success,
                 "quality": e.outcome.quality_metrics.correctness,
-                "tools": e.observation.tools_used
             })
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     let failure_count = episodes.iter().filter(|e| !e.outcome.success).count();
     let success_count = episodes.iter().filter(|e| e.outcome.success).count();
@@ -164,34 +178,38 @@ pub(super) async fn synthesize_lesson(
         "Starting lesson synthesis"
     );
 
+    let outcomes_str = serde_json::to_string_pretty(&action_outcomes).unwrap_or_default();
     let prompt = format!(
-        r#"Analyze these episodes and extract a reusable lesson pattern.
+        r#"Given these action→outcome pairs from an agent session:
 
-Category: {category}
-Episodes: {} total ({success_count} successes, {failure_count} failures)
-{}
+{outcomes_str}
 
-Look for patterns:
-- What conditions led to failures?
-- What actions prevented failures?
-- What invariants should be maintained?
+{success_count} successes, {failure_count} failures.
 
-If there's a clear pattern, respond with JSON:
+Extract a strategic lesson about WHICH ACTION to take and WHEN.
+A valid lesson MUST name a specific action type from the tools used above.
+
+Do NOT mention observe, list, or tool sequencing — the system handles that automatically.
+
+Respond with JSON:
 {{
-  "condition": "when this applies (e.g., sector_4)",
-  "action": "recommended action (e.g., slow, avoid)",
-  "expected_outcome": "what should happen",
-  "confidence": 0.0-1.0 based on evidence strength
+  "condition": "specific situation that triggers this action",
+  "action": "concrete tool call recommendation with parameters",
+  "expected_outcome": "measurable result",
+  "confidence": 0.0-1.0
 }}
 
-If no clear pattern, respond with: NO_LESSON"#,
-        episodes.len(),
-        serde_json::to_string_pretty(&eps_json).unwrap_or_default()
+If no strategic pattern is clear, respond with: NO_LESSON"#
     );
 
     let messages = vec![Message::user(prompt)];
+    // Lesson synthesis needs structured JSON with multi-episode pattern
+    // analysis. route() applies tool-call grammar (breaks plain JSON),
+    // route_fast picks the smallest model (can't produce valid JSON).
+    // route_synthesis picks the largest loaded model with plain
+    // completion — structured output without grammar interference.
     let stream = router
-        .route_fast("lesson synthesis", messages)
+        .route_synthesis("lesson synthesis", messages)
         .await
         .map_err(|e| format!("Router error: {e}"))?;
 
@@ -249,6 +267,83 @@ fn extract_quality_score(content: &str) -> f64 {
     0.7
 }
 
+/// Parse a historian agent's response into a Lesson.
+/// Reuses parse_lesson_pattern for JSON extraction.
+pub(super) fn parse_lesson_from_historian(
+    text: &str,
+    agent_id: &str,
+    swarm_id: &str,
+    category: &str,
+    episode_count: usize,
+) -> Result<Option<Lesson>, String> {
+    if text.contains("NO_LESSON") {
+        return Ok(None);
+    }
+    let (condition, action, confidence, expected_outcome) = parse_lesson_pattern(text)?;
+    let lesson = Lesson::new(
+        agent_id.to_string(),
+        swarm_id.to_string(),
+        category.to_string(),
+        LessonPattern::new(condition, action, expected_outcome),
+        confidence,
+        episode_count as u32,
+    );
+    Ok(Some(lesson))
+}
+
+/// Detect lessons that reinforce degenerate repetition patterns.
+fn is_degenerate_lesson_action(action: &str) -> bool {
+    let lower = action.to_lowercase();
+    let repetition_phrases = [
+        "identical tool call",
+        "same tool call",
+        "repeat the same",
+        "call 3 times",
+        "call 5 times",
+        "times in a row",
+        "maintain the sequence",
+        "execute the same action",
+        "keep calling",
+        "calling repeatedly",
+    ];
+    repetition_phrases.iter().any(|p| lower.contains(p))
+}
+
+/// Reject lessons about loop mechanics (observation sequencing, tool ordering).
+/// The agent loop already handles when to observe — lessons about this are
+/// tautological and crowd out strategic lessons about which actions to take.
+fn is_procedural_lesson(condition: &str, action: &str) -> bool {
+    let combined = format!("{condition} {action}").to_lowercase();
+
+    let read_only_tools = [
+        "observe",
+        "list_tools",
+        "list_resources",
+        "stateHash",
+        "episodesummary",
+    ];
+    let sequencing_verbs = [
+        "before",
+        "after",
+        "between",
+        "always",
+        "every",
+        "first",
+        "precede",
+        "follow",
+        "interleave",
+        "subsequent",
+        "preceding",
+    ];
+
+    let mentions_read_only = read_only_tools
+        .iter()
+        .any(|t| combined.contains(&t.to_lowercase()));
+    let mentions_sequencing = sequencing_verbs.iter().any(|v| combined.contains(v));
+
+    mentions_read_only && mentions_sequencing
+}
+
 /// Parse lesson pattern from LLM response
 fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), String> {
     // Try to extract JSON from content (may have markdown wrapping)
@@ -268,16 +363,24 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
     let json: serde_json::Value =
         serde_json::from_str(&sanitized).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
-    let condition = json
-        .get("condition")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let action = json
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("slow")
-        .to_string();
+    let condition = match json.get("condition").and_then(|v| v.as_str()) {
+        Some(c) if !c.is_empty() && c != "unknown" => c.to_string(),
+        _ => return Err("No condition extracted — rejecting junk lesson".to_string()),
+    };
+    let action = match json.get("action").and_then(|v| v.as_str()) {
+        Some(a) if !a.is_empty() && a != "slow" => {
+            if is_degenerate_lesson_action(a) {
+                return Err(format!("Degenerate repetition lesson rejected: {a}"));
+            }
+            if is_procedural_lesson(&condition, a) {
+                return Err(format!(
+                    "Procedural lesson about loop mechanics rejected: {a}"
+                ));
+            }
+            a.to_string()
+        }
+        _ => return Err("No action extracted — rejecting junk lesson".to_string()),
+    };
     let confidence = json
         .get("confidence")
         .and_then(|v| v.as_f64())
@@ -295,19 +398,23 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_short() {
         let result = "short result";
         assert_eq!(truncate_result(result, 500), "short result");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_exact_limit() {
         let result = "x".repeat(500);
         assert_eq!(truncate_result(&result, 500), result);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_truncate_result_over_limit() {
         let result = "a".repeat(1000);
@@ -317,6 +424,7 @@ mod tests {
         assert!(truncated.len() < 1000);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_extract_quality_score() {
         assert_eq!(extract_quality_score(r#"{"quality_score": 0.8}"#), 0.8);
@@ -324,6 +432,7 @@ mod tests {
         assert_eq!(extract_quality_score("invalid"), 0.7);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern() {
         let content = r#"{"condition": "sector_4", "action": "slow", "confidence": 0.9, "expected_outcome": "safe"}"#;
@@ -334,6 +443,7 @@ mod tests {
         assert_eq!(result.3, "safe");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_markdown() {
         let content = r#"```json
@@ -344,6 +454,7 @@ mod tests {
         assert_eq!(result.1, "avoid");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_control_characters() {
         // LLMs sometimes emit control characters that break JSON parsing
@@ -355,11 +466,13 @@ mod tests {
         assert_eq!(result.3, "stable");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_extract_quality_score_negative_clamped() {
         assert_eq!(extract_quality_score(r#"{"quality_score": -0.5}"#), 0.0);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_missing_all_fields() {
         let content = r#"{}"#;
@@ -370,12 +483,14 @@ mod tests {
         assert_eq!(result.3, "improved_outcome");
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_no_braces() {
         let content = "just plain text with no JSON";
         assert!(parse_lesson_pattern(content).is_err());
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_confidence_clamped() {
         // LLM might return confidence > 1.0 — should be clamped
@@ -388,6 +503,7 @@ mod tests {
         );
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_surrounding_text() {
         let content = r#"Here is the pattern I found:
@@ -399,6 +515,7 @@ This pattern was found across all episodes."#;
         assert_eq!(result.2, 0.95);
     }
 
+    #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern_with_raw_newlines() {
         // Raw \n inside JSON string values is illegal but LLMs emit it
@@ -408,5 +525,34 @@ This pattern was found across all episodes."#;
         assert_eq!(result.1, "throttle requests");
         assert_eq!(result.2, 0.9);
         assert_eq!(result.3, "stable");
+    }
+
+    #[test]
+    fn rejects_degenerate_repetition_lesson() {
+        let degenerate_actions = [
+            "Maintain the sequence of 3 identical tool calls",
+            "repeat the same tool call 5 times",
+            "call send_task 3 times in a row",
+            "Keep calling observe repeatedly",
+            "Always execute the same action sequence",
+        ];
+        for action in &degenerate_actions {
+            assert!(
+                super::is_degenerate_lesson_action(action),
+                "Should reject: {action}"
+            );
+        }
+
+        let valid_actions = [
+            "Set work priority to Growing for colonists with low food skill",
+            "avoid: Missing required field AgentId",
+            "Call observe before step to get current state",
+        ];
+        for action in &valid_actions {
+            assert!(
+                !super::is_degenerate_lesson_action(action),
+                "Should accept: {action}"
+            );
+        }
     }
 }

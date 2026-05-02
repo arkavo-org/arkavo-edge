@@ -1,0 +1,164 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Local LLM Inference Engine
+module: arkavo_llama_cpp
+version: 0.67.1
+
+invariants:
+  - GPU acceleration attempted first, falls back to CPU
+  - GPU status tracked globally (Unknown/Available/Unavailable)
+  - Model format auto-detected from model name
+  - Sampler chain order enforced (top_k -> top_p -> temp -> final)
+  - Chat templates support tool calling and grammar constraints
+  - Musl targets get stub implementations (no FFI)
+  - All FFI pointers validated for null before use
+  - Context size scaled based on trained context length
+
+scenarios:
+  - id: LLAMA-001
+    name: Load model with GPU acceleration
+    criticality: critical
+    given:
+      - Model file exists on disk
+      - GPU hardware available
+    when: LlamaModel loaded with GPU layers
+    then:
+      - Model loaded into VRAM
+      - GpuStatus set to Available
+      - Model ready for inference
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:190-330]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: GPU out of memory
+        expected: Falls back to CPU, GpuStatus set to Unavailable
+      - condition: Model file corrupted
+        expected: Error returned, no crash
+
+  - id: LLAMA-002
+    name: GPU fallback to CPU
+    criticality: critical
+    given:
+      - GPU acceleration failed or unavailable
+    when: Model loaded with n_gpu_layers = 0
+    then:
+      - Model loaded on CPU only
+      - GpuStatus set to Unavailable
+      - Inference still functional
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:100-111]
+    changed: "2026-03-19"
+
+  - id: LLAMA-003
+    name: Create inference context
+    criticality: critical
+    given:
+      - LlamaModel loaded
+      - Context size specified
+    when: LlamaContext created
+    then:
+      - Context allocated with requested size
+      - Batch processing configured
+      - Ready for token evaluation
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:365-700]
+    changed: "2026-03-19"
+
+  - id: LLAMA-004
+    name: Apply chat template
+    criticality: high
+    given:
+      - ChatTemplates initialized for model format
+      - ChatInputs with messages
+    when: apply_chat_template() called
+    then:
+      - Messages formatted per model template
+      - System prompt positioned correctly
+      - Tool definitions included if present
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:699-750]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Unknown model format
+        expected: Default template used
+      - condition: Empty message list
+        expected: Error or minimal prompt
+
+  - id: LLAMA-005
+    name: Tokenize and detokenize round-trip
+    criticality: high
+    given:
+      - Model loaded with vocabulary
+      - Text input
+    when: tokenize_with_model() then detokenize()
+    then:
+      - Text converted to token IDs
+      - Token IDs converted back to text
+      - Meaning preserved through round-trip
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:1021-1130]
+    changed: "2026-03-19"
+
+  - id: LLAMA-006
+    name: Auto-detect model format
+    criticality: medium
+    given:
+      - Model name string
+    when: detect_model_format() called
+    then:
+      - Gemma3 detected for gemma patterns
+      - MistralV3 detected for ministral/mistral patterns
+      - Qwen3 detected for qwen patterns
+      - GLM4 detected for glm patterns
+      - Default for unknown patterns
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:73-98]
+    changed: "2026-03-19"
+
+  - id: LLAMA-007
+    name: Grammar-constrained decoding
+    criticality: high
+    given:
+      - ChatInputs with tool definitions
+      - Grammar trigger configured
+    when: Inference runs with grammar
+    then:
+      - Output constrained to valid syntax
+      - Tool call format enforced
+      - ToolChoice respected (auto/required/none)
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:752-812]
+    changed: "2026-03-19"
+
+  - id: LLAMA-008
+    name: Parameters fit check
+    criticality: medium
+    given:
+      - Model path and minimum context size
+    when: params_fit() called
+    then:
+      - GPU layers determined for available memory
+      - Context size validated
+      - ParamsFitStatus returned
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:333-365]
+    changed: "2026-03-19"
+
+  - id: LLAMA-009
+    name: Musl target stub behavior
+    criticality: medium
+    given:
+      - Binary compiled for musl target
+    when: Any llama function called
+    then:
+      - Stub returns error or no-op
+      - GpuStatus always Unavailable
+      - No FFI calls made
+    refs: [crates/arkavo-llama-cpp/src/lib.rs:13-29]
+    changed: "2026-03-19"
+
+  - id: LLAMA-010
+    name: Multimodal image processing
+    criticality: medium
+    given:
+      - Model supports vision
+      - Image data provided
+    when: Multimodal inference requested
+    then:
+      - Image embedded by model
+      - Text and image tokens combined
+      - Response generated from multimodal input
+    refs: [crates/arkavo-llama-cpp/src/multimodal.rs]
+    changed: "2026-03-19"

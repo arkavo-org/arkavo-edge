@@ -133,7 +133,26 @@ pub fn format_markdown_report(
         }
     }
 
-    // Uncovered scenarios detail
+    // WIP scenarios (tracked via issues)
+    let wip_scenarios: Vec<(&str, &str, &str, Option<&str>)> = collect_wip(specs);
+    if !wip_scenarios.is_empty() {
+        md.push_str(&format!(
+            "\n<details>\n<summary>WIP Scenarios ({}) — tracked via issues</summary>\n\n",
+            wip_scenarios.len()
+        ));
+        md.push_str("| ID | Spec | Scenario | Issue |\n");
+        md.push_str("|----|------|----------|-------|\n");
+        for (id, spec, name, issue) in &wip_scenarios {
+            let issue_link = issue.map_or("—".to_string(), |url| {
+                let num = url.rsplit('/').next().unwrap_or(url);
+                format!("[#{num}]({url})")
+            });
+            md.push_str(&format!("| {id} | {spec} | {name} | {issue_link} |\n"));
+        }
+        md.push_str("\n</details>\n");
+    }
+
+    // Uncovered scenarios detail (excluding WIP)
     let all_uncovered: Vec<(&str, &str, &str, &str)> = collect_uncovered(specs);
     if !all_uncovered.is_empty() {
         md.push_str(&format!(
@@ -160,12 +179,34 @@ fn collect_uncovered(specs: &[SpecCoverage]) -> Vec<(&str, &str, &str, &str)> {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown");
         for sc in &spec_cov.scenarios {
-            if matches!(sc.status, CoverageStatus::Missing) {
+            if matches!(sc.status, CoverageStatus::Missing) && !sc.scenario.wip {
                 result.push((
                     sc.scenario.id.as_str(),
                     spec_name,
                     sc.scenario.criticality.as_str(),
                     sc.scenario.name.as_str(),
+                ));
+            }
+        }
+    }
+    result
+}
+
+fn collect_wip(specs: &[SpecCoverage]) -> Vec<(&str, &str, &str, Option<&str>)> {
+    let mut result = Vec::new();
+    for spec_cov in specs {
+        let spec_name = spec_cov
+            .file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        for sc in &spec_cov.scenarios {
+            if sc.scenario.wip {
+                result.push((
+                    sc.scenario.id.as_str(),
+                    spec_name,
+                    sc.scenario.name.as_str(),
+                    sc.scenario.issue.as_deref(),
                 ));
             }
         }
@@ -195,6 +236,8 @@ mod tests {
                 then: vec![],
                 refs: vec![],
                 edge_cases: vec![],
+                wip: false,
+                issue: None,
             },
             tests: vec![],
             status,

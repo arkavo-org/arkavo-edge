@@ -156,7 +156,7 @@ impl Default for TaskBudget {
             spent_usd: 0.0,
             max_tokens: 100_000,
             tokens_used: 0,
-            max_wall_time: Duration::from_secs(3600),
+            max_wall_time: Duration::from_hours(1),
             elapsed: Duration::ZERO,
         }
     }
@@ -270,7 +270,7 @@ impl SubTaskBudget {
     pub fn autoresearch() -> Self {
         Self {
             max_steps: 100,
-            max_wall_time: Duration::from_secs(300),
+            max_wall_time: Duration::from_mins(5),
             max_cost_usd: 0.0, // local models only
             max_tokens: 500_000,
         }
@@ -280,8 +280,8 @@ impl SubTaskBudget {
     pub fn evofabric() -> Self {
         Self {
             max_steps: 10,
-            max_wall_time: Duration::from_secs(300), // cold build in temp workspace
-            max_cost_usd: 0.0,                       // local models only
+            max_wall_time: Duration::from_mins(5), // cold build in temp workspace
+            max_cost_usd: 0.0,                     // local models only
             max_tokens: 50_000,
         }
     }

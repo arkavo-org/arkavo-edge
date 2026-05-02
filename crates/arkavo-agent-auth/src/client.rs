@@ -165,7 +165,8 @@ impl AgentAuthClient {
             did.to_string(),
             token_response.expires_at,
             token_response.entitlements,
-        );
+        )
+        .with_delegation_jwt(token_response.delegation_jwt);
 
         // Store locally
         storage::store_token(&stored_token).await?;

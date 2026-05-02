@@ -1,0 +1,31 @@
+[package]
+name = "arkavo-mcp-bench"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Benchmarking utilities for Arkavo Edge performance evaluation"
+repository.workspace = true
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-workspace = { path = "../arkavo-mcp-workspace" }
+arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
+arkavo-orchestrator = { path = "../arkavo-orchestrator" }
+arkavo-context = { path = "../arkavo-context" }
+arkavo-hrm = { path = "../arkavo-hrm" }
+arkavo-memory = { path = "../arkavo-memory" }
+async-trait = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+arkavo-gemini = { path = "../arkavo-gemini" }
+tracing-subscriber = { workspace = true }

@@ -56,7 +56,7 @@ impl Default for QwenConfig {
             max_tokens: Some(4096),
             temperature: Some(0.7),
             top_p: None,
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_mins(1),
             max_retries: 3,
         }
     }

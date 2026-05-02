@@ -40,11 +40,22 @@ pub struct AgentConfig {
     pub name: String,
     pub purpose: String,
     pub model: String,
+    pub mode: AgentMode,
     pub listen: String,
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
     pub api_keys: HashMap<String, String>,
     pub runtime: RuntimeConfig,
+}
+
+/// Agent execution mode.
+/// Orchestrator: autonomous tick loop (observe → plan → act).
+/// Specialist: passive, only responds to message/send tasks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AgentMode {
+    #[default]
+    Orchestrator,
+    Specialist,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +99,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 name,
                 purpose: String::new(),
                 model: String::new(),
+                mode: AgentMode::default(),
                 listen: String::new(),
                 mdns_enabled: true, // Default to true for zero-config
                 mcp_servers: Vec::new(),
@@ -194,6 +206,16 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     .trim()
                     .trim_matches('"')
                     .to_string();
+            } else if trimmed.starts_with("mode:") {
+                let mode_str = trimmed
+                    .strip_prefix("mode:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"');
+                agent.mode = match mode_str {
+                    "specialist" => AgentMode::Specialist,
+                    _ => AgentMode::Orchestrator,
+                };
             } else if trimmed.starts_with("listen:") {
                 agent.listen = trimmed
                     .strip_prefix("listen:")

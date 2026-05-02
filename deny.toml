@@ -5,21 +5,16 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = [
-    # rsa timing sidechannel — no fixed version available.
-    # Transitive: sqlx-macros-core unconditionally pulls in sqlx-mysql which depends on rsa.
-    # Project only uses sqlite; rsa is compile-time only, not used at runtime.
-    { id = "RUSTSEC-2023-0071", reason = "sqlx-macros-core unconditionally includes sqlx-mysql; compile-time only" },
     # iroh P2P library transitive deps (no alternatives available)
     { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in iroh -> postcard -> heapless" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in iroh transitive deps" },
-    { id = "RUSTSEC-2024-0384", reason = "instant in iroh transitive deps" },
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
-    # alloy-primitives -> ruint -> ark-ff -> derivative
-    { id = "RUSTSEC-2024-0388", reason = "derivative in alloy-primitives transitive deps" },
-    # fastembed -> hf-hub -> indicatif -> number_prefix
-    { id = "RUSTSEC-2025-0119", reason = "number_prefix in fastembed transitive deps" },
+    # hickory-dns vulnerabilities. iroh 0.98.2 hard-pins hickory-resolver =0.26.0-beta.4
+    # which still contains the bug; fix is in hickory-proto 0.26.1. Blocked on iroh upstream.
+    { id = "RUSTSEC-2026-0119", reason = "hickory-proto O(n²) name compression — pinned by iroh 0.98.2" },
+    { id = "RUSTSEC-2026-0120", reason = "hickory-net NSEC3 unbounded loop — pinned by iroh 0.98.2" },
 ]
 
 [bans]
@@ -40,11 +35,9 @@ skip = [
     # Transitive deps requiring upstream updates
     { crate = "tower@0.4.13", reason = "jsonrpsee v0.24.x requirement" },
     { crate = "base64@0.13.1", reason = "spm_precompiled via tokenizers" },
-    { crate = "base64@0.21.7", reason = "tiktoken-rs v0.6.0" },
     { crate = "tungstenite@0.23.0", reason = "chromiumoxide v0.7.0" },
 
     # Minor duplicates with low impact
-    { crate = "fancy-regex@0.14.0", reason = "tokenizers older version" },
     { crate = "bit-set@0.5.3", reason = "old syntect dependency" },
     { crate = "bit-vec@0.6.3", reason = "old syntect dependency" },
 ]

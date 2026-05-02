@@ -205,6 +205,7 @@ mod tests {
     use super::*;
     use crate::OpBundleStatus;
     use crate::capability_token::CapabilityToken;
+    use arkavo_test_macros::spec;
 
     fn edit_token() -> CapabilityToken {
         CapabilityToken::new(
@@ -246,6 +247,7 @@ mod tests {
         }
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn propose_with_edit_token() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -261,6 +263,7 @@ mod tests {
         assert_eq!(crdt.pending().len(), 1);
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn propose_denied_without_edit() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -270,6 +273,7 @@ mod tests {
         assert!(err.to_string().contains("Edit"));
     }
 
+    #[spec("EVO-005")]
     #[test]
     fn propose_denied_expired() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -279,6 +283,7 @@ mod tests {
         assert!(err.to_string().contains("expired"));
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn accept_moves_to_accepted() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -291,6 +296,7 @@ mod tests {
         assert_eq!(crdt.accepted().len(), 1);
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn accept_missing_bundle_errors() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -298,6 +304,7 @@ mod tests {
         assert!(err.to_string().contains("pending bundle"));
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn detect_no_conflicts() {
         let mut crdt = AstCrdt::new("fn foo() {} fn bar() {}".into());
@@ -321,6 +328,7 @@ mod tests {
         assert!(crdt.pending_conflicts().is_empty());
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn detect_conflict_same_scope() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -345,6 +353,7 @@ mod tests {
         assert_eq!(conflicts.len(), 1);
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn apply_accepted_updates_source() {
         let source = "fn foo() { let x = 1; }\n";
@@ -365,6 +374,7 @@ mod tests {
         assert!(crdt.canonical_source().contains("#[inline]"));
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn clock_increments_on_propose_and_accept() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -377,6 +387,7 @@ mod tests {
         assert_eq!(crdt.clock().get("merger-1"), 1);
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn reject_removes_from_pending() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -388,12 +399,14 @@ mod tests {
         assert!(crdt.pending().is_empty());
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn reject_missing_errors() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
         assert!(crdt.reject(Uuid::new_v4()).is_err());
     }
 
+    #[spec("EVO-002")]
     #[test]
     fn add_use_ops_dont_conflict() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());
@@ -409,6 +422,7 @@ mod tests {
         assert!(crdt.pending_conflicts().is_empty());
     }
 
+    #[spec("EVO-001")]
     #[test]
     fn multiple_agents_concurrent_clocks() {
         let mut crdt = AstCrdt::new("fn foo() {}".into());

@@ -1,0 +1,409 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent Behavioral Sequence Integrity
+module: arkavo_sequence_integrity
+version: 0.67.1
+
+invariants:
+  - Every tool call is taint-tracked from data source to data sink
+  - Action sequences are evaluated as directed graphs, not isolated calls
+  - Cross-session decomposition detected via persistent sequence ledger
+  - Sensitive data classification propagates through transformation steps
+  - Pre-execution gates enforce sequence-aware policy (not just per-action policy)
+  - Sequence anomaly detection adds <50μs overhead per tool call
+  - CriticPipeline CircuitCheck evaluates sequence context, not just single actions
+  - Egress decisions incorporate data provenance, not just destination
+
+scenarios:
+  # ============================================================================
+  # Data Taint Propagation
+  # ============================================================================
+  - id: SEQ-001
+    name: Tag data with provenance at ingestion
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/549
+    given:
+      - Agent reads data from any source (email, file, API, database)
+      - DataTaintTracker initialized for session
+    when: Data enters agent context via tool call
+    then:
+      - TaintLabel assigned with source identifier
+      - Classification level inferred (PII, credentials, internal, public)
+      - Label persists through variable assignments and context
+      - Taint metadata stored in sequence ledger
+    refs: [crates/arkavo-mcp/src/taint.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Data source classification ambiguous
+        expected: Conservative classification (assume sensitive)
+      - condition: Mixed sensitivity data merged
+        expected: Highest classification propagates
+      - condition: Agent receives data from another agent
+        expected: Upstream taint labels inherited
+
+  - id: SEQ-002
+    name: Propagate taint through data transformations
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/549
+    given:
+      - Tainted data in agent context
+      - Agent performs transformation (encode, restructure, summarize, chunk)
+    when: Transformation tool executes
+    then:
+      - Output inherits taint labels from all inputs
+      - Transformation type recorded in provenance chain
+      - Encoding changes do not strip taint (base64, JSON, etc.)
+      - Summarization preserves source taint classification
+    refs: [crates/arkavo-mcp/src/taint.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Agent extracts single field from tainted record
+        expected: Extracted field inherits parent taint
+      - condition: Agent combines tainted and public data
+        expected: Combined output inherits tainted classification
+      - condition: Agent passes tainted data through LLM inference
+        expected: LLM output tainted if input was tainted
+
+  - id: SEQ-003
+    name: Block tainted data exfiltration at egress
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/548
+    given:
+      - Agent attempts outbound action (HTTP POST, email send, file write to external)
+      - Payload contains taint-tracked data
+      - EgressTaintGate configured
+    when: Egress action evaluated
+    then:
+      - Payload taint labels checked against destination policy
+      - Internal-classified data blocked from external endpoints
+      - PII-classified data requires explicit authorization
+      - Credential-classified data blocked unconditionally
+      - Violation logged with full provenance chain
+    refs: [crates/arkavo-validation/src/egress_taint.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Destination is sanctioned internal endpoint
+        expected: Taint policy allows, action proceeds
+      - condition: Agent encodes tainted data to evade classification
+        expected: Taint tracks through encoding, still blocked
+      - condition: Agent splits tainted data across multiple small requests
+        expected: Sequence-level detection catches split pattern
+
+  # ============================================================================
+  # Action Sequence Graph
+  # ============================================================================
+  - id: SEQ-004
+    name: Build directed action graph per session
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/556
+    given:
+      - Agent session active
+      - SequenceGraphBuilder initialized
+    when: Each tool call completes
+    then:
+      - Node added to session action graph
+      - Edges connect data flow between calls (output → input)
+      - Node metadata includes tool name, parameters hash, taint labels
+      - Graph updated atomically
+    refs: [crates/arkavo-protocol/src/sequence_graph.rs]
+    changed: "2026-03-21"
+
+  - id: SEQ-005
+    name: Learn behavioral baselines per agent skill
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/552
+    given:
+      - Agent has executed N sessions for a given skill/role
+      - BaselineBuilder has sufficient history (configurable, default 100 sessions)
+    when: Baseline generation triggered
+    then:
+      - Typical action sequences extracted as graph patterns
+      - Frequency distribution computed per pattern
+      - Maximum path lengths per skill recorded
+      - Data flow patterns (source types → sink types) profiled
+      - Baseline stored with skill identifier
+    refs: [crates/arkavo-router/src/learning/baseline.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Insufficient history for baseline
+        expected: Conservative policy applied (stricter gates)
+      - condition: Skill has high variance in legitimate use
+        expected: Wider confidence intervals, more lenient thresholds
+      - condition: Baseline poisoned by attacker during training
+        expected: Invariant layer constraints override learned baselines
+
+  - id: SEQ-006
+    name: Detect sequence divergence from baseline
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
+    given:
+      - Baseline exists for agent skill
+      - Current session action graph building
+      - SequenceAnomalyDetector active
+    when: Action graph diverges from learned patterns
+    then:
+      - Divergence score computed (graph edit distance to nearest baseline)
+      - Low divergence (< threshold_1) logged, action proceeds
+      - Medium divergence (threshold_1 to threshold_2) triggers async alert
+      - High divergence (> threshold_2) triggers synchronous gate
+      - Detection completes within 50μs overhead budget
+    refs: [crates/arkavo-titan/src/sequence_anomaly.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Novel but legitimate workflow
+        expected: Gate with human-in-the-loop option, not hard block
+      - condition: Gradual drift over many sessions
+        expected: Drift detector (Titan integration) catches slow divergence
+      - condition: Anomaly detection exceeds latency budget
+        expected: Async fallback, action proceeds with enhanced logging
+
+  # ============================================================================
+  # Cross-Session Decomposition Detection
+  # ============================================================================
+  - id: SEQ-007
+    name: Persist sequence fragments to cross-session ledger
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
+    given:
+      - Agent session completes
+      - Session action graph finalized
+    when: Session graph committed to SequenceLedger
+    then:
+      - Graph persisted with agent identity and timestamp
+      - Data flow summaries (source→sink pairs) indexed
+      - Incomplete exfiltration patterns flagged as pending
+      - Ledger entries retained for configurable window (default 24h)
+    refs: [crates/arkavo-memory/src/sequence_ledger.rs]
+    changed: "2026-03-21"
+
+  - id: SEQ-008
+    name: Detect multi-session decomposition attacks
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
+    given:
+      - SequenceLedger has entries from multiple sessions
+      - DecompositionDetector running on ledger
+    when: Cross-session analysis triggered (configurable interval, default 60s)
+    then:
+      - Sessions from same agent identity correlated
+      - Data flow chains reconstructed across session boundaries
+      - Read internal data in session A + POST external in session B detected
+      - Staging patterns identified (read→store→retrieve→exfiltrate)
+      - Composite threat score computed from linked sessions
+    refs: [crates/arkavo-memory/src/decomposition.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Legitimate multi-session workflow (e.g., daily report generation)
+        expected: Baseline includes cross-session patterns for known workflows
+      - condition: Attacker uses different agent identities per session
+        expected: Data taint tracking links sessions via shared tainted content
+      - condition: Decomposition spans >24h retention window
+        expected: Summary digests retained beyond window for pattern matching
+
+  - id: SEQ-009
+    name: Correlate decomposition across agent identities
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/554
+    given:
+      - Multiple agents in mesh share data
+      - Agent A reads sensitive data, passes to Agent B
+      - Agent B performs exfiltration
+    when: Cross-agent flow analysis runs
+    then:
+      - A2A message taint labels tracked across agent boundary
+      - Composite action graph spans multiple agents
+      - No single agent's graph looks anomalous in isolation
+      - Combined graph triggers decomposition detection
+    refs: [crates/arkavo-memory/src/cross_agent.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Legitimate agent delegation (e.g., summarizer → publisher)
+        expected: Known delegation patterns whitelisted in baseline
+      - condition: Three or more agents in chain
+        expected: Taint propagates through full chain
+
+  # ============================================================================
+  # Pre-Execution Sequence Gates
+  # ============================================================================
+  - id: SEQ-010
+    name: Evaluate sequence-aware TØR-G circuit before action
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/555
+    given:
+      - CriticPipeline with CircuitCheck active
+      - TØR-G circuit compiled with sequence features
+      - Current action and session graph available
+    when: CircuitCheck evaluates pre-execution
+    then:
+      - Sequence features extracted (action type, prior actions, taint state, sink type)
+      - Circuit evaluates in <1μs (existing TØR-G performance)
+      - Pass allows action to proceed
+      - Fail blocks action with policy violation
+      - Evidence includes sequence context for audit
+    refs: [crates/arkavo-critic/src/checks/sequence_circuit.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Circuit not compiled for current agent skill
+        expected: Fallback to per-action policy (existing behavior)
+      - condition: Sequence features exceed circuit input capacity
+        expected: Feature selection prioritizes highest-signal features
+
+  - id: SEQ-011
+    name: Synchronous gate on high-consequence actions
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/555
+    given:
+      - Action classified as high-consequence (egress, delete, credential use)
+      - SequenceGate configured for synchronous evaluation
+    when: High-consequence action attempted
+    then:
+      - Full sequence context evaluated (not just current action)
+      - Prior N actions in session considered
+      - Taint state of payload assessed
+      - Decision returned before action executes
+      - Latency budget 100μs for synchronous gate
+    refs: [crates/arkavo-critic/src/checks/sequence_gate.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Gate evaluation exceeds latency budget
+        expected: Action held pending, not auto-approved
+      - condition: Session has no prior context (first action)
+        expected: Per-action policy applies, enhanced logging enabled
+
+  - id: SEQ-012
+    name: Async detection for low-consequence action coverage
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
+    given:
+      - Action classified as low-consequence (read, transform, internal write)
+      - AsyncSequenceMonitor running
+    when: Low-consequence action completes
+    then:
+      - Action logged to sequence graph without blocking
+      - Anomaly score updated asynchronously
+      - Threshold breach triggers alert (not retroactive block)
+      - Coverage maintained for all actions in session
+    refs: [crates/arkavo-router/src/async_monitor.rs]
+    changed: "2026-03-21"
+
+  # ============================================================================
+  # Integration Points
+  # ============================================================================
+  - id: SEQ-013
+    name: Titan integration for statistical sequence drift
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/553
+    given:
+      - TitanMonitor active
+      - Sequence feature vector computed per action
+    when: TitanMonitor::evaluate called with sequence features
+    then:
+      - EmaAccumulator tracks sequence entropy over time
+      - DriftDetector identifies gradual behavioral shift
+      - BoundaryDetector catches actions outside learned region
+      - Anomaly evidence includes sequence context
+    refs: [crates/arkavo-titan/src/sequence_bridge.rs]
+    changed: "2026-03-21"
+
+  - id: SEQ-014
+    name: Egress filter enhanced with provenance
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/548
+    given:
+      - EgressFilter from arkavo-validation active
+      - Outbound request intercepted
+      - Taint metadata available for payload
+    when: Egress decision made
+    then:
+      - Existing IP/domain checks applied (NET-007, VAL-005)
+      - Additionally, payload provenance evaluated
+      - Legitimate external API calls with public data pass
+      - External calls carrying internal-tainted data blocked
+      - Decision logged with provenance chain for forensics
+    refs: [crates/arkavo-validation/src/provenance_egress.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Destination on allowlist but payload tainted
+        expected: Taint policy overrides destination allowlist
+      - condition: Payload taint indeterminate (tracking gap)
+        expected: Conservative block with alert for manual review
+
+  - id: SEQ-015
+    name: Sequence evidence in audit events
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/550
+    given:
+      - EventWriter from arkavo-events active
+      - Sequence violation or anomaly detected
+    when: Security event generated
+    then:
+      - Event includes full action graph (serialized)
+      - Taint chain from source to violation point included
+      - Baseline comparison included (expected vs actual)
+      - Correlation ID links to cross-session decomposition if applicable
+      - Evidence suitable for forensic reconstruction
+    refs: [crates/arkavo-events/src/sequence_evidence.rs]
+    changed: "2026-03-21"
+
+  # ============================================================================
+  # Configuration and Lifecycle
+  # ============================================================================
+  - id: SEQ-016
+    name: Configure sequence integrity per agent role
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/551
+    given:
+      - AgentConfig includes sequence_integrity section
+      - AGENTS.md defines agent roles
+    when: Agent starts with sequence integrity enabled
+    then:
+      - Taint tracking enabled for configured data sources
+      - Baseline loaded for agent skill (or conservative default)
+      - Gate thresholds applied from config
+      - Ledger retention window set
+      - Overhead budget enforced
+    refs: [crates/arkavo-protocol/src/sequence_config.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Sequence integrity disabled in config
+        expected: Per-action policy still applies (existing behavior)
+      - condition: No baseline available for agent role
+        expected: Strict mode until baseline learned
+
+  - id: SEQ-017
+    name: Handle sequence tracking errors gracefully
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/551
+    given:
+      - Sequence tracking encounters error (storage failure, timeout)
+    when: Error propagated
+    then:
+      - SequenceIntegrityError created with context
+      - Agent operation continues (tracking is non-blocking for reads)
+      - High-consequence actions blocked if tracking unavailable
+      - Alert sent to operator
+      - Recovery attempted on next action
+    refs: [crates/arkavo-protocol/src/sequence_error.rs]
+    changed: "2026-03-21"
+    edge_cases:
+      - condition: Persistent storage failure
+        expected: In-memory fallback with reduced retention
+      - condition: Cross-agent taint bridge unavailable
+        expected: Local taint tracking continues, cross-agent gap logged

@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: OpenClaw Protocol Adapter
+module: arkavo_openclaw
+version: 0.67.1
+
+invariants:
+  - Handshake requires device authentication via Ed25519
+  - Frames follow OpenClaw protocol version
+  - Translation between OpenClaw and A2A is bidirectional and lossless
+  - WebSocket connections use TLS for non-localhost
+  - Device identity verified before session establishment
+
+scenarios:
+  - id: OCLAW-001
+    name: WebSocket handshake with device auth
+    criticality: critical
+    given:
+      - HandshakeConfig with device credentials
+      - Server listening for connections
+    when: Client initiates WebSocket handshake
+    then:
+      - TLS negotiated
+      - ChallengeSignParams exchanged
+      - DeviceIdentity verified via SignedDevice
+      - Session established
+    refs: [crates/arkavo-openclaw/src/handshake.rs]
+    changed: "2026-03-19"
+    edge_cases:
+      - condition: Invalid device signature
+        expected: Handshake rejected with auth error
+      - condition: Protocol version mismatch
+        expected: Handshake fails with version error
+
+  - id: OCLAW-002
+    name: Frame translation OpenClaw to A2A
+    criticality: critical
+    given:
+      - OpenClawFrame received from client
+    when: Translator processes frame
+    then:
+      - Frame converted to A2A JSON-RPC
+      - Semantic meaning preserved
+      - Request/Response/Event types mapped correctly
+    refs: [crates/arkavo-openclaw/src/translator.rs]
+    changed: "2026-03-19"
+
+  - id: OCLAW-003
+    name: Frame translation A2A to OpenClaw
+    criticality: critical
+    given:
+      - A2A JSON-RPC response generated
+    when: Translator converts to OpenClaw
+    then:
+      - Response wrapped in OpenClawFrame
+      - EventFrame for push notifications
+      - ResponseFrame for request replies
+    refs: [crates/arkavo-openclaw/src/translator.rs]
+    changed: "2026-03-19"
+
+  - id: OCLAW-004
+    name: Device identity verification
+    criticality: critical
+    given:
+      - DeviceAuthStore with known devices
+      - Connection attempt from device
+    when: Device presents identity
+    then:
+      - Ed25519 signature verified
+      - Device looked up in store
+      - Unknown devices rejected
+    refs: [crates/arkavo-openclaw/src/device.rs]
+    changed: "2026-03-19"
+
+  - id: OCLAW-005
+    name: Listener accepts connections
+    criticality: high
+    given:
+      - OpenClawListener bound to address
+    when: Client connects
+    then:
+      - Connection accepted
+      - Handshake initiated
+      - OpenClawTransport created on success
+    refs: [crates/arkavo-openclaw/src/server.rs]
+    changed: "2026-03-19"
+
+  - id: OCLAW-006
+    name: Dispatcher routes events
+    criticality: high
+    given:
+      - OpenClawDispatcher initialized
+      - Multiple event types possible
+    when: OpenClawEvent received
+    then:
+      - Event dispatched to correct handler
+      - Ordering preserved per connection
+      - Errors isolated per event
+    refs: [crates/arkavo-openclaw/src/server.rs]
+    changed: "2026-03-19"

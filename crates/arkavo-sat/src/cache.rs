@@ -19,7 +19,7 @@ use crate::error::SatResult;
 pub const DEFAULT_CACHE_CAPACITY: usize = 1000;
 
 /// Default TTL for cache entries
-pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(300);
+pub const DEFAULT_CACHE_TTL: Duration = Duration::from_mins(5);
 
 /// Cache key uniquely identifying a probe query
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]

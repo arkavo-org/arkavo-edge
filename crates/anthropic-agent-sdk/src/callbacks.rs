@@ -412,6 +412,7 @@ where
 mod tests {
     use super::*;
     use crate::types::{PermissionResultAllow, PermissionResultDeny};
+    use arkavo_test_macros::spec;
 
     struct TestHook;
 
@@ -453,6 +454,7 @@ mod tests {
         }
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_hook_callback_trait() {
         let hook = TestHook;
@@ -462,6 +464,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-004")]
     #[tokio::test]
     async fn test_permission_callback_trait() {
         let perm = TestPermission { allow_all: true };
@@ -476,6 +479,7 @@ mod tests {
         assert!(matches!(result.unwrap(), PermissionResult::Allow(_)));
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_arc_wrapped_callback() {
         let hook: Arc<dyn HookCallback> = Arc::new(TestHook);
@@ -485,6 +489,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-005")]
     #[tokio::test]
     async fn test_fn_hook_callback() {
         let callback = FnHookCallback::new(|_input, _tool_id, ctx| {
@@ -503,6 +508,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("CASDK-004")]
     #[tokio::test]
     async fn test_fn_permission_callback() {
         let callback = FnPermissionCallback::new(|_tool, _input, ctx| {

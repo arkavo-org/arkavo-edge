@@ -25,6 +25,7 @@ pub struct AgentConnection {
     active_subscriptions: Arc<RwLock<HashMap<String, SubscriptionHandle>>>,
     chat_sessions: Arc<RwLock<HashMap<String, String>>>, // agent_id -> session_id
     chat_broadcasts: Arc<RwLock<HashMap<String, broadcast::Sender<OrderedMessageDelta>>>>,
+    context_snapshot: Arc<RwLock<Option<serde_json::Value>>>,
     _stream_ordering: Arc<StreamOrdering>,
     _latency_tracker: Arc<LatencyTracker>,
 }
@@ -96,6 +97,7 @@ impl AgentConnection {
             active_subscriptions: Arc::new(RwLock::new(HashMap::new())),
             chat_sessions: Arc::new(RwLock::new(HashMap::new())),
             chat_broadcasts: Arc::new(RwLock::new(HashMap::new())),
+            context_snapshot: Arc::new(RwLock::new(None)),
             _stream_ordering: Arc::new(StreamOrdering::new()),
             _latency_tracker: Arc::new(LatencyTracker::new()),
         }
@@ -567,6 +569,7 @@ impl AgentConnection {
         // Spawn task to forward broadcasts to this specific UI
         let ui_tx_clone = ui_tx.clone();
         let agent_id_for_forward = agent_id.clone();
+        let context_snapshot_store = self.context_snapshot.clone();
         tokio::spawn(async move {
             while let Ok(ordered_delta) = broadcast_rx.recv().await {
                 // Intercept Metadata deltas — convert to UI events instead of forwarding
@@ -613,8 +616,15 @@ impl AgentConnection {
                     agent_id: agent_id_for_forward.clone(),
                     message_id: ordered_delta.delta.message_id,
                     delta: match ordered_delta.delta.delta {
-                        MessageDeltaContent::Text { text } => {
-                            crate::types::MessageDeltaContent::Text { text }
+                        MessageDeltaContent::Text { ref text } => {
+                            // Detect @context introspection response
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text)
+                                && parsed.get("messages").is_some()
+                                && parsed.get("cycle").is_some()
+                            {
+                                *context_snapshot_store.write().await = Some(parsed);
+                            }
+                            crate::types::MessageDeltaContent::Text { text: text.clone() }
                         }
                         MessageDeltaContent::ToolCall {
                             tool_call_id,
@@ -756,6 +766,61 @@ impl AgentConnection {
         }
     }
 
+    /// Return the latest stored @context introspection snapshot
+    pub async fn get_latest_context_snapshot(&self) -> Option<serde_json::Value> {
+        self.context_snapshot.read().await.clone()
+    }
+
+    /// Send an introspection message (like @context) that auto-opens a session if needed.
+    /// Unlike send_user_message, does not require an active chat subscription.
+    pub async fn send_introspection(
+        &self,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get or create a chat session
+        let session_id = {
+            let sessions = self.chat_sessions.read().await;
+            sessions.get(&self.agent_id).cloned()
+        };
+        let session_id = match session_id {
+            Some(id) => id,
+            None => self.reopen_chat_session(&self.agent_id).await?,
+        };
+
+        let user_message = UserMessage {
+            content: text.to_string(),
+            attachments: None,
+            metadata: None,
+        };
+
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        match client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e) if e.to_string().contains("Session not found") => {
+                drop(client_guard);
+                let new_session_id = self.reopen_chat_session(&self.agent_id).await?;
+                let client_guard = self.client.read().await;
+                let client = client_guard.as_ref().ok_or("Not connected")?;
+                let retry_msg = UserMessage {
+                    content: text.to_string(),
+                    attachments: None,
+                    metadata: None,
+                };
+                client
+                    .request::<(), _>("chat_send", rpc_params![new_session_id, retry_msg])
+                    .await
+                    .map_err(|e| format!("Introspection send failed: {e}"))?;
+                Ok(())
+            }
+            Err(e) => Err(format!("Introspection send failed: {e}").into()),
+        }
+    }
+
     /// Re-open a chat session for an agent after the previous one became stale
     async fn reopen_chat_session(
         &self,
@@ -839,6 +904,99 @@ impl AgentConnection {
         let result: serde_json::Value = client.request("system.metrics", rpc_params![]).await?;
 
         Ok(result)
+    }
+
+    /// Subscribe to push-based metrics stream from agent.
+    /// Replaces polling of system.metrics + budget.compute_status.
+    pub async fn subscribe_metrics(
+        &self,
+        tx: mpsc::Sender<crate::types::AgUiEvent>,
+        security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
+
+        let mut subscription = client
+            .subscribe::<serde_json::Value, _>(
+                "system.metrics.subscribe",
+                rpc_params![],
+                "system.metrics.unsubscribe",
+            )
+            .await?;
+        drop(client_guard);
+
+        let agent_id = self.agent_id.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(metrics)) = subscription.next().await {
+                // Forward system metrics
+                let event = crate::types::AgUiEvent::AgentSystemMetrics {
+                    agent_id: agent_id.clone(),
+                    rss_mb: metrics["rss_mb"].as_f64().unwrap_or(0.0),
+                    cpu_percent: metrics["cpu_percent"].as_f64().unwrap_or(0.0),
+                    pid: metrics["pid"].as_u64().unwrap_or(0) as u32,
+                    total_ram_mb: metrics["total_ram_mb"].as_f64(),
+                    available_ram_mb: metrics["available_ram_mb"].as_f64(),
+                };
+                let _ = tx.send(event).await;
+
+                // Forward compute budget
+                if let Some(budget) = metrics.get("compute_budget") {
+                    let event = crate::types::AgUiEvent::ComputeBudgetUpdate {
+                        agent_id: agent_id.clone(),
+                        compute_budget: budget.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = tx.send(event).await;
+                }
+
+                // Update Iroh status
+                if let Some(iroh) = metrics.get("iroh_active").and_then(|v| v.as_bool()) {
+                    let sec = security_handler.read().await;
+                    sec.update_agent_iroh(&agent_id, iroh).await;
+                    drop(sec);
+                }
+
+                // Forward context topology as telemetry event
+                if let Some(ctx) = metrics.get("context_topology") {
+                    let event = crate::types::AgUiEvent::TelemetryEvent {
+                        event_type: "context_topology".to_string(),
+                        agent_id: agent_id.clone(),
+                        details: ctx.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let _ = tx.send(event).await;
+                }
+
+                // Forward subsystem timing
+                if let Some(timing) = metrics.get("subsystem_timing") {
+                    let registry = arkavo_observability::subsystem_timing::global_timing();
+                    if let Some(ms) = timing.get("routerDecisionAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.router_decisions.record(ms as u64);
+                    }
+                    if let Some(ms) = timing
+                        .get("conductorOrchestrationAvgMs")
+                        .and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.conductor_orchestration.record(ms as u64);
+                    }
+                    if let Some(ms) = timing.get("mcpToolAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.mcp_tools.record(ms as u64);
+                    }
+                    if let Some(ms) = timing.get("inferenceAvgMs").and_then(|v| v.as_f64())
+                        && ms > 0.0
+                    {
+                        registry.inference.record(ms as u64);
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 
     /// Get KAS public key from agent (returns None if KAS not enabled)

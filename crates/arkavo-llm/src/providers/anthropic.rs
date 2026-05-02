@@ -566,44 +566,12 @@ impl Provider for AnthropicProvider {
                             if let Some(data) = line.strip_prefix("data: ")
                                 && let Ok(event) = serde_json::from_str::<StreamEvent>(data)
                             {
-                                match event {
+                                let delivery = match event {
                                     StreamEvent::ContentBlockDelta {
                                         delta: DeltaData::TextDelta { text },
                                         ..
-                                    } => {
-                                        if tx
-                                            .send(Ok(StreamResponse {
-                                                content: text,
-                                                reasoning_content: None,
-                                                done: false,
-                                                inference_timing: None,
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break; // Receiver dropped
-                                        }
-                                    }
-                                    StreamEvent::ContentBlockDelta {
-                                        delta: DeltaData::InputJsonDelta { .. },
-                                        ..
-                                    } => {
-                                        // InputJsonDelta is ignored in basic stream()
-                                    }
-                                    StreamEvent::MessageStop => {
-                                        if tx
-                                            .send(Ok(StreamResponse {
-                                                content: String::new(),
-                                                reasoning_content: None,
-                                                done: true,
-                                                inference_timing: None,
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break; // Receiver dropped
-                                        }
-                                    }
+                                    } => Some((text, false)),
+                                    StreamEvent::MessageStop => Some((String::new(), true)),
                                     StreamEvent::Error { error } => {
                                         let _ = tx
                                             .send(Err(crate::Error::Provider(format!(
@@ -613,7 +581,24 @@ impl Provider for AnthropicProvider {
                                             .await;
                                         break;
                                     }
-                                    _ => {} // Ignore other event types
+                                    StreamEvent::ContentBlockDelta {
+                                        delta: DeltaData::InputJsonDelta { .. },
+                                        ..
+                                    } => None,
+                                    _ => None,
+                                };
+                                if let Some((content, done)) = delivery
+                                    && tx
+                                        .send(Ok(StreamResponse {
+                                            content,
+                                            reasoning_content: None,
+                                            done,
+                                            inference_timing: None,
+                                        }))
+                                        .await
+                                        .is_err()
+                                {
+                                    break; // Receiver dropped
                                 }
                             }
                         }
