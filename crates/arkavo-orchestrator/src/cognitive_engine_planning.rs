@@ -1,10 +1,12 @@
 use crate::agent_assignment::AgentAssignment;
+use crate::attempt_history::AttemptHistory;
 use crate::cognitive_engine_core::{
     ExecutionPlan, PlanStep, VerificationCheck, VerificationResult,
 };
 use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
+use crate::token_estimator;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_llm::{Message as LlmMessage, Provider};
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
@@ -18,6 +20,9 @@ pub struct Planner {
     budget_tracker: Arc<BudgetTracker>,
     router: Arc<Router>,
     plan_store: Option<Arc<PlanStateStore>>,
+    /// R1: Reflexion-style attempt history; consulted at plan time so the
+    /// model is aware of prior failures on the same issue.
+    attempt_history: Arc<AttemptHistory>,
 }
 
 impl Planner {
@@ -26,10 +31,25 @@ impl Planner {
         router: Arc<Router>,
         plan_store: Option<Arc<PlanStateStore>>,
     ) -> Self {
+        Self::new_with_history(
+            budget_tracker,
+            router,
+            plan_store,
+            Arc::new(AttemptHistory::new()),
+        )
+    }
+
+    pub fn new_with_history(
+        budget_tracker: Arc<BudgetTracker>,
+        router: Arc<Router>,
+        plan_store: Option<Arc<PlanStateStore>>,
+        attempt_history: Arc<AttemptHistory>,
+    ) -> Self {
         Self {
             budget_tracker,
             router,
             plan_store,
+            attempt_history,
         }
     }
 
@@ -50,7 +70,18 @@ impl Planner {
 
         // Get capability-appropriate planner config for adaptive prompting
         let planner_config = get_planner_config(decision.recommended_model.capability());
-        let planning_prompt = planner_config.planning_prompt(assignment);
+        let base_prompt = planner_config.planning_prompt(assignment);
+
+        // R1: If prior attempts on this issue failed, prepend a summary of
+        // those failures so the model can avoid repeating the same
+        // mistakes (Reflexion-style failure memory).
+        let planning_prompt = match self
+            .attempt_history
+            .to_prompt_block(&assignment.repository, assignment.issue_number)
+        {
+            Some(history_block) => format!("{history_block}\n\n{base_prompt}"),
+            None => base_prompt,
+        };
 
         info!(
             model = ?decision.recommended_model,
@@ -93,8 +124,12 @@ impl Planner {
 
         let steps = self.parse_plan_json_or_text(&response)?;
 
-        let estimated_input_tokens = planning_prompt.len() as u32 / 4;
-        let estimated_output_tokens = response.len() as u32 / 4;
+        // P4: Accurate token estimation. `complete_with_schema` returns a
+        // raw String with no provider-reported counts, so we use an
+        // improved character/word heuristic rather than the legacy
+        // len()/4 approximation.
+        let (estimated_input_tokens, estimated_output_tokens) =
+            token_estimator::tokens_from_texts(&planning_prompt, &response);
         let total_tokens = estimated_input_tokens + estimated_output_tokens;
 
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
@@ -377,8 +412,9 @@ impl Planner {
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment LLM call failed: {e}")))?;
 
-        let estimated_input_tokens = adjustment_prompt.len() as u32 / 4;
-        let estimated_output_tokens = response.len() as u32 / 4;
+        // P4: accurate token estimation.
+        let (estimated_input_tokens, estimated_output_tokens) =
+            token_estimator::tokens_from_texts(&adjustment_prompt, &response);
 
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
