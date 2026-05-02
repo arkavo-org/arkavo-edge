@@ -151,7 +151,11 @@ function switchView(viewId) {
     } else if (viewId === 'arp') {
         wsSend({ type: 'requestArpStatus' });
         startArpPolling();
-    } else if (viewId === 'published-trust') {
+    }
+
+    // Published Trust is rendered inside the Security & Data Plane panel,
+    // so its polling is gated on entering the security view.
+    if (viewId === 'security') {
         wsSend({ type: 'requestPublishedTrust' });
         startPublishedTrustPolling();
     }
@@ -166,7 +170,7 @@ function switchView(viewId) {
     if (viewId !== 'arp') {
         stopArpPolling();
     }
-    if (viewId !== 'published-trust') {
+    if (viewId !== 'security') {
         stopPublishedTrustPolling();
     }
 }

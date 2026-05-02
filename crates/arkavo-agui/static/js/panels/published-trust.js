@@ -1,34 +1,30 @@
 "use strict";
 
-// Read-only display of MCP-T trust data the agent publishes externally.
-// The composite, dimensions, and behavior.trace events shown here are
-// EXACTLY what an external party calling `trust/query` and `trust/history`
-// would see. Nothing here gates internal decisions — see the persistent
-// banner for the operator-facing explanation.
+// Published Trust (MCP-T) — rendered as a section inside the Security &
+// Data Plane panel. Trust scoring lives semantically in the security
+// posture story, so this file exposes a render function that security.js
+// inlines at the bottom of its own output rather than owning a separate
+// view.
+//
+// The displayed score is EXACTLY what an external party calling
+// `trust/query` and `trust/history` would see. Nothing here gates
+// internal decisions — see the persistent banner.
 
 var PUBLISHED_TRUST_POLL_INTERVAL_MS = 15000;
 var publishedTrustPollHandle = null;
 
-// All visible strings on this panel originate from the agent over JSON-RPC.
-// A malicious peer could publish a behavior.trace whose subject_id or
-// contract_id contains markup, so every interpolated string runs through
-// the global escapeHtml() defined in state.js before reaching innerHTML.
+// Every visible string on this section originates from the agent over
+// JSON-RPC. A malicious peer could publish a behavior.trace whose
+// subject_id or contract_id contains markup, so every interpolated
+// string runs through the global escapeHtml() defined in state.js.
 
 function handlePublishedTrustUpdate(event) {
     AppState.lastPublishedTrust = event.snapshot;
-    var snap = event.snapshot || {};
-    var withoutTs = {};
-    for (var k in snap) {
-        if (k !== 'fetchedAt' && Object.prototype.hasOwnProperty.call(snap, k)) {
-            withoutTs[k] = snap[k];
-        }
+    // Re-render the security panel only if it's the active view — other
+    // panels never display trust data, so a hidden refresh is wasted DOM.
+    if (AppState.activeView === 'security' && typeof renderSecurity === 'function') {
+        renderSecurity();
     }
-    var fingerprint = JSON.stringify(withoutTs);
-    if (AppState.publishedTrustLastFingerprint === fingerprint) {
-        return;
-    }
-    AppState.publishedTrustLastFingerprint = fingerprint;
-    renderPublishedTrust();
 }
 
 function startPublishedTrustPolling() {
@@ -51,119 +47,120 @@ function shortDid(did) {
     return did.slice(0, 16) + '…' + did.slice(-6);
 }
 
-function pctFidelity(ratio) {
-    return Math.round((ratio || 0) * 100);
+function fidelityColor(ratio) {
+    if (ratio >= 0.95) return 'var(--success)';
+    if (ratio >= 0.75) return 'var(--warning)';
+    return 'var(--error)';
 }
 
-function fidelityBadge(ratio) {
-    var pct = pctFidelity(ratio);
-    var cls = 'badge-red';
-    if (ratio >= 0.95) cls = 'badge-green';
-    else if (ratio >= 0.75) cls = 'badge-amber';
-    return '<span class="trust-fidelity-badge ' + cls + '">' + pct + '%</span>';
-}
-
-function localTime(isoStr) {
-    if (!isoStr) return '';
-    var d = new Date(isoStr);
-    if (isNaN(d.getTime())) return isoStr;
-    return d.toLocaleTimeString();
-}
-
-function renderScoreCard(score, isSelf) {
-    if (!score) return '';
-    var dims = score.dimensions || [];
-    var dimRows = dims.map(function(d) {
-        var bar = Math.min(100, Math.round((d.value / 1000) * 100));
-        var conf = Math.round((d.confidence || 0) * 100);
-        var muted = (d.confidence || 0) < 0.3 ? ' trust-dim-muted' : '';
-        return '' +
-            '<div class="trust-dim-row' + muted + '">' +
-                '<div class="trust-dim-name">' + escapeHtml(d.name) + '</div>' +
-                '<div class="trust-dim-bar-wrap">' +
-                    '<div class="trust-dim-bar" style="width:' + bar + '%"></div>' +
-                '</div>' +
-                '<div class="trust-dim-value">' + d.value + '</div>' +
-                '<div class="trust-dim-conf">conf ' + conf + '%</div>' +
-                '<div class="trust-dim-evidence">n=' + (d.evidence_count || 0) + '</div>' +
-            '</div>';
-    }).join('');
-    if (!dimRows) {
-        dimRows = '<div class="trust-empty-dims">No populated dimensions yet.</div>';
+function dimByName(score, name) {
+    if (!score || !score.dimensions) return null;
+    for (var i = 0; i < score.dimensions.length; i++) {
+        if (score.dimensions[i].name === name) return score.dimensions[i];
     }
-
-    var sizeCls = isSelf ? 'trust-card trust-card-self' : 'trust-card trust-card-peer';
-    return '' +
-        '<div class="' + sizeCls + '">' +
-            '<div class="trust-card-header">' +
-                '<div class="trust-card-subject">' + escapeHtml(score.subjectId) + '</div>' +
-                '<div class="trust-card-composite">' + score.composite + '<span class="trust-card-out-of">/1000</span></div>' +
-            '</div>' +
-            '<div class="trust-dim-grid">' + dimRows + '</div>' +
-        '</div>';
+    return null;
 }
 
-function renderPublishedTrust() {
-    var container = document.getElementById('published-trust-container');
-    if (!container) return;
+// Returns an HTML fragment that the security panel inlines at the bottom
+// of its own output. Reuses budget.js's renderStatCard and the shared
+// `section-title` / `cost-table` / `stats-grid` / `budget-alert` classes
+// so the trust section visually matches the rest of the panel.
+function renderPublishedTrustSection() {
+    var html = '<div class="section-title">Published Trust (MCP-T)</div>';
 
     var snap = AppState.lastPublishedTrust;
     if (!snap) {
-        container.innerHTML = '<div class="empty-state"><h3>Loading Published Trust...</h3>' +
-            '<p>Querying trust/query and trust/history over the A2A WebSocket</p></div>';
-        return;
+        html += '<div class="empty-state"><p>Loading trust data &mdash; ' +
+            'querying trust/query and trust/history over the A2A WebSocket.</p></div>';
+        return html;
     }
 
-    var banner = '<div class="trust-advisory-banner">' +
-        '<strong>Published externally (advisory only)</strong> &mdash; this score does not gate ' +
-        'internal decisions. Each agent acts as its own trust provider; ARP and the router ' +
-        'remain the authoritative policy layer.<br>' +
-        '<span class="trust-banner-meta">Scored by <code>' + escapeHtml(shortDid(snap.providerDid)) + '</code> ' +
-        '&middot; fetched ' + escapeHtml(localTime(snap.fetchedAt)) + '</span>' +
+    // Persistent advisory banner — must remain visible so operators don't
+    // mistake the displayed score for an internal authorization signal.
+    html += '<div class="budget-alert warning">' +
+        '<strong>Published externally (advisory only)</strong> &mdash; this score ' +
+        'does not gate internal decisions. ARP and the router remain the ' +
+        'authoritative policy layer. Scored by <code>' +
+        escapeHtml(shortDid(snap.providerDid)) + '</code>.' +
         '</div>';
 
-    var selfSection = '';
+    // Self-published score: composite + per-dimension stat cards.
     if (snap.selfScore) {
-        selfSection = '<div class="trust-section-header">Self-published</div>' +
-            renderScoreCard(snap.selfScore, true);
-    } else {
-        selfSection = '<div class="trust-section-header">Self-published</div>' +
-            '<div class="empty-state"><p>No self score yet &mdash; the trust sync writes the local subject ' +
-            'on its first 30s tick.</p></div>';
+        html += '<div class="section-title">Self-published &mdash; ' +
+            escapeHtml(snap.selfSubjectId) + '</div>';
+        html += '<div class="stats-grid">';
+        html += renderStatCard(
+            'Composite',
+            snap.selfScore.composite + ' / 1000',
+            'fetched ' + formatTime(snap.fetchedAt)
+        );
+        snap.selfScore.dimensions.forEach(function(d) {
+            var conf = Math.round((d.confidence || 0) * 100);
+            html += renderStatCard(
+                d.name,
+                d.value + ' / 1000',
+                'conf ' + conf + '% • n=' + (d.evidence_count || 0)
+            );
+        });
+        html += '</div>';
     }
 
-    var peerSection;
-    if (snap.peers && snap.peers.length > 0) {
-        var peerCards = snap.peers.map(function(p) { return renderScoreCard(p, false); }).join('');
-        peerSection = '<div class="trust-section-header">Peer scores (' + snap.peers.length + ')</div>' +
-            '<div class="trust-peer-grid">' + peerCards + '</div>';
+    // Peer trust scores. Single table — one row per peer subject. Until
+    // per-peer attestation lands, peers carry only the verification
+    // signal; the table makes that explicit so the empty cells are
+    // information, not omission.
+    html += '<div class="section-title">Peer Trust Scores (' + snap.peers.length + ')</div>';
+    if (snap.peers.length === 0) {
+        html += '<div class="empty-state">' +
+            '<p>No peer scores yet &mdash; peers populate as the router observes ' +
+            'them via gossip.</p></div>';
     } else {
-        peerSection = '<div class="trust-section-header">Peer scores</div>' +
-            '<div class="empty-state"><p>No peer scores yet &mdash; peers populate as the router ' +
-            'observes them via gossip.</p></div>';
-    }
-
-    var traceSection;
-    if (snap.recentTraces && snap.recentTraces.length > 0) {
-        var rows = snap.recentTraces.map(function(t) {
-            var contractShort = (t.contractId || '').slice(0, 8);
-            return '<tr>' +
-                '<td>' + escapeHtml(t.subjectId) + '</td>' +
-                '<td><code>' + escapeHtml(contractShort) + '</code></td>' +
-                '<td>' + escapeHtml(localTime(t.timestamp)) + '</td>' +
-                '<td>' + fidelityBadge(t.fidelityRatio) + '</td>' +
-                '<td class="trust-trace-counts">' + t.undeclaredToolCalls + ' / ' + t.totalToolCalls + '</td>' +
+        html += '<table class="cost-table"><thead><tr>' +
+            '<th>Subject</th><th>Composite</th><th>Verification</th>' +
+            '<th>Performance</th><th>Behavioral Fidelity</th>' +
+            '</tr></thead><tbody>';
+        snap.peers.forEach(function(p) {
+            var ver = dimByName(p, 'verification');
+            var perf = dimByName(p, 'performance');
+            var fid = dimByName(p, 'behavioral_fidelity');
+            html += '<tr>' +
+                '<td>' + escapeHtml(p.subjectId) + '</td>' +
+                '<td class="mono">' + p.composite + '</td>' +
+                '<td class="mono">' + (ver ? ver.value : '—') + '</td>' +
+                '<td class="mono">' + (perf ? perf.value : '—') + '</td>' +
+                '<td class="mono">' + (fid ? fid.value : '—') + '</td>' +
                 '</tr>';
-        }).join('');
-        traceSection = '<div class="trust-section-header">Recent behavior.trace events</div>' +
-            '<table class="trust-traces-table">' +
-                '<thead><tr><th>Subject</th><th>Contract</th><th>Time</th><th>Fidelity</th><th>Undeclared / Total</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody>' +
-            '</table>';
-    } else {
-        traceSection = '<div class="trust-section-header">Recent behavior.trace events</div>' +
-            '<div class="empty-state"><p>No behavior traces yet &mdash; emitted after each tool-using task.</p></div>';
+        });
+        html += '</tbody></table>';
     }
 
-    container.innerHTML = banner + selfSection + peerSection + traceSection;
+    // Recent behavior.trace events spanning every subject. Subject column
+    // tells the operator who emitted the trace (could be self or any
+    // peer once cross-agent traces propagate).
+    html += '<div class="section-title">Recent behavior.trace Events (' +
+        snap.recentTraces.length + ')</div>';
+    if (snap.recentTraces.length === 0) {
+        html += '<div class="empty-state">' +
+            '<p>No behavior traces yet &mdash; emitted after each tool-using task.</p></div>';
+    } else {
+        html += '<table class="cost-table"><thead><tr>' +
+            '<th>Time</th><th>Subject</th><th>Contract</th><th>Fidelity</th>' +
+            '<th>Undeclared / Total</th></tr></thead><tbody>';
+        snap.recentTraces.forEach(function(t) {
+            var pct = Math.round((t.fidelityRatio || 0) * 100);
+            var color = fidelityColor(t.fidelityRatio || 0);
+            var contractShort = (t.contractId || '').slice(0, 8);
+            html += '<tr>' +
+                '<td>' + formatTime(t.timestamp) + '</td>' +
+                '<td>' + escapeHtml(t.subjectId) + '</td>' +
+                '<td class="mono">' + escapeHtml(contractShort) + '</td>' +
+                '<td class="mono" style="color:' + color + '">' + pct + '%</td>' +
+                '<td class="mono">' + (t.undeclaredToolCalls || 0) +
+                ' / ' + (t.totalToolCalls || 0) + '</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
+    }
+
+    return html;
 }
