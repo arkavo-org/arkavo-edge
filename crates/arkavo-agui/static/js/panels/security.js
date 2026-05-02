@@ -165,6 +165,15 @@ function renderSecurity() {
         html += '</tbody></table>';
     }
 
+    // Published Trust (MCP-T) — rendered as the bottom section of the
+    // Security & Data Plane panel since trust scoring lives in the
+    // security posture story rather than its own top-level tab. The
+    // function inlines escapeHtml on every interpolated value before
+    // assignment to innerHTML below.
+    if (typeof renderPublishedTrustSection === 'function') {
+        html += renderPublishedTrustSection();
+    }
+
     container.innerHTML = html;
 }
 

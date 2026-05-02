@@ -352,6 +352,48 @@ async fn dispatch_event(
             })
             .await?;
         }
+        AgUiEvent::RequestPublishedTrust { agent_id } => {
+            // Pick the named agent's connection if the panel supplied one,
+            // otherwise fall back to the first live AgentConnection so the
+            // initial render works before the user picks an agent in the
+            // dropdown.
+            let conn = {
+                let map = agent_connections.read().await;
+                match agent_id.as_deref() {
+                    Some(id) => map.get(id).cloned(),
+                    None => map.values().next().cloned(),
+                }
+            };
+            match conn {
+                Some(c) => match c.get_published_trust().await {
+                    Ok(snapshot) => {
+                        tx.send(AgUiEvent::PublishedTrustUpdate {
+                            snapshot,
+                            event_id: uuid::Uuid::new_v4().to_string(),
+                        })
+                        .await?;
+                    }
+                    Err(e) => {
+                        tx.send(AgUiEvent::Error {
+                            code: "TRUST_QUERY_FAILED".to_string(),
+                            message: format!("Published trust fetch failed: {e}"),
+                        })
+                        .await?;
+                    }
+                },
+                None => {
+                    let detail = agent_id
+                        .as_deref()
+                        .map(|id| format!("Agent {id} not connected"))
+                        .unwrap_or_else(|| "No agent connected".to_string());
+                    tx.send(AgUiEvent::Error {
+                        code: "NO_AGENT".to_string(),
+                        message: format!("{detail} — cannot fetch published trust"),
+                    })
+                    .await?;
+                }
+            }
+        }
         AgUiEvent::RequestStopFlight { flight_id } => {
             let response = match uuid::Uuid::parse_str(&flight_id) {
                 Ok(parsed_id) => {

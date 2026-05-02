@@ -32,6 +32,9 @@ mod token_estimator;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
+mod trust_emit;
+mod trust_init;
+mod trust_sync;
 mod well_known;
 
 pub use a2a_server::A2aServer;
@@ -305,6 +308,45 @@ pub trait A2aRpc {
     /// Push-based metrics stream — replaces polling of system.metrics + budget.compute_status
     #[subscription(name = "system.metrics.subscribe", unsubscribe = "system.metrics.unsubscribe", item = serde_json::Value)]
     async fn system_metrics_subscribe(&self) -> SubscriptionResult;
+
+    /// MCP-T: Query full trust score for a subject (Section 7.1)
+    #[method(name = "trust/query")]
+    async fn trust_query(
+        &self,
+        request: arkavo_trust::TrustQueryRequest,
+    ) -> RpcResult<arkavo_trust::TrustQueryResponse>;
+
+    /// MCP-T: Binary threshold verification (Section 7.2)
+    #[method(name = "trust/verify")]
+    async fn trust_verify(
+        &self,
+        request: arkavo_trust::TrustVerifyRequest,
+    ) -> RpcResult<arkavo_trust::TrustVerifyResponse>;
+
+    /// MCP-T: Retrieve trust event history (Section 7.3)
+    #[method(name = "trust/history")]
+    async fn trust_history(
+        &self,
+        request: arkavo_trust::TrustHistoryRequest,
+    ) -> RpcResult<arkavo_trust::TrustHistoryResponse>;
+
+    /// MCP-T: Discover trust providers (Section 7.4)
+    #[method(name = "trust/providers")]
+    async fn trust_providers(&self) -> RpcResult<arkavo_trust::TrustProvidersResponse>;
+
+    /// MCP-T: Publish a trust event (Section 7.5)
+    #[method(name = "trust/publish")]
+    async fn trust_publish(
+        &self,
+        request: arkavo_trust::TrustPublishRequest,
+    ) -> RpcResult<arkavo_trust::TrustPublishResponse>;
+
+    /// Private adjunct (NOT in MCP-T spec): enumerate subject IDs this
+    /// provider currently scores. The dot-namespace keeps it distinct from
+    /// the spec's `trust/*` slash methods so external MCP-T clients never
+    /// see it via discovery. Used by the agui Published Trust panel.
+    #[method(name = "trust.subjects")]
+    async fn trust_subjects(&self) -> RpcResult<serde_json::Value>;
 }
 
 pub struct A2aRpcImpl {
@@ -341,6 +383,8 @@ pub struct A2aRpcImpl {
     pub(crate) mesh_state: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
     /// Shared tool memory for tracking recent actions across message/send calls
     pub(crate) agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
+    /// MCP-T trust scoring service
+    pub(crate) trust_service: Option<arkavo_trust::SharedTrustService>,
     /// KAS A2A handler for TDF key operations
     #[cfg(feature = "kas")]
     pub(crate) kas_handler: Option<Arc<arkavo_tdf::KasA2aHandler>>,
@@ -1152,6 +1196,116 @@ impl A2aRpcServer for A2aRpcImpl {
             "subsystem_timing": subsystem_timing,
             "iroh_active": iroh_active,
         }))
+    }
+
+    async fn trust_query(
+        &self,
+        request: arkavo_trust::TrustQueryRequest,
+    ) -> RpcResult<arkavo_trust::TrustQueryResponse> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        handlers::trust::handle_trust_query(
+            &self.metrics,
+            &self.rate_limiter,
+            trust_service,
+            request,
+        )
+        .await
+    }
+
+    async fn trust_verify(
+        &self,
+        request: arkavo_trust::TrustVerifyRequest,
+    ) -> RpcResult<arkavo_trust::TrustVerifyResponse> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        handlers::trust::handle_trust_verify(
+            &self.metrics,
+            &self.rate_limiter,
+            trust_service,
+            request,
+        )
+        .await
+    }
+
+    async fn trust_history(
+        &self,
+        request: arkavo_trust::TrustHistoryRequest,
+    ) -> RpcResult<arkavo_trust::TrustHistoryResponse> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        handlers::trust::handle_trust_history(
+            &self.metrics,
+            &self.rate_limiter,
+            trust_service,
+            request,
+        )
+        .await
+    }
+
+    async fn trust_providers(&self) -> RpcResult<arkavo_trust::TrustProvidersResponse> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        handlers::trust::handle_trust_providers(&self.metrics, trust_service).await
+    }
+
+    async fn trust_publish(
+        &self,
+        request: arkavo_trust::TrustPublishRequest,
+    ) -> RpcResult<arkavo_trust::TrustPublishResponse> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        handlers::trust::handle_trust_publish(
+            &self.metrics,
+            &self.rate_limiter,
+            trust_service,
+            request,
+        )
+        .await
+    }
+
+    async fn trust_subjects(&self) -> RpcResult<serde_json::Value> {
+        let Some(ref trust_service) = self.trust_service else {
+            return Err(ErrorObjectOwned::owned(
+                -32601,
+                "Trust service not enabled",
+                None::<()>,
+            ));
+        };
+        if self.rate_limiter.check_rate_limit().is_err() {
+            self.metrics.record_rate_limit_blocked(None);
+            return Err(ErrorObjectOwned::owned(
+                arkavo_trust::error_codes::RATE_LIMITED,
+                "Rate limit exceeded",
+                None::<()>,
+            ));
+        }
+        Ok(serde_json::json!({ "subjects": trust_service.subjects() }))
     }
 
     async fn system_metrics_subscribe(&self, sink: PendingSubscriptionSink) -> SubscriptionResult {

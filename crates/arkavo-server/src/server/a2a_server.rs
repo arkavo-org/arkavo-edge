@@ -1174,6 +1174,36 @@ impl A2aServer {
             }
         }
 
+        let trust_init = super::trust_init::init_trust_service().await;
+        let trust_service = trust_init.as_ref().map(|t| t.service.clone());
+        let learning_bus_for_rpc = self.learning_bus.read().await.clone();
+        // Spawn the trust input sync once both the trust service and the
+        // learning signals it consumes are available. Without this loop,
+        // trust/query returns SubjectNotFound for every subject.
+        if let (Some(init), Some(bus), Some(rt)) = (
+            trust_init.as_ref(),
+            learning_bus_for_rpc.as_ref(),
+            router.as_ref(),
+        ) {
+            // Fire-and-forget — the loop runs for the lifetime of the
+            // process. Dropping the JoinHandle does not abort the task.
+            // created_at comes from the keypair file mtime so tenure
+            // persists across restarts.
+            drop(super::trust_sync::spawn_trust_sync(
+                init.service.clone(),
+                bus.clone(),
+                rt.clone(),
+                init.created_at,
+            ));
+        }
+        // Install the trust service into the process-global slot so the
+        // conductor's tool loop can emit behavior.trace without param
+        // threading. install() is idempotent across A2aServer restarts —
+        // the second start in the same process keeps the first service.
+        if let Some(ts) = trust_service.as_ref() {
+            let _ = arkavo_trust::install(ts.clone());
+        }
+
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1192,7 +1222,7 @@ impl A2aServer {
             registration_service: Arc::new(arkavo_agent::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,
-            learning_bus: self.learning_bus.read().await.clone(),
+            learning_bus: learning_bus_for_rpc,
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
@@ -1200,6 +1230,7 @@ impl A2aServer {
             mesh_state: Some(self.mesh_state.clone()),
             agent_memory: self.agent_memory.clone(),
             model_hint: self.resolve_model_hint().await,
+            trust_service,
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;

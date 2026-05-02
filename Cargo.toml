@@ -72,6 +72,7 @@ members = [
     "crates/arkavo-kv-cache",
     "crates/arkavo-openclaw",
     "crates/arkavo-evofabric",
+    "crates/arkavo-trust",
     "crates/arkavo-arp",
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
@@ -147,7 +148,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.73.11"
+version = "0.73.12"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

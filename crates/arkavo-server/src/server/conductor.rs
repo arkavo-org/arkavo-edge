@@ -487,6 +487,20 @@ pub async fn execute_with_conductor_and_learning(
         .await?
     };
 
+    // Emit MCP-T behavior.trace for the completed task. Subject ID matches
+    // the human-readable agent name used by BetaPrior/AntiPatternStore so the
+    // emitted trace joins with the trust score for the same subject. Skipped
+    // silently if no trust service is installed (e.g. tests, headless tools).
+    if let (Some(trust_service), Some(bus)) = (arkavo_trust::current(), learning_bus) {
+        super::trust_emit::emit_behavior_trace(
+            &trust_service,
+            bus.agent_id(),
+            &hrm_task.id.to_string(),
+            &loop_result.tool_observations,
+            loop_result.total_latency_ms,
+        );
+    }
+
     let final_result = loop_result.final_text;
     let decision_model_name = loop_result.decision_model_name;
     let total_latency_ms = loop_result.total_latency_ms;

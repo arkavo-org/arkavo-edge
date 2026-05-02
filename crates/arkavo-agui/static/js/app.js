@@ -95,6 +95,9 @@ function routeEvent(event) {
         case 'arpStatusUpdate':
             handleArpStatusUpdate(event);
             break;
+        case 'publishedTrustUpdate':
+            handlePublishedTrustUpdate(event);
+            break;
         case 'systemNotification':
             handleSystemNotification(event);
             break;
@@ -150,6 +153,13 @@ function switchView(viewId) {
         startArpPolling();
     }
 
+    // Published Trust is rendered inside the Security & Data Plane panel,
+    // so its polling is gated on entering the security view.
+    if (viewId === 'security') {
+        wsSend({ type: 'requestPublishedTrust' });
+        startPublishedTrustPolling();
+    }
+
     // Stop polling when navigating away
     if (viewId !== 'learning' && viewId !== 'router') {
         stopLearningPolling();
@@ -159,6 +169,9 @@ function switchView(viewId) {
     }
     if (viewId !== 'arp') {
         stopArpPolling();
+    }
+    if (viewId !== 'security') {
+        stopPublishedTrustPolling();
     }
 }
 

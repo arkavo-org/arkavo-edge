@@ -36,6 +36,9 @@ var AppState = {
     conversationWindow: null,
     arpStatus: null,
     arpSelectedAgent: null,
+    lastPublishedTrust: null,
+    publishedTrustLastFingerprint: null,
+    publishedTrustSelectedAgent: null,
 };
 
 var MAX_TELEMETRY = 200;
