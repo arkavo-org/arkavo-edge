@@ -5,7 +5,7 @@
 //! - Executor (mid model): executes tool calls via MCP
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
-use super::conductor_tool_loop::{ToolLoopResult, distill_with_small_model};
+use super::conductor_tool_loop::{ToolCallObservation, ToolLoopResult, distill_with_small_model};
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
 use arkavo_llm::ParsedToolCall;
@@ -61,9 +61,16 @@ pub(super) async fn run_tool_loop_parallel(
 ) -> Result<ToolLoopResult, String> {
     let loop_start = std::time::Instant::now();
 
+    let declared_scope: Vec<String> = registry_arc
+        .list_tools()
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+
     let (plan_tx, plan_rx) = mpsc::channel::<PlannedActions>(4);
     let (result_tx, result_rx) = mpsc::channel::<ExecutionResult>(16);
     let (feedback_tx, feedback_rx) = mpsc::channel::<JudgeFeedback>(4);
+    let (obs_tx, mut obs_rx) = mpsc::channel::<ToolCallObservation>(64);
 
     // Spawn executor track (3B model, chat_semaphore)
     let exec_router = router.clone();
@@ -71,6 +78,7 @@ pub(super) async fn run_tool_loop_parallel(
     let exec_mcp = mcp_registry.clone();
     let exec_bus = learning_bus.cloned();
     let exec_mem = tool_memory.cloned();
+    let exec_declared = declared_scope.clone();
     let executor = tokio::spawn(async move {
         executor_track(
             &exec_router,
@@ -80,6 +88,8 @@ pub(super) async fn run_tool_loop_parallel(
             result_tx,
             exec_bus.as_ref(),
             exec_mem.as_ref(),
+            &exec_declared,
+            obs_tx,
         )
         .await;
     });
@@ -108,6 +118,13 @@ pub(super) async fn run_tool_loop_parallel(
     let _ = executor.await;
     let _ = judge.await;
 
+    // Drain observations forwarded by the executor track. The channel is
+    // closed when executor_track returns, so this loop terminates.
+    let mut tool_observations: Vec<ToolCallObservation> = Vec::new();
+    while let Some(obs) = obs_rx.recv().await {
+        tool_observations.push(obs);
+    }
+
     let total_latency = loop_start.elapsed().as_millis() as u64;
 
     Ok(ToolLoopResult {
@@ -118,6 +135,7 @@ pub(super) async fn run_tool_loop_parallel(
         context_utilization_pct: plan_result.context_utilization_pct,
         inference_timing: plan_result.inference_timing,
         tool_call_count: plan_result.tool_call_count,
+        tool_observations,
     })
 }
 
@@ -436,6 +454,7 @@ fn is_degenerate_batch(calls: &[ParsedToolCall]) -> bool {
 
 /// Executor track: runs tool calls from the planner.
 /// Sends results to the judge for distillation and feedback.
+#[allow(clippy::too_many_arguments)]
 async fn executor_track(
     router: &Arc<arkavo_router::Router>,
     registry_arc: &Arc<ToolRegistry>,
@@ -444,6 +463,8 @@ async fn executor_track(
     result_tx: mpsc::Sender<ExecutionResult>,
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
+    declared_scope: &[String],
+    obs_tx: mpsc::Sender<ToolCallObservation>,
 ) {
     let mut step_idx: usize = 0;
 
@@ -511,6 +532,17 @@ async fn executor_track(
 
         // Process results sequentially for deterministic ordering
         for (_, tool_name, call_id, args, result, success, reward, latency_ms) in results {
+            // Capture observation for the MCP-T behavior.trace emitter
+            // regardless of success/failure — fidelity is about whether the
+            // tool was in declared scope, not whether it succeeded.
+            let _ = obs_tx
+                .send(ToolCallObservation {
+                    tool_name: tool_name.clone(),
+                    timestamp: chrono::Utc::now(),
+                    duration_ms: latency_ms,
+                    declared: declared_scope.iter().any(|t| t == &tool_name),
+                })
+                .await;
             match result {
                 Ok(result_str) => {
                     if let Some(r) = reward

@@ -1174,6 +1174,33 @@ impl A2aServer {
             }
         }
 
+        let trust_service = super::trust_init::init_trust_service().await;
+        let learning_bus_for_rpc = self.learning_bus.read().await.clone();
+        // Spawn the trust input sync once both the trust service and the
+        // learning signals it consumes are available. Without this loop,
+        // trust/query returns SubjectNotFound for every subject.
+        if let (Some(ts), Some(bus), Some(rt)) = (
+            trust_service.as_ref(),
+            learning_bus_for_rpc.as_ref(),
+            router.as_ref(),
+        ) {
+            // Fire-and-forget — the loop runs for the lifetime of the
+            // process. Dropping the JoinHandle does not abort the task.
+            drop(super::trust_sync::spawn_trust_sync(
+                ts.clone(),
+                bus.clone(),
+                rt.clone(),
+                chrono::Utc::now(),
+            ));
+        }
+        // Install the trust service into the process-global slot so the
+        // conductor's tool loop can emit behavior.trace without param
+        // threading. install() is idempotent across A2aServer restarts —
+        // the second start in the same process keeps the first service.
+        if let Some(ts) = trust_service.as_ref() {
+            let _ = arkavo_trust::install(ts.clone());
+        }
+
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1192,7 +1219,7 @@ impl A2aServer {
             registration_service: Arc::new(arkavo_agent::registration::RegistrationService::new()),
             conductor: self.conductor.read().await.clone(),
             router,
-            learning_bus: self.learning_bus.read().await.clone(),
+            learning_bus: learning_bus_for_rpc,
             public_key: self.public_key.read().await.clone(),
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
@@ -1200,12 +1227,7 @@ impl A2aServer {
             mesh_state: Some(self.mesh_state.clone()),
             agent_memory: self.agent_memory.clone(),
             model_hint: self.resolve_model_hint().await,
-            trust_service: {
-                let keypair = arkavo_crypto::AgentKeypair::generate();
-                Some(std::sync::Arc::new(arkavo_trust::TrustService::new(
-                    keypair, 3600,
-                )))
-            },
+            trust_service,
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;

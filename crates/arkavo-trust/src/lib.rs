@@ -8,6 +8,25 @@ pub mod types;
 
 pub use mapper::{AgentTrustInput, compute_trust_score};
 pub use service::{SharedTrustService, TrustService};
+pub use store::TrustStore;
+
+use std::sync::OnceLock;
+
+/// Process-global MCP-T trust service — installed by the server at startup,
+/// looked up by the conductor's tool loop to emit `behavior.trace` events
+/// without threading a reference through every call layer. Mirrors the
+/// `arkavo_arp_runtime::current` pattern.
+static GLOBAL: OnceLock<SharedTrustService> = OnceLock::new();
+
+/// Install the global trust service. Returns `Err` if one is already installed.
+pub fn install(svc: SharedTrustService) -> Result<(), SharedTrustService> {
+    GLOBAL.set(svc)
+}
+
+/// Current global trust service, if installed.
+pub fn current() -> Option<SharedTrustService> {
+    GLOBAL.get().cloned()
+}
 pub use signing::{
     SigningError, sign_trust_event, sign_trust_score, verify_trust_event, verify_trust_score,
 };

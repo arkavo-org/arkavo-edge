@@ -6,6 +6,18 @@ use arkavo_router::BurstFeedback;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+/// Single observed tool invocation captured during the loop. Used by the
+/// MCP-T `behavior.trace` emitter to compute the fidelity ratio after the
+/// task completes.
+#[derive(Debug, Clone)]
+pub(super) struct ToolCallObservation {
+    pub tool_name: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub duration_ms: u64,
+    /// True if the tool was in the registry's declared scope at task start.
+    pub declared: bool,
+}
+
 /// Result of running the agentic tool loop.
 pub(super) struct ToolLoopResult {
     pub final_text: String,
@@ -19,6 +31,10 @@ pub(super) struct ToolLoopResult {
     pub inference_timing: Option<arkavo_llm::provider::InferenceTiming>,
     /// Total number of tool calls executed across all iterations
     pub tool_call_count: usize,
+    /// Per-call observations collected during the loop, in execution order.
+    /// Each carries a `declared` flag so the consumer can compute scope
+    /// fidelity without a separate scope snapshot.
+    pub tool_observations: Vec<ToolCallObservation>,
 }
 
 /// Run the agentic tool loop: LLM calls tools → results fed back → LLM continues.
@@ -44,6 +60,12 @@ pub(super) async fn run_tool_loop(
     let mut first_inference_timing = None;
     let mut force_planning = false;
     let mut consecutive_negative_rewards: u32 = 0;
+    let mut tool_observations: Vec<ToolCallObservation> = Vec::new();
+    let declared_scope: Vec<String> = registry_arc
+        .list_tools()
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
     let loop_start = std::time::Instant::now();
 
     // Context budget: estimate model window in chars (tokens × 4)
@@ -417,6 +439,8 @@ pub(super) async fn run_tool_loop(
             decision_model_name.as_ref(),
             &mut reward_signals,
             &mut total_step_idx,
+            &declared_scope,
+            &mut tool_observations,
         )
         .await;
 
@@ -576,6 +600,7 @@ pub(super) async fn run_tool_loop(
         context_utilization_pct,
         inference_timing: first_inference_timing,
         tool_call_count: total_step_idx,
+        tool_observations,
     })
 }
 
@@ -591,6 +616,8 @@ async fn execute_tool_calls(
     decision_model_name: Option<&String>,
     reward_signals: &mut Vec<f64>,
     total_step_idx: &mut usize,
+    declared_scope: &[String],
+    observations: &mut Vec<ToolCallObservation>,
 ) -> Vec<String> {
     let mut tool_result_parts = Vec::new();
 
@@ -634,6 +661,12 @@ async fn execute_tool_calls(
                 arkavo_observability::subsystem_timing::global_timing()
                     .mcp_tools
                     .record(latency_ms);
+                observations.push(ToolCallObservation {
+                    tool_name: tool_call.tool_name.clone(),
+                    timestamp: chrono::Utc::now(),
+                    duration_ms: latency_ms,
+                    declared: declared_scope.iter().any(|t| t == &tool_call.tool_name),
+                });
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
 
                 let reward = super::conductor::extract_reward_from_result(&result_str);
@@ -727,6 +760,12 @@ async fn execute_tool_calls(
                 arkavo_observability::subsystem_timing::global_timing()
                     .mcp_tools
                     .record(latency_ms);
+                observations.push(ToolCallObservation {
+                    tool_name: tool_call.tool_name.clone(),
+                    timestamp: chrono::Utc::now(),
+                    duration_ms: latency_ms,
+                    declared: declared_scope.iter().any(|t| t == &tool_call.tool_name),
+                });
                 warn!("Tool {} failed: {}", tool_call.tool_name, err_str);
 
                 if let Some(mem) = tool_memory {

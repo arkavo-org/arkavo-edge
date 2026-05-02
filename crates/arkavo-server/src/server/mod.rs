@@ -32,6 +32,9 @@ mod token_estimator;
 mod tool_memory;
 mod tool_pattern_cache;
 mod tool_pattern_observer;
+mod trust_emit;
+mod trust_init;
+mod trust_sync;
 mod well_known;
 
 pub use a2a_server::A2aServer;

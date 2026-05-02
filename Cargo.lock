@@ -1730,6 +1730,7 @@ dependencies = [
  "arkavo-budget",
  "arkavo-critic",
  "arkavo-crypto",
+ "arkavo-device-identity",
  "arkavo-ensemble",
  "arkavo-events",
  "arkavo-evofabric",
