@@ -38,6 +38,7 @@ var AppState = {
     arpSelectedAgent: null,
     lastPublishedTrust: null,
     publishedTrustLastFingerprint: null,
+    publishedTrustSelectedAgent: null,
 };
 
 var MAX_TELEMETRY = 200;

@@ -352,14 +352,17 @@ async fn dispatch_event(
             })
             .await?;
         }
-        AgUiEvent::RequestPublishedTrust => {
-            // Single-agent install is the common case; multi-agent UI
-            // sessions can refine this by inspecting `connections` for the
-            // session's selected agent. For v1 the panel queries the first
-            // live AgentConnection.
+        AgUiEvent::RequestPublishedTrust { agent_id } => {
+            // Pick the named agent's connection if the panel supplied one,
+            // otherwise fall back to the first live AgentConnection so the
+            // initial render works before the user picks an agent in the
+            // dropdown.
             let conn = {
                 let map = agent_connections.read().await;
-                map.values().next().cloned()
+                match agent_id.as_deref() {
+                    Some(id) => map.get(id).cloned(),
+                    None => map.values().next().cloned(),
+                }
             };
             match conn {
                 Some(c) => match c.get_published_trust().await {
@@ -379,9 +382,13 @@ async fn dispatch_event(
                     }
                 },
                 None => {
+                    let detail = agent_id
+                        .as_deref()
+                        .map(|id| format!("Agent {id} not connected"))
+                        .unwrap_or_else(|| "No agent connected".to_string());
                     tx.send(AgUiEvent::Error {
                         code: "NO_AGENT".to_string(),
-                        message: "No agent connected — cannot fetch published trust".to_string(),
+                        message: format!("{detail} — cannot fetch published trust"),
                     })
                     .await?;
                 }

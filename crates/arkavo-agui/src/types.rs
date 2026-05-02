@@ -550,7 +550,13 @@ pub enum AgUiEvent {
 
     // MCP-T Published Trust panel — read-only view of what the agent
     // publishes externally via `trust/query` and `trust/history`.
-    RequestPublishedTrust,
+    // `agent_id` selects which connected agent's view to query; when None
+    // the gateway falls back to the first live AgentConnection so the
+    // initial render works before the user picks one.
+    RequestPublishedTrust {
+        #[serde(rename = "agentId", skip_serializing_if = "Option::is_none", default)]
+        agent_id: Option<String>,
+    },
     PublishedTrustUpdate {
         snapshot: PublishedTrustSnapshot,
         #[serde(rename = "eventId")]

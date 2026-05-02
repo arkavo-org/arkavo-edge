@@ -30,8 +30,36 @@ function handlePublishedTrustUpdate(event) {
 function startPublishedTrustPolling() {
     if (publishedTrustPollHandle) return;
     publishedTrustPollHandle = setInterval(function() {
-        wsSend({ type: 'requestPublishedTrust' });
+        requestPublishedTrust();
     }, PUBLISHED_TRUST_POLL_INTERVAL_MS);
+}
+
+// Fire one trust fetch for the currently-selected agent (or the gateway's
+// default first connection when none is selected). Used by the polling
+// loop and by the dropdown change handler for an immediate refresh.
+function requestPublishedTrust() {
+    var msg = { type: 'requestPublishedTrust' };
+    if (AppState.publishedTrustSelectedAgent) {
+        msg.agentId = AppState.publishedTrustSelectedAgent;
+    }
+    wsSend(msg);
+}
+
+// Click handler bound to the dropdown — updates the selected agent,
+// re-renders so the loading hint shows immediately, and fires an
+// out-of-band fetch so the user doesn't wait for the next 15s tick.
+function selectPublishedTrustAgent(agentId) {
+    if (!agentId) {
+        AppState.publishedTrustSelectedAgent = null;
+    } else {
+        AppState.publishedTrustSelectedAgent = agentId;
+    }
+    // Force a re-render that clears the prior snapshot so the operator
+    // sees the loading state instead of stale data from another agent.
+    AppState.lastPublishedTrust = null;
+    AppState.publishedTrustLastFingerprint = null;
+    if (typeof renderSecurity === 'function') renderSecurity();
+    requestPublishedTrust();
 }
 
 function stopPublishedTrustPolling() {
@@ -67,6 +95,30 @@ function dimByName(score, name) {
 // so the trust section visually matches the rest of the panel.
 function renderPublishedTrustSection() {
     var html = '<div class="section-title">Published Trust (MCP-T)</div>';
+
+    // Agent selector — lets the operator switch which agent's trust view
+    // is being queried. The gateway dispatch defaults to the first
+    // connected agent when no selection is made, so this dropdown is
+    // additive: with one agent it's still informative ("we're showing X")
+    // and with three or more it becomes the only way to inspect each
+    // agent's perspective on the others.
+    var agentIds = Object.keys(AppState.agents || {}).sort();
+    if (agentIds.length > 0) {
+        var selected = AppState.publishedTrustSelectedAgent;
+        var options = agentIds.map(function(id) {
+            var attr = (id === selected) ? ' selected' : '';
+            return '<option value="' + escapeHtml(id) + '"' + attr + '>' +
+                escapeHtml(id) + '</option>';
+        }).join('');
+        var defaultAttr = selected ? '' : ' selected';
+        html += '<div class="trust-agent-selector">' +
+            '<label>View as agent: ' +
+            '<select id="published-trust-agent-select" ' +
+            'onchange="selectPublishedTrustAgent(this.value)">' +
+            '<option value=""' + defaultAttr + '>(first connected)</option>' +
+            options +
+            '</select></label></div>';
+    }
 
     var snap = AppState.lastPublishedTrust;
     if (!snap) {
