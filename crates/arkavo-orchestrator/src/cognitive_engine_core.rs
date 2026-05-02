@@ -576,8 +576,12 @@ impl CognitiveEngine {
 
             // P4: use provider-reported token counts when available,
             // falling back to a more accurate heuristic than len()/4.
+            // The fallback path needs the FULL prompt actually sent (including
+            // any prepended StepTrace) — using `task_prompt` alone would
+            // undercount whenever the trace is non-empty.
+            let accounted_prompt = trace.rendered_prompt(&task_prompt);
             let (input_tokens, output_tokens) =
-                token_estimator::tokens_from_response(&task_prompt, &response);
+                token_estimator::tokens_from_response(&accounted_prompt, &response);
             tokens_used = tokens_used
                 .saturating_add(input_tokens)
                 .saturating_add(output_tokens);

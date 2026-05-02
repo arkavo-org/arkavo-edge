@@ -6,6 +6,7 @@
 //! and injects them into subsequent prompts, restoring ReAct-like
 //! coherence without blowing the token budget.
 
+use crate::text_utils::truncate_ellipsis;
 use arkavo_llm::{Message as LlmMessage, ProviderResponse};
 
 /// Maximum characters of accumulated trace to keep in the prompt.
@@ -38,7 +39,7 @@ impl StepTrace {
     pub fn record(&mut self, command: &str, response: &ProviderResponse) {
         let summary = summarize_response(response);
         self.entries.push(TraceEntry {
-            command: truncate(command, 200),
+            command: truncate_ellipsis(command, 200),
             summary,
             tool_calls: response.tool_calls.len(),
         });
@@ -79,13 +80,21 @@ impl StepTrace {
         Some(out)
     }
 
+    /// Render the full prompt content that `build_messages` would send,
+    /// suitable for fallback token accounting when the provider does not
+    /// report `InferenceTiming`. Keeps token estimates honest by including
+    /// the prepended trace, not just the raw `task_prompt`.
+    pub fn rendered_prompt(&self, task_prompt: &str) -> String {
+        match self.render() {
+            Some(trace) => format!("{trace}\n---\n{task_prompt}"),
+            None => task_prompt.to_string(),
+        }
+    }
+
     /// Build the message vector for the next command, prepending the
     /// rolling trace as a system-style preamble.
     pub fn build_messages(&self, task_prompt: String) -> Vec<LlmMessage> {
-        match self.render() {
-            Some(trace) => vec![LlmMessage::user(format!("{trace}\n---\n{task_prompt}"))],
-            None => vec![LlmMessage::user(task_prompt)],
-        }
+        vec![LlmMessage::user(self.rendered_prompt(&task_prompt))]
     }
 }
 
@@ -94,7 +103,7 @@ fn summarize_response(response: &ProviderResponse) -> String {
     let mut parts = Vec::new();
     let content_trimmed = response.content.trim();
     if !content_trimmed.is_empty() {
-        parts.push(truncate(content_trimmed, 240));
+        parts.push(truncate_ellipsis(content_trimmed, 240));
     }
     if !response.tool_calls.is_empty() {
         let tool_names: Vec<&str> = response
@@ -112,17 +121,6 @@ fn summarize_response(response: &ProviderResponse) -> String {
     } else {
         parts.join(" | ")
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\u{2026}", &s[..end])
 }
 
 #[cfg(test)]
@@ -192,10 +190,23 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_respects_utf8() {
-        let s = format!("{}\u{1f600}", "a".repeat(50));
-        let t = truncate(&s, 51);
-        // Shouldn't panic and should end with our ellipsis.
-        assert!(t.ends_with('\u{2026}'));
+    fn test_rendered_prompt_matches_message_content() {
+        // Regression: token accounting must use rendered_prompt to capture the
+        // expanded trace + task content actually sent to the provider.
+        let mut t = StepTrace::new();
+        t.record("ls", &resp("listed"));
+        let task = "next thing to do";
+        let rendered = t.rendered_prompt(task);
+        let msgs = t.build_messages(task.to_string());
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].content, rendered);
+        assert!(rendered.contains("ls"));
+        assert!(rendered.contains(task));
+    }
+
+    #[test]
+    fn test_rendered_prompt_empty_trace_is_just_task() {
+        let t = StepTrace::new();
+        assert_eq!(t.rendered_prompt("only the task"), "only the task");
     }
 }

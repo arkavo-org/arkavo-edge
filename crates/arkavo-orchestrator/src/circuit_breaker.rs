@@ -64,6 +64,10 @@ struct ProviderState {
     half_open_successes: u32,
     last_failure_at: Option<Instant>,
     last_success_at: Option<Instant>,
+    /// True when a half-open probe is currently outstanding. Prevents
+    /// concurrent callers from racing through the half-open window before
+    /// the first probe has reported its outcome.
+    probe_in_flight: bool,
 }
 
 impl Default for ProviderState {
@@ -74,9 +78,15 @@ impl Default for ProviderState {
             half_open_successes: 0,
             last_failure_at: None,
             last_success_at: None,
+            probe_in_flight: false,
         }
     }
 }
+
+/// Retry hint returned to callers blocked behind an in-flight half-open probe.
+/// Short enough that callers retry quickly once the probe lands; long enough
+/// to avoid a tight spin loop on a slow provider.
+const PROBE_BUSY_RETRY_AFTER: Duration = Duration::from_millis(100);
 
 /// Per-provider circuit breaker.
 #[derive(Debug)]
@@ -121,9 +131,10 @@ impl CircuitBreaker {
             }
             State::Open { until } => {
                 if now >= until {
-                    // Cooldown elapsed; promote to HalfOpen and allow one probe.
+                    // Cooldown elapsed; promote to HalfOpen and reserve the probe slot.
                     entry.state = State::HalfOpen;
                     entry.half_open_successes = 0;
+                    entry.probe_in_flight = true;
                 } else {
                     return Err(BreakerError::Open {
                         retry_after: until.saturating_duration_since(now),
@@ -131,13 +142,21 @@ impl CircuitBreaker {
                 }
             }
             State::HalfOpen => {
-                // Allow the probe through; permit records the outcome.
+                if entry.probe_in_flight {
+                    // Another caller already holds the half-open probe slot;
+                    // reject concurrent calls until the probe reports.
+                    return Err(BreakerError::Open {
+                        retry_after: PROBE_BUSY_RETRY_AFTER,
+                    });
+                }
+                entry.probe_in_flight = true;
             }
         }
 
         Ok(Permit {
             breaker: self,
             provider: provider.to_string(),
+            recorded: false,
         })
     }
 
@@ -150,6 +169,7 @@ impl CircuitBreaker {
             State::Closed => {}
             State::HalfOpen => {
                 entry.half_open_successes += 1;
+                entry.probe_in_flight = false;
                 if entry.half_open_successes >= self.success_threshold {
                     entry.state = State::Closed;
                     entry.half_open_successes = 0;
@@ -159,6 +179,7 @@ impl CircuitBreaker {
                 // Success recorded while Open means we were probably in
                 // HalfOpen transitioning; treat as a success.
                 entry.state = State::Closed;
+                entry.probe_in_flight = false;
             }
         }
     }
@@ -179,6 +200,10 @@ impl CircuitBreaker {
             };
             entry.half_open_successes = 0;
         }
+        // Failure releases the probe slot regardless of state — if we tripped
+        // back to Open, the cooldown gates further calls; if we're still in
+        // Closed, no slot was reserved and clearing is a harmless no-op.
+        entry.probe_in_flight = false;
     }
 
     /// Inspect the current state for diagnostics / metrics.
@@ -220,25 +245,33 @@ impl CircuitBreaker {
 pub struct Permit<'a> {
     breaker: &'a CircuitBreaker,
     provider: String,
+    /// Set to true once an explicit outcome has been recorded so that the
+    /// `Drop` impl skips the implicit-failure path. Using a flag (rather
+    /// than `mem::forget`) avoids leaking the heap-allocated `provider`
+    /// String on every recorded outcome.
+    recorded: bool,
 }
 
 impl Permit<'_> {
     /// Mark the guarded call as successful.
-    pub fn success(self) {
+    pub fn success(mut self) {
         self.breaker.record_success(&self.provider);
-        std::mem::forget(self);
+        self.recorded = true;
     }
 
     /// Mark the guarded call as failed. This counts toward the
     /// failure threshold and may trip the breaker.
-    pub fn failure(self) {
+    pub fn failure(mut self) {
         self.breaker.record_failure(&self.provider);
-        std::mem::forget(self);
+        self.recorded = true;
     }
 }
 
 impl Drop for Permit<'_> {
     fn drop(&mut self) {
+        if self.recorded {
+            return;
+        }
         // Treat implicit drops as failures; callers who want to record
         // success must do so explicitly via `permit.success()`. This
         // matches the fail-safe posture of the breaker.
@@ -336,6 +369,48 @@ mod tests {
         b.guard("p").unwrap().failure();
         let snap = b.snapshot("p");
         assert_eq!(snap.state_label, "open");
+    }
+
+    #[test]
+    fn half_open_admits_only_one_probe() {
+        // Regression: prior to gating with `probe_in_flight`, every concurrent
+        // caller in the half-open window slipped through, defeating the
+        // purpose of half-open as a single trial.
+        let b = CircuitBreaker::new(2, 1, Duration::from_millis(10));
+        b.guard("p").unwrap().failure();
+        b.guard("p").unwrap().failure();
+        std::thread::sleep(Duration::from_millis(20));
+
+        // First call after cooldown takes the probe slot.
+        let probe = b.guard("p").expect("first half-open probe should pass");
+        assert_eq!(b.snapshot("p").state_label, "half-open");
+
+        // Concurrent caller is rejected with a short retry hint.
+        let err = b.guard("p").expect_err("second probe must be rejected");
+        let BreakerError::Open { retry_after } = err;
+        assert!(retry_after <= Duration::from_millis(500));
+
+        // Once the probe records success, subsequent callers proceed.
+        probe.success();
+        assert!(b.guard("p").is_ok());
+    }
+
+    #[test]
+    fn implicit_drop_records_failure_and_releases_probe() {
+        // Regression: dropping a Permit without success/failure must record a
+        // failure (fail-safe) AND clear probe_in_flight so a future probe can run.
+        let b = CircuitBreaker::new(2, 1, Duration::from_millis(10));
+        b.guard("p").unwrap().failure();
+        b.guard("p").unwrap().failure();
+        std::thread::sleep(Duration::from_millis(20));
+
+        // Take the probe and drop it implicitly.
+        drop(b.guard("p").unwrap());
+        // Implicit failure should re-open the breaker.
+        assert_eq!(b.snapshot("p").state_label, "open");
+        // After cooldown a new probe must be admittable (probe_in_flight cleared).
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(b.guard("p").is_ok());
     }
 
     #[test]

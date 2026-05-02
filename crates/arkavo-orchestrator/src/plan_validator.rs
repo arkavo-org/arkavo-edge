@@ -160,18 +160,25 @@ pub fn validate(plan: &ExecutionPlan) -> ValidationReport {
 const MAX_COMMAND_LEN: usize = 4096;
 
 /// Heuristic: does this step look like it writes to disk/git?
+///
+/// Two keyword sets are used to keep false-positive rejections low:
+///
+/// * `STRICT` — high-precision verbs that almost always mean "this step
+///   modifies state." Matched in both the description and any command.
+/// * `COMMAND_ONLY` — verbs that are too common in English issue
+///   descriptions to be reliable signals there (e.g. "fix the bug",
+///   "update the docs", "apply the patch"), but ARE reliable when they
+///   appear inside a command shell line. Matched in commands only.
 fn looks_mutating(step: &PlanStep) -> bool {
-    const MUTATING: &[&str] = &[
+    const STRICT: &[&str] = &[
         "write",
         "edit",
         "create",
         "delete",
         "remove",
         "modify",
-        "update",
         "refactor",
         "rename",
-        "move",
         "patch",
         "git commit",
         "git add",
@@ -179,16 +186,17 @@ fn looks_mutating(step: &PlanStep) -> bool {
         "git merge",
         "git rebase",
         "cargo fmt",
-        "apply",
-        "fix",
     ];
+    const COMMAND_ONLY: &[&str] = &["apply", "fix", "update", "move"];
+
     let desc = step.description.to_lowercase();
-    if MUTATING.iter().any(|kw| desc.contains(kw)) {
+    if STRICT.iter().any(|kw| desc.contains(kw)) {
         return true;
     }
-    step.commands
-        .iter()
-        .any(|c| MUTATING.iter().any(|kw| c.to_lowercase().contains(kw)))
+    step.commands.iter().any(|c| {
+        let lc = c.to_lowercase();
+        STRICT.iter().any(|kw| lc.contains(kw)) || COMMAND_ONLY.iter().any(|kw| lc.contains(kw))
+    })
 }
 
 #[cfg(test)]
@@ -303,6 +311,51 @@ mod tests {
         let plan = make_plan(vec![s]);
         let report = validate(&plan);
         assert!(report.is_valid(), "got: {}", report.summary());
+    }
+
+    #[test]
+    fn test_fix_in_description_does_not_trigger_mutation_check() {
+        // Regression: "fix" appears in nearly every bug-fix issue's planning
+        // description ("fix the off-by-one", "fix the race"). Triggering
+        // UNVERIFIED_MUTATION on bare description text caused false-positive
+        // plan rejections before any commands ran. Description-only "fix"
+        // must not flag the step; only mutating commands should.
+        let s = PlanStep {
+            step_number: 1,
+            description: "investigate and fix the off-by-one bug".to_string(),
+            commands: vec!["cat src/lib.rs".to_string(), "rg fn main".to_string()],
+            verification: vec![],
+            confidence: 0.8,
+        };
+        let plan = make_plan(vec![s]);
+        let report = validate(&plan);
+        assert!(
+            report.is_valid(),
+            "description containing 'fix' with read-only commands must not be rejected; got: {}",
+            report.summary()
+        );
+    }
+
+    #[test]
+    fn test_apply_in_command_still_triggers_mutation_check() {
+        // The narrowed heuristic must still catch obvious mutating commands.
+        let s = PlanStep {
+            step_number: 1,
+            description: "land the patch".to_string(),
+            commands: vec!["git apply pr.patch".to_string()],
+            verification: vec![],
+            confidence: 0.8,
+        };
+        let plan = make_plan(vec![s]);
+        let report = validate(&plan);
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.code == "UNVERIFIED_MUTATION"),
+            "got: {}",
+            report.summary()
+        );
     }
 
     #[test]
