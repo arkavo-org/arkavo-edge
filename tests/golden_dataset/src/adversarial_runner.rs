@@ -168,6 +168,7 @@ impl AdversarialRunner {
                     reasoning_content: None,
                     tool_calls: vec![],
                     finish_reason: None,
+                    ..Default::default()
                 };
 
                 let input = VerificationInput::new(objective.clone(), response, vec![]);
@@ -219,6 +220,7 @@ impl AdversarialRunner {
                         reasoning_content: None,
                         tool_calls: vec![],
                         finish_reason: None,
+                        ..Default::default()
                     };
 
                     let input = VerificationInput::new(objective.clone(), response, vec![]);

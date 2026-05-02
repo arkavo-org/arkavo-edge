@@ -98,7 +98,7 @@ pub fn clock_skew_scenario() -> AdversaryScenario {
                             "status": "completed",
                             "result": "Registration succeeded with skew correction",
                             "clock_skew_detected": true,
-                            "skew_ms": 3600000, // 1 hour skew
+                            "skew_ms": 3_600_000, // 1 hour skew
                             "token_fresh": false,
                             "retry_with_sync": true
                         }),
