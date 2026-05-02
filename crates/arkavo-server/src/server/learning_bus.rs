@@ -517,6 +517,14 @@ impl LearningBus {
         self.gossip.read().await.peer_count().await
     }
 
+    /// Snapshot the IDs of all currently known gossip peers. Sorted for
+    /// stable iteration. Used by the MCP-T trust sync to score real peer
+    /// agents (router model stats are NOT peers — they're model variants
+    /// the local agent picks between).
+    pub async fn peer_ids(&self) -> Vec<String> {
+        self.gossip.read().await.list_peers().await
+    }
+
     /// Record that an event was received
     pub fn record_event(&self) {
         self.events_received.fetch_add(1, Ordering::Relaxed);

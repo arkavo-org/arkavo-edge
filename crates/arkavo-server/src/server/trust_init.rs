@@ -17,16 +17,27 @@ use arkavo_crypto::AgentKeypair;
 use arkavo_device_identity::keypair as device_keypair_store;
 use arkavo_memory::MemoryStorage;
 use arkavo_trust::{SharedTrustService, TrustService, TrustStore};
+use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
 const TRUST_SCORE_MAX_AGE_SECS: u32 = 3600;
 const TRUST_DB_FILENAME: &str = "trust.db";
 
+/// Result of trust service initialization. The `created_at` is the device
+/// keypair file's mtime — used as the agent's birth time for the MCP-T
+/// tenure dimension so tenure persists across process restarts. Falls back
+/// to `Utc::now()` if the file mtime is unavailable (rare; means we just
+/// created the keypair this tick, in which case tenure starts at zero).
+pub(super) struct TrustInit {
+    pub service: SharedTrustService,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Load the persistent agent keypair (creating it on first run) and open the
 /// trust event store. Returns `None` on any failure so the caller can leave
 /// the trust endpoint advertised-but-unimplemented rather than silently
 /// substituting an ephemeral identity.
-pub(super) async fn init_trust_service() -> Option<SharedTrustService> {
+pub(super) async fn init_trust_service() -> Option<TrustInit> {
     let keypair = match load_or_create_device_keypair() {
         Ok(kp) => kp,
         Err(e) => {
@@ -43,14 +54,23 @@ pub(super) async fn init_trust_service() -> Option<SharedTrustService> {
         }
     };
 
+    let created_at = device_keypair_store::created_at()
+        .ok()
+        .flatten()
+        .map(DateTime::<Utc>::from)
+        .unwrap_or_else(Utc::now);
+
     let did = keypair.public_key().to_did_key();
     info!("MCP-T trust service initialized with persistent identity {did}");
 
-    Some(Arc::new(TrustService::with_store(
-        keypair,
-        TRUST_SCORE_MAX_AGE_SECS,
-        store,
-    )))
+    Some(TrustInit {
+        service: Arc::new(TrustService::with_store(
+            keypair,
+            TRUST_SCORE_MAX_AGE_SECS,
+            store,
+        )),
+        created_at,
+    })
 }
 
 fn load_or_create_device_keypair() -> Result<AgentKeypair, String> {

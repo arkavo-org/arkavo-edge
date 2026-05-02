@@ -170,6 +170,17 @@ impl GossipProtocol {
         self.peers.read().await.len()
     }
 
+    /// Snapshot the IDs of all known peers, sorted for stable display.
+    /// Used by the MCP-T trust subsystem to enumerate scorable peer agents
+    /// (callers that just need a count should still use `peer_count` —
+    /// allocating a Vec every poll cycle is wasteful when the size is all
+    /// that's needed).
+    pub async fn list_peers(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.peers.read().await.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
     /// Check if a peer is rate limited
     ///
     /// Returns true if the peer is allowed to send, false if rate limited.

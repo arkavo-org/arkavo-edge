@@ -61,6 +61,22 @@ mod platform {
         }
         Ok(())
     }
+
+    pub fn created_at() -> Result<Option<std::time::SystemTime>> {
+        let path = get_keypair_path()?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let meta = fs::metadata(&path)
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to stat file: {}", e)))?;
+        // Prefer mtime — present on every platform — over creation time
+        // (`created()` returns Err on some Linux filesystems). The keypair
+        // file is written once and never modified, so mtime ≈ birth time.
+        let ts = meta
+            .modified()
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to read mtime: {}", e)))?;
+        Ok(Some(ts))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -117,6 +133,22 @@ mod platform {
         }
         Ok(())
     }
+
+    pub fn created_at() -> Result<Option<std::time::SystemTime>> {
+        let path = get_keypair_path()?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let meta = fs::metadata(&path)
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to stat file: {}", e)))?;
+        // Prefer mtime — present on every platform — over creation time
+        // (`created()` returns Err on some Linux filesystems). The keypair
+        // file is written once and never modified, so mtime ≈ birth time.
+        let ts = meta
+            .modified()
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to read mtime: {}", e)))?;
+        Ok(Some(ts))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -167,6 +199,22 @@ mod platform {
         }
         Ok(())
     }
+
+    pub fn created_at() -> Result<Option<std::time::SystemTime>> {
+        let path = get_keypair_path()?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let meta = fs::metadata(&path)
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to stat file: {}", e)))?;
+        // Prefer mtime — present on every platform — over creation time
+        // (`created()` returns Err on some Linux filesystems). The keypair
+        // file is written once and never modified, so mtime ≈ birth time.
+        let ts = meta
+            .modified()
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to read mtime: {}", e)))?;
+        Ok(Some(ts))
+    }
 }
 
 pub fn get_keypair() -> Result<Option<Vec<u8>>> {
@@ -179,6 +227,13 @@ pub fn store_keypair(keypair_bytes: &[u8]) -> Result<()> {
 
 pub fn delete_keypair() -> Result<()> {
     platform::delete()
+}
+
+/// File mtime of the persistent keypair, used as the agent's "birth time"
+/// for the MCP-T tenure dimension. Returns `Ok(None)` if the keypair has
+/// not been created yet.
+pub fn created_at() -> Result<Option<std::time::SystemTime>> {
+    platform::created_at()
 }
 
 #[cfg(test)]

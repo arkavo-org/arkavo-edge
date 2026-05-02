@@ -2,18 +2,28 @@
 //!
 //! `TrustService` only scores subjects whose `AgentTrustInput` has been
 //! populated. Without this loop the L1 endpoint returns `SubjectNotFound`
-//! for every query because nothing else in the codebase calls
-//! `update_agent_input`. The data already exists — `BetaPrior` in the
-//! router, `AntiPatternStore` in the policy cache, peer count in the
-//! gossip layer — so this is plumbing, not new logic.
+//! for every query.
 //!
-//! Each tick this loop emits one `AgentTrustInput` per agent the router
-//! has observed (local + each peer it has Bayesian posteriors for). Local
-//! and peer subjects use the same `agent_id` namespace; only signals that
-//! make sense from the local perspective (tenure, gossip peer count) are
-//! filled for the local subject and left empty for peers.
+//! Trust **subjects** are agents — the local agent plus each peer the
+//! local gossip layer knows about. They are NOT models. Router model
+//! stats (`LearningModule::get_all_stats`) record the local agent's
+//! Thompson-Sampling posteriors over MODEL VARIANTS it has used; the
+//! `agent_id` field in those stats is the model name, which made an
+//! earlier version of this loop emit one trust subject per model. That
+//! was wrong: models are an implementation detail of the local agent's
+//! performance, not external entities to score.
+//!
+//! Source map per dimension on each subject:
+//! - **self**: `success_rate`/`std_dev` aggregated across model_learning
+//!   stats (the local agent's effective track record across the models
+//!   it has selected); `created_at` from the persistent device-keypair
+//!   file mtime; `peer_count` from gossip; anti-pattern weights from
+//!   the policy cache for the local agent's name.
+//! - **peer**: `verification: true` (we know they exist on the gossip
+//!   layer); other signals empty until per-peer attestation lands. The
+//!   panel renders an entry so operators can see the peer set even when
+//!   no scoring evidence exists yet.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -75,39 +85,46 @@ async fn sync_once(
     let stats = learning_bus.stats().await;
     let local_peer_count = u32::try_from(stats.gossip_peers).unwrap_or(u32::MAX);
 
-    // Group router stats by agent_id so each subject (local + each observed
-    // peer) gets its own AgentTrustInput. The router has Bayesian posteriors
-    // for any agent it has observed — local-only is a degenerate case.
-    let mut grouped: HashMap<String, Vec<AgentUtilityStats>> = HashMap::new();
-    for s in router.model_learning().get_all_stats().await {
-        grouped.entry(s.agent_id.clone()).or_default().push(s);
-    }
-    // Always include the local subject — even on a fresh process with no
-    // router observations yet, the panel should render a valid "self" card.
-    grouped.entry(local_subject_id.to_string()).or_default();
-
+    // SELF: aggregate every model_learning entry into one weighted-mean
+    // success signal. These records track the local agent's per-model
+    // Thompson-Sampling posteriors; their union is the agent's effective
+    // track record across the models it has chosen.
+    let local_model_stats = router.model_learning().get_all_stats().await;
     let cache = learning_bus.policy_cache().read().await;
-    let n = grouped.len();
-    for (subject_id, subject_stats) in &grouped {
-        let patterns = cache.anti_patterns.get_for_model(subject_id);
-        let is_local = subject_id == local_subject_id;
+    let local_patterns = cache.anti_patterns.get_for_model(local_subject_id);
+    let local_input = build_input(
+        &local_model_stats,
+        &local_patterns,
+        BuildContext {
+            created_at: Some(created_at),
+            peer_count: Some(local_peer_count),
+        },
+    );
+    trust_service.update_agent_input(local_subject_id, local_input);
+
+    // PEERS: enumerate from the gossip layer — these are real other
+    // agents the local node sees on the mesh. We have no scoring
+    // evidence about them yet (per-peer attestation/cross-agent
+    // outcomes are a follow-up), so the AgentTrustInput is empty
+    // beyond the verification flag. The panel still renders an entry
+    // per peer so operators can see the peer set.
+    let peer_ids = learning_bus.peer_ids().await;
+    let peer_count = peer_ids.len();
+    for peer_id in &peer_ids {
+        let patterns = cache.anti_patterns.get_for_model(peer_id);
         let input = build_input(
-            subject_stats,
+            &[],
             &patterns,
             BuildContext {
-                created_at: if is_local { Some(created_at) } else { None },
-                peer_count: if is_local {
-                    Some(local_peer_count)
-                } else {
-                    None
-                },
+                created_at: None,
+                peer_count: None,
             },
         );
-        trust_service.update_agent_input(subject_id, input);
+        trust_service.update_agent_input(peer_id, input);
     }
     drop(cache);
 
-    debug!("MCP-T trust input refreshed for {n} subjects (local={local_subject_id})");
+    debug!("MCP-T trust input refreshed: local={local_subject_id} peers={peer_count}");
 }
 
 /// Per-subject context that comes from outside the router/anti-pattern data.

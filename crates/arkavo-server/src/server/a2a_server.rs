@@ -1174,23 +1174,26 @@ impl A2aServer {
             }
         }
 
-        let trust_service = super::trust_init::init_trust_service().await;
+        let trust_init = super::trust_init::init_trust_service().await;
+        let trust_service = trust_init.as_ref().map(|t| t.service.clone());
         let learning_bus_for_rpc = self.learning_bus.read().await.clone();
         // Spawn the trust input sync once both the trust service and the
         // learning signals it consumes are available. Without this loop,
         // trust/query returns SubjectNotFound for every subject.
-        if let (Some(ts), Some(bus), Some(rt)) = (
-            trust_service.as_ref(),
+        if let (Some(init), Some(bus), Some(rt)) = (
+            trust_init.as_ref(),
             learning_bus_for_rpc.as_ref(),
             router.as_ref(),
         ) {
             // Fire-and-forget — the loop runs for the lifetime of the
             // process. Dropping the JoinHandle does not abort the task.
+            // created_at comes from the keypair file mtime so tenure
+            // persists across restarts.
             drop(super::trust_sync::spawn_trust_sync(
-                ts.clone(),
+                init.service.clone(),
                 bus.clone(),
                 rt.clone(),
-                chrono::Utc::now(),
+                init.created_at,
             ));
         }
         // Install the trust service into the process-global slot so the
