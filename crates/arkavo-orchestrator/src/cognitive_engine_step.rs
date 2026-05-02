@@ -1,6 +1,8 @@
-//! Single-step execution: dispatches each command in a step through the
-//! router, accumulates token usage, and threads a per-step reasoning trace
-//! across commands so the model retains context within the step.
+//! Single-step execution.
+//!
+//! Dispatches each command in a step through the router, accumulates
+//! token usage, and threads a per-step reasoning trace across commands so
+//! the model retains context within the step.
 
 use crate::cognitive_engine_types::PlanStep;
 use crate::error::{Error, Result};

@@ -9,9 +9,10 @@ use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::Result;
 use tracing::{debug, warn};
 
-/// Parse a planner response, trying JSON first and falling back to the
-/// plain-text format. JSON is preferred because it loses no information;
-/// the text path exists for older / non-structured-output providers.
+/// Parse a planner response, JSON-first with a plain-text fallback.
+///
+/// JSON is preferred because it loses no information; the text path
+/// exists for older or non-structured-output providers.
 pub fn parse_plan_json_or_text(response: &str) -> Result<Vec<PlanStep>> {
     if let Ok(json_plan) = serde_json::from_str::<JsonExecutionPlan>(response) {
         debug!("Successfully parsed JSON execution plan");
@@ -110,7 +111,7 @@ fn convert_json_to_plan_steps(json_plan: JsonExecutionPlan) -> Result<Vec<PlanSt
 }
 
 fn parse_verification_keywords(s: &str) -> Vec<VerificationCheck> {
-    s.split(',').filter_map(|w| keyword_to_check(w)).collect()
+    s.split(',').filter_map(keyword_to_check).collect()
 }
 
 fn keyword_to_check(raw: &str) -> Option<VerificationCheck> {

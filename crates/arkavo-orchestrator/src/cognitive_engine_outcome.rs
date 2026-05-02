@@ -1,18 +1,21 @@
 //! Final-outcome bookkeeping for the cognitive engine's `execute` loop.
 //!
-//! Centralizes the bits of state that are easy to desynchronize when the
-//! main loop has multiple early-exit paths: the abort cause (FailureKind +
-//! detail string), the final user-facing comment, and the attempt-history
-//! recording. Keeping this in one module shrinks `cognitive_engine_core`
-//! and makes the success/failure invariant easier to test in isolation.
+//! Centralizes state that is easy to desynchronize when the main loop has
+//! multiple early-exit paths: abort cause (`FailureKind` + detail string),
+//! the final user-facing comment, and the attempt-history recording.
+//! Keeping this in one module shrinks `cognitive_engine_core` and makes
+//! the success/failure invariant easier to test in isolation.
 
 use crate::attempt_history::{AttemptHistory, FailureKind};
 use crate::cognitive_engine_types::{ExecutionPlan, VerificationResult};
 use std::sync::Arc;
 
-/// Cumulative state captured during a single `execute` run; used to make
-/// the post-loop bookkeeping (final comment, attempt-history recording)
-/// a single function rather than inlined into the orchestrator.
+/// Cumulative state captured during a single `execute` run.
+///
+/// Used to make the post-loop bookkeeping (final comment,
+/// attempt-history recording) a single function rather than inlined into
+/// the orchestrator.
+#[derive(Default)]
 pub struct ExecutionOutcome {
     pub steps_completed: usize,
     pub total_tokens: u32,
@@ -23,13 +26,7 @@ pub struct ExecutionOutcome {
 
 impl ExecutionOutcome {
     pub fn new() -> Self {
-        Self {
-            steps_completed: 0,
-            total_tokens: 0,
-            verification_results: Vec::new(),
-            abort_kind: None,
-            abort_detail: None,
-        }
+        Self::default()
     }
 
     pub fn is_success(&self, plan_step_count: usize) -> bool {

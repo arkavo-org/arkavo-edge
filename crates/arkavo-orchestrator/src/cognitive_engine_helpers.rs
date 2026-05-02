@@ -1,10 +1,9 @@
-//! Inherent methods on `CognitiveEngine` for narrow concerns: GitHub
-//! progress comments, event logging, budget checks, repository parsing,
-//! and the two early-/late-stage outcome paths (plan-invalid handling,
-//! pull-request creation).
+//! Inherent methods on `CognitiveEngine` for narrow concerns.
 //!
-//! Kept as `impl CognitiveEngine` blocks in a sibling file to keep
-//! `cognitive_engine_core` focused on the orchestration loop itself.
+//! GitHub progress comments, event logging, budget checks, repository
+//! parsing, and the two early-/late-stage outcome paths (plan-invalid
+//! handling, pull-request creation). Kept in a sibling file so the core
+//! module stays focused on the orchestration loop itself.
 
 use crate::agent_assignment::AgentAssignment;
 use crate::cognitive_engine_core::CognitiveEngine;
