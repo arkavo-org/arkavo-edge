@@ -1,10 +1,11 @@
 use crate::agent_assignment::AgentAssignment;
-use crate::cognitive_engine_core::{
-    ExecutionPlan, PlanStep, VerificationCheck, VerificationResult,
-};
+use crate::attempt_history::AttemptHistory;
+use crate::cognitive_engine_core::{ExecutionPlan, PlanStep, VerificationResult};
+use crate::cognitive_engine_planning_parser::{parse_plan_from_response, parse_plan_json_or_text};
 use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
+use crate::token_estimator;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_llm::{Message as LlmMessage, Provider};
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
@@ -18,6 +19,9 @@ pub struct Planner {
     budget_tracker: Arc<BudgetTracker>,
     router: Arc<Router>,
     plan_store: Option<Arc<PlanStateStore>>,
+    /// R1: Reflexion-style attempt history; consulted at plan time so the
+    /// model is aware of prior failures on the same issue.
+    attempt_history: Arc<AttemptHistory>,
 }
 
 impl Planner {
@@ -26,10 +30,25 @@ impl Planner {
         router: Arc<Router>,
         plan_store: Option<Arc<PlanStateStore>>,
     ) -> Self {
+        Self::new_with_history(
+            budget_tracker,
+            router,
+            plan_store,
+            Arc::new(AttemptHistory::new()),
+        )
+    }
+
+    pub fn new_with_history(
+        budget_tracker: Arc<BudgetTracker>,
+        router: Arc<Router>,
+        plan_store: Option<Arc<PlanStateStore>>,
+        attempt_history: Arc<AttemptHistory>,
+    ) -> Self {
         Self {
             budget_tracker,
             router,
             plan_store,
+            attempt_history,
         }
     }
 
@@ -50,7 +69,18 @@ impl Planner {
 
         // Get capability-appropriate planner config for adaptive prompting
         let planner_config = get_planner_config(decision.recommended_model.capability());
-        let planning_prompt = planner_config.planning_prompt(assignment);
+        let base_prompt = planner_config.planning_prompt(assignment);
+
+        // R1: If prior attempts on this issue failed, prepend a summary of
+        // those failures so the model can avoid repeating the same
+        // mistakes (Reflexion-style failure memory).
+        let planning_prompt = match self
+            .attempt_history
+            .to_prompt_block(&assignment.repository, assignment.issue_number)
+        {
+            Some(history_block) => format!("{history_block}\n\n{base_prompt}"),
+            None => base_prompt,
+        };
 
         info!(
             model = ?decision.recommended_model,
@@ -91,10 +121,14 @@ impl Planner {
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Planning LLM call failed: {e}")))?;
 
-        let steps = self.parse_plan_json_or_text(&response)?;
+        let steps = parse_plan_json_or_text(&response)?;
 
-        let estimated_input_tokens = planning_prompt.len() as u32 / 4;
-        let estimated_output_tokens = response.len() as u32 / 4;
+        // P4: Accurate token estimation. `complete_with_schema` returns a
+        // raw String with no provider-reported counts, so we use an
+        // improved character/word heuristic rather than the legacy
+        // len()/4 approximation.
+        let (estimated_input_tokens, estimated_output_tokens) =
+            token_estimator::tokens_from_texts(&planning_prompt, &response);
         let total_tokens = estimated_input_tokens + estimated_output_tokens;
 
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
@@ -145,155 +179,6 @@ impl Planner {
         }
 
         Ok(plan)
-    }
-
-    fn parse_plan_from_response(&self, response: &str) -> Result<Vec<PlanStep>> {
-        let mut steps = Vec::new();
-        let lines: Vec<&str> = response.lines().collect();
-        let mut current_step = None;
-
-        for line in lines {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            if line.starts_with("STEP ") {
-                if let Some(step) = current_step.take() {
-                    steps.push(step);
-                }
-                let desc = line
-                    .split_once(": ")
-                    .map(|(_, d)| d)
-                    .unwrap_or(line)
-                    .to_string();
-                current_step = Some(PlanStep {
-                    step_number: steps.len() + 1,
-                    description: desc,
-                    commands: Vec::new(),
-                    verification: Vec::new(),
-                    confidence: 0.8,
-                });
-            } else if line.starts_with("COMMANDS:")
-                && let Some(step) = current_step.as_mut()
-            {
-                let cmds = line
-                    .strip_prefix("COMMANDS:")
-                    .unwrap_or("")
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                step.commands = cmds;
-            } else if line.starts_with("VERIFY:")
-                && let Some(step) = current_step.as_mut()
-            {
-                let checks_str = line.strip_prefix("VERIFY:").unwrap_or("");
-                let checks: Vec<VerificationCheck> = checks_str
-                    .split(',')
-                    .filter_map(|s| {
-                        let check = s.trim().to_lowercase();
-                        if check.contains("test") {
-                            Some(VerificationCheck::TestsPassing)
-                        } else if check.contains("lint") {
-                            Some(VerificationCheck::LinterClean)
-                        } else if check.contains("build") {
-                            Some(VerificationCheck::BuildSuccessful)
-                        } else if check.contains("file_constraint") {
-                            Some(VerificationCheck::FileConstraint { max_lines: 400 })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                step.verification = checks;
-            } else if line.starts_with("CONFIDENCE:")
-                && let Some(step) = current_step.as_mut()
-                && let Some(conf_str) = line.strip_prefix("CONFIDENCE:")
-                && let Ok(conf) = conf_str.trim().parse::<f32>()
-            {
-                step.confidence = conf;
-            }
-        }
-
-        if let Some(step) = current_step {
-            steps.push(step);
-        }
-
-        if steps.is_empty() {
-            warn!("No steps parsed from plan, using default");
-            steps.push(PlanStep {
-                step_number: 1,
-                description: "Analyze and fix the issue".to_string(),
-                commands: vec!["echo 'Analyzing issue'".to_string()],
-                verification: vec![VerificationCheck::BuildSuccessful],
-                confidence: 0.5,
-            });
-        }
-
-        Ok(steps)
-    }
-
-    /// Parse plan from response, trying JSON first then falling back to text
-    fn parse_plan_json_or_text(&self, response: &str) -> Result<Vec<PlanStep>> {
-        // Try JSON parsing first (for providers with structured output)
-        if let Ok(json_plan) = serde_json::from_str::<JsonExecutionPlan>(response) {
-            debug!("Successfully parsed JSON execution plan");
-            return self.convert_json_to_plan_steps(json_plan);
-        }
-
-        // Fallback to text parsing for backward compatibility
-        debug!("JSON parsing failed, falling back to text parser");
-        self.parse_plan_from_response(response)
-    }
-
-    /// Convert JSON plan to PlanStep vector
-    fn convert_json_to_plan_steps(&self, json_plan: JsonExecutionPlan) -> Result<Vec<PlanStep>> {
-        if json_plan.steps.is_empty() {
-            warn!("Empty JSON plan received, using default");
-            return Ok(vec![PlanStep {
-                step_number: 1,
-                description: "Analyze and fix the issue".to_string(),
-                commands: vec!["echo 'Analyzing issue'".to_string()],
-                verification: vec![VerificationCheck::BuildSuccessful],
-                confidence: 0.5,
-            }]);
-        }
-
-        let steps = json_plan
-            .steps
-            .into_iter()
-            .map(|js| {
-                let verification = js
-                    .verification
-                    .into_iter()
-                    .filter_map(|v| {
-                        let check = v.to_lowercase();
-                        if check.contains("test") {
-                            Some(VerificationCheck::TestsPassing)
-                        } else if check.contains("lint") {
-                            Some(VerificationCheck::LinterClean)
-                        } else if check.contains("build") {
-                            Some(VerificationCheck::BuildSuccessful)
-                        } else if check.contains("file_constraint") {
-                            Some(VerificationCheck::FileConstraint { max_lines: 400 })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                PlanStep {
-                    step_number: js.step_number,
-                    description: js.description,
-                    commands: js.commands,
-                    verification,
-                    confidence: js.confidence,
-                }
-            })
-            .collect();
-
-        Ok(steps)
     }
 
     pub async fn adjust(
@@ -377,8 +262,9 @@ impl Planner {
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment LLM call failed: {e}")))?;
 
-        let estimated_input_tokens = adjustment_prompt.len() as u32 / 4;
-        let estimated_output_tokens = response.len() as u32 / 4;
+        // P4: accurate token estimation.
+        let (estimated_input_tokens, estimated_output_tokens) =
+            token_estimator::tokens_from_texts(&adjustment_prompt, &response);
 
         let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
         let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
@@ -397,7 +283,7 @@ impl Planner {
             warn!(error = %e, "Failed to record budget usage for adjustment");
         }
 
-        let adjusted_steps = self.parse_plan_from_response(&response)?;
+        let adjusted_steps = parse_plan_from_response(&response)?;
 
         if let Some(adjusted_step) = adjusted_steps.first() {
             info!(
