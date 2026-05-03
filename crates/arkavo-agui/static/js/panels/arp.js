@@ -78,6 +78,7 @@ function renderArp() {
     }
 
     var html = '';
+    html += renderSwarmkitLaunchErrors(snap);
     html += renderArpFlightsSection(agents);
     html += renderArpAgentSelector(agents);
 
@@ -184,6 +185,21 @@ function groupFlightRoles(agents) {
     return order.map(function(fid) { return byFlight[fid]; });
 }
 
+function renderSwarmkitLaunchErrors(snap) {
+    var errors = (snap && snap.swarmkitLaunchErrors) || [];
+    if (errors.length === 0) return '';
+    var html = '<div class="section-title">SwarmKit auto-launch failed</div>';
+    html += '<div class="cost-table"><table><tbody>';
+    errors.forEach(function(err) {
+        html += '<tr><td>' +
+            '<strong>' + escapeHtml(err.kind || 'error') + '</strong>' +
+            '<div class="arp-flight-meta"><code>' + escapeHtml(err.path || '') + '</code></div>' +
+            '</td><td><span class="status-warn">' + escapeHtml(err.message || '') + '</span></td></tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+}
+
 function renderArpFlightsSection(agents) {
     var flights = groupFlightRoles(agents);
     if (flights.length === 0) return '';
@@ -215,11 +231,36 @@ function renderArpFlightsSection(agents) {
             if (violationCount > 0) counter = ' ' + violationCount + ' viol';
             else if (traceCount > 0) counter = ' ' + traceCount;
 
+            // Bound DID — render the orchestrator's role-to-agent
+            // assignment so operators can see which mesh agent is
+            // playing this role. Empty when the flight is in-process
+            // (no real agent behind each role).
+            var didLabel = '';
+            var titleText = role.agentId;
+            if (ctx.boundAgentDid) {
+                var did = ctx.boundAgentDid;
+                // Truncate did:web:agent-7.example.net → "agent-7" for
+                // pill density; full DID still goes into the title.
+                var didShort = did;
+                var lastColon = did.lastIndexOf(':');
+                if (lastColon !== -1 && lastColon < did.length - 1) {
+                    didShort = did.slice(lastColon + 1);
+                }
+                var firstDot = didShort.indexOf('.');
+                if (firstDot !== -1) {
+                    didShort = didShort.slice(0, firstDot);
+                }
+                didLabel = ' <span class="arp-flight-pill-agent">@' +
+                    escapeHtml(didShort) + '</span>';
+                titleText = role.agentId + ' — bound to ' + did;
+            }
+
             rolesCell += '<button type="button" class="' + pillClass + '"' +
                 ' data-agent-id="' + escapeHtml(role.agentId) + '"' +
-                ' title="' + escapeHtml(role.agentId) + '">' +
+                ' title="' + escapeHtml(titleText) + '">' +
                 statusGlyph + ' <strong>' + escapeHtml(ctx.roleId) + '</strong>' +
                 ' <span class="arp-flight-pill-type">' + escapeHtml(ctx.roleType) + '</span>' +
+                didLabel +
                 escapeHtml(counter) +
                 '</button>';
         });

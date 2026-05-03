@@ -210,6 +210,7 @@ impl ArpHandler {
             role_type,
             arp_doc,
             runtime,
+            bound_agent_did,
         } = registration;
         let agent_id = flight_role_agent_id(flight_id, &role_id);
         let flight_context = FlightContext {
@@ -218,6 +219,7 @@ impl ArpHandler {
             kit_name,
             role_id,
             role_type,
+            bound_agent_did,
         };
         let loaded = LoadedDocument {
             path: None,
@@ -254,6 +256,7 @@ impl ArpHandler {
         ArpStatusSnapshot {
             agents,
             timestamp: chrono::Utc::now().to_rfc3339(),
+            swarmkit_launch_errors: Vec::new(),
         }
     }
 }
@@ -299,6 +302,9 @@ pub struct FlightRoleRegistration {
     pub role_type: String,
     pub arp_doc: ArpDocument,
     pub runtime: Arc<ArpRuntime>,
+    /// DID of the mesh agent the orchestrator bound to this role.
+    /// `None` for in-process / unbound flights.
+    pub bound_agent_did: Option<String>,
 }
 
 async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatus {
@@ -687,6 +693,7 @@ mod tests {
             role_type: role_type.into(),
             arp_doc: arkavo_arp::parse(MIN_DOC).unwrap(),
             runtime,
+            bound_agent_did: None,
         }
     }
 

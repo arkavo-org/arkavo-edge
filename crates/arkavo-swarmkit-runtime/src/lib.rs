@@ -14,11 +14,16 @@
 
 pub mod derive;
 pub mod flight;
+pub mod path_dispatch;
 #[cfg(feature = "tdf")]
 pub mod tdf;
 
 pub use derive::{DeriveOptions, derive_arp_for_role};
-pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
+pub use flight::{
+    DispatchHandle, FlightError, LaunchError, LaunchOptions, RoleRuntime, RoleTaskEnvelope,
+    RoleTaskTransport, SwarmFlight,
+};
+pub use path_dispatch::{KitPathKind, classify_kit_path, is_tdf_path};
 
 #[cfg(feature = "tdf")]
 pub use tdf::{

@@ -8,7 +8,7 @@ pub(super) mod discovery;
 pub(super) mod kas;
 pub(super) mod messaging;
 pub(super) mod registration;
-pub(super) mod specialization;
+pub mod specialization;
 pub(super) mod streaming;
 pub(super) mod tasks;
 #[cfg(feature = "kas")]

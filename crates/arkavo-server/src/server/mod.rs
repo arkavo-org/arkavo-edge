@@ -9,7 +9,7 @@ mod conductor_evofabric;
 mod conductor_parallel;
 mod conductor_planner;
 mod conductor_tool_loop;
-mod config_helpers;
+pub mod config_helpers;
 mod consolidation;
 mod contract_negotiation;
 mod conversation_window;
@@ -17,7 +17,7 @@ mod curiosity;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
-mod handlers;
+pub mod handlers;
 mod learning_bus;
 mod learning_bus_gossip;
 mod learning_bus_synthesis;
@@ -354,6 +354,15 @@ pub struct A2aRpcImpl {
     pub(crate) metrics: Arc<MetricsCollector>,
     pub(crate) mcp_registry: Arc<McpRegistry>,
     pub(crate) agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    /// Holds the current SwarmKit role assignment (kit/flight/role
+    /// metadata) once `agent.specialize` has been applied. Used by the
+    /// agent loop to tag tool outcomes for the right per-role
+    /// DecisionTrace on the orchestrator's flight.
+    pub(crate) role_specialization: Arc<crate::server::config_helpers::RoleSpecializationStore>,
+    /// Decryptor used by `agent.specialize` to recover the
+    /// `AgentSpecializationBundle` from the TDF-wrapped payload. Wired
+    /// up at construction time; tests inject a stub.
+    pub(crate) bundle_decryptor: Arc<dyn crate::server::handlers::specialization::BundleDecryptor>,
     pub(crate) llm_adapter: Option<Arc<LlmClientAdapter>>,
     pub(crate) chat_sessions: Arc<arkavo_protocol::chat_session::ChatSessionManager>,
     pub(crate) task_store: Arc<dyn TaskStore>,
@@ -1004,6 +1013,8 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             &self.mcp_registry,
             &self.agent_metadata,
+            &self.role_specialization,
+            self.bundle_decryptor.as_ref(),
             request,
         )
         .await

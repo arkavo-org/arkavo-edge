@@ -118,6 +118,27 @@ enum OrchestratorSubcommand {
 
     /// Show orchestrator status and metrics
     Status,
+
+    /// Apply a SwarmKit manifest to the local mesh.
+    ///
+    /// Loads the kit, asks the running orchestrator's A2A endpoint to
+    /// match each role to a capable agent, ship per-role specialization
+    /// bundles, launch the SwarmFlight, and dispatch the first task per
+    /// role. Reports the assignment plan as JSON on success.
+    ApplyKit {
+        /// Path to the SwarmKit manifest (.swarmkit.yaml or .json).
+        #[arg(value_name = "MANIFEST")]
+        path: std::path::PathBuf,
+
+        /// Orchestrator A2A endpoint URL. Defaults to the local
+        /// orchestrator-agent's address.
+        #[arg(
+            long,
+            env = "ARKAVO_ORCHESTRATOR_URL",
+            default_value = "http://127.0.0.1:8340"
+        )]
+        orchestrator_url: String,
+    },
 }
 
 pub async fn run(cmd: &OrchestratorCommand) -> Result<()> {
@@ -185,7 +206,63 @@ pub async fn run(cmd: &OrchestratorCommand) -> Result<()> {
         }
         OrchestratorSubcommand::Config => show_config(),
         OrchestratorSubcommand::Status => show_status(),
+        OrchestratorSubcommand::ApplyKit {
+            path,
+            orchestrator_url,
+        } => apply_kit_via_orchestrator(path, orchestrator_url).await,
     }
+}
+
+/// Send the kit's path to a running orchestrator agent over A2A and
+/// print the returned assignment plan. The orchestrator agent owns the
+/// full apply pipeline; this CLI is just a thin client that lets a
+/// human or script trigger it.
+async fn apply_kit_via_orchestrator(path: &std::path::Path, orchestrator_url: &str) -> Result<()> {
+    let absolute = std::fs::canonicalize(path)
+        .map_err(|e| anyhow::anyhow!("resolve manifest path {}: {}", path.display(), e))?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "orchestrator.apply_kit",
+        "params": {
+            "kit_path": absolute.display().to_string(),
+        }
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_mins(2))
+        .build()
+        .map_err(|e| anyhow::anyhow!("build HTTP client: {e}"))?;
+
+    let response = client
+        .post(orchestrator_url)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("POST {orchestrator_url}: {e}"))?;
+
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("parse JSON-RPC response: {e}"))?;
+
+    if !status.is_success() {
+        anyhow::bail!("orchestrator returned HTTP {status}: {body}");
+    }
+    if let Some(err) = body.get("error") {
+        anyhow::bail!("orchestrator returned JSON-RPC error: {err}");
+    }
+
+    let result = body
+        .get("result")
+        .ok_or_else(|| anyhow::anyhow!("response missing result field: {body}"))?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+    );
+    Ok(())
 }
 
 fn show_config() -> Result<()> {
