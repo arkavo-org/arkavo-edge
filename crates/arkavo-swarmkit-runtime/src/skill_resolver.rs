@@ -15,9 +15,22 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arkavo_swarmkit::{Skill, SkillContent};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use arkavo_swarmkit::{Skill, SkillContent, canonical_json};
+use base64::Engine;
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use serde::Serialize;
+
+/// Compute the canonical-form bytes a SkillContent gets signed over.
+///
+/// Uses arkavo_swarmkit::canonical_json (JCS, RFC 8785 — sorted keys, no
+/// insignificant whitespace).
+///
+/// The same helper backs `kit.id`, so the canonicalization is consistent
+/// across the SwarmKit surface.
+fn canonical_skill_bytes(content: &SkillContent) -> Result<Vec<u8>, serde_json::Error> {
+    let value = serde_json::to_value(content)?;
+    Ok(canonical_json(&value).into_bytes())
+}
 
 #[derive(Debug, Clone)]
 pub struct ResolvedSkill {
@@ -128,27 +141,59 @@ pub fn resolve_skill(_skill: &Skill, _cfg: &ResolverConfig) -> Result<ResolvedSk
     unimplemented!("Task 4 lands the inline branch")
 }
 
-/// Sign `SkillContent` with the given ed25519 `_private_key`.
+/// Sign `SkillContent` with the given ed25519 `private_key`.
 ///
 /// Returns a `SignedSkill` carrying the base64url signature and signer DID.
-/// The `SigningKey` import is used here to anchor the type; Task 3 fills
-/// the implementation.
+/// The digest is BLAKE3(canonical_json(content)); ed25519 signs the 32-byte
+/// digest. Deterministic for a given (key, content) pair.
 pub fn sign_skill_content(
-    _content: &SkillContent,
-    _signer_did: &str,
-    _private_key: &SigningKey,
+    content: &SkillContent,
+    signer_did: &str,
+    private_key: &SigningKey,
 ) -> SignedSkill {
-    unimplemented!("Task 3 lands the signer")
+    let canonical =
+        canonical_skill_bytes(content).expect("SkillContent serialization must not fail");
+    let digest = blake3::hash(&canonical);
+    let signature = private_key.sign(digest.as_bytes());
+    SignedSkill {
+        signature_b64url: base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(signature.to_bytes()),
+        signed_by: signer_did.to_string(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn deterministic_test_signer() -> (SigningKey, &'static str) {
+        let key = SigningKey::from_bytes(&[42u8; 32]);
+        (key, "did:web:test.arkavo.com")
+    }
+
+    fn sample_content() -> SkillContent {
+        SkillContent {
+            name: "asset-analysis".into(),
+            description: "Summarize a source asset".into(),
+            instructions: "Extract three to five selling points.".into(),
+            resources: vec![],
+        }
+    }
+
     #[test]
     fn types_compile_and_mock_resolver_returns_unresolvable() {
         let mock = MockPublicKeyResolver::new();
         let err = mock.resolve("did:web:nope").unwrap_err();
         assert!(matches!(err, ResolveError::SignerUnresolvable { .. }));
+    }
+
+    #[test]
+    fn sign_skill_content_is_deterministic() {
+        let (key, did) = deterministic_test_signer();
+        let content = sample_content();
+        let s1 = sign_skill_content(&content, did, &key);
+        let s2 = sign_skill_content(&content, did, &key);
+        assert_eq!(s1.signature_b64url, s2.signature_b64url);
+        assert_eq!(s1.signed_by, did);
     }
 }
