@@ -107,16 +107,16 @@ count: TBD
 | `SK-013` | `§5.2 defaults` | `§5.2-SHOULD-1` | wired | high | `crates/arkavo-swarmkit-runtime/src/derive.rs:76-130` |  | N | derive_arp_for_role default policy; constants documented in DeriveOptions |
 | `SK-014` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:118-122 + tests:329-352` |  | N | spec gap: hand-authored ARP override hook; LaunchOptions.arp_overrides |
 | `SK-015` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:200-202 + tests:294-312` |  | N | spec gap: flight_id propagation into DecisionTrace task_id |
-| `SK-020` | `(none)` |  |  |  |  |  | `?` | spec gap: SwarmFlightRegistry → ArpHandler attachment |
-| `SK-021` | `(none)` |  |  |  |  |  | `?` | spec gap: deregister isolation guarantee |
-| `SK-022` | `(none)` |  |  |  |  |  | `?` | spec gap: ARKAVO_SWARMKIT_PATH gateway-boot auto-launch |
-| `SK-023` | `(none)` |  |  |  |  |  | `?` | spec gap: snapshot ordering convention |
-| `SK-024` | `§6.5 camelCase (TDF context only)` |  |  |  |  |  | `?` | spec gap: AG-UI WebSocket JSON convention beyond §6.5 TDF scope |
+| `SK-020` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:36-56 + arp_handler.rs:204-235` |  | N | spec gap: SwarmFlightRegistry → ArpHandler attachment with FlightContext |
+| `SK-021` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:60-65 + arp_handler.rs:243-248` |  | N | spec gap: deregister isolation; idempotent on unknown flight_id |
+| `SK-022` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:91-102 + gateway.rs:401-417` |  | N | spec gap: ARKAVO_SWARMKIT_PATH gateway-boot auto-launch with non-fatal failure |
+| `SK-023` | `(none)` |  | wired | high | `crates/arkavo-agui/src/arp_handler.rs:259-281` |  | N | spec gap: local → mesh → flight roles ordering convention |
+| `SK-024` | `§6.5 camelCase (TDF context only)` |  | wired | high | `crates/arkavo-agui/src/types.rs:1126-1156` |  | N | spec gap: AG-UI WebSocket JSON convention beyond §6.5 TDF scope; flightContext field with skip_serializing_if for non-flight agents |
 | `SK-030` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
 | `SK-031` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
 | `SK-032` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
 | `SK-033` | `(none)` |  |  |  |  |  | `?` | spec gap: WebSocket fingerprint dedupe |
-| `SK-040` | `(none)` |  |  |  |  |  | `?` | spec gap: requestStopFlight operator control |
+| `SK-040` | `(none)` |  | wired | high | `crates/arkavo-agui/src/gateway_ws.rs:351-385 + swarm_flight_registry.rs:60-65` |  | N | spec gap: requestStopFlight operator control with idempotent deregister + immediate ArpStatusUpdate |
 | `SK-050` | `§6 TDF envelope` | `§11-MUST-PROD-1` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:88-115 (wrap_manifest, unwrap_manifest)` |  | N | round-trip is the lossless-encoding invariant the spec implies |
 | `SK-051` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:105-115` |  | N | runtime safety: unwrap_manifest pipes through parse_json which re-validates |
 | `SK-052` | `§6.3 SwarmKit-level orchestrator gate (descriptive)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:132-144` |  | N | swarmkit_orchestrator_policy emits the §6.3 baseline gate |
@@ -127,8 +127,8 @@ count: TBD
 | `SK-058` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:282-326` |  | N | runtime: extract embedded policy from envelope |
 | `SK-059` | `§6.3 KAS gate` | `§11-MUST-ORCH-3` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:344-382` |  | N | KAS-gated unwrap success path; verified via test 824-833 |
 | `SK-060` | `§6.3 KAS gate` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:355-365 + tests:840-865` |  | N | KAS-gated unwrap fail-fast on unhealthy/policy-mismatch; distinct from Decrypt error |
-| `SK-061` | `(none)` |  |  |  |  |  | `?` | runtime: .tdf path recognition |
-| `SK-062` | `(none)` |  |  |  |  |  | `?` | runtime: .tdf auto-launch dispatch |
+| `SK-061` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:179-189` |  | N | runtime: .tdf path recognition (case-insensitive) |
+| `SK-062` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:104-117 + 140-170` |  | N | runtime: .tdf auto-launch dispatch via launch_from_tdf_path; TdfFeatureDisabled vs TdfUnwrap distinction |
 
 ## Spec gaps
 
