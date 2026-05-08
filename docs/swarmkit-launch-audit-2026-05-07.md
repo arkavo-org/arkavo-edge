@@ -45,18 +45,18 @@ count: TBD
 
 | id | spec_ref | covers | label | confidence | evidence | owner | ship_blocker | notes |
 |----|----------|--------|-------|------------|----------|-------|--------------|-------|
-| `§4-MUST-1` | `§4 implementations MUST canonicalize before hashing/signing (sorted keys, UTF-8, LF, no trailing whitespace)` |  |  |  |  |  | `?` |  |
-| `§4.1-MUST-1` | `§4.1 SwarmFlights MUST refuse expired kits` |  |  |  |  |  | `?` |  |
-| `§4.1-MUST-2` | `§4.1 roles MUST contain >= 1 role` |  |  |  |  |  | `?` |  |
-| `§4.3-SHOULD-1` | `§4.3 role_type SHOULD use a value from Appendix C` |  |  |  |  |  | `?` |  |
-| `§4.3-SHOULD-2` | `§4.3 explicit tool allowlist; "*" SHOULD NOT be used` |  |  |  |  |  | `?` |  |
-| `SK-006` | `§4.3 orchestrators MUST NOT reject manifests solely because role_type is outside the recommended vocabulary` |  |  |  |  |  | `?` | merged 1:1 with §4.3-MUST-1 |
-| `§5.1-MUST-1` | `§5.1 inference.max_tokens MUST NOT exceed model context window minus prompt overhead` |  |  |  |  |  | `?` |  |
-| `SK-002` | `§5.1 budget.* MUST be <= corresponding constraints.global_budget.*` |  |  |  |  |  | `?` | merged 1:1 with §5.1-MUST-2 |
-| `§5.1-MUST-3` | `§5.1 model.family MUST be in the orchestrator's supported set` |  |  |  |  |  | `?` |  |
-| `§5.1-MUST-4` | `§5.1 orchestrator MUST refuse provisioning when model.family unsupported` |  |  |  |  |  | `?` |  |
-| `§5.1-MUST-5` | `§5.1 network_egress: true MUST be denied if constraints.network.egress_allowed: false` |  |  |  |  |  | `?` |  |
-| `§5.2-SHOULD-1` | `§5.2 implementations SHOULD log every defaulted field for audit` |  |  |  |  |  | `?` |  |
+| `§4-MUST-1` | `§4 implementations MUST canonicalize before hashing/signing (sorted keys, UTF-8, LF, no trailing whitespace)` |  | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:22-58` |  | N | JCS RFC 8785 implementation; exercised via SK-003 |
+| `§4.1-MUST-1` | `§4.1 SwarmFlights MUST refuse expired kits` |  | aspirational | medium | `no test coverage` |  | `?` | validate.rs only checks horizon and expires-before-created; current-time expiry check not in this crate. SwarmFlight::launch may check separately — defer call to Pass 2b |
+| `§4.1-MUST-2` | `§4.1 roles MUST contain >= 1 role` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:101-103` |  | N | NoRoles error variant |
+| `§4.3-SHOULD-1` | `§4.3 role_type SHOULD use a value from Appendix C` |  | aspirational | high | `no test coverage` |  | `?` | producer guidance, parser intentionally accepts any string (SK-006 inverts this); not enforced |
+| `§4.3-SHOULD-2` | `§4.3 explicit tool allowlist; "*" SHOULD NOT be used` |  | aspirational | high | `no test coverage` |  | `?` | wildcard guard not enforced anywhere in arkavo-swarmkit |
+| `SK-006` | `§4.3 orchestrators MUST NOT reject manifests solely because role_type is outside the recommended vocabulary` |  | wired | high | `crates/arkavo-swarmkit/src/role.rs:8-9` |  | N | merged 1:1 with §4.3-MUST-1; `role_type: String` deserializes any value |
+| `§5.1-MUST-1` | `§5.1 inference.max_tokens MUST NOT exceed model context window minus prompt overhead` |  | aspirational | high | `no test coverage` |  | `?` | not in validate.rs; orchestrator-side at provisioning time. No code path in this crate |
+| `SK-002` | `§5.1 budget.* MUST be <= corresponding constraints.global_budget.*` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:158-192 + tests:333-349` |  | N | merged 1:1 with §5.1-MUST-2; covers max_total_tokens and max_wallclock_ms |
+| `§5.1-MUST-3` | `§5.1 model.family MUST be in the orchestrator's supported set` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator concern; arkavo-swarmkit accepts any model.family string |
+| `§5.1-MUST-4` | `§5.1 orchestrator MUST refuse provisioning when model.family unsupported` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator concern, not parser |
+| `§5.1-MUST-5` | `§5.1 network_egress: true MUST be denied if constraints.network.egress_allowed: false` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:194-207 + tests:351-361` |  | N | NetworkEgressDenied error variant |
+| `§5.2-SHOULD-1` | `§5.2 implementations SHOULD log every defaulted field for audit` |  | aspirational | medium | `no test coverage` |  | `?` | not enforced in parser; runtime may log via tracing — defer to Pass 2b |
 | `SK-053` | `§6.4 orchestrator MUST construct and bind per-role TDF policies to data passed to specialists` |  |  |  |  |  | `?` | merged 1:1 with §6.4-MUST-1 |
 | `§6.5-SHOULD-1` | `§6.5 SwarmKit producers SHOULD set oaepPadding: SHA-256 once platform supports it` |  |  |  |  |  | `?` |  |
 | `§6.5-MUST-1` | `§6.5 field names MUST be camelCase (opentdf-rs convention)` |  |  |  |  |  | `?` |  |
@@ -74,10 +74,10 @@ count: TBD
 | `§9.3-MUST-1` | `§9.3 kit.authors[].did MUST be a resolvable DIF DID` |  |  |  |  |  | `?` |  |
 | `§9.3-MUST-2` | `§9.3 provenance.c2pa_assertions MUST conform to CAWG identity assertion v1.x` |  |  |  |  |  | `?` |  |
 | `§9.4-MUST-1` | `§9.4 orchestrators MUST refuse manifests where major spec_version differs from supported set` |  |  |  |  |  | `?` |  |
-| `§10.1-MUST-1` | `§10.1 orchestrators MUST maintain a nonce cache for the longest active expires` |  |  |  |  |  | `?` |  |
-| `SK-004` | `§10.1 orchestrators MUST cap accepted manifests at expires - created <= 1 year` |  |  |  |  |  | `?` | merged 1:1 with §10.1-MUST-2 |
-| `§10.1-SHOULD-1` | `§10.1 orchestrators SHOULD cap at <= 90 days unless operational requirement demands longer` |  |  |  |  |  | `?` |  |
-| `§10.1-MUST-3` | `§10.1 manifests exceeding the expiry cap MUST be rejected before any decryption` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-1` | `§10.1 orchestrators MUST maintain a nonce cache for the longest active expires` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator-side persistence concern; not in arkavo-swarmkit or runtime |
+| `SK-004` | `§10.1 orchestrators MUST cap accepted manifests at expires - created <= 1 year` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:209-223 + tests:423-439` |  | N | merged 1:1 with §10.1-MUST-2; covers ExpiryHorizonTooLarge + ExpiryBeforeCreated |
+| `§10.1-SHOULD-1` | `§10.1 orchestrators SHOULD cap at <= 90 days unless operational requirement demands longer` |  | aspirational | high | `no test coverage` |  | `?` | constant `RECOMMENDED_EXPIRY_HORIZON_SECONDS` defined in validate.rs:17 but never enforced |
+| `§10.1-MUST-3` | `§10.1 manifests exceeding the expiry cap MUST be rejected before any decryption` |  | wired | low | `crates/arkavo-swarmkit/src/validate.rs:209-223` |  | N | trivially true by construction: validate() runs on parsed manifest before any decrypt path. No explicit test asserts the temporal ordering |
 | `§10.1-MUST-4` | `§10.1 kv_cache_id slots MUST be flight-scoped unless explicitly marked persistent` |  |  |  |  |  | `?` |  |
 | `§10.1-MUST-5` | `§10.1 orchestrators MUST tag self-evaluated rubric results in DecisionTrace as self_evaluated: true` |  |  |  |  |  | `?` |  |
 | `§10.1-MUST-6` | `§10.1 downstream consumers MUST treat self-evaluated scores as unverified for trust/ranking/quality routing` |  |  |  |  |  | `?` |  |
@@ -86,7 +86,7 @@ count: TBD
 | `§10.3-MUST-1` | `§10.3 specialists MUST treat all envelope content as data except agent_provisioning and skills fields` |  |  |  |  |  | `?` |  |
 | `§11-MUST-PROD-1` | `§11 C-P1 producer MUST produce TDF envelopes per §6` |  |  |  |  |  | `?` |  |
 | `§11-MUST-PROD-2` | `§11 C-P2 producer MUST sign manifests with at least one DID-resolvable identity` |  |  |  |  |  | `?` |  |
-| `§11-MUST-PROD-3` | `§11 C-P3 producer MUST emit canonical manifests (§9.1)` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-3` | `§11 C-P3 producer MUST emit canonical manifests (§9.1)` | `§4-MUST-1, SK-003` | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:22-58` |  | N | producers using arkavo-swarmkit emit canonical via canonical_json; verified via SK-003 round-trip |
 | `§11-MUST-PROD-4` | `§11 C-P4 producer MUST set kit.expires for kits intended for distribution` |  |  |  |  |  | `?` |  |
 | `§11-MUST-ORCH-1` | `§11 C-O1 orchestrator MUST reject expired or replay-detected kits` |  |  |  |  |  | `?` |  |
 | `§11-MUST-ORCH-2` | `§11 C-O2 orchestrator MUST verify all signatures before any delegation` |  |  |  |  |  | `?` |  |
@@ -98,9 +98,9 @@ count: TBD
 | `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` |  |  |  |  |  | `?` |  |
 | `§11-MUST-SPEC-3` | `§11 C-S3 specialist MUST refuse policies that violate its host environment` |  |  |  |  |  | `?` |  |
 | `§11-MUST-SPEC-4` | `§11 C-S4 specialist MUST honor mcp_grants[].expires and not cache tokens beyond it` |  |  |  |  |  | `?` |  |
-| `SK-001` | `§4 / §4.1 / §4.6 / §5.1 / §10.1 (parse + cross-block validate)` | `§4-MUST-1, §4.1-MUST-1, §4.1-MUST-2, SK-002, SK-004` |  |  |  |  | `?` | end-to-end gate over multiple MUSTs; covers chains via merges |
-| `SK-003` | `§9.1 kit.id = BLAKE3 of canonical form (descriptive)` | `§4-MUST-1` |  |  |  |  | `?` | spec uses plain English; runtime treats as hard validation |
-| `SK-005` | `§4.6 dimension weights sum to 1.0 within fp tolerance (descriptive)` |  |  |  |  |  | `?` | spec uses plain English; runtime treats as hard validation |
+| `SK-001` | `§4 / §4.1 / §4.6 / §5.1 / §10.1 (parse + cross-block validate)` | `§4-MUST-1, §4.1-MUST-1, §4.1-MUST-2, SK-002, SK-004` | wired | high | `crates/arkavo-swarmkit/src/lib.rs:39-44 + manifest.rs:14-30` |  | N | end-to-end gate; covers chains via merges. Note: §4.1-MUST-1 (refuse expired) is not part of this end-to-end gate — it's a runtime check, not a parse-time check |
+| `SK-003` | `§9.1 kit.id = BLAKE3 of canonical form (descriptive)` | `§4-MUST-1` | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:92-100 + validate.rs:tests 449-465` |  | N | spec uses plain English; runtime treats as hard validation via KitIdHashMismatch |
+| `SK-005` | `§4.6 dimension weights sum to 1.0 within fp tolerance (descriptive)` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:140-146 + tests:393-421` |  | N | spec uses plain English; runtime treats as hard validation via RubricWeightsDoNotSumToOne |
 | `SK-010` | `§1.2 / §5 handoff (descriptive)` |  |  |  |  |  | `?` | spec describes handoff narrative; SwarmFlight-per-role-ARP is the runtime claim |
 | `SK-011` | `§7.1.1 isolation across roles (process-sharing inverse)` | `§7.1.1-MUST-3` |  |  |  |  | `?` | per-role state isolation when not sharing process |
 | `SK-012` | `(none)` |  |  |  |  |  | `?` | spec gap: quality-gate adaptation feedback into ARP prior |
