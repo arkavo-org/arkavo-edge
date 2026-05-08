@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arkavo_swarmkit::{Manifest, parse_json, parse_yaml};
-use arkavo_swarmkit_runtime::{LaunchOptions, SwarmFlight};
+use arkavo_swarmkit_runtime::{LaunchOptions, ResolverConfig, SwarmFlight};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -127,7 +127,14 @@ pub fn launch_from_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
         source: e,
     })?;
     let manifest = parse_manifest(path, &raw)?;
-    SwarmFlight::launch(&manifest, LaunchOptions::default()).map_err(|e| AutoLaunchError::Launch {
+    SwarmFlight::launch(
+        &manifest,
+        LaunchOptions {
+            resolver_config: Some(ResolverConfig::default()),
+            ..LaunchOptions::default()
+        },
+    )
+    .map_err(|e| AutoLaunchError::Launch {
         path: path.display().to_string(),
         message: e.to_string(),
     })
@@ -151,7 +158,14 @@ pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunch
             path: path.display().to_string(),
             message: e.to_string(),
         })?;
-    SwarmFlight::launch(&manifest, LaunchOptions::default()).map_err(|e| AutoLaunchError::Launch {
+    SwarmFlight::launch(
+        &manifest,
+        LaunchOptions {
+            resolver_config: Some(ResolverConfig::default()),
+            ..LaunchOptions::default()
+        },
+    )
+    .map_err(|e| AutoLaunchError::Launch {
         path: path.display().to_string(),
         message: e.to_string(),
     })

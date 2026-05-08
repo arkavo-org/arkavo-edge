@@ -8,7 +8,7 @@
 //! ARKAVO_DID_WEB_LIVE=1.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
@@ -16,15 +16,31 @@ use parking_lot::RwLock;
 
 use super::{PublicKeyResolver, ResolveError};
 
-#[derive(Default)]
+/// Production did:web resolver. The `reqwest::blocking::Client` is built
+/// lazily on first use so that constructing `ResolverConfig::default()`
+/// inside an async context (e.g. from `auto_launch_from_environment`) does
+/// not create — and later panic-drop — a blocking tokio runtime.
 pub struct DidWebPublicKeyResolver {
     cache: Arc<RwLock<HashMap<String, VerifyingKey>>>,
-    client: reqwest::blocking::Client,
+    client: OnceLock<reqwest::blocking::Client>,
+}
+
+impl Default for DidWebPublicKeyResolver {
+    fn default() -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(HashMap::new())),
+            client: OnceLock::new(),
+        }
+    }
 }
 
 impl DidWebPublicKeyResolver {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn client(&self) -> &reqwest::blocking::Client {
+        self.client.get_or_init(reqwest::blocking::Client::default)
     }
 }
 
@@ -43,7 +59,7 @@ impl PublicKeyResolver for DidWebPublicKeyResolver {
                 })?;
         let url = format!("https://{host}/.well-known/did.json");
         let json: serde_json::Value = self
-            .client
+            .client()
             .get(&url)
             .send()
             .and_then(|r| r.json())
