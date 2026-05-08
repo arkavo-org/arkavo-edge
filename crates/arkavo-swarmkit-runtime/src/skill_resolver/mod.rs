@@ -12,6 +12,9 @@
 //! * `registry` — content-addressed file in a local cache, signed.
 //! * `tdf-ref` — explicit roadmap variant; returns `TdfRefNotImplemented`.
 
+pub mod did_web;
+pub use did_web::DidWebPublicKeyResolver;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -53,6 +56,19 @@ pub struct ResolverConfig {
     pub registry_cache: PathBuf,
     pub verify: VerifyMode,
     pub public_key_resolver: Arc<dyn PublicKeyResolver>,
+}
+
+impl Default for ResolverConfig {
+    fn default() -> Self {
+        let cache = dirs::cache_dir()
+            .map(|d| d.join("arkavo").join("skills"))
+            .unwrap_or_else(|| PathBuf::from(".arkavo/skills"));
+        Self {
+            registry_cache: cache,
+            verify: VerifyMode::Required,
+            public_key_resolver: Arc::new(DidWebPublicKeyResolver::new()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
