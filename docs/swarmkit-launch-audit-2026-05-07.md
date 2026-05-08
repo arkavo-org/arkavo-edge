@@ -132,4 +132,38 @@ count: TBD
 
 ## Spec gaps
 
-(filled by Task 9 — runtime-only invariants the spec doesn't cover)
+Runtime invariants the spec does not address. Each is a candidate for a spec proposal in Phase 5 (or for the forthcoming RFC AE-2026-004).
+
+**Note on scope.** A grep for `assert!`, `debug_assert!`, `panic!`, `unreachable!`, `unimplemented!` outside `#[cfg(test)]` modules across `arkavo-swarmkit`, `arkavo-swarmkit-runtime`, and the AG-UI integration files returned **zero hits**. SwarmKit's invariants are enforced at the type system, not via runtime panics. The gaps below are not panicking invariants but *behavioural runtime claims the test contract makes that the prose spec doesn't*.
+
+### Spec-language vs runtime-validation gaps
+
+The spec uses descriptive English where the runtime treats the claim as a hard invariant. Phase 5 should promote these to MUST clauses in the next spec draft.
+
+- **§4.6 rubric weights sum to 1.0** — spec line 230 phrases it as "and the sum of weight across dimensions equals 1.0 (within floating-point tolerance)" without MUST. Runtime enforces via `RubricWeightsDoNotSumToOne` (validate.rs:140-146, exercised by SK-005). Recommendation: add `§4.6-MUST-1`.
+- **§9.1 kit.id BLAKE3 formula** — spec line 516 phrases it as "kit.id is BLAKE3(canonical_manifest)" without MUST. Runtime enforces via `KitIdHashMismatch` (validate.rs:232-246, exercised by SK-003). Recommendation: add `§9.1-MUST-1`.
+- **§1.2 / §5 handoff narrative** — spec describes the "initial conditions" → "ARP runtime" handoff descriptively. Runtime makes this concrete via `derive_arp_for_role` + `SwarmFlight::launch` (exercised by SK-010). Recommendation: §1.2 or §5 should add a MUST clause for "one ARP runtime per role at launch."
+
+### Architecture-level gaps (worth a §3 architecture overview proposal)
+
+- `flight:<flight_id>:<role_id>` synthetic-agent-id keying convention. Runtime claim from swarmkit.spec.yaml invariants: "ArpHandler stores flight roles under synthetic agent_id `flight:<flight_id>:<role_id>` so multi-flight role_id collisions are impossible." Implemented in `crates/arkavo-agui/src/arp_handler.rs:204-235` and `swarm_flight_registry.rs:36-56`. The spec doesn't define this keying scheme; it should, since any other implementation will collide on role_id.
+- AG-UI WebSocket camelCase serialization for SwarmKit-derived events. Implemented in `crates/arkavo-agui/src/types.rs:1126-1156` with `flightContext` field. Spec only mandates camelCase in §6.5 (TDF cryptographic profile context); the same convention applied to AG-UI events is a separate undocumented runtime claim.
+- `ArpStatusUpdate` fingerprint dedupe to preserve panel DOM state. Implemented in `arp.js:13-35`. This is a UI smoothing detail not in spec scope but materially affects observability and operator UX.
+
+### Operator-control gaps (no spec section yet)
+
+- `requestStopFlight` WebSocket command + `FlightStopped` event. Implemented in `gateway_ws.rs:351-385`. Spec §7.4 mentions revocation by closing A2A channels and KAS revocation events; the AG-UI operator-stop flow is a *different* surface (operator-initiated cancellation through the gateway WebSocket) that the spec doesn't describe.
+- `ARKAVO_SWARMKIT_PATH` environment-driven auto-launch with non-fatal failure. Implemented in `swarm_flight_registry.rs:91-117`. Spec doesn't address how flights are started or what fault-tolerance gateway boot needs.
+
+### Adaptation feedback gaps
+
+- Quality-gate adaptation feedback into ARP prior. Implemented as `record_tool_outcome` in `flight.rs:189-207`, exercised by SK-012 (below-quality outcome degrades the role's prior). Spec §1.2 references the ARP companion spec for adaptation but doesn't pin the feedback contract.
+- `LaunchOptions::arp_overrides` per-role hand-authored ARP. Implemented in `flight.rs:106-140`, exercised by SK-014. The spec implies derivation from `agent_provisioning` (§5.2 defaults) without acknowledging that orchestrators may need to bypass derivation for hand-authored ARP — a real production need.
+- `flight_id` propagation into per-role DecisionTrace `task_id`. Implemented in `flight.rs:200-202`, exercised by SK-015. Spec doesn't define how flight identity surfaces in trace records, which matters for cross-flight observability.
+
+### File-format / .swarmkit.tdf gaps
+
+- `.swarmkit.tdf` recommended double-extension and case-insensitive recognition. Implemented in `swarm_flight_registry.rs:179-189` (SK-061). Spec Appendix B mentions filename conventions in passing; should be normative.
+- Distinct `Io` vs `Serialize` vs `Decrypt` error variants on the read path. Implemented in `tdf.rs:291-307` (SK-057). Spec doesn't constrain error taxonomy; consumers benefit from being able to distinguish them.
+- `TdfFeatureDisabled` vs `TdfUnwrap` auto-launch error variants. Implemented in `swarm_flight_registry.rs:104-117` (SK-062). Same observation.
+
