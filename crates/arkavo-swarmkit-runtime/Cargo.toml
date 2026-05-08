@@ -24,6 +24,8 @@ arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
 arkavo-agent-auth = { path = "../arkavo-agent-auth", optional = true }
 base64 = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

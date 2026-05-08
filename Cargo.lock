@@ -1868,6 +1868,8 @@ dependencies = [
  "arkavo-tdf",
  "arkavo-test-macros",
  "base64 0.22.1",
+ "ed25519-dalek 2.2.0",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",

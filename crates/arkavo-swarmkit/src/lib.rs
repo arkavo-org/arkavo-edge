@@ -25,7 +25,7 @@ pub use coordination::{
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 pub use role::{
     AgentProvisioning, ArpRule, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
-    Model, Observability, RoleSpec, Skill, TdfAttributeReleasePolicy, ToolUse,
+    Model, Observability, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, ToolUse,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use validate::{ValidationError, validate};
