@@ -45,6 +45,59 @@ count: TBD
 
 | id | spec_ref | covers | label | confidence | evidence | owner | ship_blocker | notes |
 |----|----------|--------|-------|------------|----------|-------|--------------|-------|
+| `§4-MUST-1` | `§4 implementations MUST canonicalize before hashing/signing (sorted keys, UTF-8, LF, no trailing whitespace)` |  |  |  |  |  | `?` |  |
+| `§4.1-MUST-1` | `§4.1 SwarmFlights MUST refuse expired kits` |  |  |  |  |  | `?` |  |
+| `§4.1-MUST-2` | `§4.1 roles MUST contain >= 1 role` |  |  |  |  |  | `?` |  |
+| `§4.3-SHOULD-1` | `§4.3 role_type SHOULD use a value from Appendix C` |  |  |  |  |  | `?` |  |
+| `§4.3-SHOULD-2` | `§4.3 explicit tool allowlist; "*" SHOULD NOT be used` |  |  |  |  |  | `?` |  |
+| `§4.3-MUST-1` | `§4.3 orchestrators MUST NOT reject manifests solely because role_type is outside the recommended vocabulary` |  |  |  |  |  | `?` |  |
+| `§5.1-MUST-1` | `§5.1 inference.max_tokens MUST NOT exceed model context window minus prompt overhead` |  |  |  |  |  | `?` |  |
+| `§5.1-MUST-2` | `§5.1 budget.* MUST be <= corresponding constraints.global_budget.*` |  |  |  |  |  | `?` |  |
+| `§5.1-MUST-3` | `§5.1 model.family MUST be in the orchestrator's supported set` |  |  |  |  |  | `?` |  |
+| `§5.1-MUST-4` | `§5.1 orchestrator MUST refuse provisioning when model.family unsupported` |  |  |  |  |  | `?` |  |
+| `§5.1-MUST-5` | `§5.1 network_egress: true MUST be denied if constraints.network.egress_allowed: false` |  |  |  |  |  | `?` |  |
+| `§5.2-SHOULD-1` | `§5.2 implementations SHOULD log every defaulted field for audit` |  |  |  |  |  | `?` |  |
+| `§6.4-MUST-1` | `§6.4 orchestrator MUST construct and bind per-role TDF policies to data passed to specialists` |  |  |  |  |  | `?` |  |
+| `§6.5-SHOULD-1` | `§6.5 SwarmKit producers SHOULD set oaepPadding: SHA-256 once platform supports it` |  |  |  |  |  | `?` |  |
+| `§6.5-MUST-1` | `§6.5 field names MUST be camelCase (opentdf-rs convention)` |  |  |  |  |  | `?` |  |
+| `§7.1.1-MUST-1` | `§7.1.1 even when sharing processes, orchestrator MUST issue separate delegation envelopes per role` |  |  |  |  |  | `?` |  |
+| `§7.1.1-MUST-2` | `§7.1.1 roles MUST NOT share a process when isolation, budget, or tdf_attribute_release_policy differ` |  |  |  |  |  | `?` |  |
+| `§7.1.1-MUST-3` | `§7.1.1 orchestrators sharing processes MUST keep per-role accounting for budget, tool-calls, DecisionTrace` |  |  |  |  |  | `?` |  |
+| `§7.2-MUST-1` | `§7.2 specialists MUST canonicalize received envelope per JCS before signature verification` |  |  |  |  |  | `?` |  |
+| `§7.3-MUST-1` | `§7.3 specialist MUST verify orchestrator signature on delegation envelope` |  |  |  |  |  | `?` |  |
+| `§7.3-MUST-2` | `§7.3 specialist MUST verify each skill signature independently` |  |  |  |  |  | `?` |  |
+| `§7.3-MUST-3` | `§7.3 specialist MUST refuse if any agent_provisioning field violates host policy` |  |  |  |  |  | `?` |  |
+| `§7.3-MUST-4` | `§7.3 specialist MUST acknowledge with a ready message including BLAKE3 of received envelope` |  |  |  |  |  | `?` |  |
+| `§8.2-SHOULD-1` | `§8.2 MCP tool wildcards SHOULD NOT be used` |  |  |  |  |  | `?` |  |
+| `§8.2-MUST-1` | `§8.2 specialists MUST NOT cache MCP tokens beyond expires` |  |  |  |  |  | `?` |  |
+| `§8.2-SHOULD-2` | `§8.2 orchestrators SHOULD rotate tokens on long-running flights` |  |  |  |  |  | `?` |  |
+| `§9.3-MUST-1` | `§9.3 kit.authors[].did MUST be a resolvable DIF DID` |  |  |  |  |  | `?` |  |
+| `§9.3-MUST-2` | `§9.3 provenance.c2pa_assertions MUST conform to CAWG identity assertion v1.x` |  |  |  |  |  | `?` |  |
+| `§9.4-MUST-1` | `§9.4 orchestrators MUST refuse manifests where major spec_version differs from supported set` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-1` | `§10.1 orchestrators MUST maintain a nonce cache for the longest active expires` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-2` | `§10.1 orchestrators MUST cap accepted manifests at expires - created <= 1 year` |  |  |  |  |  | `?` |  |
+| `§10.1-SHOULD-1` | `§10.1 orchestrators SHOULD cap at <= 90 days unless operational requirement demands longer` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-3` | `§10.1 manifests exceeding the expiry cap MUST be rejected before any decryption` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-4` | `§10.1 kv_cache_id slots MUST be flight-scoped unless explicitly marked persistent` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-5` | `§10.1 orchestrators MUST tag self-evaluated rubric results in DecisionTrace as self_evaluated: true` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-6` | `§10.1 downstream consumers MUST treat self-evaluated scores as unverified for trust/ranking/quality routing` |  |  |  |  |  | `?` |  |
+| `§10.2-SHOULD-1` | `§10.2 implementations SHOULD apply sequence-integrity / cross-action taint rules when spec available` |  |  |  |  |  | `?` |  |
+| `§10.2-SHOULD-2` | `§10.2 orchestrators SHOULD inspect role-to-role handoffs and union of MCP grants for capability creep` |  |  |  |  |  | `?` |  |
+| `§10.3-MUST-1` | `§10.3 specialists MUST treat all envelope content as data except agent_provisioning and skills fields` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-1` | `§11 C-P1 producer MUST produce TDF envelopes per §6` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-2` | `§11 C-P2 producer MUST sign manifests with at least one DID-resolvable identity` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-3` | `§11 C-P3 producer MUST emit canonical manifests (§9.1)` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-4` | `§11 C-P4 producer MUST set kit.expires for kits intended for distribution` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-1` | `§11 C-O1 orchestrator MUST reject expired or replay-detected kits` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-2` | `§11 C-O2 orchestrator MUST verify all signatures before any delegation` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-3` | `§11 C-O3 orchestrator MUST construct role-scoped TDF policies and never share the SwarmKit-level wrapped key` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-4` | `§11 C-O4 orchestrator MUST enforce agent_provisioning validation per §5.1 before provisioning` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-5` | `§11 C-O5 orchestrator MUST issue MCP grants with explicit allowlists and expiries` |  |  |  |  |  | `?` |  |
+| `§11-MUST-ORCH-6` | `§11 C-O6 orchestrator MUST emit a lineage event on every delegation and revocation` |  |  |  |  |  | `?` |  |
+| `§11-MUST-SPEC-1` | `§11 C-S1 specialist MUST verify orchestrator signature on delegation envelope` |  |  |  |  |  | `?` |  |
+| `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` |  |  |  |  |  | `?` |  |
+| `§11-MUST-SPEC-3` | `§11 C-S3 specialist MUST refuse policies that violate its host environment` |  |  |  |  |  | `?` |  |
+| `§11-MUST-SPEC-4` | `§11 C-S4 specialist MUST honor mcp_grants[].expires and not cache tokens beyond it` |  |  |  |  |  | `?` |  |
 
 ## Spec gaps
 
