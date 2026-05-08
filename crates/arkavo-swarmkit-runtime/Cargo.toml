@@ -50,3 +50,7 @@ required-features = []
 [[example]]
 name = "swarmkit_agui_demo"
 required-features = []
+
+[[example]]
+name = "sign_campaign_skills"
+required-features = []
