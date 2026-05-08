@@ -489,4 +489,28 @@ mod tests {
         let err = resolve_skill(&skill, &cfg).unwrap_err();
         assert!(matches!(err, ResolveError::RegistryMiss { .. }));
     }
+
+    #[test]
+    fn t10_tdf_ref_not_implemented() {
+        let skill = Skill {
+            id: "skill:via-tdf".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::TdfRef,
+            payload: None,
+            signature: None,
+            signed_by: None,
+        };
+        let cfg = ResolverConfig {
+            registry_cache: std::env::temp_dir(),
+            verify: VerifyMode::Optional,
+            public_key_resolver: Arc::new(MockPublicKeyResolver::new()),
+        };
+        let err = resolve_skill(&skill, &cfg).unwrap_err();
+        match err {
+            ResolveError::TdfRefNotImplemented { id, .. } => {
+                assert_eq!(id, "skill:via-tdf");
+            }
+            other => panic!("expected TdfRefNotImplemented, got {other:?}"),
+        }
+    }
 }
