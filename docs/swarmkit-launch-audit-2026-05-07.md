@@ -38,8 +38,19 @@ _Frozen 2026-05-07 — no additions for the rest of this audit._
 
 ## Ship-blocker punch list
 
-count: TBD
-(filled by Task 12 — bulleted list of `ship_blocker=Y` rows linked by id)
+count: 2
+
+Both punch-list rows are about the **Skill resolver** — the gap the launch plan called "the single most awkward thing in the codebase."
+
+- `§7.3-MUST-2` — `§7.3 specialist MUST verify each skill signature independently` — aspirational — owner: paul — root cause: no skill-resolver / registry / verifier exists; `Skill` type is a manifest field only. Campaign-kit YAML declares `skills: [{source: "registry"}]` on every role, but the registry is empty and there is no resolver code path.
+- `§11-MUST-SPEC-2` — `§11 C-S2 specialist MUST verify each skill signature independently` — aspirational — owner: paul — duplicate of `§7.3-MUST-2`; same root cause and same Phase 2 fix.
+
+**Phase 2 has two paths to close both:**
+
+1. **Implement Skill resolver MVP** (the launch plan's recommendation): inline `source: "inline"` resolves directly, `source: "registry"` resolves to a local on-disk cache, `source: "tdf-ref"` documented as roadmap. This wires both rows.
+2. **Update campaign-kit README disclaimer** to add Skill resolver alongside the existing TDF/A2A/Creator-UI deferral. This flips clause 3 of the ship-blocker rule (current roadmap disclaimer covers the gap), resolving both rows to N. Honest but kicks the can.
+
+The launch plan's strategic view favors path 1 — leaving "skills declared but not loadable" in marketing surface for v1 is the kind of credibility gap external readers will catch.
 
 ## Audit table
 
