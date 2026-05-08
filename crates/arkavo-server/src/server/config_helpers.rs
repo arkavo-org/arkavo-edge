@@ -1,8 +1,38 @@
 use arkavo_protocol::agent_config::parse_agents_config;
+use arkavo_protocol::agent_specialization::RoleContext;
 use arkavo_protocol::error::{A2aError, Result};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
+
+/// Stash for the most recent SwarmKit role context this agent was specialized into.
+///
+/// Updated when an `agent.specialize` RPC succeeds; the agent's task
+/// loop reads it to tag every tool outcome with `flight_id` +
+/// `role_id` so the orchestrator's per-role DecisionTrace receives
+/// correctly-attributed events.
+///
+/// `None` until specialization runs; cleared by future agent_idle (out of
+/// scope for this slice).
+#[derive(Debug, Default)]
+pub struct RoleSpecializationStore {
+    inner: RwLock<Option<RoleContext>>,
+}
+
+impl RoleSpecializationStore {
+    pub async fn set(&self, ctx: RoleContext) {
+        *self.inner.write().await = Some(ctx);
+    }
+
+    pub async fn get(&self) -> Option<RoleContext> {
+        self.inner.read().await.clone()
+    }
+
+    pub async fn clear(&self) {
+        *self.inner.write().await = None;
+    }
+}
 
 /// Metadata about the current agent
 #[derive(Debug, Clone, Default)]
