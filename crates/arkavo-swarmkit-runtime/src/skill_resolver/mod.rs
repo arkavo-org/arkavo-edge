@@ -58,6 +58,16 @@ pub struct ResolverConfig {
     pub public_key_resolver: Arc<dyn PublicKeyResolver>,
 }
 
+impl std::fmt::Debug for ResolverConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolverConfig")
+            .field("registry_cache", &self.registry_cache)
+            .field("verify", &self.verify)
+            .field("public_key_resolver", &"<dyn PublicKeyResolver>")
+            .finish()
+    }
+}
+
 impl Default for ResolverConfig {
     fn default() -> Self {
         let cache = dirs::cache_dir()
@@ -118,12 +128,12 @@ pub enum ResolveError {
     },
 }
 
-#[cfg(test)]
-pub(crate) struct MockPublicKeyResolver {
+/// In-memory key store for testing. Useful in unit tests and integration tests
+/// that need a `PublicKeyResolver` without network access.
+pub struct MockPublicKeyResolver {
     keys: std::collections::HashMap<String, VerifyingKey>,
 }
 
-#[cfg(test)]
 impl MockPublicKeyResolver {
     pub fn new() -> Self {
         Self {
@@ -137,7 +147,12 @@ impl MockPublicKeyResolver {
     }
 }
 
-#[cfg(test)]
+impl Default for MockPublicKeyResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PublicKeyResolver for MockPublicKeyResolver {
     fn resolve(&self, did: &str) -> Result<VerifyingKey, ResolveError> {
         self.keys

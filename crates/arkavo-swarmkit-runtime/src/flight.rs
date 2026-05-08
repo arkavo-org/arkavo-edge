@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::skill_resolver;
+
 use arkavo_arp::ArpDocument;
 use arkavo_arp_runtime::{ArpRuntime, ToolOutcomeContext};
 use arkavo_swarmkit::Manifest;
@@ -26,6 +28,12 @@ pub enum LaunchError {
     UnknownOverrideRole(String),
     #[error("manifest has no roles")]
     NoRoles,
+    #[error("skill resolution failed for role {role:?}: {source}")]
+    SkillResolution {
+        role: String,
+        #[source]
+        source: skill_resolver::ResolveError,
+    },
 }
 
 /// Errors that can occur while *operating* on a launched SwarmFlight —
@@ -48,6 +56,12 @@ pub struct LaunchOptions {
     pub derive_options: DeriveOptions,
     /// Optional explicit flight id. If `None`, a fresh UUID is generated.
     pub flight_id: Option<Uuid>,
+    /// When `Some`, `SwarmFlight::launch` resolves and verifies every
+    /// role's skills before constructing per-role ARP runtimes.
+    ///
+    /// `None` (the default) skips resolution; `RoleRuntime::resolved_skills()`
+    /// returns an empty slice in that case.
+    pub resolver_config: Option<skill_resolver::ResolverConfig>,
 }
 
 /// Per-role runtime: the ARP runtime plus minimal manifest metadata so
@@ -59,6 +73,7 @@ pub struct RoleRuntime {
     role_type: String,
     arp: Arc<ArpRuntime>,
     arp_document: ArpDocument,
+    resolved_skills: Vec<skill_resolver::ResolvedSkill>,
 }
 
 impl RoleRuntime {
@@ -79,6 +94,12 @@ impl RoleRuntime {
     /// derived from `agent_provisioning`.
     pub fn arp_document(&self) -> &ArpDocument {
         &self.arp_document
+    }
+
+    /// Skills resolved at launch time. Empty when `LaunchOptions::resolver_config`
+    /// was `None` (resolution skipped).
+    pub fn resolved_skills(&self) -> &[skill_resolver::ResolvedSkill] {
+        &self.resolved_skills
     }
 }
 
@@ -125,6 +146,27 @@ impl SwarmFlight {
         let mut roles = HashMap::with_capacity(role_count);
         let mut role_order = Vec::with_capacity(role_count);
 
+        let resolved_per_role: HashMap<String, Vec<skill_resolver::ResolvedSkill>> =
+            if let Some(cfg) = &options.resolver_config {
+                let mut out = HashMap::with_capacity(manifest.roles.len());
+                for role in &manifest.roles {
+                    let mut resolved = Vec::with_capacity(role.skills.len());
+                    for skill in &role.skills {
+                        let r = skill_resolver::resolve_skill(skill, cfg).map_err(|e| {
+                            LaunchError::SkillResolution {
+                                role: role.id.clone(),
+                                source: e,
+                            }
+                        })?;
+                        resolved.push(r);
+                    }
+                    out.insert(role.id.clone(), resolved);
+                }
+                out
+            } else {
+                HashMap::new()
+            };
+
         for role in &manifest.roles {
             let arp_doc = options
                 .arp_overrides
@@ -147,6 +189,7 @@ impl SwarmFlight {
                     role_type: role.role_type.clone(),
                     arp,
                     arp_document: arp_doc,
+                    resolved_skills: resolved_per_role.get(&role.id).cloned().unwrap_or_default(),
                 },
             );
         }

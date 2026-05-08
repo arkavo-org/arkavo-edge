@@ -21,8 +21,8 @@ pub mod tdf;
 pub use derive::{DeriveOptions, derive_arp_for_role};
 pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
 pub use skill_resolver::{
-    DidWebPublicKeyResolver, PublicKeyResolver, ResolveError, ResolvedSkill, ResolverConfig,
-    SignedSkill, VerifyMode, resolve_skill, sign_skill_content,
+    DidWebPublicKeyResolver, MockPublicKeyResolver, PublicKeyResolver, ResolveError, ResolvedSkill,
+    ResolverConfig, SignedSkill, VerifyMode, resolve_skill, sign_skill_content,
 };
 
 #[cfg(feature = "tdf")]
