@@ -1,14 +1,17 @@
 //! Production-grade did:web PublicKeyResolver.
 //!
-//! Fetches https://<host>/.well-known/did.json, extracts the first
-//! Ed25519 verification method, caches the result in-process.
+//! Fetches https://<host>/.well-known/did.json via `ureq` (synchronous,
+//! no internal tokio runtime — safe to call from sync code that itself
+//! runs inside a tokio context, like the gateway's auto-launch path).
 //!
-//! Tests cover the parsing logic against fixture JSON; live HTTP
-//! fetch is exercised only by the integration suite when
+//! Extracts the first Ed25519 verification method, caches the result
+//! in-process. Tests cover the parsing logic against fixture JSON;
+//! live HTTP fetch is exercised only by integration suite when
 //! ARKAVO_DID_WEB_LIVE=1.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
@@ -16,22 +19,10 @@ use parking_lot::RwLock;
 
 use super::{PublicKeyResolver, ResolveError};
 
-/// Production did:web resolver. The `reqwest::blocking::Client` is built
-/// lazily on first use so that constructing `ResolverConfig::default()`
-/// inside an async context (e.g. from `auto_launch_from_environment`) does
-/// not create — and later panic-drop — a blocking tokio runtime.
+#[derive(Default)]
 pub struct DidWebPublicKeyResolver {
     cache: Arc<RwLock<HashMap<String, VerifyingKey>>>,
-    client: OnceLock<reqwest::blocking::Client>,
-}
-
-impl Default for DidWebPublicKeyResolver {
-    fn default() -> Self {
-        Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            client: OnceLock::new(),
-        }
-    }
+    agent: OnceLock<ureq::Agent>,
 }
 
 impl DidWebPublicKeyResolver {
@@ -39,8 +30,18 @@ impl DidWebPublicKeyResolver {
         Self::default()
     }
 
-    fn client(&self) -> &reqwest::blocking::Client {
-        self.client.get_or_init(reqwest::blocking::Client::default)
+    /// Manually evict a DID's cached pubkey. Use when a signer rotates keys.
+    pub fn evict(&self, did: &str) {
+        self.cache.write().remove(did);
+    }
+
+    /// Clear all cached pubkeys.
+    pub fn clear(&self) {
+        self.cache.write().clear();
+    }
+
+    fn agent(&self) -> &ureq::Agent {
+        self.agent.get_or_init(ureq::Agent::new)
     }
 }
 
@@ -59,15 +60,21 @@ impl PublicKeyResolver for DidWebPublicKeyResolver {
                 })?;
         let url = format!("https://{host}/.well-known/did.json");
         let json: serde_json::Value = self
-            .client()
+            .agent()
             .get(&url)
-            .send()
-            .and_then(|r| r.json())
+            .call()
             .map_err(|e| ResolveError::SignerUnresolvable {
                 id: String::new(),
                 version: String::new(),
                 did: did.to_string(),
                 reason: format!("did:web fetch failed: {e}"),
+            })?
+            .into_json()
+            .map_err(|e| ResolveError::SignerUnresolvable {
+                id: String::new(),
+                version: String::new(),
+                did: did.to_string(),
+                reason: format!("did:web JSON parse failed: {e}"),
             })?;
         let key = parse_first_ed25519_pubkey(&json).map_err(|reason| {
             ResolveError::SignerUnresolvable {
@@ -102,6 +109,11 @@ fn parse_first_ed25519_pubkey(doc: &serde_json::Value) -> Result<VerifyingKey, S
         {
             return decode_pubkey(jwk_x, "publicKeyJwk.x");
         }
+        // Ed25519 method present but no key encoding we recognize — fail
+        // explicitly rather than silently skipping. Reviewer M2.
+        return Err(format!(
+            "Ed25519 verificationMethod has no recognized key encoding (expected publicKeyBase64 or publicKeyJwk.x); type={kind}"
+        ));
     }
     Err("no Ed25519 verificationMethod found".into())
 }
@@ -146,5 +158,28 @@ mod tests {
         });
         let err = parse_first_ed25519_pubkey(&doc).unwrap_err();
         assert!(err.contains("no Ed25519"));
+    }
+
+    #[test]
+    fn ed25519_method_without_key_encoding_errors_explicitly() {
+        let doc = serde_json::json!({
+            "verificationMethod": [
+                {"type": "Ed25519VerificationKey2020"},
+            ]
+        });
+        let err = parse_first_ed25519_pubkey(&doc).unwrap_err();
+        assert!(err.contains("no recognized key encoding"), "got: {err}");
+    }
+
+    #[test]
+    fn evict_removes_cached_key() {
+        let resolver = DidWebPublicKeyResolver::new();
+        let key = VerifyingKey::from_bytes(&[1u8; 32]).unwrap();
+        resolver
+            .cache
+            .write()
+            .insert("did:web:example.com".into(), key);
+        resolver.evict("did:web:example.com");
+        assert!(resolver.cache.read().is_empty());
     }
 }

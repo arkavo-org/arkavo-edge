@@ -219,9 +219,10 @@ pub struct Skill {
     pub source: SkillSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
-    /// Base64url(ed25519 signature over JCS-canonical SkillContent bytes).
-    /// Optional at the parser level; the runtime resolver enforces presence
-    /// per `VerifyMode`. See `arkavo_swarmkit_runtime::skill_resolver`.
+    /// Base64url(ed25519 signature over BLAKE3 digest of JCS-canonical
+    /// SkillContent bytes). Optional at the parser level; the runtime
+    /// resolver enforces presence per `VerifyMode`. See
+    /// `arkavo_swarmkit_runtime::skill_resolver::sign_skill_content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     /// DID of the signer. Resolver fetches the public key via the
