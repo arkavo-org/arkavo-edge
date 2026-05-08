@@ -140,13 +140,7 @@ impl PublicKeyResolver for MockPublicKeyResolver {
 pub fn resolve_skill(skill: &Skill, cfg: &ResolverConfig) -> Result<ResolvedSkill, ResolveError> {
     let content = match skill.source {
         SkillSource::Inline => parse_inline_payload(skill)?,
-        SkillSource::Registry => {
-            // Task 5 replaces this with the real registry branch.
-            return Err(ResolveError::TdfRefNotImplemented {
-                id: skill.id.clone(),
-                version: skill.version.clone(),
-            });
-        }
+        SkillSource::Registry => load_registry_payload(skill, cfg)?,
         SkillSource::TdfRef => {
             return Err(ResolveError::TdfRefNotImplemented {
                 id: skill.id.clone(),
@@ -178,6 +172,34 @@ fn parse_inline_payload(skill: &Skill) -> Result<SkillContent, ResolveError> {
             version: skill.version.clone(),
             reason: e.to_string(),
         }
+    })
+}
+
+fn load_registry_payload(
+    skill: &Skill,
+    cfg: &ResolverConfig,
+) -> Result<SkillContent, ResolveError> {
+    // Skill.id is `blake3:<hex>`; strip the prefix to get the cache filename stem.
+    let stem = skill.id.strip_prefix("blake3:").unwrap_or(&skill.id);
+    let content_path = cfg.registry_cache.join(format!("{stem}.skill.json"));
+
+    if !content_path.exists() {
+        return Err(ResolveError::RegistryMiss {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+            cache_path: content_path,
+        });
+    }
+
+    let bytes = std::fs::read(&content_path).map_err(|e| ResolveError::Crypto {
+        id: skill.id.clone(),
+        version: skill.version.clone(),
+        reason: format!("read {content_path:?}: {e}"),
+    })?;
+    serde_json::from_slice(&bytes).map_err(|e| ResolveError::PayloadShape {
+        id: skill.id.clone(),
+        version: skill.version.clone(),
+        reason: format!("registry content parse: {e}"),
     })
 }
 
@@ -409,5 +431,62 @@ mod tests {
         let mock = MockPublicKeyResolver::new();
         let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Optional, mock)).unwrap_err();
         assert!(matches!(err, ResolveError::PayloadShape { .. }));
+    }
+
+    #[test]
+    fn t8_registry_cache_hit() {
+        let (key, did) = deterministic_test_signer();
+        let content = sample_content();
+        let signed = sign_skill_content(&content, did, &key);
+
+        // Compute the content-addressed id the same way the resolver does.
+        let canonical = canonical_skill_bytes(&content).unwrap();
+        let blake3_id = blake3::hash(&canonical).to_hex().to_string();
+
+        // Write fixture files to a temp dir.
+        let dir = tempfile::tempdir().unwrap();
+        let content_path = dir.path().join(format!("{blake3_id}.skill.json"));
+        let sig_path = dir.path().join(format!("{blake3_id}.sig.json"));
+        std::fs::write(&content_path, &canonical).unwrap();
+        std::fs::write(&sig_path, serde_json::to_string(&signed).unwrap()).unwrap();
+
+        let skill = Skill {
+            id: format!("blake3:{blake3_id}"),
+            version: "0.1.0".into(),
+            source: SkillSource::Registry,
+            payload: None,
+            signature: Some(signed.signature_b64url.clone()),
+            signed_by: Some(signed.signed_by.clone()),
+        };
+        let cfg = ResolverConfig {
+            registry_cache: dir.path().to_path_buf(),
+            verify: VerifyMode::Required,
+            public_key_resolver: Arc::new(
+                MockPublicKeyResolver::new().with_key(did, key.verifying_key()),
+            ),
+        };
+        let resolved = resolve_skill(&skill, &cfg).unwrap();
+        assert_eq!(resolved.content, content);
+        assert!(resolved.verified);
+    }
+
+    #[test]
+    fn t9_registry_cache_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = Skill {
+            id: "blake3:nonexistent".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::Registry,
+            payload: None,
+            signature: None,
+            signed_by: None,
+        };
+        let cfg = ResolverConfig {
+            registry_cache: dir.path().to_path_buf(),
+            verify: VerifyMode::Optional,
+            public_key_resolver: Arc::new(MockPublicKeyResolver::new()),
+        };
+        let err = resolve_skill(&skill, &cfg).unwrap_err();
+        assert!(matches!(err, ResolveError::RegistryMiss { .. }));
     }
 }
