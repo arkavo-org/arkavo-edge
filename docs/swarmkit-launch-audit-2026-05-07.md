@@ -46,7 +46,7 @@ count: TBD
 | id | spec_ref | covers | label | confidence | evidence | owner | ship_blocker | notes |
 |----|----------|--------|-------|------------|----------|-------|--------------|-------|
 | `§4-MUST-1` | `§4 implementations MUST canonicalize before hashing/signing (sorted keys, UTF-8, LF, no trailing whitespace)` |  | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:22-58` |  | N | JCS RFC 8785 implementation; exercised via SK-003 |
-| `§4.1-MUST-1` | `§4.1 SwarmFlights MUST refuse expired kits` |  | aspirational | medium | `no test coverage` |  | `?` | validate.rs only checks horizon and expires-before-created; current-time expiry check not in this crate. SwarmFlight::launch may check separately — defer call to Pass 2b |
+| `§4.1-MUST-1` | `§4.1 SwarmFlights MUST refuse expired kits` |  | aspirational | high | `no test coverage` |  | `?` | confirmed: SwarmFlight::launch (flight.rs:111-161) only checks empty roles + override resolution. No current-time expiry check at any layer. Pass 2b confirmed Pass 2a's medium call |
 | `§4.1-MUST-2` | `§4.1 roles MUST contain >= 1 role` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:101-103` |  | N | NoRoles error variant |
 | `§4.3-SHOULD-1` | `§4.3 role_type SHOULD use a value from Appendix C` |  | aspirational | high | `no test coverage` |  | `?` | producer guidance, parser intentionally accepts any string (SK-006 inverts this); not enforced |
 | `§4.3-SHOULD-2` | `§4.3 explicit tool allowlist; "*" SHOULD NOT be used` |  | aspirational | high | `no test coverage` |  | `?` | wildcard guard not enforced anywhere in arkavo-swarmkit |
@@ -56,57 +56,57 @@ count: TBD
 | `§5.1-MUST-3` | `§5.1 model.family MUST be in the orchestrator's supported set` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator concern; arkavo-swarmkit accepts any model.family string |
 | `§5.1-MUST-4` | `§5.1 orchestrator MUST refuse provisioning when model.family unsupported` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator concern, not parser |
 | `§5.1-MUST-5` | `§5.1 network_egress: true MUST be denied if constraints.network.egress_allowed: false` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:194-207 + tests:351-361` |  | N | NetworkEgressDenied error variant |
-| `§5.2-SHOULD-1` | `§5.2 implementations SHOULD log every defaulted field for audit` |  | aspirational | medium | `no test coverage` |  | `?` | not enforced in parser; runtime may log via tracing — defer to Pass 2b |
-| `SK-053` | `§6.4 orchestrator MUST construct and bind per-role TDF policies to data passed to specialists` |  |  |  |  |  | `?` | merged 1:1 with §6.4-MUST-1 |
-| `§6.5-SHOULD-1` | `§6.5 SwarmKit producers SHOULD set oaepPadding: SHA-256 once platform supports it` |  |  |  |  |  | `?` |  |
-| `§6.5-MUST-1` | `§6.5 field names MUST be camelCase (opentdf-rs convention)` |  |  |  |  |  | `?` |  |
-| `§7.1.1-MUST-1` | `§7.1.1 even when sharing processes, orchestrator MUST issue separate delegation envelopes per role` |  |  |  |  |  | `?` |  |
-| `§7.1.1-MUST-2` | `§7.1.1 roles MUST NOT share a process when isolation, budget, or tdf_attribute_release_policy differ` |  |  |  |  |  | `?` |  |
-| `§7.1.1-MUST-3` | `§7.1.1 orchestrators sharing processes MUST keep per-role accounting for budget, tool-calls, DecisionTrace` |  |  |  |  |  | `?` |  |
-| `§7.2-MUST-1` | `§7.2 specialists MUST canonicalize received envelope per JCS before signature verification` |  |  |  |  |  | `?` |  |
-| `§7.3-MUST-1` | `§7.3 specialist MUST verify orchestrator signature on delegation envelope` |  |  |  |  |  | `?` |  |
-| `§7.3-MUST-2` | `§7.3 specialist MUST verify each skill signature independently` |  |  |  |  |  | `?` |  |
-| `§7.3-MUST-3` | `§7.3 specialist MUST refuse if any agent_provisioning field violates host policy` |  |  |  |  |  | `?` |  |
-| `§7.3-MUST-4` | `§7.3 specialist MUST acknowledge with a ready message including BLAKE3 of received envelope` |  |  |  |  |  | `?` |  |
-| `§8.2-SHOULD-1` | `§8.2 MCP tool wildcards SHOULD NOT be used` |  |  |  |  |  | `?` |  |
-| `§8.2-MUST-1` | `§8.2 specialists MUST NOT cache MCP tokens beyond expires` |  |  |  |  |  | `?` |  |
-| `§8.2-SHOULD-2` | `§8.2 orchestrators SHOULD rotate tokens on long-running flights` |  |  |  |  |  | `?` |  |
-| `§9.3-MUST-1` | `§9.3 kit.authors[].did MUST be a resolvable DIF DID` |  |  |  |  |  | `?` |  |
-| `§9.3-MUST-2` | `§9.3 provenance.c2pa_assertions MUST conform to CAWG identity assertion v1.x` |  |  |  |  |  | `?` |  |
-| `§9.4-MUST-1` | `§9.4 orchestrators MUST refuse manifests where major spec_version differs from supported set` |  |  |  |  |  | `?` |  |
+| `§5.2-SHOULD-1` | `§5.2 implementations SHOULD log every defaulted field for audit` |  | aspirational | high | `no test coverage` |  | `?` | derive.rs uses DeriveOptions defaults silently (no tracing); confirmed across parser + runtime |
+| `SK-053` | `§6.4 orchestrator MUST construct and bind per-role TDF policies to data passed to specialists` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:186-245` |  | N | merged 1:1 with §6.4-MUST-1; role_policy + role_policies functions, attribute splitting, DID dissemination |
+| `§6.5-SHOULD-1` | `§6.5 SwarmKit producers SHOULD set oaepPadding: SHA-256 once platform supports it` |  | aspirational | medium | `no test coverage` |  | `?` | depends on arkavo-tdf default; not driven by SwarmKit producer code |
+| `§6.5-MUST-1` | `§6.5 field names MUST be camelCase (opentdf-rs convention)` |  | wired | medium | `crates/arkavo-swarmkit-runtime/src/tdf.rs (TdfManifest from arkavo_tdf)` |  | N | TDF envelope fields inherit camelCase from arkavo_tdf::TdfManifest serialization |
+| `§7.1.1-MUST-1` | `§7.1.1 even when sharing processes, orchestrator MUST issue separate delegation envelopes per role` |  | aspirational | high | `no test coverage` |  | `?` | process-sharing optimization not implemented; no delegation envelope code anywhere (grep confirms) |
+| `§7.1.1-MUST-2` | `§7.1.1 roles MUST NOT share a process when isolation, budget, or tdf_attribute_release_policy differ` |  | aspirational | high | `no test coverage` |  | `?` | depends on §7.1.1 implementation which doesn't exist |
+| `§7.1.1-MUST-3` | `§7.1.1 orchestrators sharing processes MUST keep per-role accounting for budget, tool-calls, DecisionTrace` |  | wired | medium | `crates/arkavo-swarmkit-runtime/src/flight.rs:189-207 + tests:263-292 (SK-011)` |  | N | per-role isolation invariant exercised by SK-011 even though process-sharing itself isn't implemented (one ArpRuntime per role per flight) |
+| `§7.2-MUST-1` | `§7.2 specialists MUST canonicalize received envelope per JCS before signature verification` |  | aspirational | high | `no test coverage` |  | `?` | no specialist-side delegation envelope code in arkavo-edge; entire §7.2 is the gap the launch plan calls out |
+| `§7.3-MUST-1` | `§7.3 specialist MUST verify orchestrator signature on delegation envelope` |  | aspirational | high | `no test coverage` |  | `?` | no specialist code in this repo |
+| `§7.3-MUST-2` | `§7.3 specialist MUST verify each skill signature independently` |  | aspirational | high | `no test coverage` |  | `?` | no skill-resolver/verifier code anywhere — Skill type is a manifest field only |
+| `§7.3-MUST-3` | `§7.3 specialist MUST refuse if any agent_provisioning field violates host policy` |  | aspirational | high | `no test coverage` |  | `?` | no specialist-side host-policy check |
+| `§7.3-MUST-4` | `§7.3 specialist MUST acknowledge with a ready message including BLAKE3 of received envelope` |  | aspirational | high | `no test coverage` |  | `?` | no specialist code |
+| `§8.2-SHOULD-1` | `§8.2 MCP tool wildcards SHOULD NOT be used` |  | aspirational | high | `no test coverage` |  | `?` | wildcard guard not enforced; same as §4.3-SHOULD-2 from a different angle |
+| `§8.2-MUST-1` | `§8.2 specialists MUST NOT cache MCP tokens beyond expires` |  | aspirational | high | `no test coverage` |  | `?` | no specialist-side MCP token cache in arkavo-edge |
+| `§8.2-SHOULD-2` | `§8.2 orchestrators SHOULD rotate tokens on long-running flights` |  | aspirational | high | `no test coverage` |  | `?` | no orchestrator-side MCP token rotation |
+| `§9.3-MUST-1` | `§9.3 kit.authors[].did MUST be a resolvable DIF DID` |  | aspirational | high | `no test coverage` |  | `?` | parser accepts any string in `did` field (Author struct in manifest.rs); no DID resolution check |
+| `§9.3-MUST-2` | `§9.3 provenance.c2pa_assertions MUST conform to CAWG identity assertion v1.x` |  | aspirational | high | `no test coverage` |  | `?` | parser accepts c2pa_assertions as opaque; no CAWG validation |
+| `§9.4-MUST-1` | `§9.4 orchestrators MUST refuse manifests where major spec_version differs from supported set` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:89-99` |  | N | semver-parsed major != 1 → SpecVersionMismatch error |
 | `§10.1-MUST-1` | `§10.1 orchestrators MUST maintain a nonce cache for the longest active expires` |  | aspirational | high | `no test coverage` |  | `?` | orchestrator-side persistence concern; not in arkavo-swarmkit or runtime |
 | `SK-004` | `§10.1 orchestrators MUST cap accepted manifests at expires - created <= 1 year` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:209-223 + tests:423-439` |  | N | merged 1:1 with §10.1-MUST-2; covers ExpiryHorizonTooLarge + ExpiryBeforeCreated |
 | `§10.1-SHOULD-1` | `§10.1 orchestrators SHOULD cap at <= 90 days unless operational requirement demands longer` |  | aspirational | high | `no test coverage` |  | `?` | constant `RECOMMENDED_EXPIRY_HORIZON_SECONDS` defined in validate.rs:17 but never enforced |
 | `§10.1-MUST-3` | `§10.1 manifests exceeding the expiry cap MUST be rejected before any decryption` |  | wired | low | `crates/arkavo-swarmkit/src/validate.rs:209-223` |  | N | trivially true by construction: validate() runs on parsed manifest before any decrypt path. No explicit test asserts the temporal ordering |
-| `§10.1-MUST-4` | `§10.1 kv_cache_id slots MUST be flight-scoped unless explicitly marked persistent` |  |  |  |  |  | `?` |  |
-| `§10.1-MUST-5` | `§10.1 orchestrators MUST tag self-evaluated rubric results in DecisionTrace as self_evaluated: true` |  |  |  |  |  | `?` |  |
-| `§10.1-MUST-6` | `§10.1 downstream consumers MUST treat self-evaluated scores as unverified for trust/ranking/quality routing` |  |  |  |  |  | `?` |  |
-| `§10.2-SHOULD-1` | `§10.2 implementations SHOULD apply sequence-integrity / cross-action taint rules when spec available` |  |  |  |  |  | `?` |  |
-| `§10.2-SHOULD-2` | `§10.2 orchestrators SHOULD inspect role-to-role handoffs and union of MCP grants for capability creep` |  |  |  |  |  | `?` |  |
-| `§10.3-MUST-1` | `§10.3 specialists MUST treat all envelope content as data except agent_provisioning and skills fields` |  |  |  |  |  | `?` |  |
-| `§11-MUST-PROD-1` | `§11 C-P1 producer MUST produce TDF envelopes per §6` |  |  |  |  |  | `?` |  |
-| `§11-MUST-PROD-2` | `§11 C-P2 producer MUST sign manifests with at least one DID-resolvable identity` |  |  |  |  |  | `?` |  |
+| `§10.1-MUST-4` | `§10.1 kv_cache_id slots MUST be flight-scoped unless explicitly marked persistent` |  | aspirational | medium | `no test coverage` |  | `?` | KV cache exists in arkavo-kv-cache; flight-scoping not enforced from SwarmKit side. Owner needed for verification |
+| `§10.1-MUST-5` | `§10.1 orchestrators MUST tag self-evaluated rubric results in DecisionTrace as self_evaluated: true` |  | aspirational | high | `no test coverage` |  | `?` | no DecisionTrace tag for self_evaluated; evaluation block parses but tagging not implemented |
+| `§10.1-MUST-6` | `§10.1 downstream consumers MUST treat self-evaluated scores as unverified for trust/ranking/quality routing` |  | aspirational | high | `no test coverage` |  | `?` | depends on §10.1-MUST-5 tag which doesn't exist; no consumer-side handling |
+| `§10.2-SHOULD-1` | `§10.2 implementations SHOULD apply sequence-integrity / cross-action taint rules when spec available` |  | aspirational | high | `no test coverage` |  | N | spec itself notes "When a sequence-integrity specification… is available" — that spec doesn't exist yet, so this SHOULD is conditional and not blocking |
+| `§10.2-SHOULD-2` | `§10.2 orchestrators SHOULD inspect role-to-role handoffs and union of MCP grants for capability creep` |  | aspirational | high | `no test coverage` |  | `?` | parser validates handoffs resolve, but no capability-creep analysis |
+| `§10.3-MUST-1` | `§10.3 specialists MUST treat all envelope content as data except agent_provisioning and skills fields` |  | aspirational | high | `no test coverage` |  | `?` | no specialist code in this repo |
+| `§11-MUST-PROD-1` | `§11 C-P1 producer MUST produce TDF envelopes per §6` | `SK-050` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:88-98 (wrap_manifest)` |  | N | producer wrap path covered by SK-050 |
+| `§11-MUST-PROD-2` | `§11 C-P2 producer MUST sign manifests with at least one DID-resolvable identity` |  | aspirational | medium | `no test coverage` |  | `?` | manifest carries provenance.signatures field but no signing helper in arkavo-swarmkit; parser accepts unsigned manifests |
 | `§11-MUST-PROD-3` | `§11 C-P3 producer MUST emit canonical manifests (§9.1)` | `§4-MUST-1, SK-003` | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:22-58` |  | N | producers using arkavo-swarmkit emit canonical via canonical_json; verified via SK-003 round-trip |
-| `§11-MUST-PROD-4` | `§11 C-P4 producer MUST set kit.expires for kits intended for distribution` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-1` | `§11 C-O1 orchestrator MUST reject expired or replay-detected kits` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-2` | `§11 C-O2 orchestrator MUST verify all signatures before any delegation` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-3` | `§11 C-O3 orchestrator MUST construct role-scoped TDF policies and never share the SwarmKit-level wrapped key` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-4` | `§11 C-O4 orchestrator MUST enforce agent_provisioning validation per §5.1 before provisioning` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-5` | `§11 C-O5 orchestrator MUST issue MCP grants with explicit allowlists and expiries` |  |  |  |  |  | `?` |  |
-| `§11-MUST-ORCH-6` | `§11 C-O6 orchestrator MUST emit a lineage event on every delegation and revocation` |  |  |  |  |  | `?` |  |
-| `§11-MUST-SPEC-1` | `§11 C-S1 specialist MUST verify orchestrator signature on delegation envelope` |  |  |  |  |  | `?` |  |
-| `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` |  |  |  |  |  | `?` |  |
-| `§11-MUST-SPEC-3` | `§11 C-S3 specialist MUST refuse policies that violate its host environment` |  |  |  |  |  | `?` |  |
-| `§11-MUST-SPEC-4` | `§11 C-S4 specialist MUST honor mcp_grants[].expires and not cache tokens beyond it` |  |  |  |  |  | `?` |  |
+| `§11-MUST-PROD-4` | `§11 C-P4 producer MUST set kit.expires for kits intended for distribution` |  | aspirational | high | `no test coverage` |  | N | manifest's `expires` is `Option<String>`; parser allows None. Producer guidance, not enforced |
+| `§11-MUST-ORCH-1` | `§11 C-O1 orchestrator MUST reject expired or replay-detected kits` | `§4.1-MUST-1, §10.1-MUST-1` | aspirational | high | `no test coverage` |  | `?` | depends on §4.1-MUST-1 and §10.1-MUST-1, both aspirational |
+| `§11-MUST-ORCH-2` | `§11 C-O2 orchestrator MUST verify all signatures before any delegation` |  | aspirational | high | `no test coverage` |  | `?` | no signature-verification code path; provenance.signatures parses as opaque |
+| `§11-MUST-ORCH-3` | `§11 C-O3 orchestrator MUST construct role-scoped TDF policies and never share the SwarmKit-level wrapped key` | `SK-053, SK-054, SK-059` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:186-245` |  | N | role_policy / role_policies build per-role policies; SwarmKit-level vs role-scoped policies are separate functions |
+| `§11-MUST-ORCH-4` | `§11 C-O4 orchestrator MUST enforce agent_provisioning validation per §5.1 before provisioning` | `SK-002` | wired | high | `crates/arkavo-swarmkit/src/validate.rs:88-156` |  | N | validate() runs before SwarmFlight::launch can construct ARP runtimes |
+| `§11-MUST-ORCH-5` | `§11 C-O5 orchestrator MUST issue MCP grants with explicit allowlists and expiries` |  | aspirational | high | `no test coverage` |  | `?` | McpToolGrant struct exists in role.rs but no grant-issuance code path |
+| `§11-MUST-ORCH-6` | `§11 C-O6 orchestrator MUST emit a lineage event on every delegation and revocation` |  | aspirational | high | `no test coverage` |  | `?` | DecisionTrace exists per-role but no lineage stream of delegation/revocation events |
+| `§11-MUST-SPEC-1` | `§11 C-S1 specialist MUST verify orchestrator signature on delegation envelope` |  | aspirational | high | `no test coverage` |  | `?` | duplicate of §7.3-MUST-1 |
+| `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` |  | aspirational | high | `no test coverage` |  | `?` | duplicate of §7.3-MUST-2; the entire Skill resolver is the launch-plan gap |
+| `§11-MUST-SPEC-3` | `§11 C-S3 specialist MUST refuse policies that violate its host environment` |  | aspirational | high | `no test coverage` |  | `?` | duplicate of §7.3-MUST-3 |
+| `§11-MUST-SPEC-4` | `§11 C-S4 specialist MUST honor mcp_grants[].expires and not cache tokens beyond it` |  | aspirational | high | `no test coverage` |  | `?` | duplicate of §8.2-MUST-1 |
 | `SK-001` | `§4 / §4.1 / §4.6 / §5.1 / §10.1 (parse + cross-block validate)` | `§4-MUST-1, §4.1-MUST-1, §4.1-MUST-2, SK-002, SK-004` | wired | high | `crates/arkavo-swarmkit/src/lib.rs:39-44 + manifest.rs:14-30` |  | N | end-to-end gate; covers chains via merges. Note: §4.1-MUST-1 (refuse expired) is not part of this end-to-end gate — it's a runtime check, not a parse-time check |
 | `SK-003` | `§9.1 kit.id = BLAKE3 of canonical form (descriptive)` | `§4-MUST-1` | wired | high | `crates/arkavo-swarmkit/src/canonical.rs:92-100 + validate.rs:tests 449-465` |  | N | spec uses plain English; runtime treats as hard validation via KitIdHashMismatch |
 | `SK-005` | `§4.6 dimension weights sum to 1.0 within fp tolerance (descriptive)` |  | wired | high | `crates/arkavo-swarmkit/src/validate.rs:140-146 + tests:393-421` |  | N | spec uses plain English; runtime treats as hard validation via RubricWeightsDoNotSumToOne |
-| `SK-010` | `§1.2 / §5 handoff (descriptive)` |  |  |  |  |  | `?` | spec describes handoff narrative; SwarmFlight-per-role-ARP is the runtime claim |
-| `SK-011` | `§7.1.1 isolation across roles (process-sharing inverse)` | `§7.1.1-MUST-3` |  |  |  |  | `?` | per-role state isolation when not sharing process |
-| `SK-012` | `(none)` |  |  |  |  |  | `?` | spec gap: quality-gate adaptation feedback into ARP prior |
-| `SK-013` | `§5.2 defaults` | `§5.2-SHOULD-1` |  |  |  |  | `?` | derive_arp_for_role default policy |
-| `SK-014` | `(none)` |  |  |  |  |  | `?` | spec gap: hand-authored ARP override hook |
-| `SK-015` | `(none)` |  |  |  |  |  | `?` | spec gap: flight_id propagation into DecisionTrace task_id |
+| `SK-010` | `§1.2 / §5 handoff (descriptive)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:111-161 + tests:253-261` |  | N | spec describes handoff narrative; SwarmFlight-per-role-ARP is the runtime claim |
+| `SK-011` | `§7.1.1 isolation across roles (process-sharing inverse)` | `§7.1.1-MUST-3` | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:189-207 + tests:263-292` |  | N | per-role state isolation when not sharing process |
+| `SK-012` | `(none)` |  | wired | medium | `crates/arkavo-swarmkit-runtime/tests/campaign_kit_flight.rs:117-147` |  | N | spec gap: quality-gate adaptation feedback into ARP prior; tested via integration test |
+| `SK-013` | `§5.2 defaults` | `§5.2-SHOULD-1` | wired | high | `crates/arkavo-swarmkit-runtime/src/derive.rs:76-130` |  | N | derive_arp_for_role default policy; constants documented in DeriveOptions |
+| `SK-014` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:118-122 + tests:329-352` |  | N | spec gap: hand-authored ARP override hook; LaunchOptions.arp_overrides |
+| `SK-015` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:200-202 + tests:294-312` |  | N | spec gap: flight_id propagation into DecisionTrace task_id |
 | `SK-020` | `(none)` |  |  |  |  |  | `?` | spec gap: SwarmFlightRegistry → ArpHandler attachment |
 | `SK-021` | `(none)` |  |  |  |  |  | `?` | spec gap: deregister isolation guarantee |
 | `SK-022` | `(none)` |  |  |  |  |  | `?` | spec gap: ARKAVO_SWARMKIT_PATH gateway-boot auto-launch |
@@ -117,16 +117,16 @@ count: TBD
 | `SK-032` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
 | `SK-033` | `(none)` |  |  |  |  |  | `?` | spec gap: WebSocket fingerprint dedupe |
 | `SK-040` | `(none)` |  |  |  |  |  | `?` | spec gap: requestStopFlight operator control |
-| `SK-050` | `§6 TDF envelope` | `§11-MUST-PROD-1` |  |  |  |  | `?` | round-trip is the lossless-encoding invariant the spec implies |
-| `SK-051` | `(none)` |  |  |  |  |  | `?` | runtime safety: re-validate after unwrap |
-| `SK-052` | `§6.3 SwarmKit-level orchestrator gate (descriptive)` |  |  |  |  |  | `?` | baseline policy emission |
-| `SK-054` | `§6.4 per-role policies, plural` | `SK-053` |  |  |  |  | `?` | role_policies extractor + DID lookup; SK-053 covers single-role case |
-| `SK-055` | `(none)` |  |  |  |  |  | `?` | runtime: file-format reader/writer round-trip |
-| `SK-056` | `(none)` |  |  |  |  |  | `?` | runtime: path-based wrap/unwrap helpers |
-| `SK-057` | `(none)` |  |  |  |  |  | `?` | runtime: error-variant discrimination on read |
-| `SK-058` | `(none)` |  |  |  |  |  | `?` | runtime: extract embedded policy from envelope |
-| `SK-059` | `§6.3 KAS gate` | `§11-MUST-ORCH-3` |  |  |  |  | `?` | KAS-gated unwrap success path |
-| `SK-060` | `§6.3 KAS gate` |  |  |  |  |  | `?` | KAS-gated unwrap fail-fast on unhealthy/policy-mismatch |
+| `SK-050` | `§6 TDF envelope` | `§11-MUST-PROD-1` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:88-115 (wrap_manifest, unwrap_manifest)` |  | N | round-trip is the lossless-encoding invariant the spec implies |
+| `SK-051` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:105-115` |  | N | runtime safety: unwrap_manifest pipes through parse_json which re-validates |
+| `SK-052` | `§6.3 SwarmKit-level orchestrator gate (descriptive)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:132-144` |  | N | swarmkit_orchestrator_policy emits the §6.3 baseline gate |
+| `SK-054` | `§6.4 per-role policies, plural` | `SK-053` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:212-245` |  | N | role_policies extractor + DID lookup; SK-053 covers single-role case |
+| `SK-055` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:269-289` |  | N | runtime: file-format reader/writer round-trip |
+| `SK-056` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:309-336` |  | N | runtime: path-based wrap/unwrap helpers |
+| `SK-057` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:291-307` |  | N | runtime: error-variant discrimination on read (Io vs Serialize) |
+| `SK-058` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:282-326` |  | N | runtime: extract embedded policy from envelope |
+| `SK-059` | `§6.3 KAS gate` | `§11-MUST-ORCH-3` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:344-382` |  | N | KAS-gated unwrap success path; verified via test 824-833 |
+| `SK-060` | `§6.3 KAS gate` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:355-365 + tests:840-865` |  | N | KAS-gated unwrap fail-fast on unhealthy/policy-mismatch; distinct from Decrypt error |
 | `SK-061` | `(none)` |  |  |  |  |  | `?` | runtime: .tdf path recognition |
 | `SK-062` | `(none)` |  |  |  |  |  | `?` | runtime: .tdf auto-launch dispatch |
 
