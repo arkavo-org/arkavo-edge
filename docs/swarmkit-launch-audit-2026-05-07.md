@@ -112,10 +112,10 @@ count: TBD
 | `SK-022` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:91-102 + gateway.rs:401-417` |  | N | spec gap: ARKAVO_SWARMKIT_PATH gateway-boot auto-launch with non-fatal failure |
 | `SK-023` | `(none)` |  | wired | high | `crates/arkavo-agui/src/arp_handler.rs:259-281` |  | N | spec gap: local → mesh → flight roles ordering convention |
 | `SK-024` | `§6.5 camelCase (TDF context only)` |  | wired | high | `crates/arkavo-agui/src/types.rs:1126-1156` |  | N | spec gap: AG-UI WebSocket JSON convention beyond §6.5 TDF scope; flightContext field with skip_serializing_if for non-flight agents |
-| `SK-030` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
-| `SK-031` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
-| `SK-032` | `(none)` |  |  |  |  |  | `?` | spec gap: ARP panel UI |
-| `SK-033` | `(none)` |  |  |  |  |  | `?` | spec gap: WebSocket fingerprint dedupe |
+| `SK-030` | `(none)` |  | wired | high | `crates/arkavo-agui/static/js/panels/arp.js:81 (renderArpFlightsSection call) + swarmkit.spec.yaml:SK-030` |  | N | spec gap: ARP panel UI; JS-side, coverage via spec scenario contract not Rust unit test |
+| `SK-031` | `(none)` |  | wired | high | `crates/arkavo-agui/static/js/panels/arp.js:91-101 + swarmkit.spec.yaml:SK-031` |  | N | spec gap: pill click → role selection; JS-side coverage via spec scenario |
+| `SK-032` | `(none)` |  | wired | high | `crates/arkavo-agui/static/js/panels/arp.js:163-188 + swarmkit.spec.yaml:SK-032` |  | N | spec gap: pill status glyph (violations / traces / empty); JS-side coverage via spec scenario |
+| `SK-033` | `(none)` |  | wired | high | `crates/arkavo-agui/static/js/panels/arp.js:13-35 + swarmkit.spec.yaml:SK-033` |  | N | spec gap: WebSocket fingerprint dedupe to preserve DOM state; JS-side coverage via spec scenario |
 | `SK-040` | `(none)` |  | wired | high | `crates/arkavo-agui/src/gateway_ws.rs:351-385 + swarm_flight_registry.rs:60-65` |  | N | spec gap: requestStopFlight operator control with idempotent deregister + immediate ArpStatusUpdate |
 | `SK-050` | `§6 TDF envelope` | `§11-MUST-PROD-1` | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:88-115 (wrap_manifest, unwrap_manifest)` |  | N | round-trip is the lossless-encoding invariant the spec implies |
 | `SK-051` | `(none)` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:105-115` |  | N | runtime safety: unwrap_manifest pipes through parse_json which re-validates |
