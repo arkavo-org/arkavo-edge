@@ -17,6 +17,9 @@ invariants:
   - ArpHandler stores flight roles under synthetic agent_id "flight:<flight_id>:<role_id>" so multi-flight role_id collisions are impossible
   - FlightContext on AgentArpStatus carries kit_id, kit_name, role_id, role_type for the AG-UI panel
   - ARKAVO_SWARMKIT_PATH auto-launch failures are logged and non-fatal — a misconfigured kit MUST NOT prevent gateway boot
+  - Skill resolution is eager at SwarmFlight::launch when LaunchOptions.resolver_config is Some
+  - Inline skill payloads are deserialized into typed SkillContent before signature verification
+  - ed25519 signature is computed over BLAKE3 of JCS-canonical SkillContent bytes (matches kit.id canonicalization)
 
 scenarios:
   # --- Manifest layer (arkavo-swarmkit) -----------------------------------
@@ -589,3 +592,48 @@ scenarios:
         expected: FlightStopped with error=Some(...) explaining the parse failure; no deregister call
       - condition: flight_id is a valid UUID but no flight is registered with it
         expected: FlightStopped with error=None (deregister is idempotent)
+
+  # --- Skill resolver (slice 6) -------------------------------------------
+
+  - id: SK-070
+    name: Inline skill round-trips through sign → resolve → verify
+    criticality: critical
+    given:
+      - SkillContent serialized as JSON in Skill.payload
+      - Skill.signature is base64url(ed25519 over canonical bytes) using a known signing key
+      - Skill.signed_by is the DID whose pubkey the resolver returns
+    when: resolve_skill called with VerifyMode::Required
+    then:
+      - ResolvedSkill returned with content equal to the input
+      - verified is true
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t1_inline_skill_round_trip)
+    changed: "2026-05-08"
+
+  - id: SK-071
+    name: Tampered payload fails verification with SignatureInvalid
+    criticality: critical
+    given:
+      - A signed SkillContent
+      - A modified copy of the content with the same signature
+    when: resolve_skill called with VerifyMode::Required
+    then:
+      - ResolveError::SignatureInvalid returned
+      - signer_did field carries the claimed signer
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t2_tampered_payload_fails_verify)
+    changed: "2026-05-08"
+
+  - id: SK-072
+    name: Registry cache hit resolves; miss returns RegistryMiss
+    criticality: high
+    given:
+      - A registry-cache directory with a <blake3>.skill.json fixture
+      - Skill.source = registry, signature + signed_by declared in manifest
+    when: resolve_skill called
+    then:
+      - On hit, ResolvedSkill returned with verified=true
+      - On miss (id not in cache), ResolveError::RegistryMiss returned with cache_path
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)
+    changed: "2026-05-08"
