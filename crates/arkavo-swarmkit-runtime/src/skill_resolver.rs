@@ -15,9 +15,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arkavo_swarmkit::{Skill, SkillContent, canonical_json};
+use arkavo_swarmkit::{Skill, SkillContent, SkillSource, canonical_json};
 use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::Serialize;
 
 /// Compute the canonical-form bytes a SkillContent gets signed over.
@@ -137,8 +137,116 @@ impl PublicKeyResolver for MockPublicKeyResolver {
 }
 
 /// Resolve a `Skill` reference to a verified `ResolvedSkill`.
-pub fn resolve_skill(_skill: &Skill, _cfg: &ResolverConfig) -> Result<ResolvedSkill, ResolveError> {
-    unimplemented!("Task 4 lands the inline branch")
+pub fn resolve_skill(skill: &Skill, cfg: &ResolverConfig) -> Result<ResolvedSkill, ResolveError> {
+    let content = match skill.source {
+        SkillSource::Inline => parse_inline_payload(skill)?,
+        SkillSource::Registry => {
+            // Task 5 replaces this with the real registry branch.
+            return Err(ResolveError::TdfRefNotImplemented {
+                id: skill.id.clone(),
+                version: skill.version.clone(),
+            });
+        }
+        SkillSource::TdfRef => {
+            return Err(ResolveError::TdfRefNotImplemented {
+                id: skill.id.clone(),
+                version: skill.version.clone(),
+            });
+        }
+    };
+
+    let verified = verify_signature(skill, &content, cfg)?;
+
+    Ok(ResolvedSkill {
+        skill: skill.clone(),
+        content,
+        verified,
+    })
+}
+
+fn parse_inline_payload(skill: &Skill) -> Result<SkillContent, ResolveError> {
+    let payload = skill
+        .payload
+        .as_ref()
+        .ok_or_else(|| ResolveError::InlineMissingPayload {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+        })?;
+    serde_json::from_value::<SkillContent>(payload.clone()).map_err(|e| {
+        ResolveError::PayloadShape {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+            reason: e.to_string(),
+        }
+    })
+}
+
+fn verify_signature(
+    skill: &Skill,
+    content: &SkillContent,
+    cfg: &ResolverConfig,
+) -> Result<bool, ResolveError> {
+    let (sig_b64, signer_did) = match (&skill.signature, &skill.signed_by) {
+        (Some(s), Some(d)) => (s, d),
+        _ => match cfg.verify {
+            VerifyMode::Required => {
+                return Err(ResolveError::SignatureMissing {
+                    id: skill.id.clone(),
+                    version: skill.version.clone(),
+                });
+            }
+            VerifyMode::Optional => return Ok(false),
+        },
+    };
+
+    let pubkey = cfg
+        .public_key_resolver
+        .resolve(signer_did)
+        .map_err(|e| match e {
+            ResolveError::SignerUnresolvable { did, reason, .. } => {
+                ResolveError::SignerUnresolvable {
+                    id: skill.id.clone(),
+                    version: skill.version.clone(),
+                    did,
+                    reason,
+                }
+            }
+            other => other,
+        })?;
+
+    let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(sig_b64)
+        .map_err(|e| ResolveError::Crypto {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+            reason: format!("signature base64 decode failed: {e}"),
+        })?;
+    if sig_bytes.len() != 64 {
+        return Err(ResolveError::Crypto {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+            reason: format!("signature must be 64 bytes, got {}", sig_bytes.len()),
+        });
+    }
+    let mut sig_arr = [0u8; 64];
+    sig_arr.copy_from_slice(&sig_bytes);
+    let signature = Signature::from_bytes(&sig_arr);
+
+    let canonical = canonical_skill_bytes(content).map_err(|e| ResolveError::Crypto {
+        id: skill.id.clone(),
+        version: skill.version.clone(),
+        reason: format!("canonicalization failed: {e}"),
+    })?;
+    let digest = blake3::hash(&canonical);
+
+    pubkey
+        .verify(digest.as_bytes(), &signature)
+        .map(|_| true)
+        .map_err(|_| ResolveError::SignatureInvalid {
+            id: skill.id.clone(),
+            version: skill.version.clone(),
+            signer_did: signer_did.clone(),
+        })
 }
 
 /// Sign `SkillContent` with the given ed25519 `private_key`.
@@ -195,5 +303,111 @@ mod tests {
         let s2 = sign_skill_content(&content, did, &key);
         assert_eq!(s1.signature_b64url, s2.signature_b64url);
         assert_eq!(s1.signed_by, did);
+    }
+
+    fn skill_with_inline_payload(content: &SkillContent, signed: Option<SignedSkill>) -> Skill {
+        Skill {
+            id: "skill:asset-analysis".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::Inline,
+            payload: Some(serde_json::to_value(content).unwrap()),
+            signature: signed.as_ref().map(|s| s.signature_b64url.clone()),
+            signed_by: signed.as_ref().map(|s| s.signed_by.clone()),
+        }
+    }
+
+    fn cfg_with_mock(verify: VerifyMode, mock: MockPublicKeyResolver) -> ResolverConfig {
+        ResolverConfig {
+            registry_cache: std::env::temp_dir(),
+            verify,
+            public_key_resolver: Arc::new(mock),
+        }
+    }
+
+    #[test]
+    fn t1_inline_skill_round_trip() {
+        let (key, did) = deterministic_test_signer();
+        let content = sample_content();
+        let signed = sign_skill_content(&content, did, &key);
+        let skill = skill_with_inline_payload(&content, Some(signed));
+        let mock = MockPublicKeyResolver::new().with_key(did, key.verifying_key());
+        let resolved = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap();
+        assert_eq!(resolved.content, content);
+        assert!(resolved.verified);
+    }
+
+    #[test]
+    fn t2_tampered_payload_fails_verify() {
+        let (key, did) = deterministic_test_signer();
+        let content = sample_content();
+        let signed = sign_skill_content(&content, did, &key);
+        let mut tampered = content.clone();
+        tampered.instructions = "Different instructions.".into();
+        let skill = skill_with_inline_payload(&tampered, Some(signed));
+        let mock = MockPublicKeyResolver::new().with_key(did, key.verifying_key());
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap_err();
+        assert!(matches!(err, ResolveError::SignatureInvalid { .. }));
+    }
+
+    #[test]
+    fn t3_wrong_signer_did_fails_verify() {
+        let (key_a, _) = deterministic_test_signer();
+        let key_b = SigningKey::from_bytes(&[7u8; 32]);
+        let content = sample_content();
+        let signed = sign_skill_content(&content, "did:web:claimed.example", &key_a);
+        let skill = skill_with_inline_payload(&content, Some(signed));
+        let mock =
+            MockPublicKeyResolver::new().with_key("did:web:claimed.example", key_b.verifying_key());
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap_err();
+        assert!(matches!(err, ResolveError::SignatureInvalid { .. }));
+    }
+
+    #[test]
+    fn t4_missing_signature_required_mode() {
+        let content = sample_content();
+        let skill = skill_with_inline_payload(&content, None);
+        let mock = MockPublicKeyResolver::new();
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap_err();
+        assert!(matches!(err, ResolveError::SignatureMissing { .. }));
+    }
+
+    #[test]
+    fn t5_missing_signature_optional_mode() {
+        let content = sample_content();
+        let skill = skill_with_inline_payload(&content, None);
+        let mock = MockPublicKeyResolver::new();
+        let resolved = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Optional, mock)).unwrap();
+        assert_eq!(resolved.content, content);
+        assert!(!resolved.verified);
+    }
+
+    #[test]
+    fn t6_inline_missing_payload() {
+        let skill = Skill {
+            id: "x".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::Inline,
+            payload: None,
+            signature: None,
+            signed_by: None,
+        };
+        let mock = MockPublicKeyResolver::new();
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Optional, mock)).unwrap_err();
+        assert!(matches!(err, ResolveError::InlineMissingPayload { .. }));
+    }
+
+    #[test]
+    fn t7_payload_shape_mismatch() {
+        let skill = Skill {
+            id: "x".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::Inline,
+            payload: Some(serde_json::json!({"not_a_skill_content": true})),
+            signature: None,
+            signed_by: None,
+        };
+        let mock = MockPublicKeyResolver::new();
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Optional, mock)).unwrap_err();
+        assert!(matches!(err, ResolveError::PayloadShape { .. }));
     }
 }
