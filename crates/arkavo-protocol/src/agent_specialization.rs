@@ -176,6 +176,7 @@ fn write_canonical(value: &serde_json::Value, out: &mut String) {
 }
 
 fn write_json_string(s: &str, out: &mut String) {
+    use std::fmt::Write as _;
     out.push('"');
     for c in s.chars() {
         match c {
@@ -187,7 +188,7 @@ fn write_json_string(s: &str, out: &mut String) {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                let _ = write!(out, "\\u{:04x}", c as u32);
             }
             c => out.push(c),
         }
