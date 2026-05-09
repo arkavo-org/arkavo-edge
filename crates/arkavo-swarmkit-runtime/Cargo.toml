@@ -62,3 +62,7 @@ required-features = []
 [[example]]
 name = "sign_vrm_production_skills"
 required-features = []
+
+[[example]]
+name = "sign_compliance_skills"
+required-features = []
