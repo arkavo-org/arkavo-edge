@@ -54,3 +54,7 @@ required-features = []
 [[example]]
 name = "sign_campaign_skills"
 required-features = []
+
+[[example]]
+name = "sign_code_review_skills"
+required-features = []
