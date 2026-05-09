@@ -103,9 +103,14 @@ The full audit lives at [`swarmkit-launch-audit-2026-05-08.md`](swarmkit-launch-
 
 ## Specification + roadmap
 
-The SwarmKit specification is `swarmkit-spec-draft-00`. It defines the manifest schema (§4), the `agent_provisioning` block (§5), the TDF encryption envelope (§6), the orchestrator decryption + delegation flow (§7), the skills + MCP tool distribution model (§8), versioning + identity (§9), security considerations (§10), and conformance criteria (§11). The current implementation is conformant for the manifest, runtime, TDF envelope, KAS gate, and skill signatures (see Status table). Specialist-side acceptance (§7.3) and the A2A JSON-RPC delegation envelope (§7.2) are aspirational.
+The SwarmKit specification is published at [`github.com/arkavo-org/specifications/tree/main/swarmkit`](https://github.com/arkavo-org/specifications/tree/main/swarmkit). Two drafts are live:
 
-The spec has not yet been published to the public spec repo at github.com/arkavo-org/specifications. RFC AE-2026-004 (forthcoming) targets the formal IETF-style draft for community review — its publication will replace this paragraph with a direct link.
+- [`swarmkit-spec-draft-00`](https://github.com/arkavo-org/specifications/blob/main/swarmkit/swarmkit-spec-draft-00.md) — the original spec defining manifest schema (§4), `agent_provisioning` (§5), TDF encryption envelope (§6), orchestrator decryption + delegation flow (§7), skills + MCP tool distribution (§8), versioning + identity (§9), security considerations (§10), and conformance criteria (§11).
+- [`swarmkit-spec-draft-01`](https://github.com/arkavo-org/specifications/blob/main/swarmkit/swarmkit-spec-draft-01.md) — additive draft. Bumps `spec_version` to `1.1.0`. Promotes Phase 2's invented Skill resolver protocol (SkillContent JSON schema, Ed25519/BLAKE3 signing, registry cache layout) to normative status. Closes the v2 audit's spec-language-vs-runtime gaps (§4.6, §9.1, §1.2 promoted to MUST). Adds the audit-authority privilege-differentiation threat model entry (§10.1) and the Domain-Specific Examples appendix.
+
+Changelog: [`CHANGELOG.md`](https://github.com/arkavo-org/specifications/blob/main/swarmkit/CHANGELOG.md). Future drafts will land here.
+
+RFC AE-2026-004 (forthcoming) targets the formal IETF-style draft for community review.
 
 Phase 5 spec proposals (sourced from the v2 audit's "Skill resolver gaps" subsection):
 
@@ -116,7 +121,7 @@ Phase 5 spec proposals (sourced from the v2 audit's "Skill resolver gaps" subsec
 
 ## Links
 
-- Spec: `swarmkit-spec-draft-00` (publication URL pending; see Specification + roadmap)
+- Spec: [`swarmkit-spec-draft-00`](https://github.com/arkavo-org/specifications/blob/main/swarmkit/swarmkit-spec-draft-00.md), [`draft-01`](https://github.com/arkavo-org/specifications/blob/main/swarmkit/swarmkit-spec-draft-01.md), [CHANGELOG](https://github.com/arkavo-org/specifications/blob/main/swarmkit/CHANGELOG.md)
 - v2 audit: [`swarmkit-launch-audit-2026-05-08.md`](swarmkit-launch-audit-2026-05-08.md)
 - v1 audit (Phase 1 snapshot): [`swarmkit-launch-audit-2026-05-07.md`](swarmkit-launch-audit-2026-05-07.md)
 - Per-kit READMEs: [campaign-kit](../examples/campaign-kit/README.md), [code-review-kit](../examples/code-review-kit/README.md), [vrm-production-kit](../examples/vrm-production-kit/README.md), [compliance-kit](../examples/compliance-kit/README.md)
