@@ -94,11 +94,20 @@ fn parse_first_ed25519_pubkey(doc: &serde_json::Value) -> Result<VerifyingKey, S
         .get("verificationMethod")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "no verificationMethod array".to_string())?;
+
+    let mut ed25519_seen = 0usize;
+    let mut last_skip_reason: Option<String> = None;
+
     for vm in methods {
         let kind = vm.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if kind != "Ed25519VerificationKey2020" && kind != "Ed25519VerificationKey2018" {
             continue;
         }
+        ed25519_seen += 1;
+
+        // If a recognized encoding is present, return on success or surface
+        // the decode error (a present-but-broken encoding is a fault, not a
+        // skip — the operator wants to know).
         if let Some(b64) = vm.get("publicKeyBase64").and_then(|s| s.as_str()) {
             return decode_pubkey(b64, "publicKeyBase64");
         }
@@ -109,13 +118,27 @@ fn parse_first_ed25519_pubkey(doc: &serde_json::Value) -> Result<VerifyingKey, S
         {
             return decode_pubkey(jwk_x, "publicKeyJwk.x");
         }
-        // Ed25519 method present but no key encoding we recognize — fail
-        // explicitly rather than silently skipping. Reviewer M2.
-        return Err(format!(
-            "Ed25519 verificationMethod has no recognized key encoding (expected publicKeyBase64 or publicKeyJwk.x); type={kind}"
+
+        // This Ed25519 method has neither recognized encoding. Don't fail
+        // the whole document — record the reason and continue, so a later
+        // verificationMethod entry with a recognized encoding can still
+        // satisfy resolution. Reviewer M2.
+        last_skip_reason = Some(format!(
+            "Ed25519 verificationMethod (type={kind}) has no recognized key encoding (expected publicKeyBase64 or publicKeyJwk.x)"
         ));
     }
-    Err("no Ed25519 verificationMethod found".into())
+
+    if ed25519_seen == 0 {
+        Err("no Ed25519 verificationMethod found".into())
+    } else {
+        // We saw Ed25519 method(s), but none had a recognized encoding.
+        // Surface the skip reason so the operator knows the document had
+        // an Ed25519 method we couldn't parse, rather than the more
+        // misleading "no Ed25519 found".
+        Err(last_skip_reason.unwrap_or_else(|| {
+            format!("found {ed25519_seen} Ed25519 verificationMethod(s) but none had a recognized key encoding")
+        }))
+    }
 }
 
 fn decode_pubkey(s: &str, field: &str) -> Result<VerifyingKey, String> {
@@ -169,6 +192,41 @@ mod tests {
         });
         let err = parse_first_ed25519_pubkey(&doc).unwrap_err();
         assert!(err.contains("no recognized key encoding"), "got: {err}");
+    }
+
+    #[test]
+    fn ed25519_with_no_encoding_skipped_for_later_method_with_encoding() {
+        // Reviewer M2: a malformed Ed25519 method earlier in the array
+        // must NOT prevent resolution from a working Ed25519 method later.
+        let key_bytes = [11u8; 32];
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_bytes);
+        let doc = serde_json::json!({
+            "verificationMethod": [
+                {"type": "Ed25519VerificationKey2020"},
+                {"type": "Ed25519VerificationKey2020", "publicKeyBase64": b64},
+            ]
+        });
+        let key = parse_first_ed25519_pubkey(&doc).unwrap();
+        assert_eq!(key.to_bytes(), key_bytes);
+    }
+
+    #[test]
+    fn ed25519_present_with_broken_encoding_surfaces_error() {
+        // Reviewer M2: if every Ed25519 method has either a broken encoding
+        // or no encoding, the error message must say so — not the misleading
+        // "no Ed25519 verificationMethod found".
+        let doc = serde_json::json!({
+            "verificationMethod": [
+                {"type": "Ed25519VerificationKey2020"},
+                {"type": "Ed25519VerificationKey2018"},
+            ]
+        });
+        let err = parse_first_ed25519_pubkey(&doc).unwrap_err();
+        assert!(err.contains("no recognized key encoding"), "got: {err}");
+        assert!(
+            !err.contains("no Ed25519 verificationMethod found"),
+            "must not surface the no-Ed25519 message when Ed25519 methods are present, got: {err}"
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use arkavo_swarmkit::{Skill, SkillContent, SkillSource, canonical_json};
 use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Compute the canonical-form bytes a SkillContent gets signed over.
 ///
@@ -81,7 +81,7 @@ impl Default for ResolverConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedSkill {
     pub signature_b64url: String,
     pub signed_by: String,
@@ -357,6 +357,18 @@ mod tests {
         let s2 = sign_skill_content(&content, did, &key);
         assert_eq!(s1.signature_b64url, s2.signature_b64url);
         assert_eq!(s1.signed_by, did);
+    }
+
+    #[test]
+    fn signed_skill_round_trips_through_json() {
+        // Reviewer M1: SignedSkill is the on-disk form of the registry
+        // sidecar; reading the sidecar back requires Deserialize.
+        let (key, did) = deterministic_test_signer();
+        let signed = sign_skill_content(&sample_content(), did, &key);
+        let json = serde_json::to_string(&signed).unwrap();
+        let back: SignedSkill = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.signature_b64url, signed.signature_b64url);
+        assert_eq!(back.signed_by, signed.signed_by);
     }
 
     fn skill_with_inline_payload(content: &SkillContent, signed: Option<SignedSkill>) -> Skill {
