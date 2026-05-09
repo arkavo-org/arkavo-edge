@@ -463,4 +463,40 @@ mod tests {
         let err = validate(&m).unwrap_err();
         assert!(matches!(err, ValidationError::KitIdHashMismatch { .. }));
     }
+
+    #[spec("SK-007")]
+    #[test]
+    fn custom_rubric_dimension_names_accepted() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "spec_compliance".into(),
+                        weight: 0.4,
+                        threshold: 0.95,
+                    },
+                    EvaluationDimension {
+                        name: "prompt_fidelity".into(),
+                        weight: 0.3,
+                        threshold: 0.7,
+                    },
+                    EvaluationDimension {
+                        name: "accessibility".into(),
+                        weight: 0.2,
+                        threshold: 0.7,
+                    },
+                    EvaluationDimension {
+                        name: "performance_hints".into(),
+                        weight: 0.1,
+                        threshold: 0.7,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        validate(&m).expect("custom dimension names should validate");
+    }
 }

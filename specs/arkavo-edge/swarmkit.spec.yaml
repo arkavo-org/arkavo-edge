@@ -593,6 +593,22 @@ scenarios:
       - condition: flight_id is a valid UUID but no flight is registered with it
         expected: FlightStopped with error=None (deregister is idempotent)
 
+  # --- Extensibility conformance (Phase 5) -------------------------------
+
+  - id: SK-007
+    name: Producer-defined evaluation rubric dimension names accepted
+    criticality: medium
+    given:
+      - Manifest with evaluation.rubric.dimensions using domain-specific names (e.g. spec_compliance, prompt_fidelity, accessibility)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom dimension names
+      - validate() does not reject based on dimension name vocabulary
+      - Sum-of-weights check (SK-005) still applies
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_rubric_dimension_names_accepted)
+    changed: "2026-05-08"
+
   # --- Skill resolver (slice 6) -------------------------------------------
 
   - id: SK-070
