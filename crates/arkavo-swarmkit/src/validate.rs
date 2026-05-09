@@ -463,4 +463,76 @@ mod tests {
         let err = validate(&m).unwrap_err();
         assert!(matches!(err, ValidationError::KitIdHashMismatch { .. }));
     }
+
+    #[spec("SK-007")]
+    #[test]
+    fn custom_rubric_dimension_names_accepted() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "spec_compliance".into(),
+                        weight: 0.4,
+                        threshold: 0.95,
+                    },
+                    EvaluationDimension {
+                        name: "prompt_fidelity".into(),
+                        weight: 0.3,
+                        threshold: 0.7,
+                    },
+                    EvaluationDimension {
+                        name: "accessibility".into(),
+                        weight: 0.2,
+                        threshold: 0.7,
+                    },
+                    EvaluationDimension {
+                        name: "performance_hints".into(),
+                        weight: 0.1,
+                        threshold: 0.7,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        validate(&m).expect("custom dimension names should validate");
+    }
+
+    #[spec("SK-008")]
+    #[test]
+    fn custom_tdf_attribute_strings_accepted() {
+        let mut m = minimal_manifest();
+        m.roles[0].tdf_attribute_release_policy = Some(TdfAttributeReleasePolicy {
+            attributes: vec![
+                "https://attr.arkavo.com/role/auditor".into(),
+                "https://attr.arkavo.com/clearance/restricted".into(),
+                "https://attr.arkavo.com/jurisdiction/us-ca".into(),
+                "https://attr.arkavo.com/audit_authority/true".into(),
+            ],
+            rule: ArpRule::AllOf,
+        });
+        validate(&m).expect("custom attribute strings should validate");
+        let attrs = &m.roles[0]
+            .tdf_attribute_release_policy
+            .as_ref()
+            .unwrap()
+            .attributes;
+        assert_eq!(attrs.len(), 4);
+        assert!(attrs.iter().any(|a| a.ends_with("/audit_authority/true")));
+    }
+
+    #[spec("SK-009")]
+    #[test]
+    fn custom_data_classifications_accepted() {
+        let mut m = minimal_manifest();
+        m.constraints.data_classifications = vec![
+            "restricted".into(),
+            "tactical".into(),
+            "domain-specific".into(),
+        ];
+        validate(&m).expect("custom data_classifications should validate");
+        assert_eq!(m.constraints.data_classifications.len(), 3);
+    }
 }

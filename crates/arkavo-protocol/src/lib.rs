@@ -20,6 +20,7 @@ pub mod a2a_mcp_bridge;
 pub mod a2a_policy;
 pub mod agent_config;
 pub mod agent_registry;
+pub mod agent_specialization;
 pub mod auth;
 pub mod chat_commands;
 pub mod chat_session;
@@ -57,6 +58,10 @@ pub mod websocket;
 pub use a2a::{A2aClient, A2aClientError};
 pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 pub use a2a_policy::{A2aAccess, A2aPolicy, A2aRule, PolicyMode};
+pub use agent_specialization::{
+    AgentPersona, AgentSpecializationBundle, BundleError, McpToolGrant, RoleContext,
+    verify_dissemination_includes,
+};
 pub use auth::{AuthBackend, JwtAuthBackend, MultiAuthBackend, SessionAuth};
 pub use chat_commands::{
     ChatSession, CommandResult, ContextMode, PendingContext, execute_command, parse_command,

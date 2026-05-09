@@ -1,0 +1,237 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:fHKLKTPPZlcdE-dSVOygeCV0e33bp2yQZ5LtIoXAM4E"
+  name: "Compliance Kit"
+  version: "0.1.0"
+  description: >-
+    Three roles — PII Classifier, Policy Enforcer, Auditor — produce a
+    jurisdiction-aware compliance report. Pipeline: pii_classifier →
+    policy_enforcer → auditor. The auditor (separate evaluating role)
+    is the rubric critic — not self-evaluation per spec §10.1.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-05-08T00:00:00Z"
+  expires: "2026-08-06T00:00:00Z"
+  nonce: "mTeR2K1jXcW0QqZ8nF3vL5K1"
+
+objective:
+  goal: "Classify documents for PII, apply jurisdiction-aware redaction, produce an audit-ready compliance report."
+  success_criteria:
+    - "PII recall >= 0.95"
+    - "no false-negative redaction"
+    - "complete audit trail with timestamp + role for every action"
+    - "rubric.weighted_score >= 0.80"
+
+inputs:
+  - name: "document"
+    type: "tdf-ref"
+    required: true
+    classification: "restricted"
+  - name: "jurisdiction"
+    type: "text"
+    required: true
+  - name: "data_subject_consent_status"
+    type: "text"
+    required: true
+
+deliverables:
+  - name: "compliance_report"
+    type: "json"
+    classification: "restricted"
+
+roles:
+  - id: "pii_classifier"
+    role_type: "pii_classifier"
+    description: "Classify documents for PII per jurisdiction."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.0
+        thinking: true
+      budget:
+        max_inference_calls: 4
+        max_wallclock_ms: 60000
+        max_total_tokens: 16000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:pii-classify"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "pii-classify"
+          description: "Classify documents for PII per jurisdiction."
+          instructions: "Scan the document input for PII (US-CA CCPA categories, EU GDPR Article 4(1) categories, US HIPAA PHI). For each finding, output { category, jurisdiction_basis, document_offset, confidence }. Optimize for recall — false negatives are worse than false positives in this domain."
+          resources: []
+        signature: "_MI0KtS-5S_hrqr9xcM9ub3yJrRxhSpm0zpcThGsRUdANA97Dn5cQT7K6BXyTXJf_eSjIJqnF4gGzYBJb-7ICw"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/pii_classifier"
+        - "https://attr.arkavo.com/clearance/restricted"
+        - "https://attr.arkavo.com/jurisdiction/us-ca"
+      rule: "allOf"
+    handoffs:
+      - to: "policy_enforcer"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "policy_enforcer"
+    role_type: "policy_enforcer"
+    description: "Apply jurisdiction-aware redaction or escalation."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.0
+        thinking: true
+      budget:
+        max_inference_calls: 4
+        max_wallclock_ms: 60000
+        max_total_tokens: 16000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:policy-enforce"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "policy-enforce"
+          description: "Apply jurisdiction-aware redaction or escalation."
+          instructions: "For each PII finding, apply the jurisdiction-specific policy: redact (replace with category placeholder), escalate (route to human reviewer), or pass-through (per consent_status). Refuse the document if data_subject_consent_status is incompatible with the document's classification."
+          resources: []
+        signature: "YsxFDcZW_bNWLpihCwIikkMVQfx5F-XW0wz-0FxYX9dyvUcoQien91KHO_pJsfhCq2oDVOaPCZg0P3mC2OUiCw"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/policy_enforcer"
+        - "https://attr.arkavo.com/clearance/restricted"
+        - "https://attr.arkavo.com/jurisdiction/us-ca"
+      rule: "allOf"
+    handoffs:
+      - to: "auditor"
+        on: "always"
+    context_scope:
+      can_read: ["pii_classifier", "self"]
+      can_write: ["self"]
+
+  - id: "auditor"
+    role_type: "auditor"
+    description: "Produce an audit-ready compliance report."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 768
+        temperature: 0.0
+        thinking: false
+      budget:
+        max_inference_calls: 3
+        max_wallclock_ms: 45000
+        max_total_tokens: 10000
+      context:
+        max_context_tokens: 16000
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:audit-trail"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "audit-trail"
+          description: "Produce an audit-ready compliance report."
+          instructions: "Log every classification finding and policy action with timestamp + role + jurisdiction_basis. Identify gaps: PII categories the policy didn't cover, escalation paths that weren't taken. Output a structured compliance_report deliverable suitable for regulator review."
+          resources: []
+        signature: "95z_AZcmA-CRaFqB-eb00LvkDdjTwRW5p8_B-za1z3kOzAbPeNaCjcTW5rfN0YLfvO7azCmlWQT6rZ27m5NeBQ"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/auditor"
+        - "https://attr.arkavo.com/clearance/restricted"
+        - "https://attr.arkavo.com/jurisdiction/us-ca"
+        - "https://attr.arkavo.com/audit_authority/true"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["pii_classifier", "policy_enforcer", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "pipeline"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+    compaction:
+      strategy: "tool_result"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 240
+    max_total_tokens: 50000
+    max_cost_usd: 0.15
+  data_classifications:
+    - "restricted"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+evaluation:
+  rubric:
+    reference: "swarmkit-spec-draft-00#appendix-d"
+    dimensions:
+      - name: "pii_recall"
+        weight: 0.35
+        threshold: 0.95
+      - name: "redaction_correctness"
+        weight: 0.30
+        threshold: 0.9
+      - name: "audit_completeness"
+        weight: 0.25
+        threshold: 0.95
+      - name: "jurisdiction_match"
+        weight: 0.10
+        threshold: 0.9
+  critic_role: "auditor"
+
+completion:
+  rules:
+    - "all deliverables present"
+    - "rubric.weighted_score >= 0.80"
+    - "no role in error state"
+  on_failure: "abort"
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "AAA"

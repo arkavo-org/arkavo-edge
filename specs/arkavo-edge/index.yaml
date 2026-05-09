@@ -564,12 +564,13 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 35
+    scenario_count: 48
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch
       - Per-role DecisionTrace and PolicyCache are isolated
       - ARKAVO_SWARMKIT_PATH auto-launch failures are non-fatal
+      - ARKAVO_SWARMKIT_PATH auto-launch failures are recorded into SwarmFlightRegistry and surfaced via ArpStatusSnapshot.swarmkitLaunchErrors
       - requestStopFlight deregisters every role of a flight in one call
       - Identical ArpStatusUpdate payloads do not cause panel re-renders
       - TDF envelope round-trips the manifest losslessly under canonical-form serialization
@@ -578,6 +579,10 @@ components:
       - .swarmkit.tdf file format is canonical JSON of the TdfManifest struct
       - unwrap_manifest_kas_gated fails fast on unhealthy KAS or policy mismatch before invoking the decryptor
       - Auto-launch dispatches on file extension (.tdf vs .yaml / .json)
+      - Orchestrator binds roles to mesh agents by capability matching (RoleSpec.skills / mcp_tools vs AgentRegistry::find_best_agent)
+      - Per-role specialization bundles are TDF-wrapped with policy bound to the recipient agent's DID
+      - agent.specialize unwraps the bundle, replaces persona/tokens, and stores the role context in RoleSpecializationStore
+      - SwarmFlight launches with role_agent_bindings populated and dispatches the first task per role via RoleTaskTransport
 
   - name: ui-core
     file: ui-core.spec.yaml

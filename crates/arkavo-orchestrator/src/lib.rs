@@ -38,6 +38,7 @@ pub mod planner_config;
 pub mod policy_events;
 pub mod spawn_guard;
 pub mod step_context;
+pub mod swarmkit_apply;
 pub mod task_executor;
 pub mod task_policy_manager;
 pub mod text_utils;
@@ -56,6 +57,10 @@ pub use config::OrchestratorConfig;
 pub use error::{Error, Result};
 pub use plan_validator::{ContractViolation, ValidationReport, validate as validate_plan};
 pub use step_context::StepTrace;
+pub use swarmkit_apply::{
+    AppliedKit, ApplyKitError, BundleEncryptor, BundleShipper, InMemoryTokenVault, RoleBinding,
+    RoleCapabilityMatcher, TokenVault, apply_kit,
+};
 pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
 // Re-export GitHub types from arkavo-github for backward compatibility
 pub use arkavo_github::{GitHubApp, IssueOperations, IssueUpdate};

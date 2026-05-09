@@ -6,6 +6,19 @@ Learn to build AI agent systems through hands-on examples.
 > `cargo xtask capabilities` - Interactive browser
 > `cargo xtask capabilities --matrix` - Quick overview
 
+## Shipped SwarmKits
+
+Four SwarmKits ship as runnable examples. Each is a single YAML manifest with inline-signed skills that exercises the SwarmKit runtime end-to-end (parse + validate + skill resolution + per-role ARP construction).
+
+| Kit | Domain | Roles | One-command run |
+|---|---|---|---|
+| [campaign-kit](campaign-kit/README.md) | Marketing | analyst → copy → critic | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/campaign-kit/campaign-kit.swarmkit.yaml` |
+| [code-review-kit](code-review-kit/README.md) | Developer | reviewer → security_auditor → test_writer | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/code-review-kit/code-review-kit.swarmkit.yaml` |
+| [vrm-production-kit](vrm-production-kit/README.md) | Creative | prompt_designer → vrm_assembler → validator | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/vrm-production-kit/vrm-production-kit.swarmkit.yaml` |
+| [compliance-kit](compliance-kit/README.md) | Regulated | pii_classifier → policy_enforcer → auditor | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/compliance-kit/compliance-kit.swarmkit.yaml` |
+
+Each kit ships with its own `README.md` in `examples/<kit-name>/` plus an integration test in `crates/arkavo-swarmkit-runtime/tests/<kit-name>_skill_resolver.rs` that asserts every role's skills resolve with `verified=true`.
+
 ## Quick Start (5 minutes)
 
 ```bash

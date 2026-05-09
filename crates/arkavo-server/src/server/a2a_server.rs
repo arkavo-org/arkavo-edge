@@ -35,6 +35,14 @@ pub struct A2aServer {
     buffer_config: BufferConfig,
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    /// SwarmKit role assignment slot, populated when an `agent.specialize`
+    /// RPC succeeds.
+    role_specialization: Arc<crate::server::config_helpers::RoleSpecializationStore>,
+    /// Bundle decryptor used by `agent.specialize`. Set to a real
+    /// KAS-backed implementation by the binary that constructs the
+    /// server; defaults to a stub that always rejects so a misconfigured
+    /// agent never accidentally accepts a bundle.
+    bundle_decryptor: Arc<dyn crate::server::handlers::specialization::BundleDecryptor>,
     llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
     /// Model registry for multi-model inference support
     #[cfg(feature = "llama-cpp")]
@@ -94,6 +102,12 @@ impl A2aServer {
             buffer_config,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            role_specialization: Arc::new(
+                crate::server::config_helpers::RoleSpecializationStore::default(),
+            ),
+            bundle_decryptor: Arc::new(
+                crate::server::handlers::specialization::UnconfiguredBundleDecryptor,
+            ),
             llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "llama-cpp")]
             model_registry: Arc::new(tokio::sync::RwLock::new(None)),
@@ -131,6 +145,27 @@ impl A2aServer {
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
         }
+    }
+
+    /// Inject a SwarmKit specialization-bundle decryptor. Production
+    /// binaries call this with a KAS-backed `OpenTdfService` wrapper;
+    /// the default is a stub that rejects all bundles. Callable before
+    /// the RPC server starts and during construction.
+    pub fn set_bundle_decryptor(
+        &mut self,
+        decryptor: Arc<dyn crate::server::handlers::specialization::BundleDecryptor>,
+    ) {
+        self.bundle_decryptor = decryptor;
+    }
+
+    /// Read the current SwarmKit role assignment, if any. The agent
+    /// loop consults this on every cycle so tool outcomes are tagged
+    /// for the right per-role DecisionTrace on the orchestrator's
+    /// flight.
+    pub fn role_specialization(
+        &self,
+    ) -> &Arc<crate::server::config_helpers::RoleSpecializationStore> {
+        &self.role_specialization
     }
 
     /// Set the agent's public key for TDF encryption
@@ -1209,6 +1244,8 @@ impl A2aServer {
             metrics,
             mcp_registry: self.mcp_registry.clone(),
             agent_metadata: self.agent_metadata.clone(),
+            role_specialization: self.role_specialization.clone(),
+            bundle_decryptor: self.bundle_decryptor.clone(),
             llm_adapter,
             chat_sessions,
             task_store,

@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod coordination;
 pub mod manifest;
 pub mod role;
+pub mod skill_content;
 pub mod validate;
 
 pub use canonical::{canonical_json, content_hash, kit_id_for};
@@ -24,8 +25,9 @@ pub use coordination::{
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 pub use role::{
     AgentProvisioning, ArpRule, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
-    Model, Observability, RoleSpec, Skill, TdfAttributeReleasePolicy, ToolUse,
+    Model, Observability, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, ToolUse,
 };
+pub use skill_content::{SkillContent, SkillResource};
 pub use validate::{ValidationError, validate};
 
 /// Parse a SwarmKit manifest from a JSON string and run cross-block validation.

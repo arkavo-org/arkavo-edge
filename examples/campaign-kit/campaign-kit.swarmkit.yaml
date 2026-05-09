@@ -1,6 +1,6 @@
 spec_version: "1.0.0"
 kit:
-  id: "blake3:UQrbWgCpQxTEHaHORFpfDGww71rFFmo5MZsCX6fkR8E"
+  id: "blake3:1s2sbIzo3ep1LhHYFPK6wC20aNaPD-cG0P7eJWtblP8"
   name: "Campaign Kit (3-agent MVP)"
   version: "0.1.0"
   description: >-
@@ -66,7 +66,14 @@ roles:
     skills:
       - id: "skill:asset-analysis"
         version: "0.1.0"
-        source: "registry"
+        source: "inline"
+        payload:
+          name: "asset-analysis"
+          description: "Summarize the source asset and extract selling points."
+          instructions: "Extract three to five selling points relevant to the target platform. Cite sentence ranges in the source asset for each point."
+          resources: []
+        signature: "5vNHSwYFNJEE3_2oq3buUNkZ1Liu4HRaHlHzebif2k9uyENZJLoSbt-vdPxcyS3-mxsZJ8vHjGo2rGdgjrcBCg"
+        signed_by: "did:web:arkavo.com"
     mcp_tools: []
     tdf_attribute_release_policy:
       attributes:
@@ -106,7 +113,14 @@ roles:
     skills:
       - id: "skill:platform-copy"
         version: "0.1.0"
-        source: "registry"
+        source: "inline"
+        payload:
+          name: "platform-copy"
+          description: "Generate platform-specific copy from the analyst's selling points."
+          instructions: "Produce posts, scripts, and risk_notes tailored to the target platform's voice and length constraints."
+          resources: []
+        signature: "lHkLW_-22h3gbqfp7DYCS0MjskMEkYaWre9klt8KEnEVr60yxOp6IWF5uxvT9cMU8lXQQSiIhIoofbS-YvmCCg"
+        signed_by: "did:web:arkavo.com"
     mcp_tools: []
     tdf_attribute_release_policy:
       attributes:
@@ -145,7 +159,14 @@ roles:
     skills:
       - id: "skill:campaign-critic"
         version: "0.1.0"
-        source: "registry"
+        source: "inline"
+        payload:
+          name: "campaign-critic"
+          description: "Score the produced copy against the rubric and flag unsupported claims."
+          instructions: "For each claim in the copy, check it is supported by the analyst's selling points. Score against the rubric dimensions."
+          resources: []
+        signature: "reL8v5kndK1M1kPWFjnsTOQc4Zn3NYIRyJoefdxBuwhOKHu-etNFGYGCLh71CHDzjfYQKfjCz_9MRvuQpv1iCg"
+        signed_by: "did:web:arkavo.com"
     mcp_tools: []
     tdf_attribute_release_policy:
       attributes:

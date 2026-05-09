@@ -1128,6 +1128,12 @@ pub struct AgentContextInfo {
 pub struct ArpStatusSnapshot {
     pub agents: Vec<AgentArpStatus>,
     pub timestamp: String,
+    /// Most-recent boot-time SwarmKit auto-launch failures, surfaced
+    /// for the operator. Empty in steady state. Populated when
+    /// `ARKAVO_SWARMKIT_PATH` is set but loading the manifest or
+    /// launching the flight failed.
+    #[serde(rename = "swarmkitLaunchErrors", default)]
+    pub swarmkit_launch_errors: Vec<SwarmkitLaunchErrorEntry>,
 }
 
 /// Read-only snapshot of every MCP-T trust score this agent publishes.
@@ -1239,6 +1245,25 @@ pub struct FlightContext {
     pub role_id: String,
     #[serde(rename = "roleType")]
     pub role_type: String,
+    /// DID of the mesh agent the orchestrator bound to this role.
+    /// `None` for in-process / unbound flights.
+    #[serde(rename = "boundAgentDid", skip_serializing_if = "Option::is_none")]
+    pub bound_agent_did: Option<String>,
+}
+
+/// Single auto-launch failure surfaced to the operator. The gateway
+/// records one of these into [`SwarmFlightRegistry`] when an
+/// `ARKAVO_SWARMKIT_PATH` boot launch fails, so the UI can render the
+/// failure instead of leaving the operator to grep logs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmkitLaunchErrorEntry {
+    pub path: String,
+    /// Discriminator from `AutoLaunchError`: one of `read`, `parse`,
+    /// `launch`, `tdf_unwrap`, `tdf_feature_disabled`.
+    pub kind: String,
+    pub message: String,
+    #[serde(rename = "occurredAt")]
+    pub occurred_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

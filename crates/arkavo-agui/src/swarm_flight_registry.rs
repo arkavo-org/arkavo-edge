@@ -14,16 +14,62 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arkavo_swarmkit::{Manifest, parse_json, parse_yaml};
-use arkavo_swarmkit_runtime::{LaunchOptions, SwarmFlight};
+use arkavo_swarmkit_runtime::{LaunchOptions, ResolverConfig, SwarmFlight, VerifyMode};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::arp_handler::{ArpHandler, FlightRoleRegistration};
+use crate::types::SwarmkitLaunchErrorEntry;
+
+/// Most-recent boot-time auto-launch failure. Single-slot is enough
+/// because `auto_launch_from_environment` runs exactly once at gateway
+/// boot — there is no scheduled retry that would accumulate history.
+#[derive(Debug, Clone)]
+pub struct SwarmkitLaunchFailure {
+    pub path: String,
+    pub kind: &'static str,
+    pub message: String,
+    pub occurred_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl SwarmkitLaunchFailure {
+    fn from_error(err: &AutoLaunchError) -> Self {
+        let (path, kind, message) = match err {
+            AutoLaunchError::Read { path, source } => (path.clone(), "read", source.to_string()),
+            AutoLaunchError::Parse { path, message } => (path.clone(), "parse", message.clone()),
+            AutoLaunchError::Launch { path, message } => (path.clone(), "launch", message.clone()),
+            AutoLaunchError::TdfFeatureDisabled { path } => (
+                path.clone(),
+                "tdf_feature_disabled",
+                "rebuild arkavo-agui with --features tdf to auto-launch encrypted kits".to_string(),
+            ),
+            AutoLaunchError::TdfUnwrap { path, message } => {
+                (path.clone(), "tdf_unwrap", message.clone())
+            }
+        };
+        Self {
+            path,
+            kind,
+            message,
+            occurred_at: chrono::Utc::now(),
+        }
+    }
+
+    pub fn to_entry(&self) -> SwarmkitLaunchErrorEntry {
+        SwarmkitLaunchErrorEntry {
+            path: self.path.clone(),
+            kind: self.kind.to_string(),
+            message: self.message.clone(),
+            occurred_at: self.occurred_at.to_rfc3339(),
+        }
+    }
+}
 
 /// Holds every SwarmFlight currently active in this gateway process.
 #[derive(Default)]
 pub struct SwarmFlightRegistry {
     flights: RwLock<HashMap<Uuid, Arc<SwarmFlight>>>,
+    last_failure: RwLock<Option<SwarmkitLaunchFailure>>,
 }
 
 impl SwarmFlightRegistry {
@@ -48,6 +94,7 @@ impl SwarmFlightRegistry {
                     role_type: role.role_type().to_string(),
                     arp_doc: role.arp_document().clone(),
                     runtime: role.arp().clone(),
+                    bound_agent_did: role.bound_agent_did().map(str::to_string),
                 })
                 .await;
         }
@@ -68,6 +115,37 @@ impl SwarmFlightRegistry {
 
     pub async fn get(&self, flight_id: Uuid) -> Option<Arc<SwarmFlight>> {
         self.flights.read().await.get(&flight_id).cloned()
+    }
+
+    /// Record a boot-time auto-launch failure so the panel can surface it.
+    /// Called by [`auto_launch_from_environment`] on every error path.
+    pub async fn record_failure(&self, failure: SwarmkitLaunchFailure) {
+        *self.last_failure.write().await = Some(failure);
+    }
+
+    /// Drop the recorded failure (if any). Called when an auto-launch
+    /// retry succeeds — currently only on the next gateway boot, but the
+    /// helper is symmetric so a future retry button can use it too.
+    pub async fn clear_failure(&self) {
+        *self.last_failure.write().await = None;
+    }
+
+    /// Read the most-recent recorded failure, if any.
+    pub async fn last_failure(&self) -> Option<SwarmkitLaunchFailure> {
+        self.last_failure.read().await.clone()
+    }
+
+    /// Snapshot of all recorded launch errors for inclusion in the
+    /// `ArpStatusSnapshot.swarmkit_launch_errors` field consumed by the
+    /// panel. Returns an empty Vec in steady state.
+    pub async fn launch_errors_snapshot(&self) -> Vec<SwarmkitLaunchErrorEntry> {
+        self.last_failure
+            .read()
+            .await
+            .as_ref()
+            .map(SwarmkitLaunchFailure::to_entry)
+            .into_iter()
+            .collect()
     }
 }
 
@@ -92,6 +170,39 @@ pub enum AutoLaunchError {
     TdfUnwrap { path: String, message: String },
 }
 
+/// Build a `ResolverConfig` for boot-time auto-launch.
+///
+/// Reviewer M2: shipped example kits sign with a local dev key whose
+/// signer DID is not a resolvable `did:web` document. Using
+/// `VerifyMode::Required` here would dead-end the very first boot for
+/// every operator running an example kit. We default to
+/// `VerifyMode::Optional` (signatures parsed but not enforced) and emit
+/// a `tracing::warn` so operators see the trade-off, then opt back into
+/// `VerifyMode::Required` by setting `ARKAVO_SWARMKIT_VERIFY=required`
+/// once their signer DID is resolvable.
+fn auto_launch_resolver_config() -> ResolverConfig {
+    let env = std::env::var("ARKAVO_SWARMKIT_VERIFY")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let verify = match env.as_str() {
+        "required" | "strict" => VerifyMode::Required,
+        _ => {
+            tracing::warn!(
+                target: "arkavo.swarmkit",
+                "auto-launch using VerifyMode::Optional (signatures parsed, not enforced). \
+                 Set ARKAVO_SWARMKIT_VERIFY=required to enforce signature verification — \
+                 requires a resolvable did:web document for every signer."
+            );
+            VerifyMode::Optional
+        }
+    };
+    ResolverConfig {
+        verify,
+        ..ResolverConfig::default()
+    }
+}
+
 /// Read `ARKAVO_SWARMKIT_PATH`, parse the manifest, launch a flight, and
 /// register it with the gateway. Returns `Ok(None)` when the env var is
 /// unset (the common case); errors are non-fatal at the call site.
@@ -109,14 +220,25 @@ pub async fn auto_launch_from_environment(
         return Ok(None);
     };
     let path_buf = Path::new(&path).to_path_buf();
-    let flight = if is_tdf_path(&path_buf) {
-        launch_from_tdf_path(&path_buf).await?
+    let result: Result<SwarmFlight, AutoLaunchError> = if is_tdf_path(&path_buf) {
+        launch_from_tdf_path(&path_buf).await
     } else {
-        launch_from_path(&path_buf)?
+        launch_from_path(&path_buf)
     };
-    let flight_id = flight.flight_id();
-    registry.register(Arc::new(flight), arp_handler).await;
-    Ok(Some(flight_id))
+    match result {
+        Ok(flight) => {
+            let flight_id = flight.flight_id();
+            registry.register(Arc::new(flight), arp_handler).await;
+            registry.clear_failure().await;
+            Ok(Some(flight_id))
+        }
+        Err(err) => {
+            registry
+                .record_failure(SwarmkitLaunchFailure::from_error(&err))
+                .await;
+            Err(err)
+        }
+    }
 }
 
 /// Parse a plaintext manifest from disk and launch a flight against it.
@@ -127,7 +249,14 @@ pub fn launch_from_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
         source: e,
     })?;
     let manifest = parse_manifest(path, &raw)?;
-    SwarmFlight::launch(&manifest, LaunchOptions::default()).map_err(|e| AutoLaunchError::Launch {
+    SwarmFlight::launch(
+        &manifest,
+        LaunchOptions {
+            resolver_config: Some(auto_launch_resolver_config()),
+            ..LaunchOptions::default()
+        },
+    )
+    .map_err(|e| AutoLaunchError::Launch {
         path: path.display().to_string(),
         message: e.to_string(),
     })
@@ -151,7 +280,14 @@ pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunch
             path: path.display().to_string(),
             message: e.to_string(),
         })?;
-    SwarmFlight::launch(&manifest, LaunchOptions::default()).map_err(|e| AutoLaunchError::Launch {
+    SwarmFlight::launch(
+        &manifest,
+        LaunchOptions {
+            resolver_config: Some(auto_launch_resolver_config()),
+            ..LaunchOptions::default()
+        },
+    )
+    .map_err(|e| AutoLaunchError::Launch {
         path: path.display().to_string(),
         message: e.to_string(),
     })
@@ -169,12 +305,11 @@ pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunch
 
 /// `true` when the path's extension marks it as a TDF envelope. Matches
 /// either bare `.tdf` or the recommended `.swarmkit.tdf` double extension.
+///
+/// Re-exports the canonical helper from `arkavo-swarmkit-runtime` so the
+/// gateway and orchestrator agree on the recognition rule.
 pub fn is_tdf_path(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-        return false;
-    };
-    let lower = name.to_ascii_lowercase();
-    lower.ends_with(".tdf") || lower.ends_with(".swarmkit.tdf")
+    arkavo_swarmkit_runtime::is_tdf_path(path)
 }
 
 fn parse_manifest(path: &Path, raw: &str) -> Result<Manifest, AutoLaunchError> {
@@ -390,5 +525,98 @@ provenance:
 
         let err = launch_from_path(&path).unwrap_err();
         assert!(matches!(err, AutoLaunchError::Parse { .. }));
+    }
+
+    #[tokio::test]
+    async fn record_failure_persists_until_cleared() {
+        let registry = SwarmFlightRegistry::new();
+        let failure = SwarmkitLaunchFailure {
+            path: "/tmp/missing.swarmkit.yaml".into(),
+            kind: "read",
+            message: "no such file".into(),
+            occurred_at: chrono::Utc::now(),
+        };
+        registry.record_failure(failure.clone()).await;
+        let stored = registry.last_failure().await.expect("recorded");
+        assert_eq!(stored.path, failure.path);
+        assert_eq!(stored.kind, "read");
+
+        let entries = registry.launch_errors_snapshot().await;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "read");
+
+        registry.clear_failure().await;
+        assert!(registry.last_failure().await.is_none());
+        assert!(registry.launch_errors_snapshot().await.is_empty());
+    }
+
+    #[spec("SK-080")]
+    #[serial_test::serial(env_arkavo_swarmkit_path)]
+    #[tokio::test]
+    async fn auto_launch_records_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.swarmkit.yaml");
+        std::fs::write(&path, "not: [a, valid, manifest").unwrap();
+
+        let prev = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
+        // SAFETY: serial_test serializes any test in this binary that
+        // touches the same key, so set_var/remove_var calls do not race.
+        unsafe {
+            std::env::set_var("ARKAVO_SWARMKIT_PATH", &path);
+        }
+
+        let registry = SwarmFlightRegistry::new();
+        let handler = ArpHandler::new();
+        let result = auto_launch_from_environment(&registry, &handler).await;
+
+        // Restore env before any assert that might panic.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("ARKAVO_SWARMKIT_PATH", p),
+                None => std::env::remove_var("ARKAVO_SWARMKIT_PATH"),
+            }
+        }
+
+        assert!(matches!(result, Err(AutoLaunchError::Parse { .. })));
+        let recorded = registry.last_failure().await.expect("failure recorded");
+        assert_eq!(recorded.kind, "parse");
+        assert!(recorded.path.ends_with("bad.swarmkit.yaml"));
+    }
+
+    #[spec("SK-080")]
+    #[serial_test::serial(env_arkavo_swarmkit_path)]
+    #[tokio::test]
+    async fn auto_launch_clears_failure_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("good.swarmkit.yaml");
+        std::fs::write(&path, KIT).unwrap();
+
+        let registry = SwarmFlightRegistry::new();
+        registry
+            .record_failure(SwarmkitLaunchFailure {
+                path: "/tmp/old.yaml".into(),
+                kind: "read",
+                message: "stale".into(),
+                occurred_at: chrono::Utc::now(),
+            })
+            .await;
+
+        let prev = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
+        unsafe {
+            std::env::set_var("ARKAVO_SWARMKIT_PATH", &path);
+        }
+
+        let handler = ArpHandler::new();
+        let result = auto_launch_from_environment(&registry, &handler).await;
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("ARKAVO_SWARMKIT_PATH", p),
+                None => std::env::remove_var("ARKAVO_SWARMKIT_PATH"),
+            }
+        }
+
+        assert!(matches!(result, Ok(Some(_))));
+        assert!(registry.last_failure().await.is_none());
     }
 }

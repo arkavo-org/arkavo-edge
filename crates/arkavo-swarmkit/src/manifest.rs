@@ -128,4 +128,19 @@ mod tests {
         assert_eq!(obj.goal, "test goal");
         assert!(obj.success_criteria.is_empty());
     }
+
+    #[arkavo_test_macros::spec("SK-017")]
+    #[test]
+    fn custom_did_methods_parse_as_opaque() {
+        let json = r#"[
+            {"did": "did:web:arkavo.com", "name": "Web identity"},
+            {"did": "did:key:z6MkfTeBJZNQUNhNuRHmwCqKMs8oP1y3WX5z2Ai93iyz5XuC"},
+            {"did": "did:plc:abcdefghijklmnop"}
+        ]"#;
+        let authors: Vec<Author> = serde_json::from_str(json).unwrap();
+        assert_eq!(authors.len(), 3);
+        assert_eq!(authors[0].did, "did:web:arkavo.com");
+        assert!(authors[1].did.starts_with("did:key:"));
+        assert!(authors[2].did.starts_with("did:plc:"));
+    }
 }
