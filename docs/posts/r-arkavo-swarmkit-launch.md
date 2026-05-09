@@ -1,5 +1,21 @@
 # r/arkavo Reddit post: SwarmKit launch
 
+> **⚠️ DO NOT POST until the umbrella PR (arkavo-org/arkavo-edge#590) has merged to `main`.** The post body links to `https://github.com/arkavo-org/arkavo-edge/blob/main/...` paths. These resolve only after the launch lands on main. To verify before posting, run:
+>
+> ```bash
+> for url in \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/docs/SWARMKIT.md" \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/docs/swarmkit-launch-audit-2026-05-08.md" \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/examples/campaign-kit/README.md" \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/examples/code-review-kit/README.md" \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/examples/vrm-production-kit/README.md" \
+>   "https://github.com/arkavo-org/arkavo-edge/blob/main/examples/compliance-kit/README.md"; do
+>   code=$(curl -sI -o /dev/null -w "%{http_code}" -L "$url")
+>   echo "$code  $url"
+> done
+> ```
+> Every URL must return 200. If any return 404, the PR hasn't fully merged yet — wait.
+
 > **Suggested title** (pick one when posting):
 > - "SwarmKit ships: per-role TDF policies, signed skills, four runnable kits"
 > - "We just shipped SwarmKit — declarative multi-agent kits where roles enforce their own data boundary"

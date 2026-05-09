@@ -303,6 +303,16 @@ The current published spec drafts are `swarmkit-spec-draft-00` and `swarmkit-spe
 | `SpecVersionUnparseable` / `SpecVersionMismatch` | stable | §9.4. |
 | `InvalidTimestamp` | stable | |
 
+## ParseError variants
+
+The top-level error returned by `parse_json` and `parse_yaml`.
+
+| Variant | Tier | Note |
+|---|---|---|
+| `Json(serde_json::Error)` | stable | JSON deserialization failure surfaces verbatim. |
+| `Yaml(serde_yaml::Error)` | stable | YAML deserialization failure surfaces verbatim. |
+| `Validation(ValidationError)` | stable | Wraps any cross-block ValidationError raised by `validate()` after deserialization. |
+
 ## Versioning policy
 
 - A field's tier changes only via a CHANGELOG entry tied to a spec draft bump.
