@@ -107,8 +107,7 @@ impl AgentSpecializationBundle {
     /// unwrap.
     pub fn to_canonical_json(&self) -> Result<Vec<u8>, BundleError> {
         let value = serde_json::to_value(self)?;
-        let canonical = canonical_json(&value);
-        Ok(serde_json::to_vec(&canonical)?)
+        Ok(canonical_json(&value).into_bytes())
     }
 
     /// Inverse of [`to_canonical_json`].
@@ -118,25 +117,82 @@ impl AgentSpecializationBundle {
     }
 }
 
-/// Stable, sorted-key JSON canonicalization. Mirrors the manifest's
-/// canonical form — same algorithm so the same audit/sign machinery
-/// works on bundles too.
-fn canonical_json(value: &serde_json::Value) -> serde_json::Value {
+/// JCS (RFC 8785) canonicalization.
+///
+/// **Source-of-truth: `arkavo_swarmkit::canonical_json`.** This is a
+/// byte-for-byte copy of the writer there, kept in lockstep so bundle
+/// signing and `kit.id` computation produce identical canonical bytes
+/// for identical input. The parity is verified by the
+/// `parity_with_arkavo_swarmkit_canonical_json` test below — that test
+/// fails if the two implementations drift, which is the signal to
+/// re-sync this copy.
+///
+/// We inline rather than depend on `arkavo-swarmkit` directly: nine
+/// workspace crates depend on `arkavo-protocol`, and pulling
+/// `arkavo-swarmkit` in transitively would invert the natural
+/// layering (swarmkit sits above protocol). The previous
+/// implementation built on `serde_json::Map`'s `BTreeMap` backing for
+/// sort-on-insert and used `serde_json::to_vec` for output — both of
+/// which silently break if any workspace dep enables
+/// `serde_json/preserve_order`. The hand-written writer here is
+/// feature-flag-independent.
+fn canonical_json(value: &serde_json::Value) -> String {
+    let mut buf = String::new();
+    write_canonical(value, &mut buf);
+    buf
+}
+
+fn write_canonical(value: &serde_json::Value, out: &mut String) {
     match value {
+        serde_json::Value::Null => out.push_str("null"),
+        serde_json::Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        serde_json::Value::Number(n) => out.push_str(&n.to_string()),
+        serde_json::Value::String(s) => write_json_string(s, out),
+        serde_json::Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_canonical(item, out);
+            }
+            out.push(']');
+        }
         serde_json::Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            let mut out = serde_json::Map::with_capacity(map.len());
-            for k in keys {
-                out.insert(k.clone(), canonical_json(&map[k]));
+            keys.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            out.push('{');
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_json_string(k, out);
+                out.push(':');
+                write_canonical(&map[*k], out);
             }
-            serde_json::Value::Object(out)
+            out.push('}');
         }
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.iter().map(canonical_json).collect())
-        }
-        other => other.clone(),
     }
+}
+
+fn write_json_string(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 /// Verify that `expected_did` appears in `dissemination`.
@@ -437,5 +493,40 @@ mod tests {
         let err =
             verify_dissemination_includes(&[], "did:web:agent-7.arkavo.net").expect_err("empty");
         assert!(matches!(err, BundleError::DidNotPermitted { .. }));
+    }
+
+    /// Reviewer M-1: bundle canonicalization must be byte-identical to
+    /// `arkavo_swarmkit::canonical_json` (the production manifest
+    /// canonicalizer). Anything else makes the docstring claim a lie
+    /// and breaks cross-verification of bundle/manifest signatures.
+    /// Test fixtures cover every JCS edge case the writer handles.
+    #[test]
+    fn parity_with_arkavo_swarmkit_canonical_json() {
+        let cases = [
+            serde_json::json!(null),
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!(0),
+            serde_json::json!(-42),
+            serde_json::json!(3.14),
+            serde_json::json!(""),
+            serde_json::json!("plain"),
+            serde_json::json!("a\nb\tc\"d\\e"),
+            serde_json::json!("non-ascii: ümlaut, café, 漢字, 🦀"),
+            serde_json::json!("\u{0001}\u{001f}"),
+            serde_json::json!([]),
+            serde_json::json!({}),
+            serde_json::json!([1, "two", null, true, [3.0, {}]]),
+            serde_json::json!({"b": 1, "a": 2, "z": {"y": [9, 8], "x": null}}),
+            serde_json::json!({"slash": "a/b/c", "quote": "he said \"hi\""}),
+        ];
+        for v in &cases {
+            let ours = canonical_json(v);
+            let theirs = arkavo_swarmkit::canonical_json(v);
+            assert_eq!(
+                ours, theirs,
+                "canonicalization drift between arkavo-protocol and arkavo-swarmkit on input: {v}"
+            );
+        }
     }
 }

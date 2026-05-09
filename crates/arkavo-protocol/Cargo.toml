@@ -134,6 +134,10 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "testing"] }
+# Parity check: AgentSpecializationBundle::to_canonical_json must produce
+# byte-identical output to arkavo_swarmkit::canonical_json. Dev-dep only —
+# we don't want to invert the production-deps layering.
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 # For benchmarks
 criterion = { workspace = true }
 

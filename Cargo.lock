@@ -1525,6 +1525,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-router",
  "arkavo-server",
+ "arkavo-swarmkit",
  "arkavo-tdf",
  "arkavo-test-macros",
  "arkavo-validation",
