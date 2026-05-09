@@ -14,12 +14,17 @@
 
 pub mod derive;
 pub mod flight;
+pub mod path_dispatch;
 pub mod skill_resolver;
 #[cfg(feature = "tdf")]
 pub mod tdf;
 
 pub use derive::{DeriveOptions, derive_arp_for_role};
-pub use flight::{FlightError, LaunchError, LaunchOptions, RoleRuntime, SwarmFlight};
+pub use flight::{
+    DispatchHandle, FlightError, LaunchError, LaunchOptions, RoleRuntime, RoleTaskEnvelope,
+    RoleTaskTransport, SwarmFlight,
+};
+pub use path_dispatch::{KitPathKind, classify_kit_path, is_tdf_path};
 pub use skill_resolver::{
     DidWebPublicKeyResolver, MockPublicKeyResolver, PublicKeyResolver, ResolveError, ResolvedSkill,
     ResolverConfig, SignedSkill, VerifyMode, resolve_skill, sign_skill_content,

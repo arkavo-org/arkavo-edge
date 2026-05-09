@@ -95,7 +95,7 @@ arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 
 # TDF support for KAS capability (optional)
-arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a", "opentdf"], optional = true }
 
 # Additional utilities for registration
 rand = { workspace = true }
@@ -133,6 +133,7 @@ tempfile = { workspace = true }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "testing"] }
 # For benchmarks
 criterion = { workspace = true }
 

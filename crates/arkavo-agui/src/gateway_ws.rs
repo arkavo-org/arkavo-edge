@@ -345,7 +345,8 @@ async fn dispatch_event(
             .await?;
         }
         AgUiEvent::RequestArpStatus => {
-            let snapshot = arp_handler.snapshot().await;
+            let mut snapshot = arp_handler.snapshot().await;
+            snapshot.swarmkit_launch_errors = swarm_flights.launch_errors_snapshot().await;
             tx.send(AgUiEvent::ArpStatusUpdate {
                 snapshot,
                 event_id: uuid::Uuid::new_v4().to_string(),
@@ -413,7 +414,8 @@ async fn dispatch_event(
             // Also push a fresh ArpStatusUpdate so any panel that has the
             // stopped flight selected drops it on the same render cycle
             // instead of waiting for the next 5s poll.
-            let snapshot = arp_handler.snapshot().await;
+            let mut snapshot = arp_handler.snapshot().await;
+            snapshot.swarmkit_launch_errors = swarm_flights.launch_errors_snapshot().await;
             tx.send(AgUiEvent::ArpStatusUpdate {
                 snapshot,
                 event_id: uuid::Uuid::new_v4().to_string(),

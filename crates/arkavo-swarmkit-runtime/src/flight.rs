@@ -7,6 +7,8 @@
 //! isolated.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::skill_resolver;
@@ -17,6 +19,35 @@ use arkavo_swarmkit::Manifest;
 use uuid::Uuid;
 
 use crate::derive::{DeriveOptions, derive_arp_for_role};
+
+/// Per-role task envelope handed to a [`RoleTaskTransport`] for delivery.
+#[derive(Debug, Clone)]
+pub struct RoleTaskEnvelope {
+    pub flight_id: Uuid,
+    pub role_id: String,
+    pub role_type: String,
+    pub agent_did: String,
+    pub task: String,
+}
+
+/// Pluggable transport for sending the first per-role task to its bound
+/// agent. Implementations bridge to A2A in production and capture
+/// envelopes in tests.
+pub trait RoleTaskTransport: Send + Sync {
+    fn dispatch<'a>(
+        &'a self,
+        envelope: RoleTaskEnvelope,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+}
+
+/// Receipt for one dispatched first-task envelope. Returned by
+/// [`SwarmFlight::dispatch_initial_tasks`] so callers can correlate
+/// transport sends with manifest roles.
+#[derive(Debug, Clone)]
+pub struct DispatchHandle {
+    pub role_id: String,
+    pub agent_did: String,
+}
 
 /// Errors that can occur while *launching* a SwarmFlight. These reflect
 /// validation against the manifest at flight construction time — once a
@@ -44,6 +75,10 @@ pub enum LaunchError {
 pub enum FlightError {
     #[error("role_id {0:?} is not a role in this flight")]
     UnknownRole(String),
+    #[error("dispatching first task for role {role_id:?} via transport: {message}")]
+    DispatchFailed { role_id: String, message: String },
+    #[error("role {role_id:?} has no bound agent — cannot dispatch")]
+    NoBoundAgent { role_id: String },
 }
 
 /// Options applied at SwarmFlight launch time.
@@ -62,6 +97,11 @@ pub struct LaunchOptions {
     /// `None` (the default) skips resolution; `RoleRuntime::resolved_skills()`
     /// returns an empty slice in that case.
     pub resolver_config: Option<skill_resolver::ResolverConfig>,
+    /// role_id → bound agent DID. Set by the orchestrator after
+    /// capability matching. Roles not listed have no bound agent and
+    /// `dispatch_initial_tasks` will skip them. Surfaced via
+    /// [`RoleRuntime::bound_agent_did`].
+    pub role_agent_bindings: HashMap<String, String>,
 }
 
 /// Per-role runtime: the ARP runtime plus minimal manifest metadata so
@@ -74,6 +114,15 @@ pub struct RoleRuntime {
     arp: Arc<ArpRuntime>,
     arp_document: ArpDocument,
     resolved_skills: Vec<skill_resolver::ResolvedSkill>,
+    /// DID of the mesh agent the orchestrator assigned to this role.
+    /// `None` for in-process / synthetic flights with no real agent
+    /// behind each role.
+    bound_agent_did: Option<String>,
+    /// First task this role should perform per the manifest's
+    /// coordination topology. Populated at launch from
+    /// `objective.goal` + the role's role_type. Used by
+    /// [`SwarmFlight::dispatch_initial_tasks`].
+    initial_task: String,
 }
 
 impl RoleRuntime {
@@ -100,6 +149,18 @@ impl RoleRuntime {
     /// was `None` (resolution skipped).
     pub fn resolved_skills(&self) -> &[skill_resolver::ResolvedSkill] {
         &self.resolved_skills
+    }
+
+    /// DID of the mesh agent assigned to this role, or `None` for an
+    /// unbound (in-process / synthetic) flight.
+    pub fn bound_agent_did(&self) -> Option<&str> {
+        self.bound_agent_did.as_deref()
+    }
+
+    /// First task description for this role. Used by
+    /// [`SwarmFlight::dispatch_initial_tasks`].
+    pub fn initial_task(&self) -> &str {
+        &self.initial_task
     }
 }
 
@@ -181,6 +242,11 @@ impl SwarmFlight {
                     )
                 });
             let arp = Arc::new(ArpRuntime::from_document(&arp_doc));
+            let initial_task = format!(
+                "[{role_type}] {goal}",
+                role_type = role.role_type,
+                goal = manifest.objective.goal,
+            );
             role_order.push(role.id.clone());
             roles.insert(
                 role.id.clone(),
@@ -190,6 +256,8 @@ impl SwarmFlight {
                     arp,
                     arp_document: arp_doc,
                     resolved_skills: resolved_per_role.get(&role.id).cloned().unwrap_or_default(),
+                    bound_agent_did: options.role_agent_bindings.get(&role.id).cloned(),
+                    initial_task,
                 },
             );
         }
@@ -228,7 +296,9 @@ impl SwarmFlight {
 
     /// Record a tool outcome against the given role's ARP runtime. The flight
     /// id and role id are propagated into the DecisionTrace via context so
-    /// the per-role audit trail carries flight provenance.
+    /// the per-role audit trail carries flight provenance. When the role
+    /// has a bound agent DID, that DID tags the trace entry; otherwise the
+    /// role_id is used (preserving prior behavior for unbound flights).
     pub async fn record_tool_outcome(
         &self,
         role_id: &str,
@@ -240,17 +310,62 @@ impl SwarmFlight {
             .roles
             .get(role_id)
             .ok_or_else(|| FlightError::UnknownRole(role_id.to_string()))?;
+        let agent_for_trace = role.bound_agent_did.as_deref().unwrap_or(role_id);
         let ctx = ToolOutcomeContext::new()
             .with_task_id(self.flight_id)
-            .with_agent_id(role_id);
+            .with_agent_id(agent_for_trace);
         role.arp
             .record_tool_outcome_with(tool_name, success, quality, &ctx)
             .await;
         Ok(())
     }
+
+    /// Dispatch the first task to every bound role via the supplied
+    /// transport. Roles without a bound agent are silently skipped and
+    /// excluded from the returned handles. A transport error for one
+    /// role short-circuits the whole call so the orchestrator can react
+    /// to partial-dispatch states cleanly.
+    ///
+    /// `transport` is bound as `?Sized` so callers can pass either a
+    /// concrete type or `&dyn RoleTaskTransport` without an extra wrap.
+    pub async fn dispatch_initial_tasks<T: RoleTaskTransport + ?Sized>(
+        &self,
+        transport: &T,
+    ) -> Result<Vec<DispatchHandle>, FlightError> {
+        let mut handles = Vec::new();
+        for role_id in &self.role_order {
+            let role = match self.roles.get(role_id) {
+                Some(r) => r,
+                None => continue,
+            };
+            let Some(did) = role.bound_agent_did.clone() else {
+                continue;
+            };
+            let envelope = RoleTaskEnvelope {
+                flight_id: self.flight_id,
+                role_id: role.role_id.clone(),
+                role_type: role.role_type.clone(),
+                agent_did: did.clone(),
+                task: role.initial_task.clone(),
+            };
+            transport
+                .dispatch(envelope)
+                .await
+                .map_err(|message| FlightError::DispatchFailed {
+                    role_id: role.role_id.clone(),
+                    message,
+                })?;
+            handles.push(DispatchHandle {
+                role_id: role.role_id.clone(),
+                agent_did: did,
+            });
+        }
+        Ok(handles)
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use arkavo_swarmkit::parse_yaml;
@@ -367,6 +482,156 @@ provenance:
         // can tell construction-time misconfiguration apart from runtime
         // misuse.
         assert!(matches!(err, FlightError::UnknownRole(_)));
+    }
+
+    #[derive(Default)]
+    struct CapturingTransport {
+        sent: tokio::sync::Mutex<Vec<RoleTaskEnvelope>>,
+        fail_role: Option<String>,
+    }
+
+    impl RoleTaskTransport for CapturingTransport {
+        fn dispatch<'a>(
+            &'a self,
+            envelope: RoleTaskEnvelope,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+            Box::pin(async move {
+                if self
+                    .fail_role
+                    .as_deref()
+                    .is_some_and(|r| r == envelope.role_id)
+                {
+                    return Err(format!("simulated failure for {}", envelope.role_id));
+                }
+                self.sent.lock().await.push(envelope);
+                Ok(())
+            })
+        }
+    }
+
+    #[spec("SK-070")]
+    #[tokio::test]
+    async fn launch_with_role_agent_bindings_records_dids() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        bindings.insert("beta".to_string(), "did:web:agent-b.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            f.role("alpha").unwrap().bound_agent_did(),
+            Some("did:web:agent-a.arkavo.net")
+        );
+        assert_eq!(
+            f.role("beta").unwrap().bound_agent_did(),
+            Some("did:web:agent-b.arkavo.net")
+        );
+    }
+
+    #[spec("SK-073")]
+    #[tokio::test]
+    async fn dispatch_initial_tasks_calls_transport_per_bound_role() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        bindings.insert("beta".to_string(), "did:web:agent-b.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        let transport = CapturingTransport::default();
+        let handles = f.dispatch_initial_tasks(&transport).await.unwrap();
+        assert_eq!(handles.len(), 2);
+        let sent = transport.sent.lock().await;
+        assert_eq!(sent.len(), 2);
+        // Manifest order preserved.
+        assert_eq!(sent[0].role_id, "alpha");
+        assert_eq!(sent[0].agent_did, "did:web:agent-a.arkavo.net");
+        assert!(sent[0].task.contains("two roles"));
+        assert_eq!(sent[1].role_id, "beta");
+        assert_eq!(sent[1].agent_did, "did:web:agent-b.arkavo.net");
+    }
+
+    #[tokio::test]
+    async fn dispatch_initial_tasks_skips_unbound_roles() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        let transport = CapturingTransport::default();
+        let handles = f.dispatch_initial_tasks(&transport).await.unwrap();
+        assert_eq!(handles.len(), 1);
+        assert_eq!(handles[0].role_id, "alpha");
+        let sent = transport.sent.lock().await;
+        assert_eq!(sent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_initial_tasks_propagates_transport_failure() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        bindings.insert("beta".to_string(), "did:web:agent-b.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        let transport = CapturingTransport {
+            fail_role: Some("alpha".to_string()),
+            ..Default::default()
+        };
+        let err = f.dispatch_initial_tasks(&transport).await.unwrap_err();
+        match err {
+            FlightError::DispatchFailed { role_id, .. } => assert_eq!(role_id, "alpha"),
+            other => panic!("wrong error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn record_tool_outcome_uses_bound_did_when_present() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        f.record_tool_outcome("alpha", "tool_x", true, 0.9)
+            .await
+            .unwrap();
+        let entries = f.role("alpha").unwrap().arp().decision_trace().snapshot();
+        assert_eq!(entries[0].agent_id, "did:web:agent-a.arkavo.net");
+        // Unbound role still uses role_id for backward compatibility.
+        f.record_tool_outcome("beta", "tool_y", true, 0.9)
+            .await
+            .unwrap();
+        let beta_entries = f.role("beta").unwrap().arp().decision_trace().snapshot();
+        assert_eq!(beta_entries[0].agent_id, "beta");
     }
 
     #[spec("SK-014")]

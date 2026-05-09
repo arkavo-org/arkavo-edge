@@ -571,6 +571,91 @@ scenarios:
 
   # --- Operator controls ---------------------------------------------------
 
+  - id: SK-070
+    name: orchestrator binds roles to mesh agents by capability matching
+    criticality: high
+    given:
+      - A pool of identity-only agents has registered with arkavo-protocol::AgentRegistry
+      - Each agent advertises capability strings that match either RoleSpec.skills or RoleSpec.mcp_tools[].server
+      - A SwarmKit manifest with N roles is available on disk (plain YAML/JSON)
+    when: orchestrator invokes apply_kit
+    then:
+      - Each role is matched to one agent via RoleCapabilityMatcher::match_role using AgentRegistry::find_best_agent
+      - The returned RoleBinding records (role_id, role_type, agent_did, rationale)
+      - When no agent in the pool covers any required capability for some role, ApplyKitError::RoleUncoverable is returned naming the unmatched role
+    refs:
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:155-205
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:218-260
+    changed: "2026-05-02"
+
+  - id: SK-071
+    name: per-role specialization bundle is TDF-wrapped with a policy bound to the recipient agent's DID
+    criticality: high
+    given:
+      - apply_kit has matched all roles to agents
+      - The orchestrator has a BundleEncryptor wired to a TDF service
+    when: apply_kit constructs and ships each per-role AgentSpecializationBundle
+    then:
+      - For each role, a bundle is built with persona, api_tokens, arp_overlay, role_context populated from the manifest and TokenVault
+      - The bundle is wrapped via BundleEncryptor::wrap with the assigned agent's DID
+      - The receiving side's verify_dissemination_includes rejects the wrap when a different DID attempts unwrap
+    refs:
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:262-320
+      - crates/arkavo-protocol/src/agent_specialization.rs:123-141
+      - crates/arkavo-protocol/src/agent_specialization.rs:162-176
+    changed: "2026-05-02"
+
+  - id: SK-072
+    name: agent.specialize unwraps the bundle and applies persona, tokens, and role context
+    criticality: high
+    given:
+      - An agent has registered its DID and is listening on A2A
+      - The orchestrator has shipped a TDF-wrapped AgentSpecializationBundle via the agent.specialize RPC
+    when: handle_agent_specialize processes the encrypted_bundle
+    then:
+      - encrypted_bundle is base64-decoded and the BundleDecryptor recovers the bundle
+      - AgentMetadata.purpose, .model, and .api_keys are replaced from bundle.persona / bundle.api_tokens
+      - The bundle's RoleContext is stored in RoleSpecializationStore so subsequent tool outcomes can be tagged with flight_id + role_id
+      - When the bundle's policy dissemination list does not include this agent's DID, the handler returns -32603 and no metadata changes are applied
+    refs:
+      - crates/arkavo-server/src/server/handlers/specialization.rs:65-185
+      - crates/arkavo-server/src/server/config_helpers.rs:8-30
+    changed: "2026-05-02"
+
+  - id: SK-073
+    name: orchestrator launches the SwarmFlight with role_agent_bindings and dispatches the first per-role task
+    criticality: high
+    given:
+      - All per-role bundles have been shipped successfully
+      - The orchestrator has a RoleTaskTransport wired to A2A
+    when: apply_kit calls SwarmFlight::launch and dispatch_initial_tasks
+    then:
+      - LaunchOptions.role_agent_bindings is populated from the assignment plan
+      - Each RoleRuntime exposes the bound DID via bound_agent_did()
+      - dispatch_initial_tasks calls the transport once per bound role with a RoleTaskEnvelope carrying flight_id, role_id, role_type, agent_did, and the role's first task
+      - record_tool_outcome thereafter tags DecisionTrace entries with the bound agent DID rather than the bare role_id
+    refs:
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:322-352
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:280-325
+      - crates/arkavo-swarmkit-runtime/src/flight.rs:235-260
+    changed: "2026-05-02"
+
+  - id: SK-080
+    name: SwarmKit auto-launch failures are captured and surfaced through ArpStatusSnapshot
+    criticality: medium
+    given:
+      - The gateway is configured with ARKAVO_SWARMKIT_PATH pointing at a missing or malformed manifest
+    when: gateway boot calls auto_launch_from_environment
+    then:
+      - The error is recorded into SwarmFlightRegistry::record_failure with the matching kind discriminator
+      - On the next requestArpStatus, ArpStatusSnapshot.swarmkit_launch_errors carries one entry with path, kind, message, and occurred_at
+      - A subsequent successful auto_launch_from_environment clears the recorded failure
+    refs:
+      - crates/arkavo-agui/src/swarm_flight_registry.rs:75-180
+      - crates/arkavo-agui/src/gateway_ws.rs:347-355
+      - crates/arkavo-agui/static/js/panels/arp.js:80-95
+    changed: "2026-05-02"
+
   - id: SK-040
     name: requestStopFlight deregisters the flight and pushes a fresh snapshot
     criticality: high
