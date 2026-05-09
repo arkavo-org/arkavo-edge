@@ -45,7 +45,23 @@ See the [migration guide](docs/openclaw-migration-guide.md) for a full compariso
 - **Fast:** Low-latency agent-to-agent communication. Run `cargo bench -p arkavo-protocol --bench a2a_latency` to measure.
 - **Visual:** See live agent communication flows in real-time.
 
+## SwarmKit
+
+Declarative multi-agent kits where each role declares its own TDF Attribute Release Policy. The orchestrator constructs role-scoped policies before any data reaches the role — push the trust boundary inward.
+
+```bash
+# Validate the compliance kit (per-role TDF policies in action)
+cargo run -p arkavo-swarmkit --example validate_kit -- \
+  examples/compliance-kit/compliance-kit.swarmkit.yaml
+
+# Or launch any kit at gateway boot
+ARKAVO_SWARMKIT_PATH=examples/code-review-kit/code-review-kit.swarmkit.yaml arkavo
+```
+
+Four shipped kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `compliance-kit`. Full guide: [docs/SWARMKIT.md](docs/SWARMKIT.md).
+
 ## Features
+- **SwarmKit** - Declarative multi-agent kits with per-role TDF attribute-release policies. Four shipped examples covering marketing, code review, creative, and regulated domains. See [docs/SWARMKIT.md](docs/SWARMKIT.md).
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
 - **Ministral 3 support** - Local edge models (3B/8B/14B) with vision via llama.cpp
 - Cost-aware model selection

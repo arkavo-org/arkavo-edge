@@ -17,6 +17,9 @@ invariants:
   - ArpHandler stores flight roles under synthetic agent_id "flight:<flight_id>:<role_id>" so multi-flight role_id collisions are impossible
   - FlightContext on AgentArpStatus carries kit_id, kit_name, role_id, role_type for the AG-UI panel
   - ARKAVO_SWARMKIT_PATH auto-launch failures are logged and non-fatal — a misconfigured kit MUST NOT prevent gateway boot
+  - Skill resolution is eager at SwarmFlight::launch when LaunchOptions.resolver_config is Some
+  - Inline skill payloads are deserialized into typed SkillContent before signature verification
+  - ed25519 signature is computed over BLAKE3 of JCS-canonical SkillContent bytes (matches kit.id canonicalization)
 
 scenarios:
   # --- Manifest layer (arkavo-swarmkit) -----------------------------------
@@ -674,3 +677,122 @@ scenarios:
         expected: FlightStopped with error=Some(...) explaining the parse failure; no deregister call
       - condition: flight_id is a valid UUID but no flight is registered with it
         expected: FlightStopped with error=None (deregister is idempotent)
+
+  # --- Extensibility conformance (Phase 5) -------------------------------
+
+  - id: SK-007
+    name: Producer-defined evaluation rubric dimension names accepted
+    criticality: medium
+    given:
+      - Manifest with evaluation.rubric.dimensions using domain-specific names (e.g. spec_compliance, prompt_fidelity, accessibility)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom dimension names
+      - validate() does not reject based on dimension name vocabulary
+      - Sum-of-weights check (SK-005) still applies
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_rubric_dimension_names_accepted)
+    changed: "2026-05-08"
+
+  - id: SK-008
+    name: Producer-defined TDF attribute-release attribute URLs accepted
+    criticality: medium
+    given:
+      - Role with tdf_attribute_release_policy.attributes containing custom FQN/value strings (e.g. https://attr.arkavo.com/audit_authority/true)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom attribute strings
+      - The custom strings travel through unchanged in RoleSpec.tdf_attribute_release_policy.attributes
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_tdf_attribute_strings_accepted)
+    changed: "2026-05-08"
+
+  - id: SK-009
+    name: Producer-defined data_classifications accepted
+    criticality: medium
+    given:
+      - constraints.data_classifications containing producer-defined strings (e.g. restricted, tactical)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom classification strings
+      - validate() does not reject based on classification vocabulary
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_data_classifications_accepted)
+    changed: "2026-05-08"
+
+  - id: SK-016
+    name: Producer-defined MCP tool allowlist strings accepted
+    criticality: medium
+    given:
+      - RoleSpec with mcp_tools[].tools containing producer-defined tool names
+    when: parse_yaml + serialization round-trip
+    then:
+      - Tool names deserialize as Vec<String> without coercion
+      - Round-trip through serde_json preserves every string verbatim
+    refs:
+      - crates/arkavo-swarmkit/src/role.rs (custom_mcp_tool_allowlist_round_trips)
+    changed: "2026-05-08"
+
+  - id: SK-017
+    name: Producer-defined kit.authors[].did accepted regardless of method
+    criticality: medium
+    given:
+      - kit.authors[].did containing did:web:..., did:key:..., or did:plc:... strings
+    when: parse_yaml called
+    then:
+      - All DID method strings deserialize as opaque strings without coercion or validation
+      - Method-level resolution is aspirational (§9.3-MUST-1) — only parsing is wired
+    refs:
+      - crates/arkavo-swarmkit/src/manifest.rs (custom_did_methods_parse_as_opaque)
+    changed: "2026-05-08"
+
+  # --- Skill resolver (slice 6) -------------------------------------------
+  #
+  # Note: originally allocated SK-070..072 in Phase 2; renumbered to
+  # SK-090..092 in commit resolving reviewer M1. SK-070..072 were already
+  # claimed by orchestrator-apply scenarios (lines 574..608) via the
+  # umbrella branch, and SK-080 was claimed by the auto-launch-failures
+  # scenario (line 643). SK-090..092 sits cleanly outside both ranges.
+
+  - id: SK-090
+    name: Inline skill round-trips through sign → resolve → verify
+    criticality: critical
+    given:
+      - SkillContent serialized as JSON in Skill.payload
+      - Skill.signature is base64url(ed25519 over canonical bytes) using a known signing key
+      - Skill.signed_by is the DID whose pubkey the resolver returns
+    when: resolve_skill called with VerifyMode::Required
+    then:
+      - ResolvedSkill returned with content equal to the input
+      - verified is true
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t1_inline_skill_round_trip)
+    changed: "2026-05-08"
+
+  - id: SK-091
+    name: Tampered payload fails verification with SignatureInvalid
+    criticality: critical
+    given:
+      - A signed SkillContent
+      - A modified copy of the content with the same signature
+    when: resolve_skill called with VerifyMode::Required
+    then:
+      - ResolveError::SignatureInvalid returned
+      - signer_did field carries the claimed signer
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t2_tampered_payload_fails_verify)
+    changed: "2026-05-08"
+
+  - id: SK-092
+    name: Registry cache hit resolves; miss returns RegistryMiss
+    criticality: high
+    given:
+      - A registry-cache directory with a <blake3>.skill.json fixture
+      - Skill.source = registry, signature + signed_by declared in manifest
+    when: resolve_skill called
+    then:
+      - On hit, ResolvedSkill returned with verified=true
+      - On miss (id not in cache), ResolveError::RegistryMiss returned with cache_path
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)
+    changed: "2026-05-08"

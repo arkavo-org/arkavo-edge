@@ -31,10 +31,54 @@ cargo run -p arkavo-swarmkit --example validate_kit -- \
 
 The example binary parses, validates cross-block invariants (per spec §4.6, §5.1, §10.1), and computes the BLAKE3 `kit.id` from the canonical-form manifest. The declared `kit.id` in the YAML is the result of that computation; any edit to the manifest will require recomputing the id (or temporarily setting it to `""` to skip the §9.1 hash check during authoring).
 
+## Skills
+
+The three skills are inline-signed with `did:web:arkavo.com`. The
+deterministic dev signing key (`[7u8; 32]`) is for reproducibility —
+producers replace it with their own.
+
+To regenerate signatures when content changes:
+
+```bash
+cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills
+```
+
+Edit the YAML's `signature` and `signed_by` fields with the output, then
+recompute `kit.id`:
+
+```bash
+cargo run -p arkavo-swarmkit --example validate_kit -- \
+  examples/campaign-kit/campaign-kit.swarmkit.yaml
+```
+
+Set `kit.id` in the YAML to the computed value.
+
+## Skill signature verification at gateway boot
+
+Skills in this kit are signed (ed25519 over BLAKE3 of the JCS-canonical
+`SkillContent`) using the local dev key emitted by
+`sign_campaign_skills`. That signer DID is not a published `did:web`
+document, so the production resolver (`DidWebPublicKeyResolver`) cannot
+fetch its public key.
+
+To avoid dead-ending the first boot, gateway auto-launch via
+`ARKAVO_SWARMKIT_PATH` defaults to `VerifyMode::Optional`: signatures
+are parsed and surfaced on `ResolvedSkill`, but a missing or
+unresolvable signer does not fail the launch. A `tracing::warn!` line
+fires on boot so the trade-off is visible.
+
+To enforce verification:
+
+1. Replace the dev signer with one whose DID is a resolvable `did:web`
+   document (re-run `sign_campaign_skills` with your own key, then paste
+   the new `signature` and `signed_by` into the YAML).
+2. Set `ARKAVO_SWARMKIT_VERIFY=required` in the gateway environment.
+
+Code paths that bypass the gateway (custom `LaunchOptions`) keep
+`VerifyMode::Required` as the explicit default.
+
 ## Out of scope for this MVP
 
-- TDF encryption envelope and per-role attribute release policies — declared in the manifest but not yet enforced by an orchestrator.
 - A2A JSON-RPC delegation envelope — defined in spec §7.2 but not yet wired.
 - Creator UI / approval screen — lives in the Arkavo Creator codebase.
-
-These will be addressed in follow-up PRs once the SwarmKit runtime crate is added.
+- `source: tdf-ref` skills — Phase 2 supports `inline` and `registry` only.

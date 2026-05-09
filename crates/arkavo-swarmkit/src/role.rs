@@ -219,6 +219,16 @@ pub struct Skill {
     pub source: SkillSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
+    /// Base64url(ed25519 signature over BLAKE3 digest of JCS-canonical
+    /// SkillContent bytes). Optional at the parser level; the runtime
+    /// resolver enforces presence per `VerifyMode`. See
+    /// `arkavo_swarmkit_runtime::skill_resolver::sign_skill_content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// DID of the signer. Resolver fetches the public key via the
+    /// configured `PublicKeyResolver` (Phase 2: did:web only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -299,5 +309,25 @@ mod tests {
     fn arp_rule_serializes_camel_case() {
         let r = ArpRule::AllOf;
         assert_eq!(serde_json::to_string(&r).unwrap(), "\"allOf\"");
+    }
+
+    #[spec("SK-016")]
+    #[test]
+    fn custom_mcp_tool_allowlist_round_trips() {
+        let json = r#"{
+            "server": "https://mcp.example.com",
+            "tools": [
+                "mcp__custom__do_thing",
+                "mcp__domain_specific__action",
+                "another.tool.name"
+            ],
+            "auth": "delegated"
+        }"#;
+        let grant: McpToolGrant = serde_json::from_str(json).unwrap();
+        assert_eq!(grant.tools.len(), 3);
+        assert_eq!(grant.tools[0], "mcp__custom__do_thing");
+        let serialized = serde_json::to_string(&grant).unwrap();
+        let round_tripped: McpToolGrant = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(round_tripped.tools, grant.tools);
     }
 }

@@ -15,6 +15,7 @@
 pub mod derive;
 pub mod flight;
 pub mod path_dispatch;
+pub mod skill_resolver;
 #[cfg(feature = "tdf")]
 pub mod tdf;
 
@@ -24,6 +25,10 @@ pub use flight::{
     RoleTaskTransport, SwarmFlight,
 };
 pub use path_dispatch::{KitPathKind, classify_kit_path, is_tdf_path};
+pub use skill_resolver::{
+    DidWebPublicKeyResolver, MockPublicKeyResolver, PublicKeyResolver, ResolveError, ResolvedSkill,
+    ResolverConfig, SignedSkill, VerifyMode, resolve_skill, sign_skill_content,
+};
 
 #[cfg(feature = "tdf")]
 pub use tdf::{
