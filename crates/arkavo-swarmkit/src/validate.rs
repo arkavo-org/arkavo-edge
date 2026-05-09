@@ -522,4 +522,17 @@ mod tests {
         assert_eq!(attrs.len(), 4);
         assert!(attrs.iter().any(|a| a.ends_with("/audit_authority/true")));
     }
+
+    #[spec("SK-009")]
+    #[test]
+    fn custom_data_classifications_accepted() {
+        let mut m = minimal_manifest();
+        m.constraints.data_classifications = vec![
+            "restricted".into(),
+            "tactical".into(),
+            "domain-specific".into(),
+        ];
+        validate(&m).expect("custom data_classifications should validate");
+        assert_eq!(m.constraints.data_classifications.len(), 3);
+    }
 }

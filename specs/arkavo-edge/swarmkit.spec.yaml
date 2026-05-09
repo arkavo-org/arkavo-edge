@@ -622,6 +622,19 @@ scenarios:
       - crates/arkavo-swarmkit/src/validate.rs (custom_tdf_attribute_strings_accepted)
     changed: "2026-05-08"
 
+  - id: SK-009
+    name: Producer-defined data_classifications accepted
+    criticality: medium
+    given:
+      - constraints.data_classifications containing producer-defined strings (e.g. restricted, tactical)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom classification strings
+      - validate() does not reject based on classification vocabulary
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_data_classifications_accepted)
+    changed: "2026-05-08"
+
   # --- Skill resolver (slice 6) -------------------------------------------
 
   - id: SK-070
