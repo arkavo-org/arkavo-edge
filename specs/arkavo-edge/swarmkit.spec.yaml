@@ -609,6 +609,19 @@ scenarios:
       - crates/arkavo-swarmkit/src/validate.rs (custom_rubric_dimension_names_accepted)
     changed: "2026-05-08"
 
+  - id: SK-008
+    name: Producer-defined TDF attribute-release attribute URLs accepted
+    criticality: medium
+    given:
+      - Role with tdf_attribute_release_policy.attributes containing custom FQN/value strings (e.g. https://attr.arkavo.com/audit_authority/true)
+    when: parse_yaml + validate called
+    then:
+      - Manifest parses successfully with custom attribute strings
+      - The custom strings travel through unchanged in RoleSpec.tdf_attribute_release_policy.attributes
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs (custom_tdf_attribute_strings_accepted)
+    changed: "2026-05-08"
+
   # --- Skill resolver (slice 6) -------------------------------------------
 
   - id: SK-070

@@ -499,4 +499,27 @@ mod tests {
         });
         validate(&m).expect("custom dimension names should validate");
     }
+
+    #[spec("SK-008")]
+    #[test]
+    fn custom_tdf_attribute_strings_accepted() {
+        let mut m = minimal_manifest();
+        m.roles[0].tdf_attribute_release_policy = Some(TdfAttributeReleasePolicy {
+            attributes: vec![
+                "https://attr.arkavo.com/role/auditor".into(),
+                "https://attr.arkavo.com/clearance/restricted".into(),
+                "https://attr.arkavo.com/jurisdiction/us-ca".into(),
+                "https://attr.arkavo.com/audit_authority/true".into(),
+            ],
+            rule: ArpRule::AllOf,
+        });
+        validate(&m).expect("custom attribute strings should validate");
+        let attrs = &m.roles[0]
+            .tdf_attribute_release_policy
+            .as_ref()
+            .unwrap()
+            .attributes;
+        assert_eq!(attrs.len(), 4);
+        assert!(attrs.iter().any(|a| a.ends_with("/audit_authority/true")));
+    }
 }
