@@ -88,7 +88,7 @@ This isn't a label system. Domain-specific role types travel through the manifes
 | Manifest parser + cross-block validation | wired (SK-001..006) |
 | Per-role ARP runtime construction at launch | wired (SK-010..015) |
 | Per-role TDF attribute-release policies | wired (§6.4 / SK-053..054) |
-| Skill signature verification (ed25519 over BLAKE3 canonical) | wired (SK-070..072) |
+| Skill signature verification (ed25519 over BLAKE3 canonical) | wired (SK-090..092) |
 | TDF envelope wrap/unwrap + KAS-gated decrypt | wired (SK-050..062) |
 | `ARKAVO_SWARMKIT_PATH` auto-launch | wired (SK-022, SK-061..062) |
 | AG-UI panel: live SwarmFlight roles | wired (SK-020..033) |

@@ -14,9 +14,9 @@ This is the Phase 2 closeout audit. **Two rows flipped from `aspirational` `ship
 
 **Three new SK-NNN rows** (added by Phase 2's spec contract):
 
-- `SK-070` — inline skill round-trips through sign → resolve → verify.
-- `SK-071` — tampered payload fails verification with `SignatureInvalid`.
-- `SK-072` — registry cache hit resolves; miss returns `RegistryMiss`.
+- `SK-090` — inline skill round-trips through sign → resolve → verify.
+- `SK-091` — tampered payload fails verification with `SignatureInvalid`.
+- `SK-092` — registry cache hit resolves; miss returns `RegistryMiss`.
 
 **The punch list is now empty.** No `ship_blocker=Y` rows remain.
 
@@ -47,9 +47,9 @@ Phase 2 wiring landed in PR #591 (feature/skill-resolver → feature/swarmkit-la
 
 15. TDF envelope round-trips a SwarmKit manifest losslessly with a SwarmKit-level orchestrator policy (SK-050).
 16. KAS-gated unwrap fails fast on unhealthy KAS or on policy attributes missing — distinct from KAS-side denial during decrypt (SK-060).
-17. **NEW (Phase 2):** Inline skill round-trips through sign → resolve → verify (SK-070).
-18. **NEW (Phase 2):** Tampered skill payload fails verification with `SignatureInvalid` (SK-071).
-19. **NEW (Phase 2):** Registry-cached skills resolve on hit; cache miss returns `RegistryMiss` with the expected path (SK-072).
+17. **NEW (Phase 2):** Inline skill round-trips through sign → resolve → verify (SK-090).
+18. **NEW (Phase 2):** Tampered skill payload fails verification with `SignatureInvalid` (SK-091).
+19. **NEW (Phase 2):** Registry-cached skills resolve on hit; cache miss returns `RegistryMiss` with the expected path (SK-092).
 
 ### Validate flow (from `examples/campaign-kit/README.md`)
 
@@ -96,7 +96,7 @@ No new `ship_blocker=Y` rows were introduced by Phase 2. The campaign-kit YAML's
 | `§7.1.1-MUST-3` | `§7.1.1 orchestrators sharing processes MUST keep per-role accounting for budget, tool-calls, DecisionTrace` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/flight.rs:189-207 + tests:263-292 (SK-011)` | paul | N | per-role isolation invariant exercised by SK-011 even though process-sharing itself isn't implemented |
 | `§7.2-MUST-1` | `§7.2 specialists MUST canonicalize received envelope per JCS before signature verification` |  | aspirational | high | `no test coverage` | paul | N | no specialist-side delegation envelope code in arkavo-edge; entire §7.2 is the gap the launch plan calls out |
 | `§7.3-MUST-1` | `§7.3 specialist MUST verify orchestrator signature on delegation envelope` |  | aspirational | high | `no test coverage` | paul | N | no specialist code in this repo |
-| `§7.3-MUST-2` | `§7.3 specialist MUST verify each skill signature independently` | `SK-070, SK-071` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (verify_signature) + tests t1, t2` | paul | **N** | **Δ FROM v1:** Phase 2 wired the resolver. Inline + registry source modes verify ed25519 over BLAKE3(canonical SkillContent). VerifyMode::Required errors on missing signature; Optional returns verified=false. SwarmFlight::launch resolves eagerly when LaunchOptions::resolver_config is Some. Specialists not yet exercising — orchestrator-side acts as proxy until §7.x A2A delegation lands |
+| `§7.3-MUST-2` | `§7.3 specialist MUST verify each skill signature independently` | `SK-090, SK-091` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (verify_signature) + tests t1, t2` | paul | **N** | **Δ FROM v1:** Phase 2 wired the resolver. Inline + registry source modes verify ed25519 over BLAKE3(canonical SkillContent). VerifyMode::Required errors on missing signature; Optional returns verified=false. SwarmFlight::launch resolves eagerly when LaunchOptions::resolver_config is Some. Specialists not yet exercising — orchestrator-side acts as proxy until §7.x A2A delegation lands |
 | `§7.3-MUST-3` | `§7.3 specialist MUST refuse if any agent_provisioning field violates host policy` |  | aspirational | high | `no test coverage` | paul | N | no specialist-side host-policy check |
 | `§7.3-MUST-4` | `§7.3 specialist MUST acknowledge with a ready message including BLAKE3 of received envelope` |  | aspirational | high | `no test coverage` | paul | N | no specialist code |
 | `§8.2-SHOULD-1` | `§8.2 MCP tool wildcards SHOULD NOT be used` |  | aspirational | high | `no test coverage` | paul | N | wildcard guard not enforced; same as §4.3-SHOULD-2 from a different angle |
@@ -126,7 +126,7 @@ No new `ship_blocker=Y` rows were introduced by Phase 2. The campaign-kit YAML's
 | `§11-MUST-ORCH-5` | `§11 C-O5 orchestrator MUST issue MCP grants with explicit allowlists and expiries` |  | aspirational | high | `no test coverage` | paul | N | McpToolGrant struct exists in role.rs but no grant-issuance code path |
 | `§11-MUST-ORCH-6` | `§11 C-O6 orchestrator MUST emit a lineage event on every delegation and revocation` |  | aspirational | high | `no test coverage` | paul | N | DecisionTrace exists per-role but no lineage stream of delegation/revocation events |
 | `§11-MUST-SPEC-1` | `§11 C-S1 specialist MUST verify orchestrator signature on delegation envelope` |  | aspirational | high | `no test coverage` | paul | N | duplicate of §7.3-MUST-1 |
-| `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` | `§7.3-MUST-2, SK-070, SK-071` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (verify_signature)` | paul | **N** | **Δ FROM v1:** duplicate of §7.3-MUST-2; closed by Phase 2 wiring. Orchestrator-side verifies on behalf of future specialists; specialists will re-verify on receipt when §7.x lands |
+| `§11-MUST-SPEC-2` | `§11 C-S2 specialist MUST verify each skill signature independently` | `§7.3-MUST-2, SK-090, SK-091` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (verify_signature)` | paul | **N** | **Δ FROM v1:** duplicate of §7.3-MUST-2; closed by Phase 2 wiring. Orchestrator-side verifies on behalf of future specialists; specialists will re-verify on receipt when §7.x lands |
 | `§11-MUST-SPEC-3` | `§11 C-S3 specialist MUST refuse policies that violate its host environment` |  | aspirational | high | `no test coverage` | paul | N | duplicate of §7.3-MUST-3 |
 | `§11-MUST-SPEC-4` | `§11 C-S4 specialist MUST honor mcp_grants[].expires and not cache tokens beyond it` |  | aspirational | high | `no test coverage` | paul | N | duplicate of §8.2-MUST-1 |
 | `SK-001` | `§4 / §4.1 / §4.6 / §5.1 / §10.1 (parse + cross-block validate)` | `§4-MUST-1, §4.1-MUST-1, §4.1-MUST-2, SK-002, SK-004` | wired | high | `crates/arkavo-swarmkit/src/lib.rs:39-44 + manifest.rs:14-30` | paul | N | end-to-end gate; covers chains via merges |
@@ -160,9 +160,9 @@ No new `ship_blocker=Y` rows were introduced by Phase 2. The campaign-kit YAML's
 | `SK-060` | `§6.3 KAS gate` |  | wired | high | `crates/arkavo-swarmkit-runtime/src/tdf.rs:355-365 + tests:840-865` | paul | N | KAS-gated unwrap fail-fast on unhealthy/policy-mismatch; distinct from Decrypt error |
 | `SK-061` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:179-189` | paul | N | runtime: .tdf path recognition (case-insensitive) |
 | `SK-062` | `(none)` |  | wired | high | `crates/arkavo-agui/src/swarm_flight_registry.rs:104-117 + 140-170` | paul | N | runtime: .tdf auto-launch dispatch via launch_from_tdf_path; TdfFeatureDisabled vs TdfUnwrap distinction |
-| `SK-070` | `§7.3 / §11 (specialist signature verification)` | `§7.3-MUST-2, §11-MUST-SPEC-2` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t1_inline_skill_round_trip)` | paul | N | **NEW (Phase 2):** inline skill round-trip — sign + resolve + verify produces verified=true |
-| `SK-071` | `§7.3 / §11 (specialist signature verification)` | `§7.3-MUST-2, §11-MUST-SPEC-2` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t2_tampered_payload_fails_verify)` | paul | N | **NEW (Phase 2):** tampered payload returns ResolveError::SignatureInvalid; tamper detection contract |
-| `SK-072` | `(none)` |  | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)` | paul | N | **NEW (Phase 2):** registry-cache hit + miss; cache_path on RegistryMiss for debugging |
+| `SK-090` | `§7.3 / §11 (specialist signature verification)` | `§7.3-MUST-2, §11-MUST-SPEC-2` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t1_inline_skill_round_trip)` | paul | N | **NEW (Phase 2):** inline skill round-trip — sign + resolve + verify produces verified=true |
+| `SK-091` | `§7.3 / §11 (specialist signature verification)` | `§7.3-MUST-2, §11-MUST-SPEC-2` | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t2_tampered_payload_fails_verify)` | paul | N | **NEW (Phase 2):** tampered payload returns ResolveError::SignatureInvalid; tamper detection contract |
+| `SK-092` | `(none)` |  | **wired** | high | `crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)` | paul | N | **NEW (Phase 2):** registry-cache hit + miss; cache_path on RegistryMiss for debugging |
 
 ## Spec gaps
 

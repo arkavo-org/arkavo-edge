@@ -390,7 +390,7 @@ mod tests {
         }
     }
 
-    #[spec("SK-070")]
+    #[spec("SK-090")]
     #[test]
     fn t1_inline_skill_round_trip() {
         let (key, did) = deterministic_test_signer();
@@ -403,7 +403,7 @@ mod tests {
         assert!(resolved.verified);
     }
 
-    #[spec("SK-071")]
+    #[spec("SK-091")]
     #[test]
     fn t2_tampered_payload_fails_verify() {
         let (key, did) = deterministic_test_signer();
@@ -479,7 +479,7 @@ mod tests {
         assert!(matches!(err, ResolveError::PayloadShape { .. }));
     }
 
-    #[spec("SK-072")]
+    #[spec("SK-092")]
     #[test]
     fn t8_registry_cache_hit() {
         let (key, did) = deterministic_test_signer();

@@ -747,8 +747,14 @@ scenarios:
     changed: "2026-05-08"
 
   # --- Skill resolver (slice 6) -------------------------------------------
+  #
+  # Note: originally allocated SK-070..072 in Phase 2; renumbered to
+  # SK-090..092 in commit resolving reviewer M1. SK-070..072 were already
+  # claimed by orchestrator-apply scenarios (lines 574..608) via the
+  # umbrella branch, and SK-080 was claimed by the auto-launch-failures
+  # scenario (line 643). SK-090..092 sits cleanly outside both ranges.
 
-  - id: SK-070
+  - id: SK-090
     name: Inline skill round-trips through sign → resolve → verify
     criticality: critical
     given:
@@ -763,7 +769,7 @@ scenarios:
       - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t1_inline_skill_round_trip)
     changed: "2026-05-08"
 
-  - id: SK-071
+  - id: SK-091
     name: Tampered payload fails verification with SignatureInvalid
     criticality: critical
     given:
@@ -777,7 +783,7 @@ scenarios:
       - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t2_tampered_payload_fails_verify)
     changed: "2026-05-08"
 
-  - id: SK-072
+  - id: SK-092
     name: Registry cache hit resolves; miss returns RegistryMiss
     criticality: high
     given:

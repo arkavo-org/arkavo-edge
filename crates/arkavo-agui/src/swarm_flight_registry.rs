@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arkavo_swarmkit::{Manifest, parse_json, parse_yaml};
-use arkavo_swarmkit_runtime::{LaunchOptions, ResolverConfig, SwarmFlight};
+use arkavo_swarmkit_runtime::{LaunchOptions, ResolverConfig, SwarmFlight, VerifyMode};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -170,6 +170,39 @@ pub enum AutoLaunchError {
     TdfUnwrap { path: String, message: String },
 }
 
+/// Build a `ResolverConfig` for boot-time auto-launch.
+///
+/// Reviewer M2: shipped example kits sign with a local dev key whose
+/// signer DID is not a resolvable `did:web` document. Using
+/// `VerifyMode::Required` here would dead-end the very first boot for
+/// every operator running an example kit. We default to
+/// `VerifyMode::Optional` (signatures parsed but not enforced) and emit
+/// a `tracing::warn` so operators see the trade-off, then opt back into
+/// `VerifyMode::Required` by setting `ARKAVO_SWARMKIT_VERIFY=required`
+/// once their signer DID is resolvable.
+fn auto_launch_resolver_config() -> ResolverConfig {
+    let env = std::env::var("ARKAVO_SWARMKIT_VERIFY")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let verify = match env.as_str() {
+        "required" | "strict" => VerifyMode::Required,
+        _ => {
+            tracing::warn!(
+                target: "arkavo.swarmkit",
+                "auto-launch using VerifyMode::Optional (signatures parsed, not enforced). \
+                 Set ARKAVO_SWARMKIT_VERIFY=required to enforce signature verification — \
+                 requires a resolvable did:web document for every signer."
+            );
+            VerifyMode::Optional
+        }
+    };
+    ResolverConfig {
+        verify,
+        ..ResolverConfig::default()
+    }
+}
+
 /// Read `ARKAVO_SWARMKIT_PATH`, parse the manifest, launch a flight, and
 /// register it with the gateway. Returns `Ok(None)` when the env var is
 /// unset (the common case); errors are non-fatal at the call site.
@@ -219,7 +252,7 @@ pub fn launch_from_path(path: &Path) -> Result<SwarmFlight, AutoLaunchError> {
     SwarmFlight::launch(
         &manifest,
         LaunchOptions {
-            resolver_config: Some(ResolverConfig::default()),
+            resolver_config: Some(auto_launch_resolver_config()),
             ..LaunchOptions::default()
         },
     )
@@ -250,7 +283,7 @@ pub async fn launch_from_tdf_path(path: &Path) -> Result<SwarmFlight, AutoLaunch
     SwarmFlight::launch(
         &manifest,
         LaunchOptions {
-            resolver_config: Some(ResolverConfig::default()),
+            resolver_config: Some(auto_launch_resolver_config()),
             ..LaunchOptions::default()
         },
     )

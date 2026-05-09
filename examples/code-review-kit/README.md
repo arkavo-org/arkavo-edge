@@ -59,6 +59,30 @@ cargo run -p arkavo-swarmkit --example validate_kit -- \
 
 Set `kit.id` in the YAML to the computed value.
 
+## Skill signature verification at gateway boot
+
+Skills in this kit are signed (ed25519 over BLAKE3 of the JCS-canonical
+`SkillContent`) using the local dev key emitted by
+`sign_code_review_skills`. That signer DID is not a published `did:web` document, so
+the production resolver (`DidWebPublicKeyResolver`) cannot fetch its
+public key.
+
+To avoid dead-ending the first boot, gateway auto-launch via
+`ARKAVO_SWARMKIT_PATH` defaults to `VerifyMode::Optional`: signatures
+are parsed and surfaced on `ResolvedSkill`, but a missing or
+unresolvable signer does not fail the launch. A `tracing::warn!` line
+fires on boot so the trade-off is visible.
+
+To enforce verification:
+
+1. Replace the dev signer with one whose DID is a resolvable `did:web`
+   document (re-run `sign_code_review_skills` with your own key, then paste the new
+   `signature` and `signed_by` into the YAML).
+2. Set `ARKAVO_SWARMKIT_VERIFY=required` in the gateway environment.
+
+Code paths that bypass the gateway (custom `LaunchOptions`) keep
+`VerifyMode::Required` as the explicit default.
+
 ## Out of scope for this MVP
 
 - Actual code-review inference — this kit specifies the workflow; the
