@@ -310,4 +310,24 @@ mod tests {
         let r = ArpRule::AllOf;
         assert_eq!(serde_json::to_string(&r).unwrap(), "\"allOf\"");
     }
+
+    #[spec("SK-016")]
+    #[test]
+    fn custom_mcp_tool_allowlist_round_trips() {
+        let json = r#"{
+            "server": "https://mcp.example.com",
+            "tools": [
+                "mcp__custom__do_thing",
+                "mcp__domain_specific__action",
+                "another.tool.name"
+            ],
+            "auth": "delegated"
+        }"#;
+        let grant: McpToolGrant = serde_json::from_str(json).unwrap();
+        assert_eq!(grant.tools.len(), 3);
+        assert_eq!(grant.tools[0], "mcp__custom__do_thing");
+        let serialized = serde_json::to_string(&grant).unwrap();
+        let round_tripped: McpToolGrant = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(round_tripped.tools, grant.tools);
+    }
 }

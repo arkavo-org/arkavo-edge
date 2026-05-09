@@ -635,6 +635,32 @@ scenarios:
       - crates/arkavo-swarmkit/src/validate.rs (custom_data_classifications_accepted)
     changed: "2026-05-08"
 
+  - id: SK-016
+    name: Producer-defined MCP tool allowlist strings accepted
+    criticality: medium
+    given:
+      - RoleSpec with mcp_tools[].tools containing producer-defined tool names
+    when: parse_yaml + serialization round-trip
+    then:
+      - Tool names deserialize as Vec<String> without coercion
+      - Round-trip through serde_json preserves every string verbatim
+    refs:
+      - crates/arkavo-swarmkit/src/role.rs (custom_mcp_tool_allowlist_round_trips)
+    changed: "2026-05-08"
+
+  - id: SK-017
+    name: Producer-defined kit.authors[].did accepted regardless of method
+    criticality: medium
+    given:
+      - kit.authors[].did containing did:web:..., did:key:..., or did:plc:... strings
+    when: parse_yaml called
+    then:
+      - All DID method strings deserialize as opaque strings without coercion or validation
+      - Method-level resolution is aspirational (§9.3-MUST-1) — only parsing is wired
+    refs:
+      - crates/arkavo-swarmkit/src/manifest.rs (custom_did_methods_parse_as_opaque)
+    changed: "2026-05-08"
+
   # --- Skill resolver (slice 6) -------------------------------------------
 
   - id: SK-070
