@@ -1,0 +1,234 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:sB5iYZQngOTJEGXW9iD9g_oH7x-KciuXGQoZI0tlP6E"
+  name: "VRM Production Kit"
+  version: "0.1.0"
+  description: >-
+    Three roles — Prompt Designer, VRM Assembler, VRM Validator — produce
+    a VRM 1.0-compliant avatar specification from a creator brief.
+    Pipeline: prompt_designer → vrm_assembler → validator.
+    The kit specifies the workflow; emitting actual .vrm binary files is
+    out of scope for this MVP.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-05-08T00:00:00Z"
+  expires: "2026-08-06T00:00:00Z"
+  nonce: "fK3vL5mTeR2K1jXcW0QqZ8nF"
+
+objective:
+  goal: "Specify a VRM 1.0-compliant avatar from a creator brief and validate spec compliance."
+  success_criteria:
+    - "VRM 1.0 spec compliance score >= 0.95"
+    - "prompt fidelity score >= 0.7"
+    - "rubric.weighted_score >= 0.75"
+
+inputs:
+  - name: "creator_brief"
+    type: "text"
+    required: true
+    classification: "internal"
+  - name: "target_platform"
+    type: "text"
+    required: true
+  - name: "style_reference"
+    type: "tdf-ref"
+    required: false
+    classification: "internal"
+
+deliverables:
+  - name: "vrm_specification"
+    type: "json"
+    classification: "internal"
+
+roles:
+  - id: "prompt_designer"
+    role_type: "prompt_designer"
+    description: "Produce an avatar specification from a creator brief."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.5
+        thinking: true
+      budget:
+        max_inference_calls: 5
+        max_wallclock_ms: 90000
+        max_total_tokens: 20000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:prompt-design"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "prompt-design"
+          description: "Produce an avatar specification from a creator brief."
+          instructions: "From the creator_brief input, produce a structured avatar specification: visual brief (face, body, costume), persona (voice, mannerisms), constraints (target_platform performance budget, accessibility requirements). Cite the creator_brief sentence ranges supporting each spec choice."
+          resources: []
+        signature: "sgNXrGVuguqsRhY8v_xBnQ-OGyc4tum35FqbN11gel4MZ8Bgm_Udap9K1NwgZLicuMZsItE9WPd9CzFEtdbrCA"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/prompt_designer"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "vrm_assembler"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "vrm_assembler"
+    role_type: "vrm_assembler"
+    description: "Emit VRM 1.0 metadata JSON from an avatar specification."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1536
+        temperature: 0.2
+        thinking: false
+      budget:
+        max_inference_calls: 6
+        max_wallclock_ms: 120000
+        max_total_tokens: 30000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "tool_result"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:vrm-assemble"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "vrm-assemble"
+          description: "Emit VRM 1.0 metadata JSON from an avatar specification."
+          instructions: "Translate the prompt_designer's avatar specification into VRM 1.0 schema JSON: skeleton (humanoid bones), blendshapes (expression presets), and metadata (license, author, version). Do not emit binary glTF/VRM data — JSON metadata only."
+          resources: []
+        signature: "YJ_YR0txvPqxg9h7mPSc8XOLigD338kxH8Nc6aPumoi1Yg04TEPqyaNb25dRdRJ1Dx9PIh7pDWrvub3HddtsDQ"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/vrm_assembler"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "validator"
+        on: "always"
+    context_scope:
+      can_read: ["prompt_designer", "self"]
+      can_write: ["self"]
+
+  - id: "validator"
+    role_type: "vrm_validator"
+    description: "Validate VRM 1.0 spec compliance and prompt fidelity."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 512
+        temperature: 0.0
+        thinking: false
+      budget:
+        max_inference_calls: 4
+        max_wallclock_ms: 60000
+        max_total_tokens: 12000
+      context:
+        max_context_tokens: 16000
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:vrm-validate"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "vrm-validate"
+          description: "Validate VRM 1.0 spec compliance and prompt fidelity."
+          instructions: "Validate the assembled VRM JSON against the VRM 1.0 schema (required humanoid bones, expression presets, metadata). Score prompt fidelity by comparing the assembled spec against the prompt_designer's specification. Flag missing required fields and accessibility gaps."
+          resources: []
+        signature: "bJA6cqqUHNb0aMadEx1tF0oP1SWUsZZJngjawUmWH2URGm7KQC-28fIe1w5-iivHM8p3z8Jbr6lneTiwSBUiCQ"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/vrm_validator"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["prompt_designer", "vrm_assembler", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "pipeline"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+    compaction:
+      strategy: "tool_result"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 480
+    max_total_tokens: 80000
+    max_cost_usd: 0.40
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+evaluation:
+  rubric:
+    reference: "swarmkit-spec-draft-00#appendix-d"
+    dimensions:
+      - name: "spec_compliance"
+        weight: 0.40
+        threshold: 0.95
+      - name: "prompt_fidelity"
+        weight: 0.30
+        threshold: 0.7
+      - name: "accessibility"
+        weight: 0.20
+        threshold: 0.7
+      - name: "performance_hints"
+        weight: 0.10
+        threshold: 0.7
+  critic_role: "validator"
+
+completion:
+  rules:
+    - "all deliverables present"
+    - "rubric.weighted_score >= 0.75"
+    - "no role in error state"
+  on_failure: "abort"
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "AAA"
