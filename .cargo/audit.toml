@@ -18,4 +18,14 @@ ignore = [
     "RUSTSEC-2026-0119",
     # hickory-net NSEC3 closest-encloser proof unbounded loop. Same blocker as above.
     "RUSTSEC-2026-0120",
+    # atomic-polyfill unmaintained — transitive via heapless -> postcard -> irpc -> iroh-blobs.
+    # Blocked on iroh updating to postcard 2.x which drops heapless 0.7.
+    "RUSTSEC-2023-0089",
+    # bincode unmaintained — transitive via hnsw_rs -> arkavo-memory.
+    # hnsw_rs 0.3.4 is the latest published version; no upgrade path available.
+    "RUSTSEC-2025-0141",
+    # paste unmaintained — widely used transitive macro crate. No direct usage.
+    "RUSTSEC-2024-0436",
+    # proc-macro-error unmaintained — widely used transitive proc-macro crate.
+    "RUSTSEC-2024-0370",
 ]

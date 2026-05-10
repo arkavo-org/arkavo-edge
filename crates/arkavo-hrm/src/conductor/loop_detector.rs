@@ -48,25 +48,23 @@ impl LoopDetector {
     pub fn record_failure(&mut self, description: &str) -> Option<u32> {
         let hash = Self::hash_description(description);
 
-        // Check for exact hash match first
+        // Increment exact hash count
         let count = self.failure_counts.entry(hash).or_insert(0);
         *count += 1;
 
-        if *count >= MAX_IDENTICAL_FAILURES {
-            return Some(*count);
+        // Calculate total failures for this pattern (exact + similar descriptions)
+        let mut total = *count;
+        for (prev_hash, prev_desc) in &self.recent_descriptions {
+            if *prev_hash != hash
+                && similarity(description, prev_desc) >= SIMILARITY_THRESHOLD
+                && let Some(similar_count) = self.failure_counts.get(prev_hash)
+            {
+                total += similar_count;
+            }
         }
 
-        // Check for similar descriptions
-        for (prev_hash, prev_desc) in &self.recent_descriptions {
-            if *prev_hash != hash && similarity(description, prev_desc) >= SIMILARITY_THRESHOLD {
-                // Similar but not identical - count as same failure pattern
-                let similar_count = self.failure_counts.entry(*prev_hash).or_insert(0);
-                *similar_count += 1;
-
-                if *similar_count >= MAX_IDENTICAL_FAILURES {
-                    return Some(*similar_count);
-                }
-            }
+        if total >= MAX_IDENTICAL_FAILURES {
+            return Some(total);
         }
 
         // Store this description
@@ -89,27 +87,21 @@ impl LoopDetector {
     pub fn would_thrash(&self, description: &str) -> bool {
         let hash = Self::hash_description(description);
 
-        if self
-            .failure_counts
-            .get(&hash)
-            .is_some_and(|&count| count >= MAX_IDENTICAL_FAILURES - 1)
-        {
-            return true;
-        }
+        let exact_count = self.failure_counts.get(&hash).copied().unwrap_or(0);
+        // +1 for the potential new failure being recorded
+        let mut total = exact_count + 1;
 
-        // Check similar descriptions
+        // Include similar descriptions in the cluster total
         for (prev_hash, prev_desc) in &self.recent_descriptions {
-            if similarity(description, prev_desc) >= SIMILARITY_THRESHOLD
-                && self
-                    .failure_counts
-                    .get(prev_hash)
-                    .is_some_and(|&count| count >= MAX_IDENTICAL_FAILURES - 1)
+            if *prev_hash != hash
+                && similarity(description, prev_desc) >= SIMILARITY_THRESHOLD
+                && let Some(similar_count) = self.failure_counts.get(prev_hash)
             {
-                return true;
+                total += similar_count;
             }
         }
 
-        false
+        total >= MAX_IDENTICAL_FAILURES
     }
 
     /// Get the failure count for a description
@@ -210,6 +202,34 @@ mod tests {
                 .record_failure("Refactor the database layer")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_no_double_counting_across_similar_descriptions() {
+        let mut detector = LoopDetector::new();
+
+        // Fail task A once
+        assert!(
+            detector
+                .record_failure("Fix the auth bug in login")
+                .is_none()
+        );
+        assert_eq!(detector.failure_count("Fix the auth bug in login"), 1);
+
+        // Fail a similar task B once.
+        // Similarity: 6 shared words / 7 union = ~0.86 (> 0.85 threshold).
+        // This should NOT inflate A's exact counter — the previous bug did exactly that.
+        assert!(
+            detector
+                .record_failure("Fix the auth bug in login page")
+                .is_none()
+        );
+        assert_eq!(detector.failure_count("Fix the auth bug in login"), 1);
+
+        // Fail A again — cluster total is now 3 (A=2 + B=1), so this should trigger.
+        let result = detector.record_failure("Fix the auth bug in login");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), 3);
     }
 
     #[test]
