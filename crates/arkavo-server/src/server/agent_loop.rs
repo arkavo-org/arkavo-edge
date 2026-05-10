@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::server::tool_memory::ToolMemory;
+
+/// Absolute safety limit for agent cycles to prevent runaway loops.
+/// At a 5-second minimum tick interval, this allows ~6 days of continuous operation.
+const MAX_AGENT_CYCLES: u64 = 100_000;
 
 /// Configuration for the agent orchestrator loop.
 ///
@@ -158,6 +162,13 @@ pub async fn run_agent_loop(
                 config.inference_active.store(true, std::sync::atomic::Ordering::SeqCst);
                 cycle += 1;
                 config.orchestrator_tick.store(cycle, Relaxed);
+
+                if cycle >= MAX_AGENT_CYCLES {
+                    error!(
+                        "Agent reached absolute cycle limit ({MAX_AGENT_CYCLES}), shutting down loop"
+                    );
+                    break;
+                }
 
                 if config.purpose.is_empty() {
                     continue;

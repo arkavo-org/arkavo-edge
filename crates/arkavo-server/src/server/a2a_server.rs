@@ -1041,7 +1041,15 @@ impl A2aServer {
         if let Some(bus) = self.learning_bus().await {
             let lc = learning_context.clone();
             tokio::spawn(async move {
+                let mut iterations = 0u64;
                 loop {
+                    iterations += 1;
+                    if iterations > 1_000_000 {
+                        tracing::warn!(
+                            "Learning context updater reached iteration limit, stopping"
+                        );
+                        break;
+                    }
                     let guidance = bus.get_behavior_guidance(None).await;
                     let trends = bus.get_quality_trends().await;
                     let lesson_count = bus.behavior_lesson_count().await;
@@ -1075,7 +1083,13 @@ impl A2aServer {
             let tc = task_context.clone();
             let agent_memory = self.agent_memory.clone();
             tokio::spawn(async move {
+                let mut iterations = 0u64;
                 loop {
+                    iterations += 1;
+                    if iterations > 1_000_000 {
+                        tracing::warn!("Task context updater reached iteration limit, stopping");
+                        break;
+                    }
                     let memory = agent_memory.read().await;
                     let mut ctx = String::new();
 

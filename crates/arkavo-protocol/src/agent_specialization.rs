@@ -296,7 +296,6 @@ mod tdf_io {
     mod tests {
         use super::super::tests::sample_bundle;
         use super::{BundleError, BundleTdfError, unwrap_bundle, wrap_bundle};
-        use crate::AgentSpecializationBundle;
         use arkavo_tdf::testing::MockTdfService;
 
         #[tokio::test]
