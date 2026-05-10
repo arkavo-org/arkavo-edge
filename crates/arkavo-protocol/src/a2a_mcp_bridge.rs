@@ -93,16 +93,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // Each test gets an isolated SQLite path via MemoryStorage::new_test() —
+    // sharing the default path causes "database is locked" under parallel test runs.
+    async fn test_bridge() -> A2aMcpBridge {
+        let storage = Arc::new(
+            MemoryStorage::new_test()
+                .await
+                .expect("Failed to create test storage"),
+        );
+        A2aMcpBridge {
+            registry: Arc::new(RwLock::new(ToolRegistry::new(storage))),
+        }
+    }
+
     #[tokio::test]
     async fn test_bridge_creation() {
-        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+        let bridge = test_bridge().await;
         let tools = bridge.list_tools().await;
         assert!(!tools.is_empty());
     }
 
     #[tokio::test]
     async fn test_call_get_agent_time() {
-        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+        let bridge = test_bridge().await;
         let request = McpToolRequest {
             tool_name: "get_agent_time".to_string(),
             params: json!({"format": "unix"}),
@@ -116,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_nonexistent_tool() {
-        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+        let bridge = test_bridge().await;
         let request = McpToolRequest {
             tool_name: "nonexistent_tool".to_string(),
             params: json!({}),
@@ -130,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_includes_time_tools() {
-        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+        let bridge = test_bridge().await;
         let tools = bridge.list_tools().await;
 
         assert!(tools.contains(&"get_agent_time".to_string()));
@@ -140,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_tool_schema() {
-        let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+        let bridge = test_bridge().await;
         let schema = bridge.get_tool_schema("get_agent_time").await;
 
         assert!(schema.is_some());
