@@ -2,6 +2,7 @@
 .claude/
 .mcp.json
 .arkavo/
+.superpowers/
 
 # Generated reports
 docs/traceability.html
