@@ -139,7 +139,9 @@ impl ArchitectExecutor {
                     let tool_infos = r.list_tools();
                     // Use the correct format based on the model provider
                     match current_model {
-                        ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+                        ModelChoice::GeminiFlash
+                        | ModelChoice::Gemini35Flash
+                        | ModelChoice::GeminiPro => {
                             arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
                         }
                         _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
@@ -244,11 +246,13 @@ impl ArchitectExecutor {
                         Error::ModelExecution(format!("Failed to create Anthropic provider: {e}"))
                     })
             }
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => arkavo_llm::GeminiProvider::new()
-                .map(|p| Box::new(p) as Box<dyn Provider>)
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
-                }),
+            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
+                arkavo_llm::GeminiProvider::new()
+                    .map(|p| Box::new(p) as Box<dyn Provider>)
+                    .map_err(|e| {
+                        Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
+                    })
+            }
             _ => {
                 // For local models, use Gemini as fallback if available
                 if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
@@ -284,7 +288,14 @@ impl ArchitectExecutor {
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
             ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
-            ModelChoice::GeminiFlash => ModelChoice::ClaudeSonnet,
+            ModelChoice::GeminiFlash => ModelChoice::Gemini35Flash,
+            // Escalate within the 3.5 Flash thinking-tier ladder before
+            // jumping families, so Thompson Sampling actually exercises the
+            // distinct arms before falling back to Anthropic.
+            ModelChoice::Gemini35FlashMinimal => ModelChoice::Gemini35Flash,
+            ModelChoice::Gemini35Flash => ModelChoice::Gemini35FlashMedium,
+            ModelChoice::Gemini35FlashMedium => ModelChoice::Gemini35FlashHigh,
+            ModelChoice::Gemini35FlashHigh => ModelChoice::ClaudeSonnet,
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
@@ -301,6 +312,12 @@ impl ArchitectExecutor {
         match model {
             ModelChoice::GeminiFlash => {
                 (input_tokens / 1_000_000.0).mul_add(0.30, (output_tokens / 1_000_000.0) * 2.50)
+            }
+            ModelChoice::Gemini35Flash
+            | ModelChoice::Gemini35FlashMinimal
+            | ModelChoice::Gemini35FlashMedium
+            | ModelChoice::Gemini35FlashHigh => {
+                (input_tokens / 1_000_000.0).mul_add(1.50, (output_tokens / 1_000_000.0) * 9.00)
             }
             ModelChoice::GeminiPro => {
                 (input_tokens / 1_000_000.0).mul_add(1.25, (output_tokens / 1_000_000.0) * 5.00)
@@ -374,6 +391,14 @@ mod tests {
 
             assert_eq!(
                 executor.escalate_model(&ModelChoice::GeminiFlash),
+                ModelChoice::Gemini35Flash
+            );
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::Gemini35Flash),
+                ModelChoice::Gemini35FlashMedium
+            );
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::Gemini35FlashHigh),
                 ModelChoice::ClaudeSonnet
             );
             assert_eq!(

@@ -1,2 +1,4 @@
 logs/
 .pids
+
+# .env files: covered by root .gitignore

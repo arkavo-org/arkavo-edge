@@ -401,6 +401,7 @@ pub(crate) async fn generate_tokens_pooled(
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
             n_eval: perf.n_eval.max(0) as u32,
+            n_thinking_eval: None,
         };
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
             tokens_generated,
@@ -720,6 +721,7 @@ pub(crate) async fn generate_tokens_with_context(
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
             n_eval: perf.n_eval.max(0) as u32,
+            n_thinking_eval: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))

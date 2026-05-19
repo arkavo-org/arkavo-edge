@@ -207,7 +207,7 @@ impl ModelSelector {
             if prefer_pro {
                 ModelChoice::GeminiPro
             } else {
-                ModelChoice::GeminiFlash
+                ModelChoice::Gemini35Flash
             }
         } else {
             // No cloud available, use local (with availability check)
@@ -339,6 +339,16 @@ impl ModelSelector {
 
         // Cloud models (unconstrained by memory)
         if self.availability.gemini {
+            // Gemini 3.5 Flash (May 2026) ships as four distinct Thompson
+            // Sampling arms — one per thinking tier — so the learning
+            // module can converge on the right cost/quality point per
+            // task category. `Gemini35Flash` (low tier) is the production
+            // default; the others are opt-in via learning.
+            models.push(ModelChoice::Gemini35Flash);
+            models.push(ModelChoice::Gemini35FlashMinimal);
+            models.push(ModelChoice::Gemini35FlashMedium);
+            models.push(ModelChoice::Gemini35FlashHigh);
+            // Legacy Flash alias kept around for cost-tier fallback.
             models.push(ModelChoice::GeminiFlash);
         }
         if self.availability.anthropic {
@@ -407,7 +417,7 @@ mod tests {
         let decision = selector
             .select(&classification, "Build a React component")
             .unwrap();
-        assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
+        assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
         assert!(decision.reasoning.contains("WebDev Arena"));
     }
 
@@ -480,6 +490,7 @@ mod tests {
     fn test_feasible_models_gemini_only() {
         let selector = ModelSelector::with_availability(gemini_only());
         let feasible = selector.feasible_models();
+        assert!(feasible.contains(&ModelChoice::Gemini35Flash));
         assert!(feasible.contains(&ModelChoice::GeminiFlash));
         // GeminiPro removed from feasible set (Flash only) in d4227709
         assert!(!feasible.contains(&ModelChoice::GeminiPro));

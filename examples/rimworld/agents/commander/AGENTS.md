@@ -33,7 +33,7 @@ purpose: |
 
   NEVER call only observe. NEVER write text without a tool call.
 
-model: gemma-4-26b-a4b
+model: gemini-3.5-flash
 action_interval: 120
 listen: 0.0.0.0:8401
 mdns: true

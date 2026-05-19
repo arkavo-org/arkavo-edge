@@ -45,7 +45,7 @@ Image data: data:image/png;base64,{image_data}"#
     );
 
     let mut stream = client
-        .stream_generate_content(&prompt, None)
+        .stream_generate_content(&prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -109,7 +109,7 @@ Image: data:image/png;base64,{image_data}"#
     );
 
     let mut stream = client
-        .stream_generate_content(&prompt, None)
+        .stream_generate_content(&prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -153,7 +153,7 @@ async fn test_multimodal_error_handling() {
 Image: data:image/png;base64,{invalid_image_data}"#
     );
 
-    let result = client.stream_generate_content(&prompt, None).await;
+    let result = client.stream_generate_content(&prompt, None, None).await;
 
     if let Ok(mut stream) = result {
         let mut had_error = false;
@@ -201,7 +201,7 @@ Question: What is 2+2? Also, can you see the image I provided?"#
     );
 
     let mut stream = client
-        .stream_generate_content(&prompt, None)
+        .stream_generate_content(&prompt, None, None)
         .await
         .expect("Failed to create stream");
 

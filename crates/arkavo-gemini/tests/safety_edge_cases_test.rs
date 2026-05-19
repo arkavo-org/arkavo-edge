@@ -31,7 +31,7 @@ async fn test_safety_filter_handling() {
         "Tell me about chemical reactions that are considered dangerous in household settings.";
 
     let mut stream = client
-        .stream_generate_content(safety_boundary_prompt, None)
+        .stream_generate_content(safety_boundary_prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -80,7 +80,9 @@ async fn test_rate_limit_backoff() {
         let client_clone = RestClient::new(&api_key, &model);
         let task = tokio::spawn(async move {
             let prompt = format!("Quick test {i}");
-            let result = client_clone.stream_generate_content(&prompt, None).await;
+            let result = client_clone
+                .stream_generate_content(&prompt, None, None)
+                .await;
             result.is_ok()
         });
         tasks.push(task);
@@ -115,7 +117,7 @@ async fn test_context_window_overflow() {
     let prompt = format!("{large_text}\n\nWhat is the last word in the text above?");
 
     let mut stream = client
-        .stream_generate_content(&prompt, None)
+        .stream_generate_content(&prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -154,7 +156,7 @@ async fn test_token_limit_boundary() {
     let prompt = "Count from 1 to 10000 with commas between numbers.";
 
     let result = timeout(Duration::from_secs(30), async {
-        let mut stream = client.stream_generate_content(prompt, None).await?;
+        let mut stream = client.stream_generate_content(prompt, None, None).await?;
 
         let mut token_count = 0;
         let mut had_response = false;
@@ -192,7 +194,7 @@ async fn test_token_limit_boundary() {
 async fn test_invalid_api_key_handling() {
     let client = RestClient::new("invalid_key_12345", "models/gemini-3-pro-preview");
 
-    let result = client.stream_generate_content("test", None).await;
+    let result = client.stream_generate_content("test", None, None).await;
 
     assert!(
         result.is_err(),
@@ -214,7 +216,7 @@ async fn test_network_timeout_handling() {
     let prompt = "Explain quantum computing in detail.";
 
     let result = timeout(Duration::from_millis(100), async {
-        let mut stream = client.stream_generate_content(prompt, None).await?;
+        let mut stream = client.stream_generate_content(prompt, None, None).await?;
 
         while let Some(_chunk) = stream.next().await {}
 
@@ -236,7 +238,7 @@ async fn test_empty_prompt_handling() {
     let model = get_model();
     let client = RestClient::new(&api_key, &model);
 
-    let result = client.stream_generate_content("", None).await;
+    let result = client.stream_generate_content("", None, None).await;
 
     if let Ok(mut stream) = result {
         let mut had_response = false;
@@ -263,7 +265,9 @@ async fn test_very_long_prompt() {
 
     let long_prompt = "Tell me a story. ".repeat(5000);
 
-    let result = client.stream_generate_content(&long_prompt, None).await;
+    let result = client
+        .stream_generate_content(&long_prompt, None, None)
+        .await;
 
     match result {
         Ok(mut stream) => {
@@ -304,7 +308,7 @@ async fn test_rapid_sequential_requests() {
     for i in 0..5 {
         let prompt = format!("Quick test {i}");
         let result = timeout(Duration::from_secs(10), async {
-            let mut stream = client.stream_generate_content(&prompt, None).await?;
+            let mut stream = client.stream_generate_content(&prompt, None, None).await?;
             let mut had_response = false;
 
             while let Some(chunk_result) = stream.next().await {

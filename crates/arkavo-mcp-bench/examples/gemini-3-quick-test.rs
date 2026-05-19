@@ -104,7 +104,7 @@ async fn run_swe_bench_test(
     let mut ttft_measured = false;
     let mut ttft = 0u64;
 
-    let mut stream = client.stream_generate_content(&prompt, None).await?;
+    let mut stream = client.stream_generate_content(&prompt, None, None).await?;
     let mut full_text = String::new();
 
     while let Some(chunk_result) = stream.next().await {
@@ -189,7 +189,7 @@ No explanations, just the code."#;
     let mut ttft = 0u64;
     let mut ttft_measured = false;
 
-    let mut stream = client.stream_generate_content(prompt, None).await?;
+    let mut stream = client.stream_generate_content(prompt, None, None).await?;
     let mut full_text = String::new();
 
     while let Some(chunk_result) = stream.next().await {
@@ -261,7 +261,7 @@ Use an efficient iterative approach. No explanations, just the code."#;
     let mut ttft = 0u64;
     let mut ttft_measured = false;
 
-    let mut stream = client.stream_generate_content(prompt, None).await?;
+    let mut stream = client.stream_generate_content(prompt, None, None).await?;
     let mut full_text = String::new();
 
     while let Some(chunk_result) = stream.next().await {

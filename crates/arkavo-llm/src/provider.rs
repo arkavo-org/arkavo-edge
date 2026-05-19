@@ -20,9 +20,10 @@ pub struct ProviderResponse {
     pub quality_gate_retries: u8,
 }
 
-/// Timing data from the LLM inference engine.
-/// Populated by llama.cpp provider; None for cloud providers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Timing and token-usage data from the LLM inference engine.
+/// Populated by llama.cpp and by cloud providers that surface usage
+/// metadata (Gemini 3.5's `usageMetadata` block in particular).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InferenceTiming {
     /// Prompt evaluation / prefill time in ms
     pub prompt_eval_ms: f64,
@@ -30,8 +31,18 @@ pub struct InferenceTiming {
     pub generation_ms: f64,
     /// Number of prompt tokens evaluated (not served from KV cache)
     pub n_prompt_eval: u32,
-    /// Number of tokens generated
+    /// Number of tokens generated and surfaced to the caller (visible
+    /// text + tool calls — for thinking models this excludes the
+    /// internal chain-of-thought).
     pub n_eval: u32,
+    /// Tokens spent inside the model's hidden chain-of-thought, when
+    /// the provider reports it separately (Gemini 3.5's
+    /// `thoughtsTokenCount`). These count toward billing on Gemini but
+    /// are invisible to the response stream — call them out separately
+    /// so the cost path can multiply by output-rate without double-
+    /// counting and so latency analysis can attribute spikes correctly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_thinking_eval: Option<u32>,
 }
 
 #[async_trait]

@@ -2,8 +2,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum GeminiError {
+    /// Boxed because `tokio_tungstenite::tungstenite::Error` is ~136 bytes
+    /// on its own; carrying it inline blows `GeminiError` past clippy's
+    /// `result_large_err` threshold and forces `#[allow]` on every public
+    /// `Result<_, GeminiError>` function in the crate. Manual `From` impl
+    /// below preserves `?` ergonomics at callsites.
     #[error("WebSocket connection error: {0}")]
-    WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocketError(Box<tokio_tungstenite::tungstenite::Error>),
 
     #[error("Session not connected")]
     NotConnected,
@@ -32,6 +37,9 @@ pub enum GeminiError {
     #[error("Authentication failed: {0}")]
     AuthenticationError(String),
 
+    #[error("Configuration error: {0}")]
+    Config(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
@@ -40,3 +48,9 @@ pub enum GeminiError {
 }
 
 pub type Result<T> = std::result::Result<T, GeminiError>;
+
+impl From<tokio_tungstenite::tungstenite::Error> for GeminiError {
+    fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
+        GeminiError::WebSocketError(Box::new(e))
+    }
+}

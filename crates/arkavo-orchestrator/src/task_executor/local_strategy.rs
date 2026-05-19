@@ -145,8 +145,8 @@ impl LocalTaskStrategy {
 
         // Check for Gemini
         if std::env::var("GEMINI_API_KEY").is_ok() {
-            let model_id = std::env::var("GEMINI_MODEL")
-                .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
+            let model_id =
+                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3.5-flash".to_string());
             models.push(ModelInfo::cloud("Gemini", "gemini", model_id));
         }
 
@@ -589,7 +589,7 @@ mod tests {
             4.0,
             ModelCapability::Medium,
         )];
-        let cloud = vec![ModelInfo::cloud("Gemini", "gemini", "gemini-2.0-flash")];
+        let cloud = vec![ModelInfo::cloud("Gemini", "gemini", "gemini-3.5-flash")];
 
         let selected = LocalTaskStrategy::select_models(&local, &cloud).unwrap();
 

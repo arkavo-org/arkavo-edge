@@ -276,6 +276,32 @@ pub enum ClientMessage {
 pub struct StreamChunk {
     #[serde(default)]
     pub candidates: Vec<StreamCandidate>,
+    /// Token-usage report. Gemini emits this on the final SSE chunk for
+    /// `streamGenerateContent`; absent on intermediate deltas.
+    #[serde(default, rename = "usageMetadata")]
+    pub usage_metadata: Option<UsageMetadata>,
+}
+
+/// Token accounting from the Gemini API.
+///
+/// `thoughts_token_count` is the killer field for Gemini 3.5 cost
+/// tracking — at default (dynamic) thinking, AA observed 5.5x token
+/// usage vs Gemini 3 Flash, almost entirely landing here. Surface it so
+/// the router can attribute spend and so latency spikes can be tied
+/// back to a specific thinking budget.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageMetadata {
+    #[serde(default)]
+    pub prompt_token_count: Option<u32>,
+    #[serde(default)]
+    pub candidates_token_count: Option<u32>,
+    #[serde(default)]
+    pub thoughts_token_count: Option<u32>,
+    #[serde(default)]
+    pub total_token_count: Option<u32>,
+    #[serde(default)]
+    pub cached_content_token_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -297,8 +323,12 @@ pub struct StreamContent {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum StreamPart {
+    /// Text part. `thought=true` indicates a Gemini 3.5 thought-signature
+    /// segment that should be surfaced separately from the final answer.
     Text {
         text: String,
+        #[serde(default)]
+        thought: bool,
     },
     FunctionCall {
         #[serde(rename = "functionCall")]
@@ -315,7 +345,13 @@ pub struct StreamFunctionCall {
 #[derive(Debug, Clone)]
 pub struct StreamResponse {
     pub text: Option<String>,
+    /// Gemini 3.5 thought-summary text (only populated when
+    /// `ThinkingConfig::include_thoughts=true`).
+    pub thought_text: Option<String>,
     pub function_calls: Vec<FunctionCall>,
+    /// Token-usage from `usageMetadata`. Populated on the terminal
+    /// chunk (`done=true`), `None` on intermediate streaming deltas.
+    pub usage: Option<UsageMetadata>,
     pub done: bool,
 }
 

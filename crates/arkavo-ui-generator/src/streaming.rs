@@ -77,7 +77,7 @@ impl StreamingGenerator {
 
                 let api_key = std::env::var("GEMINI_API_KEY").unwrap();
                 let model = std::env::var("GEMINI_MODEL")
-                    .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
+                    .unwrap_or_else(|_| "gemini-3.5-flash".to_string());
                 let client = RestClient::new(api_key, model);
 
                 // Define JSON schema for structured output
@@ -92,7 +92,10 @@ impl StreamingGenerator {
                 });
 
                 // Use streaming API with JSON mode for real-time incremental generation
-                match client.stream_generate_content_json(&prompt, schema).await {
+                match client
+                    .stream_generate_content_json(&prompt, schema, None)
+                    .await
+                {
                     Ok(mut stream) => {
                         let mut json_buffer = String::new();
                         let mut last_sent_html = String::new();

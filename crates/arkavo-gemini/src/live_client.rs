@@ -3,30 +3,95 @@ use crate::types::{
     ClientContent, ClientMessage, FunctionCall, FunctionDeclaration, GenerationConfig, SetupConfig,
     Tool, ToolCall, ToolResponse,
 };
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/// WebSocket endpoint for the Gemini Live (BidiGenerateContent) API.
+///
+/// **Not the default streaming surface.** Text streaming for normal chat /
+/// agentic routing goes through `RestClient::stream_generate_content_*`
+/// (HTTP SSE on `streamGenerateContent`), which is what `GeminiProvider`
+/// and `arkavo-router` invoke in production.
+///
+/// `LiveSessionClient` and this WebSocket endpoint are for **bidi audio /
+/// video sessions** — stateful sockets where the client streams microphone
+/// frames or video and the model streams audio responses. The only models
+/// currently exposed for `bidiGenerateContent` are the
+/// `gemini-2.5-flash-native-audio-*` variants; the announced
+/// `gemini-3.1-flash-live` is preview-gated.
+///
+/// Live API lives at `v1alpha` (REST sibling is `v1beta`).
+pub const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
+
+/// Default model identifier for Live (bidi) WebSocket sessions.
+///
+/// Set to the only model the public v1alpha endpoint actually routes for
+/// `bidiGenerateContent` today. Override via `GEMINI_MODEL` /
+/// `LiveSessionClient::new(...)` if your account has the 3.1-flash-live
+/// preview enabled.
+pub const DEFAULT_LIVE_MODEL: &str = "gemini-2.5-flash-native-audio-latest";
+
 const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 const INITIAL_BACKOFF_MS: u64 = 1000;
 
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// Response modality requested in the Live API setup frame.
+///
+/// The currently-routable bidi models (`gemini-2.5-flash-native-audio-*`)
+/// only emit `Audio`; `Text` is wired for the future `gemini-3.1-flash-live`
+/// preview where text bidi is supported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveModality {
+    Text,
+    Audio,
+}
 
+impl LiveModality {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "TEXT",
+            Self::Audio => "AUDIO",
+        }
+    }
+}
+
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsWriter = SplitSink<WsStream, Message>;
+type WsReader = SplitStream<WsStream>;
+type SharedWriter = Arc<Mutex<Option<WsWriter>>>;
+
+/// Stateful WebSocket session against the Gemini Live (BidiGenerateContent) API.
+///
+/// **Use this only for bidi audio / video sessions.** For text chat,
+/// agentic tool loops, and structured JSON output, use `RestClient` — the
+/// `streamGenerateContent` SSE endpoint is the production streaming surface
+/// that `GeminiProvider` and `arkavo-router` invoke.
+///
+/// Typical Live API workflow: connect → stream microphone PCM frames →
+/// receive model audio + function calls → send `ToolResponse` frames →
+/// close.
+///
+/// The underlying WebSocket is split at connect-time so the receiver task
+/// owns the read half and `send_message` / `close` contend only on the
+/// writer mutex; this avoids the deadlock you get when both sides try to
+/// take a single `RwLock<WebSocket>` while one of them is parked on
+/// `stream.next().await`.
 pub struct LiveSessionClient {
     api_key: String,
     model: String,
     tools: Vec<Value>,
-    ws_stream: Arc<RwLock<Option<WsStream>>>,
+    modality: LiveModality,
+    ws_writer: SharedWriter,
     tool_call_tx: mpsc::UnboundedSender<Vec<FunctionCall>>,
     tool_call_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<Vec<FunctionCall>>>>>,
     connected: Arc<AtomicBool>,
@@ -35,6 +100,23 @@ pub struct LiveSessionClient {
 impl LiveSessionClient {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new_with_tools(api_key, model, vec![])
+    }
+
+    /// Construct a Live (bidi) WebSocket client pinned to
+    /// `DEFAULT_LIVE_MODEL`. For text streaming use `RestClient` — the
+    /// production SSE surface — not this WebSocket path.
+    pub fn new_default(api_key: impl Into<String>) -> Self {
+        Self::new(api_key, DEFAULT_LIVE_MODEL)
+    }
+
+    /// Build a Live (bidi) client from `GEMINI_API_KEY` using the default
+    /// Live-capable model. Not for text chat — see `RestClient`.
+    pub fn try_from_env() -> Result<Self> {
+        let api_key = std::env::var("GEMINI_API_KEY")
+            .map_err(|_| GeminiError::Config("GEMINI_API_KEY not set for Live API".to_string()))?;
+        let model =
+            std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_LIVE_MODEL.to_string());
+        Ok(Self::new(api_key, model))
     }
 
     pub fn new_with_tools(
@@ -47,11 +129,19 @@ impl LiveSessionClient {
             api_key: api_key.into(),
             model: model.into(),
             tools,
-            ws_stream: Arc::new(RwLock::new(None)),
+            modality: LiveModality::Text,
+            ws_writer: Arc::new(Mutex::new(None)),
             tool_call_tx: tx,
             tool_call_rx: Arc::new(RwLock::new(Some(rx))),
             connected: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Override the response modality (default `Text`). Must be set before
+    /// `connect()` since the setup frame is sent at that point.
+    pub fn with_modality(mut self, modality: LiveModality) -> Self {
+        self.modality = modality;
+        self
     }
 
     pub async fn connect(&self) -> Result<()> {
@@ -89,15 +179,17 @@ impl LiveSessionClient {
 
         debug!("Connecting to Gemini WebSocket endpoint");
         let (ws_stream, _) = connect_async(&url_with_key).await?;
+        let (writer, reader) = ws_stream.split();
 
-        let mut stream_guard = self.ws_stream.write().await;
-        *stream_guard = Some(ws_stream);
-        drop(stream_guard);
+        {
+            let mut guard = self.ws_writer.lock().await;
+            *guard = Some(writer);
+        }
 
         self.send_setup().await?;
         self.connected.store(true, Ordering::Relaxed);
 
-        self.start_receiver_task();
+        self.start_receiver_task(reader);
 
         Ok(())
     }
@@ -121,10 +213,17 @@ impl LiveSessionClient {
             }])
         };
 
+        // Live API requires the fully-qualified `models/<id>` form in the
+        // setup frame — server rejects the bare id with "not found".
+        let model_id = if self.model.starts_with("models/") {
+            self.model.clone()
+        } else {
+            format!("models/{}", self.model)
+        };
         let setup = SetupConfig {
-            model: self.model.clone(),
+            model: model_id,
             generation_config: Some(GenerationConfig {
-                response_modalities: vec!["AUDIO".to_string()],
+                response_modalities: vec![self.modality.as_str().to_string()],
                 temperature: None,
                 max_output_tokens: None,
             }),
@@ -134,53 +233,40 @@ impl LiveSessionClient {
         self.send_message(ClientMessage::Setup { setup }).await
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     async fn send_message(&self, message: ClientMessage) -> Result<()> {
         let json = serde_json::to_string(&message)?;
         info!("Sending message: {}", json);
 
-        let mut stream_guard = self.ws_stream.write().await;
-        let stream = stream_guard.as_mut().ok_or(GeminiError::NotConnected)?;
-
-        stream.send(Message::Text(json)).await?;
-        Ok(())
+        let mut guard = self.ws_writer.lock().await;
+        let writer = guard.as_mut().ok_or(GeminiError::NotConnected)?;
+        let send_result = writer.send(Message::Text(json)).await;
+        drop(guard);
+        send_result.map_err(GeminiError::from)
     }
 
-    #[allow(clippy::significant_drop_tightening)]
-    fn start_receiver_task(&self) {
-        let ws_stream = self.ws_stream.clone();
+    fn start_receiver_task(&self, reader: WsReader) {
         let tool_call_tx = self.tool_call_tx.clone();
         let connected = self.connected.clone();
+        let ws_writer = self.ws_writer.clone();
 
         tokio::spawn(async move {
             info!("Receiver task started");
+            let mut reader = reader;
             loop {
-                let message = {
-                    let mut stream_guard = ws_stream.write().await;
-                    let stream = match stream_guard.as_mut() {
-                        Some(s) => s,
-                        None => {
-                            debug!("Receiver task: stream not connected");
-                            break;
-                        }
-                    };
-
-                    debug!("Waiting for next message...");
-                    match stream.next().await {
-                        Some(Ok(msg)) => {
-                            debug!("Received websocket message type: {:?}", msg);
-                            msg
-                        }
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {}", e);
-                            connected.store(false, Ordering::Relaxed);
-                            break;
-                        }
-                        None => {
-                            info!("WebSocket stream ended");
-                            connected.store(false, Ordering::Relaxed);
-                            break;
-                        }
+                let message = match reader.next().await {
+                    Some(Ok(msg)) => {
+                        debug!("Received websocket message type: {:?}", msg);
+                        msg
+                    }
+                    Some(Err(e)) => {
+                        error!("WebSocket error: {}", e);
+                        connected.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                    None => {
+                        info!("WebSocket stream ended");
+                        connected.store(false, Ordering::Relaxed);
+                        break;
                     }
                 };
 
@@ -211,9 +297,14 @@ impl LiveSessionClient {
                         true
                     }
                     Message::Ping(data) => {
-                        let mut stream_guard = ws_stream.write().await;
-                        if let Some(stream) = stream_guard.as_mut() {
-                            let _ = stream.send(Message::Pong(data)).await;
+                        // Reply via the shared writer mutex. Reader holds no
+                        // writer lock during its own next() await, so this
+                        // never deadlocks against close() or send_message().
+                        {
+                            let mut guard = ws_writer.lock().await;
+                            if let Some(writer) = guard.as_mut() {
+                                let _ = writer.send(Message::Pong(data)).await;
+                            }
                         }
                         false
                     }
@@ -349,11 +440,18 @@ impl LiveSessionClient {
 
     pub async fn close(&self) -> Result<()> {
         self.connected.store(false, Ordering::Relaxed);
-        let mut stream_guard = self.ws_stream.write().await;
-        if let Some(mut stream) = stream_guard.take() {
-            let result = stream.send(Message::Close(None)).await;
-            drop(stream_guard);
-            result?;
+        // The receiver task owns the read half and never grabs the writer
+        // mutex for long, so this lock is uncontended (no deadlock against
+        // a parked reader). Taking the writer also closes the underlying
+        // socket on drop, which makes reader.next() return None and the
+        // receiver task exit cleanly.
+        let taken = {
+            let mut guard = self.ws_writer.lock().await;
+            guard.take()
+        };
+        if let Some(mut writer) = taken {
+            let _ = writer.send(Message::Close(None)).await;
+            let _ = writer.close().await;
         }
         Ok(())
     }

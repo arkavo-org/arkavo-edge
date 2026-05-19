@@ -82,7 +82,7 @@ async fn test_parallel_tool_execution() {
     let prompt = "Get the weather in Tokyo AND the stock price for Apple. Do both tasks.";
 
     let mut stream = client
-        .stream_generate_content(prompt, Some(tools))
+        .stream_generate_content(prompt, Some(tools), None)
         .await
         .expect("Failed to create stream");
 
@@ -144,7 +144,7 @@ async fn test_json_mode_reliability() {
 Only respond with valid JSON, no other text."#;
 
     let mut stream = client
-        .stream_generate_content(prompt, None)
+        .stream_generate_content(prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -189,7 +189,7 @@ async fn test_tool_orchestration_complexity() {
     let prompt = "First get the weather in NYC, then get Apple stock price, then calculate 10+20";
 
     let mut stream = client
-        .stream_generate_content(prompt, Some(tools))
+        .stream_generate_content(prompt, Some(tools), None)
         .await
         .expect("Failed to create stream");
 
@@ -235,7 +235,7 @@ async fn test_error_recovery_malformed_tool() {
     let prompt = "Use the broken_tool, and if it fails, get weather for London";
 
     let mut stream = client
-        .stream_generate_content(prompt, Some(tools))
+        .stream_generate_content(prompt, Some(tools), None)
         .await
         .expect("Failed to create stream");
 
@@ -273,7 +273,7 @@ async fn test_multi_turn_consistency() {
     let turn1_prompt = "Remember this number: 42. What is it?";
 
     let mut stream = client
-        .stream_generate_content(turn1_prompt, None)
+        .stream_generate_content(turn1_prompt, None, None)
         .await
         .expect("Failed to create stream");
 

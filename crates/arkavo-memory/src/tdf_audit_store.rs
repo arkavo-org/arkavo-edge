@@ -216,7 +216,7 @@ mod tests {
             session_id: session.to_string(),
             message_index: idx,
             agent_id: "test-agent".to_string(),
-            model: "gemini-2.5-flash".to_string(),
+            model: "gemini-3.5-flash".to_string(),
             algorithm: "AES-256-GCM".to_string(),
             ciphertext_bytes: 1024 + idx * 100,
             policy_attributes: vec![

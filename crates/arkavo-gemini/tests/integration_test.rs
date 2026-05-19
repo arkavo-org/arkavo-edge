@@ -8,7 +8,7 @@ use serde_json::json;
 
 #[tokio::test]
 async fn test_client_creation() {
-    let client = LiveSessionClient::new("test_api_key", "gemini-2.5-flash");
+    let client = LiveSessionClient::new("test_api_key", "gemini-3.5-flash");
     assert!(!client.is_connected());
 }
 
@@ -26,7 +26,7 @@ async fn test_client_with_tools() {
     registry.build(&dispatcher);
 
     let tools = dispatcher.list_tools();
-    let client = LiveSessionClient::new_with_tools("test_api_key", "gemini-2.5-flash", tools);
+    let client = LiveSessionClient::new_with_tools("test_api_key", "gemini-3.5-flash", tools);
     assert!(!client.is_connected());
 }
 
