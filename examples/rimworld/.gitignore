@@ -1,2 +1,5 @@
 logs/
 .pids
+
+# Environment files (API keys)
+.env
