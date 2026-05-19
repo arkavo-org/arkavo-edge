@@ -4,8 +4,7 @@ AGENTS.md
 # But track the example configuration
 !AGENTS.md.example
 
-# Ignore environment files
-.env
+# .env files: covered by root .gitignore
 
 # Workspace and logs
 workspace/*

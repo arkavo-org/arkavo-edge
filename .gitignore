@@ -71,7 +71,14 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 # Fuzzing artifacts
 **/fuzz/artifacts/
 **/fuzz/corpus/**/
-/.test.env
+
+# Environment files carry secrets (API keys, tokens) — never commit.
+# Patterns match anywhere in the tree.
+.env
+.env.*
+.test.env
+!.env.example
+!.env.*.example
 /STATUS.md
 vendor/idb/
 vendor/idb-prebuilt/

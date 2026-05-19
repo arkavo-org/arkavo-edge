@@ -1,5 +1,4 @@
 logs/
 .pids
 
-# Environment files (API keys)
-.env
+# .env files: covered by root .gitignore
