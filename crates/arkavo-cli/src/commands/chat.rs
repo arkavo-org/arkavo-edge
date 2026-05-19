@@ -79,6 +79,7 @@ fn create_runtime() -> std::io::Result<Runtime> {
 /// Execute the chat command
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("[diag] chat::execute entered");
     // Check for --help flag first
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         print_usage();
@@ -180,10 +181,12 @@ fn execute_a2a_chat(
     let runtime = create_runtime()?;
 
     runtime.block_on(async {
+        eprintln!("[diag] inside runtime, about to LocalEngine::new()");
         // Initialize engine with Router + full tool registry (including Claude SDK)
         let engine = arkavo_server::LocalEngine::new()
             .await
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        eprintln!("[diag] LocalEngine::new returned");
 
         // Create ChatSession (wraps A2aClient)
         let mut session =
