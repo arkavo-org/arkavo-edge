@@ -34,8 +34,23 @@ fi
 
 chmod +x "$ARKAVO_BIN"
 
+# Capture panic backtraces from any SIGILL/abort (release builds with
+# panic = "abort" compile Rust panics down to ud2/SIGILL, which loses
+# the backtrace without this flag).
+export RUST_BACKTRACE=full
+
 echo "Testing with binary: $ARKAVO_BIN"
 echo "Using KIMI (Moonshot AI) remote API"
+echo ""
+
+# Direct smoke probe — runs each known-failing prompt outside the BDD
+# wrapper so any panic message lands in the job log before the script's
+# error-handling swallows it.
+echo "=== Smoke probe: count ==="
+"$ARKAVO_BIN" chat --prompt "Count from 1 to 5, one number per line." 2>&1 | head -40 || echo "(smoke exit=$?)"
+echo ""
+echo "=== Smoke probe: rust ==="
+"$ARKAVO_BIN" chat --prompt "Name the language that Cargo and rustc belong to. One word." 2>&1 | head -40 || echo "(smoke exit=$?)"
 echo ""
 
 # Create temp directory for test outputs
