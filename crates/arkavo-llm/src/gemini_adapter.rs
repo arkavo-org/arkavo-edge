@@ -21,7 +21,7 @@ impl GeminiProvider {
             Error::Config("GEMINI_API_KEY not set (optional - will fallback to local model)".into())
         })?;
 
-        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-flash-latest".to_string());
+        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3.5-flash".to_string());
 
         Ok(Self {
             client: RestClient::new(api_key, model),
@@ -42,7 +42,7 @@ impl GeminiProvider {
         let model = config
             .model
             .clone()
-            .unwrap_or_else(|| "gemini-flash-latest".to_string());
+            .unwrap_or_else(|| "gemini-3.5-flash".to_string());
 
         Ok(Self {
             client: RestClient::new(api_key.clone(), model),
@@ -129,7 +129,9 @@ impl Provider for GeminiProvider {
             result
                 .map(|response| StreamResponse {
                     content: response.text.unwrap_or_default(),
-                    reasoning_content: None,
+                    // Surface Gemini 3.5 thought-summary segments via the
+                    // standard reasoning-content channel.
+                    reasoning_content: response.thought_text,
                     done: response.done,
                     inference_timing: None,
                 })

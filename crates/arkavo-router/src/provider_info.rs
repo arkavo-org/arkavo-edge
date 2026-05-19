@@ -23,7 +23,7 @@ impl super::Router {
                 "Gemini",
                 "Google",
                 "GEMINI_MODEL",
-                "gemini-3-pro-preview",
+                "gemini-3.5-flash",
             ),
             (
                 "MOONSHOT_API_KEY",

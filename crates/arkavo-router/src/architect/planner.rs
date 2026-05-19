@@ -175,7 +175,7 @@ Guidelines:
             // Frontend tasks: Use cheaper, fast models
             TaskCategory::FrontendUI => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
@@ -200,7 +200,7 @@ Guidelines:
             // Documentation: Use cheaper models
             TaskCategory::Documentation => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else {
                     ModelChoice::LocalQwen3
                 }
@@ -223,7 +223,7 @@ Guidelines:
             // Vision: Needs multimodal
             TaskCategory::VisionAnalysis => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
@@ -236,7 +236,7 @@ Guidelines:
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else {
                     ModelChoice::LocalQwen3
                 }
@@ -251,6 +251,11 @@ Guidelines:
             ModelChoice::GeminiFlash => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
+                input_cost + output_cost
+            }
+            ModelChoice::Gemini35Flash => {
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.50;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 9.00;
                 input_cost + output_cost
             }
             ModelChoice::GeminiPro => {
@@ -322,7 +327,10 @@ mod tests {
         // Should prefer cheaper models for frontend
         assert!(matches!(
             model,
-            ModelChoice::GeminiFlash | ModelChoice::ClaudeSonnet | ModelChoice::LocalMinistral3B
+            ModelChoice::GeminiFlash
+                | ModelChoice::Gemini35Flash
+                | ModelChoice::ClaudeSonnet
+                | ModelChoice::LocalMinistral3B
         ));
     }
 

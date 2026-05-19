@@ -78,7 +78,9 @@ impl super::Router {
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => self.is_gemini_available(),
+            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
+                self.is_gemini_available()
+            }
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
@@ -249,7 +251,7 @@ impl super::Router {
                 }
             }
             #[cfg(feature = "gemini")]
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
                 if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
                     Ok(Box::new(provider))
                 } else {

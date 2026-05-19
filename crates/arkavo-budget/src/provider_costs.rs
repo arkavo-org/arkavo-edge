@@ -239,13 +239,15 @@ mod tests {
                 max_output_tokens: Some(16384),
             },
             PricingEntry {
-                model_id: "gemini-2.0-flash".into(),
+                model_id: "gemini-3.5-flash".into(),
                 provider: "google".into(),
-                input_cents_per_1k: 10,
-                output_cents_per_1k: 40,
-                cached_input_cents_per_1k: Some(2),
+                // Gemini 3.5 Flash (May 2026): $1.50/M input → 0.15¢/1K rounded up to 1¢ resolution.
+                // Sample data lives in integer cents per 1K — real registry overrides via API.
+                input_cents_per_1k: 150,
+                output_cents_per_1k: 900,
+                cached_input_cents_per_1k: Some(15),
                 cache_write_cents_per_1k: None,
-                context_window: Some(1048576),
+                context_window: Some(1_048_576),
                 max_output_tokens: Some(8192),
             },
             PricingEntry {
@@ -290,7 +292,7 @@ mod tests {
         assert_eq!(count, 3);
         assert!(
             pricing
-                .get_model_pricing("google", "gemini-2.0-flash")
+                .get_model_pricing("google", "gemini-3.5-flash")
                 .is_some()
         );
     }

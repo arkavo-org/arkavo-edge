@@ -32,6 +32,9 @@ pub enum GeminiError {
     #[error("Authentication failed: {0}")]
     AuthenticationError(String),
 
+    #[error("Configuration error: {0}")]
+    Config(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 

@@ -18,6 +18,7 @@ impl GeminiSseStream {
             let mut buffer = String::new();
             let mut event_data = String::new();
             let mut accumulated_text = String::new();
+            let mut accumulated_thought = String::new();
             let mut last_sent_len = 0;
             let mut accumulated_calls: Vec<FunctionCall> = Vec::new();
 
@@ -50,6 +51,7 @@ impl GeminiSseStream {
                                     match serde_json::from_str::<StreamChunk>(data) {
                                         Ok(chunk) => {
                                             let mut new_text = String::new();
+                                            let mut new_thought = String::new();
                                             let mut finish_reason = None;
 
                                             for candidate in chunk.candidates {
@@ -57,8 +59,14 @@ impl GeminiSseStream {
 
                                                 for part in candidate.content.parts {
                                                     match part {
-                                                    crate::types::StreamPart::Text { text } => {
-                                                        if !text.is_empty() {
+                                                    crate::types::StreamPart::Text { text, thought } => {
+                                                        if text.is_empty() {
+                                                            continue;
+                                                        }
+                                                        if thought {
+                                                            new_thought.push_str(&text);
+                                                            accumulated_thought.push_str(&text);
+                                                        } else {
                                                             new_text.push_str(&text);
                                                             accumulated_text.push_str(&text);
                                                         }
@@ -80,6 +88,7 @@ impl GeminiSseStream {
                                             }
 
                                             if !new_text.is_empty()
+                                                || !new_thought.is_empty()
                                                 || !accumulated_calls.is_empty()
                                                 || finish_reason.is_some()
                                             {
@@ -89,6 +98,11 @@ impl GeminiSseStream {
                                                         None
                                                     } else {
                                                         Some(new_text)
+                                                    },
+                                                    thought_text: if new_thought.is_empty() {
+                                                        None
+                                                    } else {
+                                                        Some(new_thought)
                                                     },
                                                     // Only send function calls in the final chunk to avoid duplicates
                                                     function_calls: if done {
@@ -166,6 +180,11 @@ impl GeminiSseStream {
 
                                             let salvage_response = StreamResponse {
                                                 text: unsent_text,
+                                                thought_text: if accumulated_thought.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(accumulated_thought.clone())
+                                                },
                                                 function_calls: accumulated_calls.clone(),
                                                 done: true,
                                             };
@@ -206,6 +225,11 @@ impl GeminiSseStream {
 
                         let salvage_response = StreamResponse {
                             text: unsent_text,
+                            thought_text: if accumulated_thought.is_empty() {
+                                None
+                            } else {
+                                Some(accumulated_thought.clone())
+                            },
                             function_calls: accumulated_calls.clone(),
                             done: true,
                         };
@@ -223,6 +247,11 @@ impl GeminiSseStream {
 
             let final_response = StreamResponse {
                 text: unsent_text,
+                thought_text: if accumulated_thought.is_empty() {
+                    None
+                } else {
+                    Some(accumulated_thought)
+                },
                 function_calls: accumulated_calls,
                 done: true,
             };

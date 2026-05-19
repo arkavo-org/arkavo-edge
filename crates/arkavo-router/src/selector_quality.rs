@@ -56,6 +56,9 @@ impl ModelSelector {
 
         let model_benefit = match model {
             ModelChoice::GeminiFlash => "Fast (3s), cost-effective ($0.003-0.006)",
+            ModelChoice::Gemini35Flash => {
+                "Frontier reasoning at ~280 tok/s (2s), 1M context, multimodal ($1.50/$9.00 per M)"
+            }
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
             ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
             ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
@@ -100,7 +103,7 @@ impl ModelSelector {
         match category {
             TaskCategory::FrontendUI => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
@@ -120,7 +123,7 @@ impl ModelSelector {
             }
             TaskCategory::Documentation => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else {
                     ModelChoice::LocalQwen3
                 }
@@ -148,7 +151,7 @@ impl ModelSelector {
             TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
             TaskCategory::VisionAnalysis => {
                 if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
@@ -161,7 +164,7 @@ impl ModelSelector {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {
-                    ModelChoice::GeminiFlash
+                    ModelChoice::Gemini35Flash
                 } else {
                     ModelChoice::LocalQwen3
                 }
@@ -436,6 +439,13 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
             vec![("test_generation", 5.0, 2.0), ("backend_api", 5.0, 2.0)]
         }
         ModelChoice::GeminiFlash => vec![("frontend_ui", 5.0, 2.0)],
+        // Gemini 3.5 Flash: pro-tier reasoning + agentic; warm-start for code & agent tasks.
+        ModelChoice::Gemini35Flash => vec![
+            ("frontend_ui", 5.0, 2.0),
+            ("code_generation", 5.0, 2.0),
+            ("refactoring", 4.0, 2.0),
+            ("vision_analysis", 5.0, 2.0),
+        ],
         ModelChoice::GeminiPro => {
             vec![("test_generation", 5.0, 2.0), ("backend_api", 5.0, 2.0)]
         }
@@ -491,10 +501,18 @@ mod tests {
         let selector = ModelSelector::with_availability(gemini_only());
         let learning = LearningModule::new();
 
+        // Feed positive evidence for both Flash variants and negative for Pro,
+        // so Thompson Sampling should converge on one of the two Flash models.
         for _ in 0..20 {
             learning
                 .immediate_update(
                     "gemini-flash-latest",
+                    &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
+                )
+                .await;
+            learning
+                .immediate_update(
+                    "gemini-3.5-flash",
                     &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
                 )
                 .await;
@@ -516,13 +534,16 @@ mod tests {
                 .select_adaptive(&learning, &classification, 0.0, &[])
                 .await
                 .unwrap();
-            if decision.recommended_model == ModelChoice::GeminiFlash {
+            if matches!(
+                decision.recommended_model,
+                ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash
+            ) {
                 flash_count += 1;
             }
         }
         assert!(
             flash_count > 10,
-            "GeminiFlash should be selected most times (got {flash_count}/20)"
+            "A Flash-family model should be selected most times (got {flash_count}/20)"
         );
     }
 

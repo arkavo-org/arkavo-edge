@@ -38,7 +38,7 @@ impl LlmIntegration {
         decision: &RoutingDecision,
     ) -> Result<LlmClient> {
         match decision.recommended_model {
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
                 #[cfg(feature = "gemini")]
                 {
                     use arkavo_llm::GeminiProvider;

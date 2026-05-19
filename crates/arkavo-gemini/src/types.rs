@@ -297,8 +297,12 @@ pub struct StreamContent {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum StreamPart {
+    /// Text part. `thought=true` indicates a Gemini 3.5 thought-signature
+    /// segment that should be surfaced separately from the final answer.
     Text {
         text: String,
+        #[serde(default)]
+        thought: bool,
     },
     FunctionCall {
         #[serde(rename = "functionCall")]
@@ -315,6 +319,9 @@ pub struct StreamFunctionCall {
 #[derive(Debug, Clone)]
 pub struct StreamResponse {
     pub text: Option<String>,
+    /// Gemini 3.5 thought-summary text (only populated when
+    /// `ThinkingConfig::include_thoughts=true`).
+    pub thought_text: Option<String>,
     pub function_calls: Vec<FunctionCall>,
     pub done: bool,
 }

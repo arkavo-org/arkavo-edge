@@ -17,6 +17,9 @@ pub enum PlannerTier {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ModelChoice {
     GeminiFlash,
+    /// Gemini 3.5 Flash (May 2026) — frontier reasoning at ~280 tok/s,
+    /// 1M context, native multimodal, $1.50/$9.00 per M tokens
+    Gemini35Flash,
     GeminiPro,
     ClaudeSonnet,
     ClaudeOpus,
@@ -61,6 +64,7 @@ impl ModelChoice {
     pub fn name(&self) -> &str {
         match self {
             Self::GeminiFlash => "gemini-flash-latest",
+            Self::Gemini35Flash => "gemini-3.5-flash",
             Self::GeminiPro => "gemini-3-pro-preview",
             Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
             Self::ClaudeOpus => "claude-opus-4-5-20251101",
@@ -101,7 +105,7 @@ impl ModelChoice {
             | Self::LocalGemma4B
             | Self::LocalGemma12B => "gemma",
             Self::LocalDeepSeekCoder | Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
-            Self::GeminiFlash | Self::GeminiPro => "google",
+            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::KimiK2 => "kimi",
         }
@@ -130,6 +134,15 @@ impl ModelChoice {
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
             "gemini-flash-latest" => Some(Self::GeminiFlash),
+            "gemini-3.5-flash"
+            | "gemini-3.5-flash-latest"
+            | "gemini-3.5"
+            | "gemini35flash"
+            // gemini-3.1 Live/TTS helper variants share the 3.5 stack's
+            // routing / billing surface — alias them to the Flash entry so
+            // they pass availability + cost checks.
+            | "gemini-3.1-flash-live"
+            | "gemini-3.1-flash-tts" => Some(Self::Gemini35Flash),
             "gemini-3-pro-preview" => Some(Self::GeminiPro),
             _ if name.contains("claude-sonnet") => Some(Self::ClaudeSonnet),
             _ if name.contains("claude-opus") => Some(Self::ClaudeOpus),
@@ -186,7 +199,10 @@ impl ModelChoice {
     }
 
     pub fn is_gemini(&self) -> bool {
-        matches!(self, Self::GeminiFlash | Self::GeminiPro)
+        matches!(
+            self,
+            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro
+        )
     }
 
     pub fn is_deepseek(&self) -> bool {
@@ -202,7 +218,7 @@ impl ModelChoice {
 
     pub fn provider(&self) -> &str {
         match self {
-            Self::GeminiFlash | Self::GeminiPro => "google",
+            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::LocalQwen3
             | Self::LocalQwen35_9B
@@ -244,6 +260,7 @@ impl ModelChoice {
             | Self::LocalGemma12B
             | Self::LocalDeepSeekCoder
             | Self::GeminiFlash
+            | Self::Gemini35Flash
             | Self::GeminiPro
             | Self::ClaudeSonnet
             | Self::ClaudeOpus
@@ -431,6 +448,7 @@ impl ModelChoice {
             Self::LocalGemma12B => "Gemma 12B",
             Self::LocalDeepSeekCoder => "DeepSeek Coder",
             Self::GeminiFlash => "Gemini Flash",
+            Self::Gemini35Flash => "Gemini 3.5 Flash",
             Self::GeminiPro => "Gemini Pro",
             Self::ClaudeSonnet => "Claude Sonnet",
             Self::ClaudeOpus => "Claude Opus",
@@ -511,14 +529,24 @@ impl RoutingDecision {
         match (model, category) {
             (ModelChoice::GeminiFlash, TaskCategory::FrontendUI) => {
                 vec![
+                    ModelChoice::Gemini35Flash,
                     ModelChoice::GeminiPro,
                     ModelChoice::ClaudeSonnet,
                     ModelChoice::LocalMinistral3B,
                 ]
             }
+            (ModelChoice::Gemini35Flash, _) => {
+                vec![
+                    ModelChoice::GeminiPro,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             (ModelChoice::GeminiPro, _) => {
                 vec![
                     ModelChoice::ClaudeOpus,
+                    ModelChoice::Gemini35Flash,
                     ModelChoice::GeminiFlash,
                     ModelChoice::LocalMinistral8B,
                 ]
@@ -587,6 +615,12 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
                 input_cost + output_cost
             }
+            ModelChoice::Gemini35Flash => {
+                // Gemini 3.5 Flash (May 2026): $1.50/M input, $9.00/M output
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.50;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 9.00;
+                input_cost + output_cost
+            }
             ModelChoice::GeminiPro => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.25;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 5.00;
@@ -638,6 +672,8 @@ impl RoutingDecision {
     fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
             ModelChoice::GeminiFlash => Duration::from_secs(3),
+            // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash
+            ModelChoice::Gemini35Flash => Duration::from_secs(2),
             ModelChoice::GeminiPro => Duration::from_secs(10),
             ModelChoice::ClaudeSonnet => Duration::from_secs(5),
             ModelChoice::ClaudeOpus => Duration::from_secs(15),
@@ -677,7 +713,67 @@ mod tests {
     #[test]
     fn test_model_choice_name() {
         assert_eq!(ModelChoice::GeminiFlash.name(), "gemini-flash-latest");
+        assert_eq!(ModelChoice::Gemini35Flash.name(), "gemini-3.5-flash");
         assert_eq!(ModelChoice::LocalGemma270M.name(), "gemma-3-270m-it");
+    }
+
+    #[test]
+    fn test_gemini_3_5_flash_properties() {
+        let model = ModelChoice::Gemini35Flash;
+        assert_eq!(model.provider(), "google");
+        assert_eq!(model.family(), "google");
+        assert_eq!(model.display_name(), "Gemini 3.5 Flash");
+        assert!(model.is_gemini());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert_eq!(model.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_gemini_3_5_flash_aliases() {
+        for alias in [
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-latest",
+            "gemini-3.5",
+            "gemini35flash",
+            "gemini-3.1-flash-live",
+            "gemini-3.1-flash-tts",
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Gemini35Flash),
+                "alias {alias} should resolve to Gemini35Flash"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Gemini35Flash.name()),
+            Some(ModelChoice::Gemini35Flash),
+            "round-trip via primary name"
+        );
+    }
+
+    #[test]
+    fn test_gemini_3_5_flash_cost_matches_announcement() {
+        // Gemini 3.5 Flash (May 2026): $1.50/M input, $9.00/M output —
+        // priced above legacy Flash and above Pro on output, reflecting the
+        // thinking/agentic upgrade noted in the launch announcement.
+        let cost = RoutingDecision::estimate_cost(
+            &ModelChoice::Gemini35Flash,
+            TaskCategory::CodeGeneration,
+        );
+        let flash_cost =
+            RoutingDecision::estimate_cost(&ModelChoice::GeminiFlash, TaskCategory::CodeGeneration);
+        let pro_cost =
+            RoutingDecision::estimate_cost(&ModelChoice::GeminiPro, TaskCategory::CodeGeneration);
+        assert!(cost > 0.0, "Gemini 3.5 Flash should be priced");
+        assert!(
+            cost > flash_cost,
+            "3.5 Flash should cost more than legacy Flash"
+        );
+        assert!(
+            cost > pro_cost,
+            "3.5 Flash output is $9/M vs Pro $5/M, so total exceeds Pro at this token mix"
+        );
     }
 
     #[test]

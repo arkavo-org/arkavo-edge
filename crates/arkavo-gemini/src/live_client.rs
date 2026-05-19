@@ -16,9 +16,36 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/// Default WebSocket endpoint for the Gemini Live (BidiGenerateContent) API.
+///
+/// Gemini 3.5 makes the WebSocket Live API the recommended low-latency streaming
+/// surface — text, audio, and video flow over a single stateful socket. Use
+/// this constant when wiring custom clients; the bundled `LiveSessionClient`
+/// targets it automatically.
+pub const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+
+/// Default model identifier for live WebSocket sessions.
+pub const DEFAULT_LIVE_MODEL: &str = "gemini-3.5-flash";
+
 const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 const INITIAL_BACKOFF_MS: u64 = 1000;
+
+/// Response modalities the Live API can emit. Default is `Text` to match the
+/// general text-streaming use case; audio/video sessions opt in explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveModality {
+    Text,
+    Audio,
+}
+
+impl LiveModality {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "TEXT",
+            Self::Audio => "AUDIO",
+        }
+    }
+}
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -26,6 +53,7 @@ pub struct LiveSessionClient {
     api_key: String,
     model: String,
     tools: Vec<Value>,
+    modality: LiveModality,
     ws_stream: Arc<RwLock<Option<WsStream>>>,
     tool_call_tx: mpsc::UnboundedSender<Vec<FunctionCall>>,
     tool_call_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<Vec<FunctionCall>>>>>,
@@ -35,6 +63,23 @@ pub struct LiveSessionClient {
 impl LiveSessionClient {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self::new_with_tools(api_key, model, vec![])
+    }
+
+    /// Construct a client pinned to the default Gemini Live model
+    /// (`DEFAULT_LIVE_MODEL`) — the WebSocket-based streaming entry point that
+    /// Gemini 3.5 promotes as the default for low-latency interaction.
+    pub fn new_default(api_key: impl Into<String>) -> Self {
+        Self::new(api_key, DEFAULT_LIVE_MODEL)
+    }
+
+    /// Build a Live client from `GEMINI_API_KEY` using the default model.
+    #[allow(clippy::result_large_err)]
+    pub fn try_from_env() -> Result<Self> {
+        let api_key = std::env::var("GEMINI_API_KEY")
+            .map_err(|_| GeminiError::Config("GEMINI_API_KEY not set for Live API".to_string()))?;
+        let model =
+            std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_LIVE_MODEL.to_string());
+        Ok(Self::new(api_key, model))
     }
 
     pub fn new_with_tools(
@@ -47,11 +92,19 @@ impl LiveSessionClient {
             api_key: api_key.into(),
             model: model.into(),
             tools,
+            modality: LiveModality::Text,
             ws_stream: Arc::new(RwLock::new(None)),
             tool_call_tx: tx,
             tool_call_rx: Arc::new(RwLock::new(Some(rx))),
             connected: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Override the response modality (default `Text`). Must be set before
+    /// `connect()` since the setup frame is sent at that point.
+    pub fn with_modality(mut self, modality: LiveModality) -> Self {
+        self.modality = modality;
+        self
     }
 
     pub async fn connect(&self) -> Result<()> {
@@ -124,7 +177,7 @@ impl LiveSessionClient {
         let setup = SetupConfig {
             model: self.model.clone(),
             generation_config: Some(GenerationConfig {
-                response_modalities: vec!["AUDIO".to_string()],
+                response_modalities: vec![self.modality.as_str().to_string()],
                 temperature: None,
                 max_output_tokens: None,
             }),

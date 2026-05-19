@@ -1017,7 +1017,7 @@ fn detect_available_llms() -> Vec<LlmInfo> {
 
     // Check for Gemini
     if env::var("GEMINI_API_KEY").is_ok() {
-        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
+        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3.5-flash".to_string());
         llms.push(LlmInfo {
             name: "Gemini".to_string(),
             provider: "Google".to_string(),

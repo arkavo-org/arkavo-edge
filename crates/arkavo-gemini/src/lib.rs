@@ -7,8 +7,8 @@ pub mod types;
 
 pub use dispatcher::{ToolDefinition, ToolDispatcher, ToolRegistry};
 pub use error::{GeminiError, Result};
-pub use live_client::LiveSessionClient;
-pub use rest_client::RestClient;
+pub use live_client::{DEFAULT_LIVE_MODEL, GEMINI_WS_ENDPOINT, LiveModality, LiveSessionClient};
+pub use rest_client::{RestClient, ThinkingConfig};
 pub use sse_stream::GeminiSseStream;
 pub use types::{
     ClientContent, FunctionCall, FunctionDeclaration, GenerationConfig, ServerMessage, SetupConfig,

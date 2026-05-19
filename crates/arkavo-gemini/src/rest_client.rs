@@ -60,7 +60,7 @@ struct FunctionResponsePart {
     response: Value,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
@@ -70,6 +70,28 @@ struct GenerationConfig {
     response_mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "responseSchema")]
     response_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingConfig")]
+    thinking_config: Option<ThinkingConfig>,
+}
+
+/// Gemini 3.5 Thinking controls.
+///
+/// `thinking_budget` clamps the internal reasoning loop:
+/// - `Some(0)`     — disable thinking (fastest, cheapest).
+/// - `Some(-1)`    — dynamic; the model decides budget.
+/// - `Some(n>0)`   — exact token cap for the chain-of-thought.
+/// - `None`        — server default.
+///
+/// `include_thoughts: true` surfaces `thought=true` parts in the response,
+/// which the stream parser folds into `StreamResponse::thought_text`.
+///
+/// Per https://ai.google.dev/gemini-api/docs/thinking
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ThinkingConfig {
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingBudget")]
+    pub thinking_budget: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "includeThoughts")]
+    pub include_thoughts: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -174,7 +196,22 @@ impl RestClient {
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
     ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_impl(prompt, tools, None).await
+        self.stream_generate_content_impl(prompt, tools, None, None)
+            .await
+    }
+
+    /// Stream with Gemini 3.5 thinking controls (per https://ai.google.dev/gemini-api/docs/thinking).
+    ///
+    /// Use `thinking_budget=Some(0)` to disable thinking, `Some(-1)` for dynamic, or
+    /// `include_thoughts=Some(true)` to surface thought summaries in the stream.
+    pub async fn stream_generate_content_with_thinking(
+        &self,
+        prompt: impl Into<String>,
+        tools: Option<Vec<FunctionDeclaration>>,
+        thinking: ThinkingConfig,
+    ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_impl(prompt, tools, None, Some(thinking))
+            .await
     }
 
     pub async fn stream_generate_content_json(
@@ -182,7 +219,7 @@ impl RestClient {
         prompt: impl Into<String>,
         schema: Value,
     ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_impl(prompt, None, Some(schema))
+        self.stream_generate_content_impl(prompt, None, Some(schema), None)
             .await
     }
 
@@ -193,6 +230,18 @@ impl RestClient {
         system_instruction: Option<String>,
         contents: Vec<(String, String)>, // (role, text) pairs
         tools: Option<Vec<FunctionDeclaration>>,
+    ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_multi_with_thinking(system_instruction, contents, tools, None)
+            .await
+    }
+
+    /// Multi-turn stream that also threads a `ThinkingConfig` through to Gemini 3.5.
+    pub async fn stream_generate_content_multi_with_thinking(
+        &self,
+        system_instruction: Option<String>,
+        contents: Vec<(String, String)>,
+        tools: Option<Vec<FunctionDeclaration>>,
+        thinking: Option<ThinkingConfig>,
     ) -> Result<GeminiSseStream> {
         let sys = system_instruction.map(|text| Content {
             role: "user".to_string(), // Gemini system_instruction ignores role
@@ -207,6 +256,11 @@ impl RestClient {
             })
             .collect();
 
+        let generation_config = thinking.map(|t| GenerationConfig {
+            thinking_config: Some(t),
+            ..GenerationConfig::default()
+        });
+
         let request = GenerateContentRequest {
             contents,
             system_instruction: sys,
@@ -215,7 +269,7 @@ impl RestClient {
                     function_declarations: t,
                 }]
             }),
-            generation_config: None,
+            generation_config,
         };
 
         self.stream_request(request).await
@@ -226,13 +280,18 @@ impl RestClient {
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
         json_schema: Option<Value>,
+        thinking: Option<ThinkingConfig>,
     ) -> Result<GeminiSseStream> {
-        let generation_config = json_schema.map(|schema| GenerationConfig {
-            temperature: None,
-            max_output_tokens: None,
-            response_mime_type: Some("application/json".to_string()),
-            response_schema: Some(schema),
-        });
+        let generation_config = match (json_schema, thinking) {
+            (None, None) => None,
+            (schema, thinking) => Some(GenerationConfig {
+                temperature: None,
+                max_output_tokens: None,
+                response_mime_type: schema.as_ref().map(|_| "application/json".to_string()),
+                response_schema: schema,
+                thinking_config: thinking,
+            }),
+        };
 
         let request = GenerateContentRequest {
             contents: vec![Content {

@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_model_info_cloud() {
-        let model = ModelInfo::cloud("Gemini Flash", "gemini", "gemini-2.0-flash");
+        let model = ModelInfo::cloud("Gemini 3.5 Flash", "gemini", "gemini-3.5-flash");
         assert_eq!(model.provider, "gemini");
         assert!(model.path.is_none());
     }

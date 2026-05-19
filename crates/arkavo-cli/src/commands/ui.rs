@@ -978,7 +978,7 @@ async fn create_client_from_routing(
     use arkavo_router::ModelChoice;
 
     match decision.recommended_model {
-        ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+        ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
             #[cfg(feature = "gemini")]
             {
                 use arkavo_llm::GeminiProvider;

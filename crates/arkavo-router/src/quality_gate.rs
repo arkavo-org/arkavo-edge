@@ -46,7 +46,9 @@ impl super::Router {
                 let tool_infos =
                     registry.search_tools("", arkavo_mcp_tools::DetailLevel::NameAndDescription);
                 let json = match model {
-                    crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                    crate::ModelChoice::GeminiFlash
+                    | crate::ModelChoice::Gemini35Flash
+                    | crate::ModelChoice::GeminiPro => {
                         arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                     }
                     _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
@@ -105,7 +107,9 @@ impl super::Router {
                 )
                 .await;
                 let json = match model {
-                    crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                    crate::ModelChoice::GeminiFlash
+                    | crate::ModelChoice::Gemini35Flash
+                    | crate::ModelChoice::GeminiPro => {
                         arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                     }
                     _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
@@ -271,7 +275,9 @@ impl super::Router {
                     .await;
 
                     let json = match current_decision.recommended_model {
-                        crate::ModelChoice::GeminiFlash | crate::ModelChoice::GeminiPro => {
+                        crate::ModelChoice::GeminiFlash
+                        | crate::ModelChoice::Gemini35Flash
+                        | crate::ModelChoice::GeminiPro => {
                             arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                         }
                         _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),

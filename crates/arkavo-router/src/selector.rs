@@ -207,7 +207,7 @@ impl ModelSelector {
             if prefer_pro {
                 ModelChoice::GeminiPro
             } else {
-                ModelChoice::GeminiFlash
+                ModelChoice::Gemini35Flash
             }
         } else {
             // No cloud available, use local (with availability check)
@@ -339,6 +339,9 @@ impl ModelSelector {
 
         // Cloud models (unconstrained by memory)
         if self.availability.gemini {
+            // Gemini 3.5 Flash (May 2026) is the new daily-driver Flash.
+            // Keep legacy alias model around for cost-tier fallback.
+            models.push(ModelChoice::Gemini35Flash);
             models.push(ModelChoice::GeminiFlash);
         }
         if self.availability.anthropic {
@@ -407,7 +410,7 @@ mod tests {
         let decision = selector
             .select(&classification, "Build a React component")
             .unwrap();
-        assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
+        assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
         assert!(decision.reasoning.contains("WebDev Arena"));
     }
 
@@ -480,6 +483,7 @@ mod tests {
     fn test_feasible_models_gemini_only() {
         let selector = ModelSelector::with_availability(gemini_only());
         let feasible = selector.feasible_models();
+        assert!(feasible.contains(&ModelChoice::Gemini35Flash));
         assert!(feasible.contains(&ModelChoice::GeminiFlash));
         // GeminiPro removed from feasible set (Flash only) in d4227709
         assert!(!feasible.contains(&ModelChoice::GeminiPro));
