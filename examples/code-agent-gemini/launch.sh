@@ -133,7 +133,7 @@ start_agent() {
 
     # Set model based on flag
     if [ -z "$GEMINI_MODEL" ]; then
-        GEMINI_MODEL="gemini-3-pro-preview"
+        GEMINI_MODEL="gemini-3.5-flash"
     fi
     print_status "Using model: $GEMINI_MODEL"
 
@@ -245,7 +245,7 @@ test_connection() {
 
     # Test via chat command
     RESPONSE=$(cd ../.. && cargo run --features gemini -p arkavo -- \
-        chat --model "${GEMINI_MODEL:-gemini-flash-latest}" \
+        chat --model "${GEMINI_MODEL:-gemini-3.5-flash}" \
         --prompt "Respond with: API test successful" 2>&1)
 
     if [ $? -eq 0 ]; then
@@ -298,6 +298,11 @@ case "${1:-start}" in
         show_budget
         ;;
     --flash)
+        export GEMINI_MODEL="gemini-3.5-flash"
+        check_prerequisites
+        start_agent
+        ;;
+    --flash-legacy)
         export GEMINI_MODEL="gemini-flash-latest"
         check_prerequisites
         start_agent
@@ -319,7 +324,7 @@ case "${1:-start}" in
         echo "Usage: $0 {start|stop|restart|status|logs|test|budget} [options]"
         echo ""
         echo "Commands:"
-        echo "  start           - Start the Gemini Code agent (default: gemini-3-pro-preview)"
+        echo "  start           - Start the Gemini Code agent (default: gemini-3.5-flash)"
         echo "  stop            - Stop the agent"
         echo "  restart         - Restart the agent"
         echo "  status          - Check agent status"
@@ -328,8 +333,9 @@ case "${1:-start}" in
         echo "  budget          - Show budget usage"
         echo ""
         echo "Model Options:"
-        echo "  --pro           - Use Gemini 2.5 Pro (best quality)"
-        echo "  --flash         - Use Gemini Flash (fast, cheaper)"
+        echo "  --pro           - Use Gemini 3 Pro Preview (best quality)"
+        echo "  --flash         - Use Gemini 3.5 Flash (frontier reasoning, ~280 tok/s) [default]"
+        echo "  --flash-legacy  - Use legacy gemini-flash-latest alias"
         echo "  --lite          - Use Gemini Flash-Lite (fastest, cheapest)"
         echo ""
         echo "Other Options:"

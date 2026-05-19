@@ -16,22 +16,39 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-/// Default WebSocket endpoint for the Gemini Live (BidiGenerateContent) API.
+/// WebSocket endpoint for the Gemini Live (BidiGenerateContent) API.
 ///
-/// Gemini 3.5 makes the WebSocket Live API the recommended low-latency streaming
-/// surface — text, audio, and video flow over a single stateful socket. Use
-/// this constant when wiring custom clients; the bundled `LiveSessionClient`
-/// targets it automatically.
-pub const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+/// **Not the default streaming surface.** Text streaming for normal chat /
+/// agentic routing goes through `RestClient::stream_generate_content_*`
+/// (HTTP SSE on `streamGenerateContent`), which is what `GeminiProvider`
+/// and `arkavo-router` invoke in production.
+///
+/// `LiveSessionClient` and this WebSocket endpoint are for **bidi audio /
+/// video sessions** — stateful sockets where the client streams microphone
+/// frames or video and the model streams audio responses. The only models
+/// currently exposed for `bidiGenerateContent` are the
+/// `gemini-2.5-flash-native-audio-*` variants; the announced
+/// `gemini-3.1-flash-live` is preview-gated.
+///
+/// Live API lives at `v1alpha` (REST sibling is `v1beta`).
+pub const GEMINI_WS_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 
-/// Default model identifier for live WebSocket sessions.
-pub const DEFAULT_LIVE_MODEL: &str = "gemini-3.5-flash";
+/// Default model identifier for Live (bidi) WebSocket sessions.
+///
+/// Set to the only model the public v1alpha endpoint actually routes for
+/// `bidiGenerateContent` today. Override via `GEMINI_MODEL` /
+/// `LiveSessionClient::new(...)` if your account has the 3.1-flash-live
+/// preview enabled.
+pub const DEFAULT_LIVE_MODEL: &str = "gemini-2.5-flash-native-audio-latest";
 
 const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 const INITIAL_BACKOFF_MS: u64 = 1000;
 
-/// Response modalities the Live API can emit. Default is `Text` to match the
-/// general text-streaming use case; audio/video sessions opt in explicitly.
+/// Response modality requested in the Live API setup frame.
+///
+/// The currently-routable bidi models (`gemini-2.5-flash-native-audio-*`)
+/// only emit `Audio`; `Text` is wired for the future `gemini-3.1-flash-live`
+/// preview where text bidi is supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveModality {
     Text,
@@ -49,6 +66,16 @@ impl LiveModality {
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+/// Stateful WebSocket session against the Gemini Live (BidiGenerateContent) API.
+///
+/// **Use this only for bidi audio / video sessions.** For text chat,
+/// agentic tool loops, and structured JSON output, use `RestClient` — the
+/// `streamGenerateContent` SSE endpoint is the production streaming surface
+/// that `GeminiProvider` and `arkavo-router` invoke.
+///
+/// Typical Live API workflow: connect → stream microphone PCM frames →
+/// receive model audio + function calls → send `ToolResponse` frames →
+/// close.
 pub struct LiveSessionClient {
     api_key: String,
     model: String,
@@ -65,14 +92,15 @@ impl LiveSessionClient {
         Self::new_with_tools(api_key, model, vec![])
     }
 
-    /// Construct a client pinned to the default Gemini Live model
-    /// (`DEFAULT_LIVE_MODEL`) — the WebSocket-based streaming entry point that
-    /// Gemini 3.5 promotes as the default for low-latency interaction.
+    /// Construct a Live (bidi) WebSocket client pinned to
+    /// `DEFAULT_LIVE_MODEL`. For text streaming use `RestClient` — the
+    /// production SSE surface — not this WebSocket path.
     pub fn new_default(api_key: impl Into<String>) -> Self {
         Self::new(api_key, DEFAULT_LIVE_MODEL)
     }
 
-    /// Build a Live client from `GEMINI_API_KEY` using the default model.
+    /// Build a Live (bidi) client from `GEMINI_API_KEY` using the default
+    /// Live-capable model. Not for text chat — see `RestClient`.
     #[allow(clippy::result_large_err)]
     pub fn try_from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
@@ -174,8 +202,15 @@ impl LiveSessionClient {
             }])
         };
 
+        // Live API requires the fully-qualified `models/<id>` form in the
+        // setup frame — server rejects the bare id with "not found".
+        let model_id = if self.model.starts_with("models/") {
+            self.model.clone()
+        } else {
+            format!("models/{}", self.model)
+        };
         let setup = SetupConfig {
-            model: self.model.clone(),
+            model: model_id,
             generation_config: Some(GenerationConfig {
                 response_modalities: vec![self.modality.as_str().to_string()],
                 temperature: None,

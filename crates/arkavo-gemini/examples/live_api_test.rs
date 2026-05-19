@@ -3,7 +3,7 @@
 //! This example uses #[tokio::main] which internally uses Runtime::block_on.
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
+use arkavo_gemini::{LiveModality, LiveSessionClient, ToolDispatcher, ToolRegistry};
 use serde_json::json;
 use std::env;
 use tokio::time::{Duration, sleep};
@@ -13,7 +13,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY required");
-    let model = "models/gemini-2.0-flash-exp";
+    // Live API (bidiGenerateContent) requires a Live-capable model. As of
+    // May 2026 only `gemini-2.5-flash-native-audio-*` is exposed via AI Studio
+    // for v1beta WebSocket sessions; the gemini-3.1-flash-live helper from
+    // the 3.5 launch is gated to Vertex AI / preview accounts. Override with
+    // `GEMINI_LIVE_MODEL` if your account has 3.1-flash-live available.
+    let model = env::var("GEMINI_LIVE_MODEL")
+        .unwrap_or_else(|_| "gemini-2.5-flash-native-audio-latest".to_string());
+    println!("Using Live API model: {model}");
 
     println!("Setting up tool dispatcher...");
     let dispatcher = ToolDispatcher::new(2);
@@ -57,7 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Registered {} tools", tool_schemas.len());
     println!("\nCreating Live API client with tools...");
 
-    let client = LiveSessionClient::new_with_tools(api_key, model, tool_schemas);
+    // Native-audio models only emit AUDIO; flip modality accordingly.
+    let client = LiveSessionClient::new_with_tools(api_key, &model, tool_schemas)
+        .with_modality(LiveModality::Audio);
 
     println!("Connecting to Gemini Live API...");
     client.connect().await?;

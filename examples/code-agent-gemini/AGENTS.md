@@ -6,8 +6,9 @@ port: 8346
 
 ## Model Configuration
 
-model: gemini-3-pro-preview
-# For faster iteration: gemini-flash-latest
+model: gemini-3.5-flash
+# For deeper reasoning: gemini-3-pro-preview
+# Legacy alias: gemini-flash-latest
 
 ## Capabilities
 
