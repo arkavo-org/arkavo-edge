@@ -78,9 +78,12 @@ impl super::Router {
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
-            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
-                self.is_gemini_available()
-            }
+            ModelChoice::GeminiFlash
+            | ModelChoice::Gemini35Flash
+            | ModelChoice::Gemini35FlashMinimal
+            | ModelChoice::Gemini35FlashMedium
+            | ModelChoice::Gemini35FlashHigh
+            | ModelChoice::GeminiPro => self.is_gemini_available(),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
@@ -251,8 +254,22 @@ impl super::Router {
                 }
             }
             #[cfg(feature = "gemini")]
-            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
-                if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
+            ModelChoice::GeminiFlash
+            | ModelChoice::Gemini35Flash
+            | ModelChoice::Gemini35FlashMinimal
+            | ModelChoice::Gemini35FlashMedium
+            | ModelChoice::Gemini35FlashHigh
+            | ModelChoice::GeminiPro => {
+                // Each ModelChoice arm carries its own API model id +
+                // thinking budget. Construct the provider explicitly so
+                // distinct Thompson Sampling arms actually send different
+                // `thinkingConfig` payloads to the Gemini API.
+                let api_model = model.gemini_api_model().unwrap_or("gemini-3.5-flash");
+                let thinking = model.gemini_thinking_budget();
+                let built =
+                    arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking)
+                        .or_else(|_| arkavo_llm::GeminiProvider::new());
+                if let Ok(provider) = built {
                     Ok(Box::new(provider))
                 } else {
                     #[cfg(feature = "llama-cpp")]

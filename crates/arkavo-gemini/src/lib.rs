@@ -12,5 +12,5 @@ pub use rest_client::{RestClient, ThinkingConfig};
 pub use sse_stream::GeminiSseStream;
 pub use types::{
     ClientContent, FunctionCall, FunctionDeclaration, GenerationConfig, ServerMessage, SetupConfig,
-    StreamResponse, Tool, ToolResponse,
+    StreamResponse, Tool, ToolResponse, UsageMetadata,
 };

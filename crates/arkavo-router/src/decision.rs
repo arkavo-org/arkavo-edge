@@ -17,9 +17,22 @@ pub enum PlannerTier {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ModelChoice {
     GeminiFlash,
-    /// Gemini 3.5 Flash (May 2026) — frontier reasoning at ~280 tok/s,
-    /// 1M context, native multimodal, $1.50/$9.00 per M tokens
+    /// Gemini 3.5 Flash with the **low** thinking tier (budget 512 tokens).
+    /// Production daily-driver — matches AA-recommended pinned thinking that
+    /// avoids the dynamic-thinking timeout class.
     Gemini35Flash,
+    /// Gemini 3.5 Flash with thinking **disabled** (budget 0). Fast and
+    /// cheap; in practice the model becomes too conservative for tool-call
+    /// loops, so prefer `Gemini35Flash` for routine routing.
+    Gemini35FlashMinimal,
+    /// Gemini 3.5 Flash with the **medium** thinking tier (budget 2048).
+    /// Matches the server default; spend climbs and bimodal latency
+    /// reappears, but quality on complex planning is meaningfully higher.
+    Gemini35FlashMedium,
+    /// Gemini 3.5 Flash with the **high** thinking tier (budget 8192).
+    /// Use for explicit deliberation paths only — Thompson Sampling
+    /// should learn which task types justify the cost/latency hit.
+    Gemini35FlashHigh,
     GeminiPro,
     ClaudeSonnet,
     ClaudeOpus,
@@ -64,7 +77,13 @@ impl ModelChoice {
     pub fn name(&self) -> &str {
         match self {
             Self::GeminiFlash => "gemini-flash-latest",
+            // Thompson Sampling sees each thinking tier as a distinct arm,
+            // so the canonical name carries the tier suffix. `gemini_api_model()`
+            // strips it back to the API model id for REST calls.
             Self::Gemini35Flash => "gemini-3.5-flash",
+            Self::Gemini35FlashMinimal => "gemini-3.5-flash-minimal",
+            Self::Gemini35FlashMedium => "gemini-3.5-flash-medium",
+            Self::Gemini35FlashHigh => "gemini-3.5-flash-high",
             Self::GeminiPro => "gemini-3-pro-preview",
             Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
             Self::ClaudeOpus => "claude-opus-4-5-20251101",
@@ -105,7 +124,12 @@ impl ModelChoice {
             | Self::LocalGemma4B
             | Self::LocalGemma12B => "gemma",
             Self::LocalDeepSeekCoder | Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
-            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro => "google",
+            Self::GeminiFlash
+            | Self::Gemini35Flash
+            | Self::Gemini35FlashMinimal
+            | Self::Gemini35FlashMedium
+            | Self::Gemini35FlashHigh
+            | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::KimiK2 => "kimi",
         }
@@ -142,7 +166,14 @@ impl ModelChoice {
             // routing / billing surface — alias them to the Flash entry so
             // they pass availability + cost checks.
             | "gemini-3.1-flash-live"
-            | "gemini-3.1-flash-tts" => Some(Self::Gemini35Flash),
+            | "gemini-3.1-flash-tts"
+            // Explicit "low" tier alias resolves to the default Gemini35Flash arm.
+            | "gemini-3.5-flash-low" => Some(Self::Gemini35Flash),
+            "gemini-3.5-flash-minimal" | "gemini-3.5-flash-off" => {
+                Some(Self::Gemini35FlashMinimal)
+            }
+            "gemini-3.5-flash-medium" => Some(Self::Gemini35FlashMedium),
+            "gemini-3.5-flash-high" => Some(Self::Gemini35FlashHigh),
             "gemini-3-pro-preview" => Some(Self::GeminiPro),
             _ if name.contains("claude-sonnet") => Some(Self::ClaudeSonnet),
             _ if name.contains("claude-opus") => Some(Self::ClaudeOpus),
@@ -201,8 +232,43 @@ impl ModelChoice {
     pub fn is_gemini(&self) -> bool {
         matches!(
             self,
-            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro
+            Self::GeminiFlash
+                | Self::Gemini35Flash
+                | Self::Gemini35FlashMinimal
+                | Self::Gemini35FlashMedium
+                | Self::Gemini35FlashHigh
+                | Self::GeminiPro
         )
+    }
+
+    /// Underlying Gemini API model id (strips the per-arm thinking-tier
+    /// suffix). Returns `None` for non-Gemini variants.
+    pub fn gemini_api_model(&self) -> Option<&'static str> {
+        match self {
+            Self::GeminiFlash => Some("gemini-flash-latest"),
+            Self::Gemini35Flash
+            | Self::Gemini35FlashMinimal
+            | Self::Gemini35FlashMedium
+            | Self::Gemini35FlashHigh => Some("gemini-3.5-flash"),
+            Self::GeminiPro => Some("gemini-3-pro-preview"),
+            _ => None,
+        }
+    }
+
+    /// `thinkingBudget` to pass to the Gemini API for this arm. `None`
+    /// means "leave the server at its default" (which on Gemini 3.5 Flash
+    /// is dynamic thinking — the latency-spike regime we want to avoid).
+    /// Per the Artificial Analysis pre-release: minimal / low / medium /
+    /// high tiers are exposed; we map them to concrete token caps so
+    /// Thompson Sampling can learn the cost/quality tradeoff per task type.
+    pub fn gemini_thinking_budget(&self) -> Option<i32> {
+        match self {
+            Self::Gemini35FlashMinimal => Some(0),
+            Self::Gemini35Flash => Some(512),
+            Self::Gemini35FlashMedium => Some(2048),
+            Self::Gemini35FlashHigh => Some(8192),
+            _ => None,
+        }
     }
 
     pub fn is_deepseek(&self) -> bool {
@@ -218,7 +284,12 @@ impl ModelChoice {
 
     pub fn provider(&self) -> &str {
         match self {
-            Self::GeminiFlash | Self::Gemini35Flash | Self::GeminiPro => "google",
+            Self::GeminiFlash
+            | Self::Gemini35Flash
+            | Self::Gemini35FlashMinimal
+            | Self::Gemini35FlashMedium
+            | Self::Gemini35FlashHigh
+            | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::LocalQwen3
             | Self::LocalQwen35_9B
@@ -261,6 +332,9 @@ impl ModelChoice {
             | Self::LocalDeepSeekCoder
             | Self::GeminiFlash
             | Self::Gemini35Flash
+            | Self::Gemini35FlashMinimal
+            | Self::Gemini35FlashMedium
+            | Self::Gemini35FlashHigh
             | Self::GeminiPro
             | Self::ClaudeSonnet
             | Self::ClaudeOpus
@@ -448,7 +522,10 @@ impl ModelChoice {
             Self::LocalGemma12B => "Gemma 12B",
             Self::LocalDeepSeekCoder => "DeepSeek Coder",
             Self::GeminiFlash => "Gemini Flash",
-            Self::Gemini35Flash => "Gemini 3.5 Flash",
+            Self::Gemini35Flash => "Gemini 3.5 Flash (low)",
+            Self::Gemini35FlashMinimal => "Gemini 3.5 Flash (minimal)",
+            Self::Gemini35FlashMedium => "Gemini 3.5 Flash (medium)",
+            Self::Gemini35FlashHigh => "Gemini 3.5 Flash (high)",
             Self::GeminiPro => "Gemini Pro",
             Self::ClaudeSonnet => "Claude Sonnet",
             Self::ClaudeOpus => "Claude Opus",
@@ -615,19 +692,33 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
                 input_cost + output_cost
             }
-            ModelChoice::Gemini35Flash => {
+            ModelChoice::Gemini35Flash
+            | ModelChoice::Gemini35FlashMinimal
+            | ModelChoice::Gemini35FlashMedium
+            | ModelChoice::Gemini35FlashHigh => {
                 // Gemini 3.5 Flash (May 2026): $1.50/M input, $9.00/M output —
                 // roughly 3x Gemini 3 Flash ($0.50 / $3.00). Independent Artificial
                 // Analysis reporting also flags 5.5x higher token usage when
-                // dynamic thinking is on (the model default), so any ARP budget
+                // dynamic thinking is on (the server default), so any ARP budget
                 // policy migrated from `gemini-3-flash` priors will undercount
-                // real spend by ~5–15x for "hard" decisions. `GeminiProvider`
-                // pins `thinkingBudget=0` by default to make this estimate
-                // realistic; explicit deliberation flows that opt back into
-                // thinking should track output tokens directly rather than
-                // trusting `TokenEstimate`.
+                // real spend by ~5–15x for "hard" decisions.
+                //
+                // We expose distinct ModelChoice arms per thinking tier; the
+                // category-based estimate here only knows about visible output
+                // tokens. Each arm gets a thinking-multiplier on output to bake
+                // in the expected chain-of-thought spend so Thompson Sampling
+                // can see the cost difference per arm. Real spend should always
+                // come from `usageMetadata` once it's available.
+                let thinking_multiplier = match model {
+                    ModelChoice::Gemini35FlashMinimal => 0.0,
+                    ModelChoice::Gemini35Flash => 0.5, // ~512 tokens / typical 1k output
+                    ModelChoice::Gemini35FlashMedium => 2.0,
+                    ModelChoice::Gemini35FlashHigh => 8.0,
+                    _ => 0.0,
+                };
+                let effective_output = (token_estimate.output as f64) * (1.0 + thinking_multiplier);
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.50;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 9.00;
+                let output_cost = (effective_output / 1_000_000.0) * 9.00;
                 input_cost + output_cost
             }
             ModelChoice::GeminiPro => {
@@ -681,8 +772,13 @@ impl RoutingDecision {
     fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
             ModelChoice::GeminiFlash => Duration::from_secs(3),
-            // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash
+            // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash.
+            // Latency scales roughly with the thinking budget; tiers are
+            // hand-tuned from the rimworld run + AA reference numbers.
+            ModelChoice::Gemini35FlashMinimal => Duration::from_secs(1),
             ModelChoice::Gemini35Flash => Duration::from_secs(2),
+            ModelChoice::Gemini35FlashMedium => Duration::from_secs(6),
+            ModelChoice::Gemini35FlashHigh => Duration::from_secs(20),
             ModelChoice::GeminiPro => Duration::from_secs(10),
             ModelChoice::ClaudeSonnet => Duration::from_secs(5),
             ModelChoice::ClaudeOpus => Duration::from_secs(15),
@@ -731,7 +827,7 @@ mod tests {
         let model = ModelChoice::Gemini35Flash;
         assert_eq!(model.provider(), "google");
         assert_eq!(model.family(), "google");
-        assert_eq!(model.display_name(), "Gemini 3.5 Flash");
+        assert_eq!(model.display_name(), "Gemini 3.5 Flash (low)");
         assert!(model.is_gemini());
         assert!(model.is_cloud());
         assert!(!model.is_local());

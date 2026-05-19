@@ -56,8 +56,17 @@ impl ModelSelector {
 
         let model_benefit = match model {
             ModelChoice::GeminiFlash => "Fast (3s), cost-effective ($0.003-0.006)",
+            ModelChoice::Gemini35FlashMinimal => {
+                "3.5 Flash, thinking off (1s) — fastest arm; conservative on action-taking"
+            }
             ModelChoice::Gemini35Flash => {
-                "Frontier reasoning at ~280 tok/s (2s), 1M context, multimodal ($1.50/$9.00 per M)"
+                "3.5 Flash, low thinking (2s) — production default; ~280 tok/s, no 90s spikes"
+            }
+            ModelChoice::Gemini35FlashMedium => {
+                "3.5 Flash, medium thinking (6s) — server default tier; quality > speed"
+            }
+            ModelChoice::Gemini35FlashHigh => {
+                "3.5 Flash, high thinking (20s) — deliberation arm; only when task warrants it"
             }
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
             ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
@@ -536,7 +545,11 @@ mod tests {
                 .unwrap();
             if matches!(
                 decision.recommended_model,
-                ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash
+                ModelChoice::GeminiFlash
+                    | ModelChoice::Gemini35Flash
+                    | ModelChoice::Gemini35FlashMinimal
+                    | ModelChoice::Gemini35FlashMedium
+                    | ModelChoice::Gemini35FlashHigh
             ) {
                 flash_count += 1;
             }

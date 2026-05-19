@@ -48,6 +48,9 @@ impl super::Router {
                 let json = match model {
                     crate::ModelChoice::GeminiFlash
                     | crate::ModelChoice::Gemini35Flash
+                    | crate::ModelChoice::Gemini35FlashMinimal
+                    | crate::ModelChoice::Gemini35FlashMedium
+                    | crate::ModelChoice::Gemini35FlashHigh
                     | crate::ModelChoice::GeminiPro => {
                         arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                     }
@@ -109,6 +112,9 @@ impl super::Router {
                 let json = match model {
                     crate::ModelChoice::GeminiFlash
                     | crate::ModelChoice::Gemini35Flash
+                    | crate::ModelChoice::Gemini35FlashMinimal
+                    | crate::ModelChoice::Gemini35FlashMedium
+                    | crate::ModelChoice::Gemini35FlashHigh
                     | crate::ModelChoice::GeminiPro => {
                         arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                     }

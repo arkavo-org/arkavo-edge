@@ -339,9 +339,16 @@ impl ModelSelector {
 
         // Cloud models (unconstrained by memory)
         if self.availability.gemini {
-            // Gemini 3.5 Flash (May 2026) is the new daily-driver Flash.
-            // Keep legacy alias model around for cost-tier fallback.
+            // Gemini 3.5 Flash (May 2026) ships as four distinct Thompson
+            // Sampling arms — one per thinking tier — so the learning
+            // module can converge on the right cost/quality point per
+            // task category. `Gemini35Flash` (low tier) is the production
+            // default; the others are opt-in via learning.
             models.push(ModelChoice::Gemini35Flash);
+            models.push(ModelChoice::Gemini35FlashMinimal);
+            models.push(ModelChoice::Gemini35FlashMedium);
+            models.push(ModelChoice::Gemini35FlashHigh);
+            // Legacy Flash alias kept around for cost-tier fallback.
             models.push(ModelChoice::GeminiFlash);
         }
         if self.availability.anthropic {

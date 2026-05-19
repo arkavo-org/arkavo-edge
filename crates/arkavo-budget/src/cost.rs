@@ -114,7 +114,7 @@ impl Div<u64> for TokenCost {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -124,6 +124,12 @@ pub struct TokenUsage {
     /// Tokens written into the prompt cache (billed at write surcharge rate)
     #[serde(default)]
     pub cache_write_tokens: u32,
+    /// Hidden chain-of-thought tokens (Gemini 3.5's `thoughtsTokenCount`).
+    /// Billed at the output rate by Gemini but invisible to the response
+    /// stream — tracked separately so latency analysis and per-tier
+    /// thinking-budget reporting can attribute spend correctly.
+    #[serde(default)]
+    pub thinking_tokens: u32,
 }
 
 impl TokenUsage {
@@ -133,6 +139,7 @@ impl TokenUsage {
             output_tokens,
             cached_input_tokens: 0,
             cache_write_tokens: 0,
+            thinking_tokens: 0,
         }
     }
 
@@ -147,11 +154,29 @@ impl TokenUsage {
             output_tokens,
             cached_input_tokens,
             cache_write_tokens,
+            thinking_tokens: 0,
+        }
+    }
+
+    /// Build a TokenUsage from real provider-reported token counts.
+    /// Pass `thinking_tokens=None` for providers that don't separate
+    /// chain-of-thought tokens from regular output.
+    pub fn with_thinking(input_tokens: u32, output_tokens: u32, thinking_tokens: u32) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            cached_input_tokens: 0,
+            cache_write_tokens: 0,
+            thinking_tokens,
         }
     }
 
     pub fn total_tokens(&self) -> u32 {
-        self.input_tokens + self.output_tokens + self.cached_input_tokens + self.cache_write_tokens
+        self.input_tokens
+            + self.output_tokens
+            + self.cached_input_tokens
+            + self.cache_write_tokens
+            + self.thinking_tokens
     }
 
     pub fn calculate_cost(
@@ -160,7 +185,9 @@ impl TokenUsage {
         output_cost_per_thousand: TokenCost,
     ) -> TokenCost {
         let input_cost = TokenCost::from_tokens(self.input_tokens, input_cost_per_thousand);
-        let output_cost = TokenCost::from_tokens(self.output_tokens, output_cost_per_thousand);
+        // Thinking tokens bill at the output rate (Gemini pricing rule).
+        let billable_output = self.output_tokens.saturating_add(self.thinking_tokens);
+        let output_cost = TokenCost::from_tokens(billable_output, output_cost_per_thousand);
         input_cost + output_cost
     }
 }

@@ -44,6 +44,9 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::LocalGlm47Flash
         | ModelChoice::GeminiFlash
         | ModelChoice::Gemini35Flash
+        | ModelChoice::Gemini35FlashMinimal
+        | ModelChoice::Gemini35FlashMedium
+        | ModelChoice::Gemini35FlashHigh
         | ModelChoice::GeminiPro
         | ModelChoice::ClaudeSonnet
         | ModelChoice::ClaudeOpus

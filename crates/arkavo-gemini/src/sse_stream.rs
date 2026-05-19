@@ -21,6 +21,9 @@ impl GeminiSseStream {
             let mut accumulated_thought = String::new();
             let mut last_sent_len = 0;
             let mut accumulated_calls: Vec<FunctionCall> = Vec::new();
+            // Gemini emits usageMetadata once, on the terminal chunk. Keep
+            // the latest value seen so the final StreamResponse carries it.
+            let mut latest_usage: Option<crate::types::UsageMetadata> = None;
 
             while let Some(chunk_result) = futures::StreamExt::next(&mut stream).await {
                 match chunk_result {
@@ -53,6 +56,10 @@ impl GeminiSseStream {
                                             let mut new_text = String::new();
                                             let mut new_thought = String::new();
                                             let mut finish_reason = None;
+
+                                            if let Some(usage) = chunk.usage_metadata {
+                                                latest_usage = Some(usage);
+                                            }
 
                                             for candidate in chunk.candidates {
                                                 finish_reason.clone_from(&candidate.finish_reason);
@@ -109,6 +116,11 @@ impl GeminiSseStream {
                                                         accumulated_calls.clone()
                                                     } else {
                                                         Vec::new()
+                                                    },
+                                                    usage: if done {
+                                                        latest_usage.clone()
+                                                    } else {
+                                                        None
                                                     },
                                                     done,
                                                 };
@@ -186,6 +198,7 @@ impl GeminiSseStream {
                                                     Some(accumulated_thought.clone())
                                                 },
                                                 function_calls: accumulated_calls.clone(),
+                                                usage: latest_usage.clone(),
                                                 done: true,
                                             };
 
@@ -231,6 +244,7 @@ impl GeminiSseStream {
                                 Some(accumulated_thought.clone())
                             },
                             function_calls: accumulated_calls.clone(),
+                            usage: latest_usage.clone(),
                             done: true,
                         };
                         let _ = tx.send(Ok(salvage_response)).await;
@@ -253,6 +267,7 @@ impl GeminiSseStream {
                     Some(accumulated_thought)
                 },
                 function_calls: accumulated_calls,
+                usage: latest_usage,
                 done: true,
             };
             let _ = tx.send(Ok(final_response)).await;

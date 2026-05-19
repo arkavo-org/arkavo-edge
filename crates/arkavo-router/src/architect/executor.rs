@@ -289,7 +289,13 @@ impl ArchitectExecutor {
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
             ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
             ModelChoice::GeminiFlash => ModelChoice::Gemini35Flash,
-            ModelChoice::Gemini35Flash => ModelChoice::ClaudeSonnet,
+            // Escalate within the 3.5 Flash thinking-tier ladder before
+            // jumping families, so Thompson Sampling actually exercises the
+            // distinct arms before falling back to Anthropic.
+            ModelChoice::Gemini35FlashMinimal => ModelChoice::Gemini35Flash,
+            ModelChoice::Gemini35Flash => ModelChoice::Gemini35FlashMedium,
+            ModelChoice::Gemini35FlashMedium => ModelChoice::Gemini35FlashHigh,
+            ModelChoice::Gemini35FlashHigh => ModelChoice::ClaudeSonnet,
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
@@ -307,7 +313,10 @@ impl ArchitectExecutor {
             ModelChoice::GeminiFlash => {
                 (input_tokens / 1_000_000.0).mul_add(0.30, (output_tokens / 1_000_000.0) * 2.50)
             }
-            ModelChoice::Gemini35Flash => {
+            ModelChoice::Gemini35Flash
+            | ModelChoice::Gemini35FlashMinimal
+            | ModelChoice::Gemini35FlashMedium
+            | ModelChoice::Gemini35FlashHigh => {
                 (input_tokens / 1_000_000.0).mul_add(1.50, (output_tokens / 1_000_000.0) * 9.00)
             }
             ModelChoice::GeminiPro => {
@@ -386,6 +395,10 @@ mod tests {
             );
             assert_eq!(
                 executor.escalate_model(&ModelChoice::Gemini35Flash),
+                ModelChoice::Gemini35FlashMedium
+            );
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::Gemini35FlashHigh),
                 ModelChoice::ClaudeSonnet
             );
             assert_eq!(

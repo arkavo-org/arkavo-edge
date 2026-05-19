@@ -2,10 +2,12 @@ use crate::config::LlmConfig;
 use crate::error::{Error, Result};
 use crate::mcp_converter::McpConverter;
 use crate::message::{Message, Role};
-use crate::provider::{Provider, ProviderResponse};
+use crate::provider::{InferenceTiming, Provider, ProviderResponse};
 use crate::stream::StreamResponse;
 use crate::tool_parser::ParsedToolCall;
-use arkavo_gemini::{FunctionDeclaration, GeminiSseStream, RestClient, ThinkingConfig};
+use arkavo_gemini::{
+    FunctionDeclaration, GeminiSseStream, RestClient, ThinkingConfig, UsageMetadata,
+};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::env;
@@ -58,6 +60,27 @@ impl GeminiProvider {
     pub fn with_thinking(mut self, thinking: Option<ThinkingConfig>) -> Self {
         self.default_thinking = thinking;
         self
+    }
+
+    /// Construct a provider pinned to a specific model + thinking budget.
+    /// Used by the router to materialise the distinct Thompson Sampling
+    /// arms (`Gemini35FlashMinimal/Low/Medium/High`) — each arm shares the
+    /// `gemini-3.5-flash` API model but ships its own `thinkingBudget`.
+    pub fn for_model_with_thinking(
+        model: impl Into<String>,
+        thinking_budget: Option<i32>,
+    ) -> Result<Self> {
+        let api_key = env::var("GEMINI_API_KEY").map_err(|_| {
+            Error::Config("GEMINI_API_KEY not set (optional - will fallback to local model)".into())
+        })?;
+        let default_thinking = thinking_budget.map(|b| ThinkingConfig {
+            thinking_budget: Some(b),
+            include_thoughts: None,
+        });
+        Ok(Self {
+            client: RestClient::new(api_key, model),
+            default_thinking,
+        })
     }
 
     /// Production default: pin `thinkingBudget` to `512` (low) unless the
@@ -169,7 +192,9 @@ impl Provider for GeminiProvider {
                     // standard reasoning-content channel.
                     reasoning_content: response.thought_text,
                     done: response.done,
-                    inference_timing: None,
+                    // Token usage only arrives on the terminal chunk;
+                    // intermediate deltas get `None`.
+                    inference_timing: response.usage.as_ref().map(timing_from_usage),
                 })
                 .map_err(|e| Error::Stream(format!("Stream error: {e}")))
         });
@@ -260,7 +285,9 @@ impl Provider for GeminiProvider {
             .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 
         let mut accumulated_text = String::new();
+        let mut accumulated_thought = String::new();
         let mut all_function_calls = Vec::new();
+        let mut last_usage: Option<UsageMetadata> = None;
 
         while let Some(chunk_result) = gemini_stream.next().await {
             let chunk = chunk_result.map_err(|e| Error::Stream(format!("Stream error: {e}")))?;
@@ -268,9 +295,14 @@ impl Provider for GeminiProvider {
             if let Some(text) = chunk.text {
                 accumulated_text.push_str(&text);
             }
-
+            if let Some(thought) = chunk.thought_text {
+                accumulated_thought.push_str(&thought);
+            }
             if !chunk.function_calls.is_empty() {
                 all_function_calls.extend(chunk.function_calls);
+            }
+            if chunk.usage.is_some() {
+                last_usage = chunk.usage;
             }
 
             if chunk.done {
@@ -289,12 +321,31 @@ impl Provider for GeminiProvider {
 
         Ok(ProviderResponse {
             content: accumulated_text,
-            reasoning_content: None,
+            reasoning_content: if accumulated_thought.is_empty() {
+                None
+            } else {
+                Some(accumulated_thought)
+            },
             tool_calls: parsed_tool_calls,
             finish_reason: None,
-            inference_timing: None,
+            inference_timing: last_usage.as_ref().map(timing_from_usage),
             quality_gate_retries: 0,
         })
+    }
+}
+
+/// Convert Gemini `usageMetadata` into the LLM-crate `InferenceTiming`
+/// shape so the router/budget paths see token counts uniformly across
+/// providers. Latencies stay zero for cloud calls (we don't get per-phase
+/// timings from the API today), but token counts — input, output,
+/// thinking — are the load-bearing fields for cost tracking.
+fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
+    InferenceTiming {
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        n_prompt_eval: usage.prompt_token_count.unwrap_or(0),
+        n_eval: usage.candidates_token_count.unwrap_or(0),
+        n_thinking_eval: usage.thoughts_token_count,
     }
 }
 

@@ -161,8 +161,10 @@ impl ProviderPricing {
         self.get_model_pricing(provider, model).map(|pricing| {
             let input_cost =
                 TokenCost::from_tokens(usage.input_tokens, pricing.input_cost_per_thousand);
+            // Thinking tokens bill at the output rate (Gemini pricing rule).
+            let billable_output = usage.output_tokens.saturating_add(usage.thinking_tokens);
             let output_cost =
-                TokenCost::from_tokens(usage.output_tokens, pricing.output_cost_per_thousand);
+                TokenCost::from_tokens(billable_output, pricing.output_cost_per_thousand);
 
             let cached_rate = pricing
                 .cached_input_cost_per_thousand

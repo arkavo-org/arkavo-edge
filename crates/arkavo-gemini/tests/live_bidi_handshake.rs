@@ -57,7 +57,15 @@ async fn live_bidi_setup_handshake() {
     // Give the server a beat to deliver setupComplete on the receiver task.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // Intentionally do not call client.close(): the current implementation
-    // contends with the receiver task for the WS write lock and deadlocks.
-    // Tokio drops the spawned receiver when the test runtime tears down.
+    // Regression guard for the prior deadlock: close() used to contend
+    // with the receiver task for a single RwLock<WebSocket> and would hang
+    // forever. The split-sink fix means close() returns promptly.
+    timeout(Duration::from_secs(5), client.close())
+        .await
+        .expect("close() timed out — receiver/writer deadlock regressed")
+        .expect("close() returned error");
+    assert!(
+        !client.is_connected(),
+        "client should be disconnected after close()"
+    );
 }

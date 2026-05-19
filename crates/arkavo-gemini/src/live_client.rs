@@ -3,13 +3,14 @@ use crate::types::{
     ClientContent, ClientMessage, FunctionCall, FunctionDeclaration, GenerationConfig, SetupConfig,
     Tool, ToolCall, ToolResponse,
 };
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -65,6 +66,9 @@ impl LiveModality {
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsWriter = SplitSink<WsStream, Message>;
+type WsReader = SplitStream<WsStream>;
+type SharedWriter = Arc<Mutex<Option<WsWriter>>>;
 
 /// Stateful WebSocket session against the Gemini Live (BidiGenerateContent) API.
 ///
@@ -76,12 +80,18 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// Typical Live API workflow: connect → stream microphone PCM frames →
 /// receive model audio + function calls → send `ToolResponse` frames →
 /// close.
+///
+/// The underlying WebSocket is split at connect-time so the receiver task
+/// owns the read half and `send_message` / `close` contend only on the
+/// writer mutex; this avoids the deadlock you get when both sides try to
+/// take a single `RwLock<WebSocket>` while one of them is parked on
+/// `stream.next().await`.
 pub struct LiveSessionClient {
     api_key: String,
     model: String,
     tools: Vec<Value>,
     modality: LiveModality,
-    ws_stream: Arc<RwLock<Option<WsStream>>>,
+    ws_writer: SharedWriter,
     tool_call_tx: mpsc::UnboundedSender<Vec<FunctionCall>>,
     tool_call_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<Vec<FunctionCall>>>>>,
     connected: Arc<AtomicBool>,
@@ -101,7 +111,6 @@ impl LiveSessionClient {
 
     /// Build a Live (bidi) client from `GEMINI_API_KEY` using the default
     /// Live-capable model. Not for text chat — see `RestClient`.
-    #[allow(clippy::result_large_err)]
     pub fn try_from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .map_err(|_| GeminiError::Config("GEMINI_API_KEY not set for Live API".to_string()))?;
@@ -121,7 +130,7 @@ impl LiveSessionClient {
             model: model.into(),
             tools,
             modality: LiveModality::Text,
-            ws_stream: Arc::new(RwLock::new(None)),
+            ws_writer: Arc::new(Mutex::new(None)),
             tool_call_tx: tx,
             tool_call_rx: Arc::new(RwLock::new(Some(rx))),
             connected: Arc::new(AtomicBool::new(false)),
@@ -170,15 +179,17 @@ impl LiveSessionClient {
 
         debug!("Connecting to Gemini WebSocket endpoint");
         let (ws_stream, _) = connect_async(&url_with_key).await?;
+        let (writer, reader) = ws_stream.split();
 
-        let mut stream_guard = self.ws_stream.write().await;
-        *stream_guard = Some(ws_stream);
-        drop(stream_guard);
+        {
+            let mut guard = self.ws_writer.lock().await;
+            *guard = Some(writer);
+        }
 
         self.send_setup().await?;
         self.connected.store(true, Ordering::Relaxed);
 
-        self.start_receiver_task();
+        self.start_receiver_task(reader);
 
         Ok(())
     }
@@ -222,53 +233,40 @@ impl LiveSessionClient {
         self.send_message(ClientMessage::Setup { setup }).await
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     async fn send_message(&self, message: ClientMessage) -> Result<()> {
         let json = serde_json::to_string(&message)?;
         info!("Sending message: {}", json);
 
-        let mut stream_guard = self.ws_stream.write().await;
-        let stream = stream_guard.as_mut().ok_or(GeminiError::NotConnected)?;
-
-        stream.send(Message::Text(json)).await?;
-        Ok(())
+        let mut guard = self.ws_writer.lock().await;
+        let writer = guard.as_mut().ok_or(GeminiError::NotConnected)?;
+        let send_result = writer.send(Message::Text(json)).await;
+        drop(guard);
+        send_result.map_err(GeminiError::from)
     }
 
-    #[allow(clippy::significant_drop_tightening)]
-    fn start_receiver_task(&self) {
-        let ws_stream = self.ws_stream.clone();
+    fn start_receiver_task(&self, reader: WsReader) {
         let tool_call_tx = self.tool_call_tx.clone();
         let connected = self.connected.clone();
+        let ws_writer = self.ws_writer.clone();
 
         tokio::spawn(async move {
             info!("Receiver task started");
+            let mut reader = reader;
             loop {
-                let message = {
-                    let mut stream_guard = ws_stream.write().await;
-                    let stream = match stream_guard.as_mut() {
-                        Some(s) => s,
-                        None => {
-                            debug!("Receiver task: stream not connected");
-                            break;
-                        }
-                    };
-
-                    debug!("Waiting for next message...");
-                    match stream.next().await {
-                        Some(Ok(msg)) => {
-                            debug!("Received websocket message type: {:?}", msg);
-                            msg
-                        }
-                        Some(Err(e)) => {
-                            error!("WebSocket error: {}", e);
-                            connected.store(false, Ordering::Relaxed);
-                            break;
-                        }
-                        None => {
-                            info!("WebSocket stream ended");
-                            connected.store(false, Ordering::Relaxed);
-                            break;
-                        }
+                let message = match reader.next().await {
+                    Some(Ok(msg)) => {
+                        debug!("Received websocket message type: {:?}", msg);
+                        msg
+                    }
+                    Some(Err(e)) => {
+                        error!("WebSocket error: {}", e);
+                        connected.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                    None => {
+                        info!("WebSocket stream ended");
+                        connected.store(false, Ordering::Relaxed);
+                        break;
                     }
                 };
 
@@ -299,9 +297,14 @@ impl LiveSessionClient {
                         true
                     }
                     Message::Ping(data) => {
-                        let mut stream_guard = ws_stream.write().await;
-                        if let Some(stream) = stream_guard.as_mut() {
-                            let _ = stream.send(Message::Pong(data)).await;
+                        // Reply via the shared writer mutex. Reader holds no
+                        // writer lock during its own next() await, so this
+                        // never deadlocks against close() or send_message().
+                        {
+                            let mut guard = ws_writer.lock().await;
+                            if let Some(writer) = guard.as_mut() {
+                                let _ = writer.send(Message::Pong(data)).await;
+                            }
                         }
                         false
                     }
@@ -437,11 +440,18 @@ impl LiveSessionClient {
 
     pub async fn close(&self) -> Result<()> {
         self.connected.store(false, Ordering::Relaxed);
-        let mut stream_guard = self.ws_stream.write().await;
-        if let Some(mut stream) = stream_guard.take() {
-            let result = stream.send(Message::Close(None)).await;
-            drop(stream_guard);
-            result?;
+        // The receiver task owns the read half and never grabs the writer
+        // mutex for long, so this lock is uncontended (no deadlock against
+        // a parked reader). Taking the writer also closes the underlying
+        // socket on drop, which makes reader.next() return None and the
+        // receiver task exit cleanly.
+        let taken = {
+            let mut guard = self.ws_writer.lock().await;
+            guard.take()
+        };
+        if let Some(mut writer) = taken {
+            let _ = writer.send(Message::Close(None)).await;
+            let _ = writer.close().await;
         }
         Ok(())
     }
