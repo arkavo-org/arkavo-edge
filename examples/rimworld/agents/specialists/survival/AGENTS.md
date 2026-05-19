@@ -11,7 +11,7 @@ purpose: |
   Be specific: name colonists, suggest exact actions the commander can execute.
 
 mode: specialist
-model: gemma-4-e2b
+model: gemini-3.5-flash
 listen: 0.0.0.0:8410
 mdns: true
 
