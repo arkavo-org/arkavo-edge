@@ -221,7 +221,7 @@ async fn generate_solution_streaming(
     client: &RestClient,
     prompt: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut stream = client.stream_generate_content(prompt, None).await?;
+    let mut stream = client.stream_generate_content(prompt, None, None).await?;
 
     let mut full_text = String::new();
 

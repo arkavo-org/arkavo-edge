@@ -122,7 +122,12 @@ impl RestClient {
         &self,
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
+        thinking: Option<ThinkingConfig>,
     ) -> Result<(Option<String>, Vec<FunctionCall>)> {
+        let generation_config = thinking.map(|t| GenerationConfig {
+            thinking_config: Some(t),
+            ..GenerationConfig::default()
+        });
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: "user".to_string(),
@@ -136,7 +141,7 @@ impl RestClient {
                     function_declarations: t,
                 }]
             }),
-            generation_config: None,
+            generation_config,
         };
 
         // Remove 'models/' prefix if present since we'll add it in the URL
@@ -191,26 +196,20 @@ impl RestClient {
         Ok((text_response, function_calls))
     }
 
+    /// Stream a single-turn prompt with optional tools and thinking budget.
+    ///
+    /// For Gemini 3.5+ models, `thinking` lets callers pin the
+    /// `thinkingBudget` — pass `Some(ThinkingConfig { thinking_budget: Some(0), .. })`
+    /// to disable dynamic chain-of-thought (recommended for latency-sensitive
+    /// step-planning calls; the model default is dynamic, which the AA report
+    /// flags as the primary cause of bimodal latency spikes).
     pub async fn stream_generate_content(
         &self,
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
+        thinking: Option<ThinkingConfig>,
     ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_impl(prompt, tools, None, None)
-            .await
-    }
-
-    /// Stream with Gemini 3.5 thinking controls (per https://ai.google.dev/gemini-api/docs/thinking).
-    ///
-    /// Use `thinking_budget=Some(0)` to disable thinking, `Some(-1)` for dynamic, or
-    /// `include_thoughts=Some(true)` to surface thought summaries in the stream.
-    pub async fn stream_generate_content_with_thinking(
-        &self,
-        prompt: impl Into<String>,
-        tools: Option<Vec<FunctionDeclaration>>,
-        thinking: ThinkingConfig,
-    ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_impl(prompt, tools, None, Some(thinking))
+        self.stream_generate_content_impl(prompt, tools, None, thinking)
             .await
     }
 
@@ -218,28 +217,18 @@ impl RestClient {
         &self,
         prompt: impl Into<String>,
         schema: Value,
+        thinking: Option<ThinkingConfig>,
     ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_impl(prompt, None, Some(schema), None)
+        self.stream_generate_content_impl(prompt, None, Some(schema), thinking)
             .await
     }
 
-    /// Stream with multi-turn contents and optional system instruction.
-    /// This is the method that GeminiProvider should use for tool-calling conversations.
+    /// Multi-turn stream with optional system instruction and thinking budget.
+    /// This is the method `GeminiProvider` uses for tool-calling conversations.
     pub async fn stream_generate_content_multi(
         &self,
         system_instruction: Option<String>,
         contents: Vec<(String, String)>, // (role, text) pairs
-        tools: Option<Vec<FunctionDeclaration>>,
-    ) -> Result<GeminiSseStream> {
-        self.stream_generate_content_multi_with_thinking(system_instruction, contents, tools, None)
-            .await
-    }
-
-    /// Multi-turn stream that also threads a `ThinkingConfig` through to Gemini 3.5.
-    pub async fn stream_generate_content_multi_with_thinking(
-        &self,
-        system_instruction: Option<String>,
-        contents: Vec<(String, String)>,
         tools: Option<Vec<FunctionDeclaration>>,
         thinking: Option<ThinkingConfig>,
     ) -> Result<GeminiSseStream> {

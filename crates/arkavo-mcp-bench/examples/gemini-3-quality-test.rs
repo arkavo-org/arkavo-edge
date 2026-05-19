@@ -26,7 +26,7 @@ async fn test_code_compilation(client: &RestClient) -> QualityTestResult {
     let prompt = "Write a simple Rust function that calculates the factorial of a number. Only output the function code, no explanation.";
 
     let mut stream = client
-        .stream_generate_content(prompt, None)
+        .stream_generate_content(prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -115,7 +115,7 @@ async fn test_needle_in_haystack(client: &RestClient) -> QualityTestResult {
     );
 
     let mut stream = client
-        .stream_generate_content(&prompt, None)
+        .stream_generate_content(&prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -162,7 +162,7 @@ async fn test_factual_accuracy(client: &RestClient) -> QualityTestResult {
 
     for (question, expected) in questions.iter() {
         let mut stream = client
-            .stream_generate_content(*question, None)
+            .stream_generate_content(*question, None, None)
             .await
             .expect("Failed to create stream");
 
@@ -218,7 +218,7 @@ async fn test_json_schema_compliance(client: &RestClient) -> QualityTestResult {
 Only output valid JSON, nothing else."#;
 
     let mut stream = client
-        .stream_generate_content(prompt, None)
+        .stream_generate_content(prompt, None, None)
         .await
         .expect("Failed to create stream");
 
@@ -286,7 +286,7 @@ fn quicksort<T: Ord>(arr: &mut [T]) {
     let prompt = format!("Explain this Rust code:\n{}", code);
 
     let mut stream = client
-        .stream_generate_content(prompt, None)
+        .stream_generate_content(prompt, None, None)
         .await
         .expect("Failed to create stream");
 

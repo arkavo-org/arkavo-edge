@@ -92,7 +92,10 @@ impl StreamingGenerator {
                 });
 
                 // Use streaming API with JSON mode for real-time incremental generation
-                match client.stream_generate_content_json(&prompt, schema).await {
+                match client
+                    .stream_generate_content_json(&prompt, schema, None)
+                    .await
+                {
                     Ok(mut stream) => {
                         let mut json_buffer = String::new();
                         let mut last_sent_html = String::new();

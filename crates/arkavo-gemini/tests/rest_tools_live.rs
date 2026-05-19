@@ -70,6 +70,7 @@ async fn rest_generate_content_invokes_tool() {
         .generate_content(
             "Please create a new stream called 'release-canary' and make it Open",
             Some(tool_decls),
+            None,
         )
         .await
         .expect("generate_content failed");

@@ -616,7 +616,16 @@ impl RoutingDecision {
                 input_cost + output_cost
             }
             ModelChoice::Gemini35Flash => {
-                // Gemini 3.5 Flash (May 2026): $1.50/M input, $9.00/M output
+                // Gemini 3.5 Flash (May 2026): $1.50/M input, $9.00/M output —
+                // roughly 3x Gemini 3 Flash ($0.50 / $3.00). Independent Artificial
+                // Analysis reporting also flags 5.5x higher token usage when
+                // dynamic thinking is on (the model default), so any ARP budget
+                // policy migrated from `gemini-3-flash` priors will undercount
+                // real spend by ~5–15x for "hard" decisions. `GeminiProvider`
+                // pins `thinkingBudget=0` by default to make this estimate
+                // realistic; explicit deliberation flows that opt back into
+                // thinking should track output tokens directly rather than
+                // trusting `TokenEstimate`.
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.50;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 9.00;
                 input_cost + output_cost

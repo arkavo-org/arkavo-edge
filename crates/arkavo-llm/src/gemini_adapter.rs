@@ -5,7 +5,7 @@ use crate::message::{Message, Role};
 use crate::provider::{Provider, ProviderResponse};
 use crate::stream::StreamResponse;
 use crate::tool_parser::ParsedToolCall;
-use arkavo_gemini::{FunctionDeclaration, GeminiSseStream, RestClient};
+use arkavo_gemini::{FunctionDeclaration, GeminiSseStream, RestClient, ThinkingConfig};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::env;
@@ -13,6 +13,7 @@ use tokio_stream::StreamExt;
 
 pub struct GeminiProvider {
     client: RestClient,
+    default_thinking: Option<ThinkingConfig>,
 }
 
 impl GeminiProvider {
@@ -25,6 +26,7 @@ impl GeminiProvider {
 
         Ok(Self {
             client: RestClient::new(api_key, model),
+            default_thinking: Some(Self::default_thinking_from_env()),
         })
     }
 
@@ -46,7 +48,41 @@ impl GeminiProvider {
 
         Ok(Self {
             client: RestClient::new(api_key.clone(), model),
+            default_thinking: Some(Self::default_thinking_from_env()),
         })
+    }
+
+    /// Override the default thinking budget. `None` falls back to server
+    /// default (dynamic for Gemini 3.5 Flash) — only use when you have an
+    /// explicit deliberation code path that benefits from extended reasoning.
+    pub fn with_thinking(mut self, thinking: Option<ThinkingConfig>) -> Self {
+        self.default_thinking = thinking;
+        self
+    }
+
+    /// Production default: pin `thinkingBudget` to `512` (low) unless the
+    /// `GEMINI_THINKING_BUDGET` env var overrides.
+    ///
+    /// Gemini 3.5 Flash defaults to dynamic thinking, which Artificial
+    /// Analysis flagged as the dominant driver of bimodal latency (1–3s
+    /// success → 90s timeouts when the model decides a task is "hard").
+    /// We pin to the "low" tier — enough chain-of-thought budget for the
+    /// model to commit to tool calls (with `0`/off it just emitted
+    /// `observe` over and over in the rimworld loop instead of stepping)
+    /// but capped well below the runaway-thinking regime.
+    ///
+    /// Env values: `0` (off), `-1` (dynamic), positive integer (exact
+    /// token cap). Default if unset: `512`. Use `with_thinking` for
+    /// explicit deliberation paths that want medium/high.
+    fn default_thinking_from_env() -> ThinkingConfig {
+        let budget = env::var("GEMINI_THINKING_BUDGET")
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(512);
+        ThinkingConfig {
+            thinking_budget: Some(budget),
+            include_thoughts: None,
+        }
     }
 }
 
@@ -80,7 +116,7 @@ impl Provider for GeminiProvider {
 
         let mut gemini_stream = self
             .client
-            .stream_generate_content(prompt, None)
+            .stream_generate_content(prompt, None, self.default_thinking.clone())
             .await
             .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 
@@ -121,7 +157,7 @@ impl Provider for GeminiProvider {
 
         let gemini_stream: GeminiSseStream = self
             .client
-            .stream_generate_content(prompt, None)
+            .stream_generate_content(prompt, None, self.default_thinking.clone())
             .await
             .map_err(|e| Error::Stream(format!("Gemini streaming error: {e}")))?;
 
@@ -172,7 +208,7 @@ impl Provider for GeminiProvider {
 
         let mut gemini_stream = self
             .client
-            .stream_generate_content_json(prompt, schema)
+            .stream_generate_content_json(prompt, schema, self.default_thinking.clone())
             .await
             .map_err(|e| Error::Provider(format!("Gemini JSON streaming error: {e}")))?;
 
@@ -214,7 +250,12 @@ impl Provider for GeminiProvider {
 
         let mut gemini_stream = self
             .client
-            .stream_generate_content_multi(system_instruction, contents, tool_declarations)
+            .stream_generate_content_multi(
+                system_instruction,
+                contents,
+                tool_declarations,
+                self.default_thinking.clone(),
+            )
             .await
             .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 

@@ -67,6 +67,7 @@ async fn sse_streaming_invokes_tool() {
         .stream_generate_content(
             "Please create a new stream called 'release-canary' and make it Open",
             Some(tools),
+            None,
         )
         .await
         .expect("stream_generate_content failed");
