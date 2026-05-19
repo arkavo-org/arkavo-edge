@@ -2,9 +2,7 @@ use std::env;
 use std::process;
 
 fn main() {
-    eprintln!("[diag] main() entered");
     let args: Vec<String> = env::args().collect();
-    eprintln!("[diag] args parsed: {:?}", args);
 
     // Handle version with git commit hash
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
@@ -35,10 +33,8 @@ fn main() {
         args.get(1..).unwrap_or_default().to_vec()
     };
 
-    eprintln!("[diag] calling arkavo_cli::run with: {:?}", command_args);
     if let Err(err) = arkavo_cli::run(&command_args) {
         eprintln!("Error: {err}");
         process::exit(1);
     }
-    eprintln!("[diag] arkavo_cli::run returned ok");
 }

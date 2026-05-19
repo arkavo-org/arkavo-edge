@@ -19,11 +19,9 @@ pub struct LocalEngine {
 impl LocalEngine {
     /// Create a new LocalEngine with Router and full tool registration.
     pub async fn new() -> Result<Self, String> {
-        eprintln!("[diag] LocalEngine::new about to call Router::new");
         let router = Router::new()
             .await
             .map_err(|e| format!("Failed to initialize router: {e}"))?;
-        eprintln!("[diag] Router::new returned");
 
         // Apply preflight policies from AGENTS.md if available
         let agent_config = arkavo_router::load_agent_config().unwrap_or_default();

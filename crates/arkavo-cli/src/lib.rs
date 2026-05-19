@@ -19,9 +19,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Respects RUST_LOG environment variable (e.g., RUST_LOG=debug)
     use std::sync::Once;
     static INIT: Once = Once::new();
-    eprintln!("[diag] arkavo_cli::run entered");
     INIT.call_once(|| {
-        eprintln!("[diag] one-time init starting");
         use tracing_subscriber::{EnvFilter, fmt};
         fmt()
             .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
@@ -35,17 +33,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .with_line_number(false)
             .init();
 
-        eprintln!("[diag] tracing initialized");
         // Load API keys from .arkavo/AGENTS.md if present
         arkavo_router::model_discovery::load_api_keys_from_config();
-        eprintln!("[diag] api keys loaded");
 
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
-        eprintln!("[diag] egress filter initialized");
     });
-    eprintln!("[diag] post one-time init");
 
     // Check for verbose flag
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
@@ -56,14 +50,11 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
     // First-run experience: check if models are available
-    let first_run_check = !is_help_or_version && first_run::is_first_run();
-    eprintln!("[diag] first_run_check={}", first_run_check);
-    if first_run_check {
+    if !is_help_or_version && first_run::is_first_run() {
         // Handle first-run flow in a runtime
         let runtime = tokio::runtime::Runtime::new()?;
         runtime.block_on(handle_first_run(verbose))?;
     }
-    eprintln!("[diag] past first_run");
 
     if args.is_empty() {
         // No command provided, default to agent run
