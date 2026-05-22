@@ -528,13 +528,27 @@ components:
   - name: attestation
     file: attestation.spec.yaml
     module: arkavo_attestation
-    description: Device attestation and security state
+    description: Device and model attestation
     criticality: critical
-    scenario_count: 6
+    scenario_count: 11
     invariants:
       - Platform evidence collected
       - Security state: Trusted/Suspicious/Compromised
       - Timestamp and device ID in evidence
+      - Model weights content-addressed by BLAKE3
+      - Model evidence maps onto SPIFFE/SPIRE selectors
+
+  - name: agent-identity
+    file: agent-identity.spec.yaml
+    module: arkavo_agent_identity
+    description: Agent Identity Authority — issues and attests agent identity
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - AIA issues and attests identity only; grants no access
+      - Trust level derived from attestation, never self-asserted
+      - Credentials Ed25519-signed over canonical document bytes
+      - Identity yields only agent.identity.* attributes
 
   - name: browser
     file: browser.spec.yaml

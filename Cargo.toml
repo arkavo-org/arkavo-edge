@@ -43,6 +43,7 @@ members = [
     "crates/arkavo-cef",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
+    "crates/arkavo-agent-identity",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
     "crates/arkavo-agent",
@@ -123,6 +124,7 @@ default-members = [
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
+    "crates/arkavo-agent-identity",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
     "crates/arkavo-agent-auth",
@@ -148,7 +150,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.76.0"
+version = "0.77.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent Identity Authority
+module: arkavo_agent_identity
+version: 0.77.0
+
+invariants:
+  - AIA issues and attests identity only; it grants no access and assigns no work
+  - Trust level is derived from attestation evidence, never self-asserted
+  - Credentials are Ed25519-signed over canonical document bytes
+  - Identity yields only agent.identity.* OpenTDF attributes
+  - Authorization attributes remain orchestrator-issued
+  - Credential verification requires a key resolved from a trusted root
+
+scenarios:
+  - id: AIA-001
+    name: Issue an agent identity credential
+    criticality: critical
+    given:
+      - An IdentityAuthority with a signing key
+      - An agent public key and an IssueRequest
+    when: issue called
+    then:
+      - IdentityDocument built with iss, sub, agent_type, public_key
+      - Document signed with the authority's Ed25519 key
+      - iat and exp recorded as RFC 3339 timestamps
+      - Credential bundles the document and its signature
+    refs: [crates/arkavo-agent-identity/src/authority.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Validity duration overflows the credential clock
+        expected: Malformed error returned
+
+  - id: AIA-002
+    name: Derive trust level from attestation evidence
+    criticality: critical
+    given:
+      - An IssueRequest carrying model or platform attestation evidence
+    when: issue evaluates the evidence
+    then:
+      - Model evidence or a Trusted platform yields trust_level attested
+      - Suspicious or unknown platform alone yields trust_level unattested
+      - Absent evidence yields trust_level unattested
+      - Attested model id is copied into the document model field
+    refs: [crates/arkavo-agent-identity/src/authority.rs]
+    changed: "2026-05-22"
+
+  - id: AIA-003
+    name: Refuse to attest a compromised runtime
+    criticality: critical
+    given:
+      - An IssueRequest with platform evidence in Compromised state
+    when: issue called
+    then:
+      - Issuance fails with CompromisedRuntime
+      - No credential is produced
+    refs: [crates/arkavo-agent-identity/src/authority.rs]
+    changed: "2026-05-22"
+
+  - id: AIA-004
+    name: Verify a credential against a trusted authority key
+    criticality: critical
+    given:
+      - An IdentityCredential and a trusted authority public key
+    when: verify called
+    then:
+      - Signature checked over the canonical document bytes
+      - Expired credentials rejected
+      - Tampered documents rejected with InvalidSignature
+      - The verified document is returned on success
+    refs: [crates/arkavo-agent-identity/src/credential.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Credential verified with a different authority key
+        expected: InvalidSignature returned
+
+  - id: AIA-005
+    name: Rotate an agent key
+    criticality: high
+    given:
+      - An existing credential and a new agent public key
+    when: rotate called
+    then:
+      - A new credential is issued for the same subject
+      - All identity claims preserved except public_key and lifetime
+      - The rotated credential is signed afresh
+    refs: [crates/arkavo-agent-identity/src/authority.rs]
+    changed: "2026-05-22"
+
+  - id: AIA-006
+    name: Revoke an agent and publish a revocation list
+    criticality: critical
+    given:
+      - An IdentityAuthority that has revoked one or more agents
+    when: revocation_list called
+    then:
+      - Each revoked agent recorded with subject and timestamp
+      - Revocation is idempotent per subject
+      - The list is signed by the authority
+      - is_revoked reports membership
+    refs: [crates/arkavo-agent-identity/src/revocation.rs]
+    changed: "2026-05-22"
+
+  - id: AIA-007
+    name: Endorse a subordinate authority and publish a trust chain
+    criticality: high
+    given:
+      - A root IdentityAuthority and a subordinate authority key
+    when: endorse_subordinate and trust_chain called
+    then:
+      - Parent signs an endorsement binding the child id and key
+      - Subordinate trust chain carries the endorsement
+      - Root trust chain carries no endorsement
+    refs: [crates/arkavo-agent-identity/src/trust_chain.rs]
+    changed: "2026-05-22"
+
+  - id: AIA-008
+    name: Resolve a trust chain to a trusted root
+    criticality: critical
+    given:
+      - A published TrustChain and a trusted root public key
+    when: resolve called
+    then:
+      - Root chain trusted only if its key equals the trusted root
+      - Subordinate chain requires a valid root-signed endorsement
+      - The resolved authority key is returned for credential verification
+    refs: [crates/arkavo-agent-identity/src/trust_chain.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Endorsement expired
+        expected: Expired error returned
+      - condition: authority_key swapped after endorsement
+        expected: Malformed error returned
+
+  - id: AIA-009
+    name: Project identity to OpenTDF attributes
+    criticality: high
+    given:
+      - An IdentityDocument
+    when: tdf_attributes called
+    then:
+      - Emits agent.identity.type, trust_level, runtime
+      - Emits agent.identity.owner and organization when present
+      - Never emits orchestrator-issued authorization attributes
+    refs: [crates/arkavo-agent-identity/src/document.rs]
+    changed: "2026-05-22"
