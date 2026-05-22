@@ -2,7 +2,11 @@ use arkavo_device_identity::{AgentIdentity, DeviceId};
 use serde::{Deserialize, Serialize};
 
 pub mod evidence;
+pub mod gguf;
+pub mod model;
 pub mod platform;
+
+pub use model::{FileModelAttestor, ModelAttestor, ModelEvidence, ModelFormat, ModelRuntime};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
@@ -12,6 +16,8 @@ pub enum AttestationError {
     EvidenceGeneration(String),
     #[error("Unsupported platform: {0}")]
     UnsupportedPlatform(String),
+    #[error("Model attestation failed: {0}")]
+    Model(String),
 }
 
 pub type Result<T> = std::result::Result<T, AttestationError>;
