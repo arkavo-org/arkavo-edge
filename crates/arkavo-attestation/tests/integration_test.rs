@@ -1,6 +1,4 @@
-use arkavo_attestation::{
-    AttestationType, SecurityState, detect_platform_code, evidence, platform,
-};
+use arkavo_attestation::{SecurityState, detect_platform_code, evidence, platform};
 use arkavo_device_identity::{AgentIdentity, get_or_create_device_id};
 
 const TEST_APP_VERSION: &str = "0.38.2";
@@ -78,7 +76,7 @@ fn test_end_to_end_device_attestation_flow() {
     #[cfg(target_os = "macos")]
     {
         println!("macOS-specific assertions:");
-        if capabilities.attestation_type == AttestationType::SecureEnclave {
+        if capabilities.attestation_type == arkavo_attestation::AttestationType::SecureEnclave {
             println!("✓ Using Secure Enclave attestation");
             assert!(capabilities.supports_freshness);
             assert!(capabilities.supports_hardware_binding);

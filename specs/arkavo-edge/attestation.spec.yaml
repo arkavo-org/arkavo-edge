@@ -1,12 +1,15 @@
-feature: Device Attestation and Security State
+feature: Device and Model Attestation
 module: arkavo_attestation
-version: 0.67.6
+version: 0.76.0
 
 invariants:
   - Platform evidence collected via attestor trait
   - "Security state: Trusted, Suspicious, Compromised, Unknown"
   - "Attestation types: TPM Quote, Secure Enclave, Software Fingerprint"
   - Evidence includes timestamp and device ID
+  - Model weights are content-addressed by BLAKE3
+  - Model evidence binds weights digest to runtime identity
+  - Model evidence maps onto SPIFFE/SPIRE workload selectors
 
 scenarios:
   - id: ATT-001
@@ -108,3 +111,94 @@ scenarios:
         expected: Tolerance applied
       - condition: Future timestamp
         expected: Validation error
+
+  - id: ATT-007
+    name: Content-address model weights with BLAKE3
+    criticality: critical
+    given:
+      - Model weights file on disk
+      - FileModelAttestor bound to the file
+    when: attest called
+    then:
+      - Weights streamed through BLAKE3 in bounded chunks
+      - Digest returned as "blake3:<64 hex chars>"
+      - Weights size in bytes recorded
+      - Identical content yields an identical digest
+    refs: [crates/arkavo-attestation/src/model.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Weights file missing or unreadable
+        expected: AttestationError::Model returned
+      - condition: Weights content differs by a single byte
+        expected: Distinct digest produced
+
+  - id: ATT-008
+    name: Extract model metadata from GGUF header
+    criticality: high
+    given:
+      - GGUF weights file (version 2 or 3)
+    when: GGUF header parsed
+    then:
+      - Architecture read from general.architecture
+      - Logical name read from general.name
+      - Quantization derived from general.file_type
+      - Tensor count and GGUF version recorded
+      - Array values skipped without loading weights
+    refs: [crates/arkavo-attestation/src/gguf.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Magic bytes are not "GGUF"
+        expected: Parse rejected as non-GGUF
+      - condition: Unsupported GGUF version
+        expected: Parse rejected with version error
+      - condition: Declared string length exceeds limit
+        expected: Parse rejected before allocation
+
+  - id: ATT-009
+    name: Attest model identity end-to-end
+    criticality: critical
+    given:
+      - Model weights file and a known runtime
+    when: ModelAttestor::attest called
+    then:
+      - On-disk format detected (GGUF, safetensors, unknown)
+      - ModelEvidence produced with digest, runtime, timestamp
+      - GGUF metadata enriches evidence when present
+      - model_id falls back to file stem without a GGUF name
+    refs: [crates/arkavo-attestation/src/model.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: safetensors file with no key/value header
+        expected: Evidence omits GGUF-only fields
+      - condition: Runtime build identifier unknown
+        expected: runtime_version left unset, not faked
+
+  - id: ATT-010
+    name: Derive SPIRE workload selectors from model evidence
+    criticality: high
+    given:
+      - ModelEvidence produced by attestation
+    when: spire_selectors called
+    then:
+      - "model:id, model:weights, model:format, model:runtime emitted"
+      - Optional arch, quant, runtime-version emitted when known
+      - Absent optional fields produce no selector
+    refs: [crates/arkavo-attestation/src/model.rs]
+    changed: "2026-05-22"
+
+  - id: ATT-011
+    name: Derive SPIFFE ID from model evidence
+    criticality: high
+    given:
+      - ModelEvidence produced by attestation
+      - A trust domain
+    when: spiffe_id called
+    then:
+      - "ID shaped spiffe://<domain>/model/<arch>/<id>/<digest-prefix>"
+      - Each path segment normalized to a URL-safe form
+      - Digest prefix is the first 16 hex characters
+    refs: [crates/arkavo-attestation/src/model.rs]
+    changed: "2026-05-22"
+    edge_cases:
+      - condition: Architecture unknown
+        expected: arch segment is "unknown"

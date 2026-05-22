@@ -1,0 +1,21 @@
+[package]
+name = "arkavo-agent-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent Identity Authority: issues and attests agent identity credentials"
+
+[dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-attestation = { path = "../arkavo-attestation" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+arkavo-device-identity = { path = "../arkavo-device-identity" }
+
+[features]
+default = []

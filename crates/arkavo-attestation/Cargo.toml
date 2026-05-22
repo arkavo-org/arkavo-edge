@@ -9,6 +9,7 @@ description = "Platform attestation for arkavo-edge"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+blake3 = "1.5"
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
