@@ -15,7 +15,6 @@ Reduce tool-loop second-inference (Infer2) latency by wiring b9292's `common_spe
 - Draft model (`COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE`) — needs config surface, second GGUF load, tokenizer-compat checks. Deferred.
 - N-gram cache persistence across requests. Would amplify gains for repetitive workloads. Deferred.
 - Remote provider paths (Kimi, Gemini, Anthropic). Out of scope; those have their own spec mechanisms upstream.
-- Auto-disable based on per-model performance history. Ship visibility first; auto-disable lands in a follow-up once we have real-workload data.
 
 ## Motivation
 
@@ -33,9 +32,10 @@ Single integration point in `crates/arkavo-llm/src/llamacpp_streaming.rs`. The t
 |---|---|
 | `arkavo-llama-cpp-sys` | `arkavo_spec_wrapper.{cpp,h}` — extern "C" wrapper around `common_speculative_*` (init/begin/process/draft/accept/free). Compiled into the existing `arkavo_chat_wrapper` lib via the existing `cc_build` block in `build.rs`. |
 | `arkavo-llama-cpp` | `SpeculativeContext` newtype with `new(model, n_seq) -> Result`, `begin(seq, prompt)`, `draft() -> Vec<token>`, `accept(seq, n)`, `Drop`. ~80 lines. |
-| `arkavo-llm` | Generation loop in `llamacpp_streaming.rs` wraps decode with `begin → loop { draft → batch_eval → walk accept-prefix → emit → accept(n) }`. ~100-150 line diff. |
-| Config | `ARKAVO_SPEC_NGRAM` env (default `1` = on, set `0` to disable globally). `ARKAVO_SPEC_NGRAM_DISABLE` comma-separated substrings to skip per model. Read once at provider construction. |
-| Telemetry | Extend `InferenceTiming` with `n_draft: Option<u32>`, `n_accepted: Option<u32>`. Per-model rolling map kept in the provider for the watch-and-warn loop. `tool_bench` aggregates and prints per-model `accept_rate` and `spec_speedup_pct`. |
+| `arkavo-llm` | Generation loop in `llamacpp_streaming.rs` wraps decode with `begin → loop { draft → batch_eval → walk accept-prefix → emit → accept(n) }`. Reads `use_spec_decoding` from `CompletionOptions`; emits raw `n_draft` / `n_accepted` in `InferenceTiming`. No thresholds, no env reads, no policy. ~100-150 line diff. |
+| `CompletionOptions` (`arkavo-llm`) | Gains `use_spec_decoding: bool`. Passed from the router into the provider per request. |
+| `arkavo-router` | Owns policy. `RoutingDecision` gains `use_spec_decoding: bool` next to the existing `should_compress`. Router maintains per-model rolling accept-rate stats — sibling to the existing `model_learning` and `AntiPattern` infrastructure — and decides the flag from those stats. Telemetry feedback path consumes `n_draft` / `n_accepted` from completed requests to update the stats. Emits a structured router event when a model drops below the accept-rate threshold; no log lines (per `feedback_telemetry_not_logging`). |
+| `tool_bench` | Reads router's per-model stats to print `accept_rate` and `spec_speedup_pct` per model alongside existing Infer1/Infer2 columns. |
 
 ## Data flow
 
@@ -74,18 +74,13 @@ NGRAM helps or hurts depending on workload and model:
 
 The fast-synthesis path uses `qwen3.5-0.8b` (per `MEMORY.md` "Multi-Model Agent Architecture") — exactly the case where NGRAM may hurt. Without per-model visibility, we'd silently slow that path down.
 
-Three mechanisms:
+All three policy mechanisms live in `arkavo-router`. The streaming layer is a dumb executor — it does spec when the routing decision tells it to and reports the numbers.
 
-1. **Per-model telemetry.** `n_draft`, `n_accepted`, `accept_rate`, `spec_speedup_pct` keyed by model identity. Use the model GGUF hash if PR #595's `ModelAttestor` content-addressing has merged by implementation time; otherwise fall back to the loaded model name string from `llama_model_meta_val_str` (`general.name`). The watch-and-warn loop only needs a stable per-model key, not the cryptographic guarantee. Surfaced in `InferenceTiming` and aggregated in `tool_bench` output.
+1. **Per-model accept-rate stats** (router). Rolling window per-model keyed by model identity — GGUF hash if PR #595's `ModelAttestor` content-addressing has merged by implementation time, otherwise the loaded model name string from `llama_model_meta_val_str` (`general.name`). The watch-and-warn loop only needs a stable per-model key, not the cryptographic guarantee. Updated from `n_draft` / `n_accepted` in `InferenceTiming` via the post-execution feedback path that already flows back into router learning.
 
-2. **Watch-and-warn.** Rolling 20-request average accept rate per model. If under 15%, emit a one-time WARN log:
-   ```
-   spec decoding accept rate 8% for model qwen3.5-0.8b over last 20 requests
-   — consider ARKAVO_SPEC_NGRAM_DISABLE=qwen3.5-0.8b
-   ```
-   No auto-disable in this PR. Land visibility first.
+2. **Per-request policy decision** (router). When constructing a `RoutingDecision`, the router consults the per-model accept-rate stats. If the rolling average is below the threshold (proposed: 15% over 20 requests), `use_spec_decoding = false` for that model. Otherwise true. Insufficient data ⇒ true (try it, gather data, let the router decide later). This is the **escape hatch** — no env var, no manual list. The router auto-detects per CLAUDE.md philosophy ("Auto-detect capabilities. No manual configuration.").
 
-3. **Escape hatch.** `ARKAVO_SPEC_NGRAM_DISABLE=qwen3.5-0.8b,phi-3-mini` — substring match against model name, matching models skip spec for the session.
+3. **Structured warning event** (router). When a model crosses below threshold, the router emits a structured event onto its existing telemetry stream (e.g., `RouterEvent::SpecDecodingDisabled { model, accept_rate, sample_size }`) for the UI to surface, instead of a log line. Consistent with `feedback_telemetry_not_logging` ("Use telemetry aggregated in UI, not log lines").
 
 ## Risk register
 
@@ -94,7 +89,7 @@ Three mechanisms:
 | Sampling parity break (spec produces different tokens than baseline) | Parity test: 100-token completions with `ARKAVO_SPEC_NGRAM=0` vs `=1` on a deterministic seed; assert identical token IDs. Fails CI if they diverge. |
 | KV cache misalignment on rollback | Use `common_speculative_accept(spec, seq, n)` exclusively — never roll back positions ourselves. Test paths: 0 accepted, all accepted, partial accepted. |
 | Grammar interaction (tool calls must still be grammar-constrained) | Speculative sampling integrates with the existing sampler chain. Tool-call test must still produce valid tool calls; existing tests in `arkavo-llm` cover this. |
-| Silent regression on small models | Per-model telemetry + watch-and-warn (see above). |
+| Silent regression on small models | Router-owned per-model accept-rate stats + auto-skip below threshold (see Per-model variability). The streaming layer can't silently regress because it has no policy of its own — it does what the router says, and the router downgrades it as soon as the data shows the model is a bad fit. |
 | Hot path complexity making future debugging harder | Speculative context owned by the provider, lifetime tied to context. Generation loop change is contained to one function. Comment documents the invariant. |
 
 ## Verification (before claiming done)
@@ -105,14 +100,20 @@ Three mechanisms:
 - [ ] `cargo clippy -- -D warnings` — green
 - [ ] `tool_bench` reports `accept_rate >= 30%` on the 9B planner path on a tool-loop scenario (the case we're optimizing for)
 - [ ] `tool_bench` shows neutral-or-better Infer2 ms on at least one workload
-- [ ] Watch-and-warn fires (does not crash) when forced into low-accept conditions
+- [ ] Router auto-skips spec for a forced-low-accept-rate model (test that drives accept rate to 0 for one model and verifies subsequent `RoutingDecision.use_spec_decoding == false` for that model while a high-accept model stays true)
+- [ ] `RouterEvent::SpecDecodingDisabled` emitted exactly once per model crossing the threshold (no flapping, no log noise)
+
+## Non-goals (also)
+
+- Removing `use_spec_decoding` from the router's auto-decision in favor of an env var or per-model AGENTS.md flag. Auto-detection from rolling stats is the design; manual overrides would erode the "no manual configuration" property.
+- Persisting per-model accept-rate stats across process restarts. In-memory rolling window is enough for v1; persistence can be added later if the warm-up cost is measurably significant.
 
 ## Planned commits (stacked on `feature/llama-cpp-b9292`)
 
 1. `arkavo_spec_wrapper: expose common_speculative as C API` — `.cpp` + `.h`, build.rs hookup
 2. `arkavo-llama-cpp: safe SpeculativeContext wrapper` — Rust safe surface + unit tests
-3. `arkavo-llm: integrate NGRAM spec decoding into streaming generation` — generation loop change, parity test, env gate
-4. `arkavo-llm: per-model spec telemetry and watch-and-warn` — per-model rolling accept rate, warn log, disable env
-5. `tool_bench: report spec accept-rate and spec_speedup_pct per model`
+3. `arkavo-llm: integrate NGRAM spec decoding into streaming generation` — generation loop change, `CompletionOptions.use_spec_decoding` field, raw `n_draft`/`n_accepted` in `InferenceTiming`, parity test. No policy.
+4. `arkavo-router: per-model spec accept-rate stats and auto-skip` — rolling window in `model_learning` (or sibling), `RoutingDecision.use_spec_decoding`, threshold check, `RouterEvent::SpecDecodingDisabled` structured event
+5. `tool_bench: report per-model spec accept-rate and spec_speedup_pct`
 
-Effort estimate: ~400-500 line diff across 6 files. 4-6 hours focused. Most risk in commit 3 (generation loop change).
+Effort estimate: ~400-500 line diff across 6 files. 4-6 hours focused. Most risk in commit 3 (generation loop change); commit 4 is bounded by the existing `model_learning` patterns.
