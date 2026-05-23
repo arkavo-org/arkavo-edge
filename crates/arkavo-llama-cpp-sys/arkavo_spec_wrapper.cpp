@@ -7,7 +7,8 @@
 #include "llama.h"
 #include "common.h"
 
-#include <stdexcept>
+#include <cstdio>
+#include <exception>
 #include <vector>
 
 struct arkavo_spec {
@@ -25,13 +26,23 @@ arkavo_spec *arkavo_spec_init_ngram(uint32_t n_seq) {
         auto *handle = new arkavo_spec();
         handle->ptr.reset(raw);
         return handle;
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_init_ngram] exception: %s\n", e.what());
+        return nullptr;
     } catch (...) {
+        fprintf(stderr, "[arkavo_spec_init_ngram] unknown exception\n");
         return nullptr;
     }
 }
 
 void arkavo_spec_free(arkavo_spec *spec) {
-    delete spec; // unique_ptr in ptr handles cleanup via common_speculative_deleter
+    try {
+        delete spec; // unique_ptr in ptr handles cleanup via common_speculative_deleter
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_free] exception: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "[arkavo_spec_free] unknown exception\n");
+    }
 }
 
 void arkavo_spec_begin(
@@ -44,14 +55,22 @@ void arkavo_spec_begin(
     try {
         llama_tokens tokens(prompt_tokens, prompt_tokens + n_prompt_tokens);
         common_speculative_begin(spec->ptr.get(), seq_id, tokens);
-    } catch (...) {}
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_begin] exception: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "[arkavo_spec_begin] unknown exception\n");
+    }
 }
 
 int arkavo_spec_process(arkavo_spec *spec, const struct llama_batch *batch) {
     if (!spec || !batch) return -1;
     try {
         return common_speculative_process(spec->ptr.get(), *batch) ? 0 : -2;
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_process] exception: %s\n", e.what());
+        return -3;
     } catch (...) {
+        fprintf(stderr, "[arkavo_spec_process] unknown exception\n");
         return -3;
     }
 }
@@ -83,7 +102,11 @@ uint32_t arkavo_spec_draft(
         if (n > static_cast<uint32_t>(n_max)) n = n_max;
         for (uint32_t i = 0; i < n; ++i) out_tokens[i] = result_buf[i];
         return n;
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_draft] exception: %s\n", e.what());
+        return 0;
     } catch (...) {
+        fprintf(stderr, "[arkavo_spec_draft] unknown exception\n");
         return 0;
     }
 }
@@ -92,7 +115,11 @@ void arkavo_spec_accept(arkavo_spec *spec, int32_t seq_id, uint16_t n_accepted) 
     if (!spec) return;
     try {
         common_speculative_accept(spec->ptr.get(), seq_id, n_accepted);
-    } catch (...) {}
+    } catch (const std::exception &e) {
+        fprintf(stderr, "[arkavo_spec_accept] exception: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "[arkavo_spec_accept] unknown exception\n");
+    }
 }
 
 } // extern "C"

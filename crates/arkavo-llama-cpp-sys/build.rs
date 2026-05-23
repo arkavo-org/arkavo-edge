@@ -440,18 +440,20 @@ fn main() {
             "cargo:rerun-if-changed={}",
             manifest_dir.join("arkavo_grammar_wrapper.h").display()
         );
-        println!("cargo:rerun-if-changed={}", spec_wrapper_src.display());
-        println!(
-            "cargo:rerun-if-changed={}",
-            manifest_dir.join("arkavo_spec_wrapper.h").display()
-        );
 
         let mut cc_build = cc::Build::new();
-        cc_build
-            .cpp(true)
-            .std("c++17")
-            .file(&wrapper_src)
-            .file(&spec_wrapper_src);
+        cc_build.cpp(true).std("c++17").file(&wrapper_src);
+
+        // Independently gate spec wrapper on its own file existence
+        if spec_wrapper_src.exists() {
+            println!("cargo:rerun-if-changed={}", spec_wrapper_src.display());
+            println!(
+                "cargo:rerun-if-changed={}",
+                manifest_dir.join("arkavo_spec_wrapper.h").display()
+            );
+            cc_build.file(&spec_wrapper_src);
+        }
+
         // -fexceptions is GCC/Clang only; MSVC enables exceptions by default
         if !cfg!(target_os = "windows") {
             cc_build.flag("-fexceptions");
@@ -514,8 +516,10 @@ fn main() {
                 grammar_wrapper_header.display()
             ));
         }
+        // Only include spec wrapper header if the source exists (independent gate)
         let spec_wrapper_header = manifest_dir.join("arkavo_spec_wrapper.h");
-        if spec_wrapper_header.exists() {
+        let spec_wrapper_src = manifest_dir.join("arkavo_spec_wrapper.cpp");
+        if spec_wrapper_header.exists() && spec_wrapper_src.exists() {
             wrapper_content.push_str(&format!("#include \"{}\"\n", spec_wrapper_header.display()));
         }
         std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");

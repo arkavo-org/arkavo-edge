@@ -21,6 +21,7 @@ arkavo_spec *arkavo_spec_init_ngram(uint32_t n_seq);
 void arkavo_spec_free(arkavo_spec *spec);
 
 // Begin a new generation for seq_id with the given prompt tokens.
+// Pass the prompt token IDs (token_t = llama_token = int32_t).
 void arkavo_spec_begin(
     arkavo_spec *spec,
     int32_t seq_id,
