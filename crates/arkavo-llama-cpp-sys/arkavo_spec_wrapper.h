@@ -32,9 +32,14 @@ void arkavo_spec_begin(
 // Returns 0 on success, non-zero on failure.
 int arkavo_spec_process(arkavo_spec *spec, const struct llama_batch *batch);
 
-// Generate a draft for seq_id given n_past (current KV position) and id_last
-// (most recently sampled token). Writes up to n_max draft tokens into out_tokens.
-// Returns the number of draft tokens written (0 if cache has no useful prediction).
+// Generate a draft for seq_id given the current token history.
+// `history` / `n_history` is the running window of tokens seen so far for this
+// sequence (prompt + generated). NGRAM_SIMPLE scans this window for a match
+// ending in `id_last` and emits the m-gram following that match.
+// `n_past` is the current KV cache position (unused by NGRAM_SIMPLE but kept
+// in the signature for parity with other speculative types).
+// Writes up to n_max draft tokens into out_tokens.
+// Returns the number of draft tokens written (0 if no useful prediction).
 // out_tokens must have capacity >= n_max.
 uint32_t arkavo_spec_draft(
     arkavo_spec *spec,
@@ -42,6 +47,8 @@ uint32_t arkavo_spec_draft(
     int32_t n_past,
     int32_t id_last,
     int32_t n_max,
+    const int32_t *history,
+    uint32_t n_history,
     int32_t *out_tokens);
 
 // Inform the speculative context that n_accepted of the drafted tokens were

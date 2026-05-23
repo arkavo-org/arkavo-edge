@@ -94,6 +94,8 @@ mod tests {
                 n_prompt_eval: 123,
                 n_eval: 45,
                 n_thinking_eval: None,
+                n_draft: None,
+                n_accepted: None,
             }),
             quality_gate_retries: 0,
         };

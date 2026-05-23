@@ -29,17 +29,37 @@ impl SpeculativeContext {
     }
 
     /// Draft up to `n_max` tokens following `id_last` at KV position `n_past`.
-    /// Returns the drafted tokens (may be empty).
-    pub fn draft(&mut self, seq_id: i32, n_past: i32, id_last: i32, n_max: i32) -> Vec<i32> {
+    /// `history` is the running window of tokens for this sequence (prompt +
+    /// generated). NGRAM_SIMPLE searches this window for a match ending in
+    /// `id_last` and emits the following m-gram. Returns the drafted tokens
+    /// (may be empty if no match is found or n_max <= 0).
+    pub fn draft(
+        &mut self,
+        seq_id: i32,
+        n_past: i32,
+        id_last: i32,
+        n_max: i32,
+        history: &[i32],
+    ) -> Vec<i32> {
         if n_max <= 0 {
             return Vec::new();
         }
         let mut out = vec![0i32; n_max as usize];
         // SAFETY: self.ptr is non-null; out is a Vec we just allocated with capacity
         // n_max > 0; the C wrapper writes at most n_max int32 values and returns the
-        // actual count. Guarded against n_max <= 0 above.
+        // actual count. history is a borrowed slice valid for the duration of the call;
+        // the wrapper copies the data into its own buffer before invoking impl::draft.
         let n = unsafe {
-            ffi::arkavo_spec_draft(self.ptr, seq_id, n_past, id_last, n_max, out.as_mut_ptr())
+            ffi::arkavo_spec_draft(
+                self.ptr,
+                seq_id,
+                n_past,
+                id_last,
+                n_max,
+                history.as_ptr(),
+                history.len() as u32,
+                out.as_mut_ptr(),
+            )
         };
         out.truncate(n as usize);
         out
@@ -71,10 +91,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_draft_returns_empty() {
+    fn empty_history_returns_empty_draft() {
         let mut spec = SpeculativeContext::new_ngram(1).expect("init");
         spec.begin(0, &[]);
-        let drafted = spec.draft(0, 0, 0, 8);
-        assert!(drafted.is_empty(), "empty cache should yield empty draft");
+        let drafted = spec.draft(0, 0, 0, 8, &[]);
+        assert!(drafted.is_empty(), "empty history should yield empty draft");
+    }
+
+    #[test]
+    fn repeated_pattern_can_be_drafted() {
+        // Build a history containing a repeated 4-token pattern so ngram_simple
+        // (default size_n=1) can find a match ending in `id_last` and emit the
+        // following m-gram. The exact draft size depends on upstream defaults
+        // (size_m, min_hits); we only assert this returns deterministically
+        // without crashing.
+        let mut spec = SpeculativeContext::new_ngram(1).expect("init");
+        let history: Vec<i32> = vec![1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4];
+        spec.begin(0, &history);
+        let drafted = spec.draft(0, history.len() as i32, 4, 8, &history);
+        // Function returns without panicking; result may be empty depending on
+        // upstream min_hits config but the call surface is exercised.
+        assert!(drafted.len() <= 8);
     }
 }

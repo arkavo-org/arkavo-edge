@@ -81,6 +81,8 @@ uint32_t arkavo_spec_draft(
     int32_t n_past,
     int32_t id_last,
     int32_t n_max,
+    const int32_t *history,
+    uint32_t n_history,
     int32_t *out_tokens)
 {
     if (!spec || n_max <= 0) return 0;
@@ -91,7 +93,13 @@ uint32_t arkavo_spec_draft(
         params.n_past = n_past;
         params.id_last = id_last;
 
+        // ngram_simple scans `*params.prompt` for a match ending in id_last,
+        // so the caller must pass the running token history. If history is
+        // empty the impl returns no drafts (which is fine, just no speedup).
         llama_tokens prompt_buf;
+        if (history && n_history > 0) {
+            prompt_buf.assign(history, history + n_history);
+        }
         llama_tokens result_buf;
         params.prompt = &prompt_buf;
         params.result = &result_buf;

@@ -1435,6 +1435,34 @@ pub fn batch_init_with_tokens_seq(
     batch
 }
 
+/// Initialize a batch with `request_logits=1` on every position.
+/// Used by speculative decoding to verify multiple candidate tokens in a
+/// single decode call (each position needs its own logits so the target
+/// sampler can be run against each).
+#[cfg(not(target_env = "musl"))]
+pub fn batch_init_with_tokens_all_logits(
+    tokens: &[ffi::llama_token],
+    pos_offset: i32,
+    seq_id: i32,
+) -> ffi::llama_batch {
+    // SAFETY: llama_batch_init allocates all internal arrays with capacity tokens.len()
+    let mut batch = unsafe { ffi::llama_batch_init(tokens.len() as i32, 0, 1) };
+
+    for (i, &token) in tokens.iter().enumerate() {
+        // SAFETY: Arrays are allocated by llama_batch_init with capacity >= tokens.len()
+        unsafe {
+            *batch.token.add(i) = token;
+            *batch.pos.add(i) = pos_offset + i as i32;
+            *batch.n_seq_id.add(i) = 1;
+            *(*batch.seq_id.add(i)) = seq_id;
+            *batch.logits.add(i) = 1; // request logits at every position
+        }
+    }
+
+    batch.n_tokens = tokens.len() as i32;
+    batch
+}
+
 /// Free a batch created with batch_init_with_tokens
 #[cfg(not(target_env = "musl"))]
 pub fn batch_free(batch: &mut ffi::llama_batch) {
