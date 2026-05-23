@@ -39,6 +39,10 @@ pub mod multimodal;
 #[cfg(not(target_env = "musl"))]
 pub mod memory;
 
+// Speculative decoding via arkavo_spec_wrapper
+#[cfg(not(target_env = "musl"))]
+pub mod speculative;
+
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
