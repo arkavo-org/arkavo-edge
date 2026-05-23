@@ -117,7 +117,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -231,7 +231,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
@@ -299,7 +299,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
@@ -419,7 +419,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -773,7 +773,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
