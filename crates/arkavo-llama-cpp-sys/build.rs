@@ -273,6 +273,7 @@ fn main() {
         .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
         .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples
         .define("LLAMA_BUILD_SERVER", "OFF") // Don't build server
+        .define("LLAMA_BUILD_APP", "OFF") // Unified `llama` binary links server-impl; not needed for sys crate
         .define("LLAMA_BUILD_COMMON", "ON"); // Build common library (chat templates, Jinja, grammar)
 
     // Use ccache or sccache if available for faster rebuilds
@@ -325,15 +326,17 @@ fn main() {
         }
     }
 
-    // Link libraries from the CMake build tree that aren't installed to lib/
-    // (common, cpp-httplib, build_info are built but not installed by CMake)
+    // Link libraries from the CMake build tree that aren't installed to lib/.
+    // Upstream b9292 renamed `common` → `llama-common` and split the build-info
+    // OBJECT library into a static `llama-common-base` archive. `llama-common`
+    // is installed (auto-picked from lib/); `llama-common-base` and the vendored
+    // cpp-httplib are not, so we link them out of the CMake build tree.
     //
     // On Windows with MSBuild, CMake places artifacts in config subdirectories
     // (e.g., build/common/Release/) instead of build/common/ directly.
     let build_dir = dst.join("build");
     let common_base = build_dir.join("common");
     let common_lib = if cfg!(target_os = "windows") {
-        // MSBuild uses config-specific subdirectories
         let release_dir = common_base.join("Release");
         let relwithdebinfo_dir = common_base.join("RelWithDebInfo");
         if release_dir.exists() {
@@ -348,20 +351,7 @@ fn main() {
     };
     if common_lib.exists() {
         println!("cargo:rustc-link-search=native={}", common_lib.display());
-        println!("cargo:rustc-link-lib=static=common");
-
-        // build_info is an OBJECT library — link its object file directly
-        if cfg!(target_os = "windows") {
-            let build_info_obj = common_base.join("build_info.dir/Release/build-info.obj");
-            if build_info_obj.exists() {
-                println!("cargo:rustc-link-arg={}", build_info_obj.display());
-            }
-        } else {
-            let build_info_obj = common_base.join("CMakeFiles/build_info.dir/build-info.cpp.o");
-            if build_info_obj.exists() {
-                println!("cargo:rustc-link-arg={}", build_info_obj.display());
-            }
-        }
+        println!("cargo:rustc-link-lib=static=llama-common-base");
     }
     let httplib_base = build_dir.join("vendor/cpp-httplib");
     let httplib = if cfg!(target_os = "windows") {
