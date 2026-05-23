@@ -93,6 +93,7 @@ mod tests {
                 generation_ms: 0.0,
                 n_prompt_eval: 123,
                 n_eval: 45,
+                n_thinking_eval: None,
             }),
             quality_gate_retries: 0,
         };
