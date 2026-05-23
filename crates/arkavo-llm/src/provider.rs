@@ -51,6 +51,13 @@ pub struct InferenceTiming {
     /// None when spec was disabled for the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub n_accepted: Option<u32>,
+    /// Set when the caller requested spec decoding but the streaming layer
+    /// declined to engage it (e.g., grammar active, stops active). The router
+    /// uses this to avoid penalizing the model's accept-rate stats for cases
+    /// where spec never had a chance to run. None means either spec wasn't
+    /// requested, or spec ran (in which case n_draft/n_accepted are Some).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_bypassed: Option<String>,
 }
 
 /// Per-request completion options that the router populates and the

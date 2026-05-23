@@ -348,6 +348,7 @@ fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
         n_thinking_eval: usage.thoughts_token_count,
         n_draft: None,
         n_accepted: None,
+        spec_bypassed: None,
     }
 }
 

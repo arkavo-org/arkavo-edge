@@ -410,6 +410,7 @@ pub(crate) async fn generate_tokens_pooled(
             n_thinking_eval: None,
             n_draft: None,
             n_accepted: None,
+            spec_bypassed: None,
         };
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
             tokens_generated,
@@ -456,11 +457,32 @@ pub(crate) async fn generate_tokens_with_context(
     // fall through to the original single-token loop.
     let spec_safe =
         config.use_spec_decoding && config.grammar.is_none() && config.additional_stops.is_empty();
+
+    let spec_bypass_reason: Option<&'static str> = if config.use_spec_decoding && !spec_safe {
+        if config.grammar.is_some() {
+            Some("grammar_active")
+        } else if !config.additional_stops.is_empty() {
+            Some("stops_active")
+        } else {
+            Some("unknown")
+        }
+    } else {
+        None
+    };
+
     if spec_safe {
         generate_tokens_with_spec(model, prompt_bytes, config, tx, context_options).await;
         return;
     }
-    generate_tokens_baseline(model, prompt_bytes, config, tx, context_options).await;
+    generate_tokens_baseline(
+        model,
+        prompt_bytes,
+        config,
+        tx,
+        context_options,
+        spec_bypass_reason,
+    )
+    .await;
 }
 
 /// Original (pre-spec) per-token generation loop, unmodified semantically.
@@ -473,6 +495,7 @@ async fn generate_tokens_baseline(
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
     context_options: ContextReuseOptions,
+    spec_bypass_reason: Option<&'static str>,
 ) {
     let start_time = Instant::now();
     let mut first_token_time: Option<Instant> = None;
@@ -762,6 +785,7 @@ async fn generate_tokens_baseline(
             n_thinking_eval: None,
             n_draft: None,
             n_accepted: None,
+            spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
@@ -1059,6 +1083,7 @@ async fn generate_tokens_with_spec(
             n_thinking_eval: None,
             n_draft: Some(n_draft_total),
             n_accepted: Some(n_accepted_total),
+            spec_bypassed: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
