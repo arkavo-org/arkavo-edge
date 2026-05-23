@@ -429,6 +429,7 @@ fn main() {
 
     // Compile the C++ chat wrapper that bridges to common_chat_templates_apply()
     let wrapper_src = manifest_dir.join("arkavo_chat_wrapper.cpp");
+    let spec_wrapper_src = manifest_dir.join("arkavo_spec_wrapper.cpp");
     if wrapper_src.exists() {
         println!("cargo:rerun-if-changed={}", wrapper_src.display());
         println!(
@@ -439,9 +440,18 @@ fn main() {
             "cargo:rerun-if-changed={}",
             manifest_dir.join("arkavo_grammar_wrapper.h").display()
         );
+        println!("cargo:rerun-if-changed={}", spec_wrapper_src.display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join("arkavo_spec_wrapper.h").display()
+        );
 
         let mut cc_build = cc::Build::new();
-        cc_build.cpp(true).std("c++17").file(&wrapper_src);
+        cc_build
+            .cpp(true)
+            .std("c++17")
+            .file(&wrapper_src)
+            .file(&spec_wrapper_src);
         // -fexceptions is GCC/Clang only; MSVC enables exceptions by default
         if !cfg!(target_os = "windows") {
             cc_build.flag("-fexceptions");
@@ -503,6 +513,10 @@ fn main() {
                 "#include \"{}\"\n",
                 grammar_wrapper_header.display()
             ));
+        }
+        let spec_wrapper_header = manifest_dir.join("arkavo_spec_wrapper.h");
+        if spec_wrapper_header.exists() {
+            wrapper_content.push_str(&format!("#include \"{}\"\n", spec_wrapper_header.display()));
         }
         std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");
 
