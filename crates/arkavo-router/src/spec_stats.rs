@@ -41,6 +41,11 @@ impl SpecStats {
         }
     }
 
+    /// Configured rolling window size (number of recent requests considered).
+    pub fn window(&self) -> u32 {
+        self.window
+    }
+
     /// Record a spec-decoding sample for `model`.
     ///
     /// Only call this when `spec_bypassed` is `None` on the `InferenceTiming` —

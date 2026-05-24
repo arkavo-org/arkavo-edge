@@ -660,7 +660,7 @@ impl Router {
         decision.use_spec_decoding = spec_decision.use_spec;
         if let Some(rate_pct) = spec_decision.crossed_below_threshold {
             let model_name = decision.recommended_model.name().to_string();
-            let sample_size = 20u32; // matches SpecStats::default() window
+            let sample_size = self.spec_stats.window();
             if let Ok(mut g) = self.pending_events.lock() {
                 g.push(RouterEvent::SpecDecodingDisabled {
                     model: model_name,
@@ -823,7 +823,10 @@ impl Router {
         let model = preferred;
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
 
-        let provider = self.instantiate_provider(&model).await?;
+        let use_spec = self.spec_stats.decide(model.name()).use_spec;
+        let provider = self
+            .instantiate_provider_with_spec(&model, use_spec)
+            .await?;
 
         let _permit = self
             .synthesis_semaphore
@@ -869,7 +872,10 @@ impl Router {
             .unwrap_or_else(|| self.selector.fastest_local_model());
         tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
 
-        let provider = self.instantiate_provider(&model).await?;
+        let use_spec = self.spec_stats.decide(model.name()).use_spec;
+        let provider = self
+            .instantiate_provider_with_spec(&model, use_spec)
+            .await?;
 
         let _permit = self
             .chat_semaphore
