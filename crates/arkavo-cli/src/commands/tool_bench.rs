@@ -735,10 +735,10 @@ async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn s
     println!("Measures: prompt → tool call → synthetic result → response");
     println!("═══════════════════════════════════════════════════════════════");
     println!(
-        "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10}",
-        "Scenario", "Tool OK", "Infer1 ms", "Infer2 ms", "Total ms", "Resp len"
+        "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10} {:<10}",
+        "Scenario", "Tool OK", "Infer1 ms", "Infer2 ms", "Total ms", "Resp len", "Spec acc %"
     );
-    println!("{}", "─".repeat(76));
+    println!("{}", "─".repeat(86));
 
     let iterations = command.iterations;
     let mut total_infer1 = 0u64;
@@ -784,28 +784,47 @@ async fn run_tool_loop_bench(command: &ToolBenchCommand) -> Result<(), Box<dyn s
                 .await;
             let infer2_ms = start2.elapsed().as_millis() as u64;
 
-            let resp_len = match &resp2 {
-                Ok(r) => r.content.len(),
-                Err(_) => 0,
+            let (resp_len, spec_acc) = match &resp2 {
+                Ok(r) => {
+                    let len = r.content.len();
+                    let spec_str = match r.inference_timing.as_ref() {
+                        Some(timing) => match (
+                            timing.spec_bypassed.as_deref(),
+                            timing.n_draft,
+                            timing.n_accepted,
+                        ) {
+                            (Some(reason), _, _) => {
+                                format!("byp:{}", reason.chars().take(5).collect::<String>())
+                            }
+                            (None, Some(d), Some(a)) if d > 0 => format!("{}%", (a * 100) / d),
+                            (None, Some(_), Some(_)) => "0%".to_string(),
+                            (None, _, _) => "-".to_string(),
+                        },
+                        None => "-".to_string(),
+                    };
+                    (len, spec_str)
+                }
+                Err(_) => (0, "-".to_string()),
             };
 
             total_infer1 += infer1_ms;
             total_infer2 += infer2_ms;
 
             println!(
-                "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10}",
+                "{:<20} {:<10} {:<12} {:<12} {:<12} {:<10} {:<10}",
                 name,
                 if tool_ok { "ok" } else { "FAIL" },
                 format!("{infer1_ms}ms"),
                 format!("{infer2_ms}ms"),
                 format!("{}ms", infer1_ms + infer2_ms),
                 format!("{resp_len}ch"),
+                spec_acc,
             );
         }
     }
 
     let n = loop_scenarios.len() as u64 * iterations as u64;
-    println!("{}", "─".repeat(76));
+    println!("{}", "─".repeat(86));
     println!(
         "Average: infer1={:.0}ms  infer2={:.0}ms  total={:.0}ms",
         total_infer1 as f64 / n as f64,
