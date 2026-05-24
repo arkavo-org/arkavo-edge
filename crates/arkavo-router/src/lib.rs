@@ -24,6 +24,7 @@ pub mod response;
 pub mod rlm;
 pub mod selector;
 pub mod selector_quality;
+pub mod spec_stats;
 pub mod stream;
 #[cfg(feature = "tdf-encrypt")]
 pub mod tdf_audit;
@@ -77,6 +78,24 @@ pub use learning::{
     AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
     LearningConfig, LearningModule, QualityMetrics,
 };
+pub use spec_stats::SpecStats;
+
+/// Structured events emitted by the router for telemetry consumers.
+///
+/// Prefer `drain_events()` over log lines — callers aggregate these into
+/// metrics or UI events instead of scraping logs.
+#[derive(Debug, Clone)]
+pub enum RouterEvent {
+    /// A model's rolling spec-decoding accept rate dropped below the threshold.
+    ///
+    /// The router will stop recommending spec decoding for this model until its
+    /// accept rate recovers. Emitted exactly once per low→high→low transition.
+    SpecDecodingDisabled {
+        model: String,
+        accept_rate_pct: u32,
+        sample_size: u32,
+    },
+}
 
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
@@ -152,6 +171,12 @@ pub struct Router {
     /// (reset on successful inference), this is only reset when rewards turn positive.
     /// Used to trigger model hint release after sustained poor task quality.
     reward_failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
+    /// Per-model rolling spec-decoding accept-rate tracker.
+    /// Decides whether to enable NGRAM spec for the next request to each model.
+    spec_stats: Arc<spec_stats::SpecStats>,
+    /// Structured router events waiting to be consumed by the caller.
+    /// Callers drain these via `drain_events()` instead of scraping log lines.
+    pending_events: Arc<std::sync::Mutex<Vec<RouterEvent>>>,
 }
 
 impl Router {
@@ -194,6 +219,8 @@ impl Router {
             reward_failure_counts: Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            spec_stats: Arc::new(spec_stats::SpecStats::default()),
+            pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
         })
     }
 
@@ -236,6 +263,8 @@ impl Router {
             reward_failure_counts: Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            spec_stats: Arc::new(spec_stats::SpecStats::default()),
+            pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
         })
     }
 
@@ -334,6 +363,26 @@ impl Router {
     /// Get a reference to the model learning module (Thompson Sampling state)
     pub fn model_learning(&self) -> &LearningModule {
         &self.model_learning
+    }
+
+    /// Get a reference to the per-model spec-decoding accept-rate tracker.
+    ///
+    /// Callers feed `InferenceTiming.n_draft`/`n_accepted` back here after
+    /// each completion so the router learns which models benefit from spec.
+    pub fn spec_stats(&self) -> &Arc<spec_stats::SpecStats> {
+        &self.spec_stats
+    }
+
+    /// Drain all pending structured router events.
+    ///
+    /// Returns all events accumulated since the last call and clears the queue.
+    /// Callers should poll this after each routing cycle and forward events to
+    /// their telemetry aggregator.
+    pub fn drain_events(&self) -> Vec<RouterEvent> {
+        self.pending_events
+            .lock()
+            .map(|mut g| std::mem::take(&mut *g))
+            .unwrap_or_default()
     }
 
     /// Set per-agent memory budget on the model selector.
@@ -602,6 +651,24 @@ impl Router {
             .write()
             .await
             .record_routing(&classification, &decision);
+
+        // Consult spec-decoding stats. Only local models run llama.cpp, so only
+        // they can benefit from (or be hurt by) NGRAM spec decoding. Cloud models
+        // are unaffected and we leave their flag at the default `true` so the field
+        // stays consistent if spec ever applies to remote paths in the future.
+        let spec_decision = self.spec_stats.decide(decision.recommended_model.name());
+        decision.use_spec_decoding = spec_decision.use_spec;
+        if let Some(rate_pct) = spec_decision.crossed_below_threshold {
+            let model_name = decision.recommended_model.name().to_string();
+            let sample_size = 20u32; // matches SpecStats::default() window
+            if let Ok(mut g) = self.pending_events.lock() {
+                g.push(RouterEvent::SpecDecodingDisabled {
+                    model: model_name,
+                    accept_rate_pct: rate_pct,
+                    sample_size,
+                });
+            }
+        }
 
         Ok(decision)
     }
@@ -985,6 +1052,8 @@ impl Router {
             last_decision_trace: self.last_decision_trace.clone(),
             recent_traces: self.recent_traces.clone(),
             reward_failure_counts: self.reward_failure_counts.clone(),
+            spec_stats: self.spec_stats.clone(),
+            pending_events: self.pending_events.clone(),
         })
     }
 
