@@ -252,8 +252,23 @@ pub(super) async fn generate_tokens_pooled_with_spec(
             }
             sampler.accept(target_token);
 
-            // Draft candidate continuation tokens from the running history.
-            let drafts = spec_ctx.draft(seq_id, pos + 1, target_token, N_DRAFT_MAX, &history);
+            // Clamp draft count so the spec verification batch
+            // [pos..pos+drafts.len()] fits within safe_ctx. Without this, a
+            // spec batch near the end of the context window overflows and
+            // llama_decode returns code 1 ("could not find a KV slot"),
+            // which the GPU breaker then retries pointlessly with the same
+            // oversize batch. Reserve one slot for target_token at batch
+            // index 0, so the maximum safe draft count is
+            // safe_ctx - pos - 1.
+            let remaining_slots = i32::try_from(safe_ctx)
+                .unwrap_or(i32::MAX)
+                .saturating_sub(pos);
+            let safe_n_max = (remaining_slots - 1).clamp(0, N_DRAFT_MAX);
+            let drafts = if safe_n_max <= 0 {
+                Vec::new()
+            } else {
+                spec_ctx.draft(seq_id, pos + 1, target_token, safe_n_max, &history)
+            };
 
             if drafts.is_empty() {
                 // No spec opportunity — fall back to the standard single-token
@@ -585,8 +600,20 @@ pub(super) async fn generate_tokens_with_spec(
             }
             sampler.accept(target_token);
 
-            // Draft candidate continuation tokens from the running history.
-            let drafts = spec_ctx.draft(seq_id, pos + 1, target_token, N_DRAFT_MAX, &history);
+            // Clamp draft count so the spec verification batch
+            // [pos..pos+drafts.len()] fits within safe_ctx. See the matching
+            // comment in `generate_tokens_pooled_with_spec` for the
+            // overflow scenario this prevents (llama_decode code 1 at
+            // the end of the context window).
+            let remaining_slots = i32::try_from(safe_ctx)
+                .unwrap_or(i32::MAX)
+                .saturating_sub(pos);
+            let safe_n_max = (remaining_slots - 1).clamp(0, N_DRAFT_MAX);
+            let drafts = if safe_n_max <= 0 {
+                Vec::new()
+            } else {
+                spec_ctx.draft(seq_id, pos + 1, target_token, safe_n_max, &history)
+            };
 
             if drafts.is_empty() {
                 // No spec opportunity this step — fall back to the standard

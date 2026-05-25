@@ -15,10 +15,18 @@ use arkavo_llm::provider::Provider;
 use arkavo_llm::{Message, Role};
 
 fn make_provider(model_path: &str, use_spec: bool) -> LlamaCppProvider {
+    make_provider_with_max_tokens(model_path, use_spec, 80)
+}
+
+fn make_provider_with_max_tokens(
+    model_path: &str,
+    use_spec: bool,
+    max_tokens: u32,
+) -> LlamaCppProvider {
     let config = SamplingConfig {
         temperature: 0.0,
         seed: 42,
-        max_tokens: 80,
+        max_tokens,
         debug: false,
         use_spec_decoding: use_spec,
         ..Default::default()
@@ -277,5 +285,66 @@ async fn long_prompt_does_not_emit_invalid_batch() {
         baseline_ok,
         "baseline completion failed: {:?}",
         baseline_result.err()
+    );
+}
+
+/// Regression for the spec-batch overflow at the end of the context window.
+/// When the planner pushes `pos` to within N_DRAFT_MAX of safe_ctx, the spec
+/// verification batch `[pos..pos+drafts.len()]` overflowed the allocated KV
+/// slots and `llama_decode` returned code 1 ("could not find a KV slot"),
+/// which the GPU breaker then retried pointlessly with the same oversize
+/// batch. The fix clamps `drafts.len()` to `safe_ctx - pos - 1` per cycle.
+///
+/// To exercise the boundary we want a prompt large enough that one full spec
+/// batch (`N_DRAFT_MAX = 8` tokens) plus a single generation step would land
+/// past `safe_ctx`. For `qwen3.6-35b-a3b` and `gemma-4-26b-a4b`, safe_ctx is
+/// `min(trained_ctx / 4, 16384) = 16384`, so we target ~15800 prompt tokens
+/// + 600 max_tokens to push generation right against the boundary.
+#[tokio::test]
+#[ignore = "requires local GGUF model; opt-in via ARKAVO_TEST_MODEL and --ignored"]
+async fn near_context_limit_does_not_emit_kv_slot_failure() {
+    let model_path = match std::env::var("ARKAVO_TEST_MODEL") {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Skipping: set ARKAVO_TEST_MODEL=/path/to/model.gguf to run");
+            return;
+        }
+    };
+
+    let approx_tokens: usize = std::env::var("ARKAVO_TEST_PROMPT_TOKENS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(15800);
+    let max_tokens: u32 = std::env::var("ARKAVO_TEST_MAX_TOKENS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(600);
+
+    eprintln!("=== Spec ON, ~{approx_tokens}-token prompt + {max_tokens} max_tokens ===");
+    let provider = make_provider_with_max_tokens(&model_path, true, max_tokens);
+    let result = provider.complete(make_long_messages(approx_tokens)).await;
+    match &result {
+        Ok(s) => eprintln!("  OK: {} chars generated", s.len()),
+        Err(e) => eprintln!("  ERROR: {e}"),
+    }
+
+    let saw_kv_slot_failure = result
+        .as_ref()
+        .err()
+        .map(|e| {
+            let msg = e.to_string();
+            msg.contains("code: 1") || msg.contains("could not find a KV slot")
+        })
+        .unwrap_or(false);
+
+    assert!(
+        !saw_kv_slot_failure,
+        "spec batch overflowed safe_ctx near the end of the context window — \
+         clamp logic in spec.rs failed to cap drafts.len() to (safe_ctx - pos - 1)"
+    );
+    assert!(
+        result.is_ok(),
+        "near-context-limit completion failed: {:?}",
+        result.err()
     );
 }
