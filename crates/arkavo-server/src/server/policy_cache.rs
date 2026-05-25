@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::anti_pattern::AntiPatternStore;
+use super::synthesis::is_destructive_unconditional_lesson;
 use super::tool_pattern_observer::TOOL_FORMAT_CATEGORY;
 
 const MAX_BEHAVIOR_LESSONS_PER_KEY: usize = 5;
@@ -300,6 +301,18 @@ impl PolicyCache {
             .iter()
             .filter(|((_, cat), _)| category.is_none() || category == Some(cat.as_str()))
             .flat_map(|(_, lessons)| lessons.iter())
+            // Suppress lessons that recommend destructive actions without a
+            // catastrophic-failure condition. Synthesis now rejects these at
+            // creation time, but the policy cache loads persisted entries
+            // from disk on every startup, and one such lesson —
+            // action=`registerAgent followed by reset`,
+            // condition=`when starting a new session` — leaked through under
+            // an earlier version of the filters. Without this guard the bad
+            // lesson rides forward forever, telling the agent to wipe state
+            // every time it reconnects.
+            .filter(|l| {
+                !is_destructive_unconditional_lesson(&l.pattern.condition, &l.pattern.action)
+            })
             .filter(|l| seen_conditions.insert(l.pattern.condition.as_str()))
             .take(MAX_GUIDANCE_LESSONS * 2) // Collect more, then split
             .collect();
