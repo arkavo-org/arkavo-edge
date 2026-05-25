@@ -186,7 +186,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake, mold linker, and build dependencies
@@ -401,7 +401,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -535,7 +535,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -553,7 +553,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -650,7 +650,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
@@ -684,7 +684,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -1190,7 +1190,7 @@ jobs:
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
           cd vendor/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          git checkout ef570f63087b6a5a2930210a13f87990e8113927
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
@@ -1523,7 +1523,7 @@ jobs:
       - name: Setup vendor/llama.cpp
         run: |
           git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout e21cdc11a0461d8b0cbd28cc356d993bf6be7282
+          cd vendor/llama.cpp && git checkout ef570f63087b6a5a2930210a13f87990e8113927
 
       - name: Install build dependencies
         run: |

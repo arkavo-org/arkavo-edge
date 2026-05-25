@@ -67,7 +67,8 @@ arkavo_chat_result arkavo_chat_templates_apply(
     const arkavo_chat_tool *tools, int num_tools,
     int tool_choice,
     int enable_thinking,
-    int add_generation_prompt)
+    int add_generation_prompt,
+    int parallel_tool_calls)
 {
     arkavo_chat_result result = {};
 
@@ -81,6 +82,7 @@ arkavo_chat_result arkavo_chat_templates_apply(
         inputs.add_generation_prompt = (add_generation_prompt != 0);
         inputs.use_jinja = true;
         inputs.enable_thinking = (enable_thinking != 0);
+        inputs.parallel_tool_calls = (parallel_tool_calls != 0);
 
         for (int i = 0; i < num_messages; i++) {
             common_chat_msg msg;

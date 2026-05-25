@@ -1,0 +1,98 @@
+# BASE_COMMIT: ef570f630
+# VERIFY_ABSENT: TODO @aldehir : need to extend json-schema-to-grammar
+# VERIFY_PRESENT: gemma4-dict-nonempty
+# Reapplied for b9292 — upstream still uses gemma4-dict (allows {}) for all
+# tool args, and gemma4_to_json() returns "" for unknown composite rules. Both
+# combine to let Gemma 4 emit tool calls like `step({})` that satisfy the
+# grammar but lack required schema fields, which downstream MCP rejects.
+# Original patch authored against c08d28d08 (commit 90c897a7); dropped in the
+# c2b675f7 b9292 bump under the assumption that Qwen3.6 was the primary path.
+diff --git a/common/chat-peg-parser.cpp b/common/chat-peg-parser.cpp
+--- a/common/chat-peg-parser.cpp
++++ b/common/chat-peg-parser.cpp
+@@ -955,6 +955,28 @@ static std::string gemma4_to_json(const common_peg_ast_arena & arena, common_peg
+         return result;
+     }
+
++    // Non-empty variant — same AST shape as gemma4-dict, same JSON output.
++    // The grammar rule differs only in requiring at least one kv pair, but the
++    // parsed tree is identical to a populated gemma4-dict and must be emitted
++    // the same way (open brace, comma-joined kv pairs, close brace).
++    if (node.rule == "gemma4-dict-nonempty") {
++        std::string result = "{";
++
++        bool add_comma = false;
++        for (auto child_id : node.children) {
++            if (add_comma) {
++                result += ',';
++            }
++            add_comma = true;
++            result += gemma4_to_json(arena, child_id);
++        }
++
++        if (!node.is_partial) {
++            result += '}';
++        }
++        return result;
++    }
++
+     if (node.rule == "gemma4-value") {
+         if (!node.children.empty()) {
+             return gemma4_to_json(arena, node.children[0]);
+@@ -962,7 +984,17 @@ static std::string gemma4_to_json(const common_peg_ast_arena & arena, common_peg
+         return "";
+     }
+
+-    return "";
++    // Unknown composite rule — recurse into children.
++    // Supports schema-generated rules (e.g., g4-*-obj, g4-*-f-*) that
++    // compose known leaf/container rules without their own explicit case.
++    if (!node.children.empty()) {
++        std::string result;
++        for (auto child_id : node.children) {
++            result += gemma4_to_json(arena, child_id);
++        }
++        return result;
++    }
++    return std::string(node.text);
+ }
+
+ void common_chat_peg_gemma4_mapper::visit(const common_peg_ast_arena & arena, common_peg_ast_id id) {
+diff --git a/common/chat.cpp b/common/chat.cpp
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -1248,6 +1248,14 @@ static common_chat_params common_chat_params_init_gemma4(const common_chat_templ
+                     p.choice({p.literal("}"), p.sequence({members, ws, p.literal("}")})})
+                 });
+             });
++            // Non-empty variant: requires at least one key-value pair.
++            // Used for tool args where the schema has required fields.
++            p.rule("gemma4-dict-nonempty", [&]() {
++                auto ws = p.space();
++                auto member = p.ref("gemma4-dict-kv");
++                auto members = p.sequence({member, p.zero_or_more(p.sequence({p.literal(","), ws, member}))});
++                return p.sequence({p.literal("{"), ws, members, ws, p.literal("}")});
++            });
+             p.rule("gemma4-array", [&]() {
+                 auto ws = p.space();
+                 auto value = p.ref("gemma4-value");
+@@ -1270,12 +1278,16 @@ static common_chat_params common_chat_params_init_gemma4(const common_chat_templ
+             foreach_function(inputs.tools, [&](const json & tool) {
+                 const auto & function = tool.at("function");
+                 std::string  name     = function.at("name");
+-                // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
+-                // const auto & params   = function.at("parameters");
++                json params = function.contains("parameters") ? function.at("parameters") : json::object();
++
++                // Use non-empty dict grammar for tools with required fields
++                bool has_required = params.contains("required") && params["required"].is_array()
++                                    && !params["required"].empty();
++                auto args_grammar = p.ref(has_required ? "gemma4-dict-nonempty" : "gemma4-dict");
+
+                 tool_choice |= p.rule("tool-" + name, p.tool(p.sequence({
+                     p.tool_open(p.tool_name(p.literal(name)) + p.peek(p.literal("{"))),
+-                    p.tool_args(p.ref("gemma4-dict")),
++                    p.tool_args(args_grammar),
+                 })));
+             });
+

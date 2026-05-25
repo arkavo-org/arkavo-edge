@@ -1,5 +1,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
+pub(crate) mod spec;
+
 use crate::gpu_fault::classify_gpu_fault;
 use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
@@ -139,6 +141,10 @@ pub(crate) struct StreamingConfig {
     pub additional_stops: Vec<String>,
     /// Generation prompt for non-lazy grammar prefilling (from Jinja template)
     pub generation_prompt: Option<String>,
+    /// Enable NGRAM self-speculative decoding for this generation.
+    /// When true the per-token loop branches into the spec-decoding path;
+    /// when false it follows the identical sampling sequence as before.
+    pub use_spec_decoding: bool,
 }
 
 /// Options for context reuse in multi-turn conversations
@@ -152,6 +158,12 @@ pub(crate) struct ContextReuseOptions {
     pub clear_cache: bool,
     /// Sequence ID for multi-sequence inference. None = use default (seq 0).
     pub seq_id: Option<i32>,
+    /// Tokens already in the KV cache from prior turns, in chronological order.
+    /// When provided, the spec ngram cache scans these in addition to the new
+    /// prompt tokens, so multi-turn inference benefits from the previous turn's
+    /// output patterns. Empty = spec cache has no cross-turn context, which
+    /// degrades spec performance but is not a correctness bug.
+    pub prior_tokens: Vec<i32>,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -173,6 +185,12 @@ pub(crate) async fn generate_tokens(
 
 /// Generate tokens using a pre-allocated pooled context.
 /// Avoids context allocation contention by reusing an existing KV cache.
+///
+/// Dispatches to the spec-decoding path when `config.use_spec_decoding` is
+/// set AND there is no grammar / additional stop sequences active — mirroring
+/// the gate enforced by `generate_tokens_with_context` for the non-pooled
+/// path. When spec is requested but the gate blocks it, the bypass reason
+/// is surfaced via `InferenceTiming.spec_bypassed`.
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub(crate) async fn generate_tokens_pooled(
     pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
@@ -180,6 +198,56 @@ pub(crate) async fn generate_tokens_pooled(
     prompt_bytes: Vec<u8>,
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
+) {
+    let mrope_model = model.uses_mrope();
+    let spec_safe = config.use_spec_decoding
+        && config.grammar.is_none()
+        && config.additional_stops.is_empty()
+        && !mrope_model;
+
+    let spec_bypass_reason: Option<&'static str> = if config.use_spec_decoding && !spec_safe {
+        if mrope_model {
+            // M-RoPE forbids batches whose start position is <= seq_pos_max,
+            // so the spec rollback (seq_rm unaccepted-draft tail and resubmit)
+            // is unsafe even when seq_rm itself succeeds.
+            Some("mrope_no_partial_rollback")
+        } else if config.grammar.is_some() {
+            Some("grammar_active")
+        } else if !config.additional_stops.is_empty() {
+            Some("stops_active")
+        } else {
+            Some("unknown")
+        }
+    } else {
+        None
+    };
+
+    if spec_safe {
+        spec::generate_tokens_pooled_with_spec(pooled_ctx, model, prompt_bytes, config, tx).await;
+        return;
+    }
+    generate_tokens_pooled_baseline(
+        pooled_ctx,
+        model,
+        prompt_bytes,
+        config,
+        tx,
+        spec_bypass_reason,
+    )
+    .await;
+}
+
+/// Original (pre-spec) pooled per-token generation loop, unmodified semantically.
+/// Kept as a separate function so the spec-decoding path can be added without
+/// changing the hot baseline.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+async fn generate_tokens_pooled_baseline(
+    pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
+    model: Arc<LlamaModel>,
+    prompt_bytes: Vec<u8>,
+    config: StreamingConfig,
+    tx: UnboundedSender<Result<StreamResponse>>,
+    spec_bypass_reason: Option<&'static str>,
 ) {
     let start_time = Instant::now();
     let mut first_token_time: Option<Instant> = None;
@@ -402,6 +470,9 @@ pub(crate) async fn generate_tokens_pooled(
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
             n_eval: perf.n_eval.max(0) as u32,
             n_thinking_eval: None,
+            n_draft: None,
+            n_accepted: None,
+            spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
         };
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
             tokens_generated,
@@ -427,7 +498,11 @@ pub(crate) async fn generate_tokens_pooled(
     }
 }
 
-/// Generate tokens with optional context reuse for multi-turn conversations
+/// Generate tokens with optional context reuse for multi-turn conversations.
+/// Dispatches to the spec-decoding path when `config.use_spec_decoding` is
+/// set AND there is no grammar / additional stop sequences active — the
+/// non-spec path is byte-identical to the pre-spec implementation, so any
+/// caller that opts out of spec hits the exact same code as before.
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub(crate) async fn generate_tokens_with_context(
     model: Arc<LlamaModel>,
@@ -435,6 +510,64 @@ pub(crate) async fn generate_tokens_with_context(
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
     context_options: ContextReuseOptions,
+) {
+    // Spec is only safe to engage when sampling is unconstrained: grammar
+    // samplers carry state that's hard to keep parity-clean across multi-token
+    // batch verification, and additional_stops fire on the special-token
+    // decoding of the *single* most-recently-sampled token (the spec path
+    // would need to replay them per accepted draft). When either is active,
+    // fall through to the original single-token loop.
+    //
+    // M-RoPE models forbid batches whose start position is `<=` the KV's
+    // seq_pos_max, which makes the unaccepted-draft rollback unsafe: even
+    // when `seq_rm` shrinks the KV correctly, the next batch start triggers
+    // the M-RoPE position-monotonicity check and the decode is rejected.
+    let mrope_model = model.uses_mrope();
+    let spec_safe = config.use_spec_decoding
+        && config.grammar.is_none()
+        && config.additional_stops.is_empty()
+        && !mrope_model;
+
+    let spec_bypass_reason: Option<&'static str> = if config.use_spec_decoding && !spec_safe {
+        if mrope_model {
+            Some("mrope_no_partial_rollback")
+        } else if config.grammar.is_some() {
+            Some("grammar_active")
+        } else if !config.additional_stops.is_empty() {
+            Some("stops_active")
+        } else {
+            Some("unknown")
+        }
+    } else {
+        None
+    };
+
+    if spec_safe {
+        spec::generate_tokens_with_spec(model, prompt_bytes, config, tx, context_options).await;
+        return;
+    }
+    generate_tokens_baseline(
+        model,
+        prompt_bytes,
+        config,
+        tx,
+        context_options,
+        spec_bypass_reason,
+    )
+    .await;
+}
+
+/// Original (pre-spec) per-token generation loop, unmodified semantically.
+/// Kept as a separate function so the spec-decoding path can be added without
+/// changing a single token of the hot, well-tuned baseline.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+async fn generate_tokens_baseline(
+    model: Arc<LlamaModel>,
+    prompt_bytes: Vec<u8>,
+    config: StreamingConfig,
+    tx: UnboundedSender<Result<StreamResponse>>,
+    context_options: ContextReuseOptions,
+    spec_bypass_reason: Option<&'static str>,
 ) {
     let start_time = Instant::now();
     let mut first_token_time: Option<Instant> = None;
@@ -722,6 +855,9 @@ pub(crate) async fn generate_tokens_with_context(
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
             n_eval: perf.n_eval.max(0) as u32,
             n_thinking_eval: None,
+            n_draft: None,
+            n_accepted: None,
+            spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
@@ -1007,5 +1143,23 @@ mod tests {
     fn test_classify_decode_error_generic() {
         let err = super::classify_decode_error("token at pos 42", "some other error");
         assert!(matches!(err, crate::Error::Config(_)));
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_code_minus_one_is_config_error() {
+        // Regression: code -1 ("invalid input batch") used to be classified
+        // as a GpuFault, which triggered reset_gpu_status() + retry — both
+        // pointless and noisy for what's actually a batch-construction bug.
+        // It now propagates as a Config error so callers abort the round
+        // instead of looping.
+        let err = super::classify_decode_error(
+            "spec batch at pos 4110",
+            "llama_decode failed with code: -1",
+        );
+        assert!(
+            matches!(err, crate::Error::Config(_)),
+            "code -1 must be Config, got: {err:?}"
+        );
     }
 }

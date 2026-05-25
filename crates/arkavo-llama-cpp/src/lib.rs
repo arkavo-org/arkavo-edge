@@ -39,6 +39,10 @@ pub mod multimodal;
 #[cfg(not(target_env = "musl"))]
 pub mod memory;
 
+// Speculative decoding via arkavo_spec_wrapper
+#[cfg(not(target_env = "musl"))]
+pub mod speculative;
+
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
@@ -328,6 +332,27 @@ impl LlamaModel {
     /// Create chat templates from this model's GGUF metadata
     pub fn chat_templates(&self) -> Result<ChatTemplates, String> {
         ChatTemplates::new(self.ptr as *const ffi::llama_model)
+    }
+
+    /// True when the model uses multimodal/interleaved RoPE (M-RoPE / I-MROPE / VISION).
+    ///
+    /// b9292's batch validator enforces strict position monotonicity for
+    /// M-RoPE — batches whose `seq_pos_min(s)` is `<=` the KV cache's
+    /// `seq_pos_max(s)` are rejected with `llama_decode` code -1
+    /// ("invalid input batch"). That makes the spec-decoding rollback
+    /// pattern (`seq_rm` the unaccepted draft tail and re-submit) unsafe:
+    /// even when the rollback succeeds at the KV level, the next batch's
+    /// start position triggers the M-RoPE check.
+    ///
+    /// Callers should bypass speculative decoding for these models.
+    pub fn uses_mrope(&self) -> bool {
+        // SAFETY: `self.ptr` is non-null for any value of `Self` constructed via
+        // `from_file`/`from_file_with_ctx`. `llama_model_rope_type` is documented
+        // as a pure accessor that takes a `const llama_model *`.
+        let rope_type = unsafe { ffi::llama_model_rope_type(self.ptr) };
+        rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_MROPE
+            || rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_IMROPE
+            || rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_VISION
     }
 }
 
@@ -933,6 +958,13 @@ pub struct ChatInputs {
     pub tool_choice: ToolChoice,
     pub enable_thinking: bool,
     pub add_generation_prompt: bool,
+    /// When false, the generated grammar caps the model at exactly one
+    /// tool call per inference. When true, the grammar's `repeat` rule
+    /// has max=-1 (unbounded), which lets repetition-prone models emit
+    /// runaway batches (observed: 297 identical `<|tool_call>` blocks in
+    /// a single 43 KB response under Gemma 4). Default `false` matches
+    /// the "Pick ONE action per cycle" agent loop discipline.
+    pub parallel_tool_calls: bool,
 }
 
 /// Per-message metadata for Jinja template rendering (tool results)
@@ -1068,6 +1100,7 @@ impl ChatTemplates {
                 inputs.tool_choice as i32,
                 if inputs.enable_thinking { 1 } else { 0 },
                 if inputs.add_generation_prompt { 1 } else { 0 },
+                if inputs.parallel_tool_calls { 1 } else { 0 },
             )
         };
 
@@ -1424,6 +1457,34 @@ pub fn batch_init_with_tokens_seq(
         // SAFETY: Array bounds checked via !tokens.is_empty()
         unsafe {
             *batch.logits.add(tokens.len() - 1) = 1;
+        }
+    }
+
+    batch.n_tokens = tokens.len() as i32;
+    batch
+}
+
+/// Initialize a batch with `request_logits=1` on every position.
+/// Used by speculative decoding to verify multiple candidate tokens in a
+/// single decode call (each position needs its own logits so the target
+/// sampler can be run against each).
+#[cfg(not(target_env = "musl"))]
+pub fn batch_init_with_tokens_all_logits(
+    tokens: &[ffi::llama_token],
+    pos_offset: i32,
+    seq_id: i32,
+) -> ffi::llama_batch {
+    // SAFETY: llama_batch_init allocates all internal arrays with capacity tokens.len()
+    let mut batch = unsafe { ffi::llama_batch_init(tokens.len() as i32, 0, 1) };
+
+    for (i, &token) in tokens.iter().enumerate() {
+        // SAFETY: Arrays are allocated by llama_batch_init with capacity >= tokens.len()
+        unsafe {
+            *batch.token.add(i) = token;
+            *batch.pos.add(i) = pos_offset + i as i32;
+            *batch.n_seq_id.add(i) = 1;
+            *(*batch.seq_id.add(i)) = seq_id;
+            *batch.logits.add(i) = 1; // request logits at every position
         }
     }
 

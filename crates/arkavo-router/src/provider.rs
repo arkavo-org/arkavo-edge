@@ -7,12 +7,14 @@ use arkavo_llm::Provider;
 fn sampling_config_for(
     model: &ModelChoice,
     store: &crate::optimal_config::OptimalConfigStore,
+    use_spec_decoding: bool,
 ) -> arkavo_llm::SamplingConfig {
     if let Some(oc) = store.get(model) {
         arkavo_llm::SamplingConfig {
             temperature: oc.temperature,
             top_p: oc.top_p,
             thinking_mode: Some(oc.thinking_mode),
+            use_spec_decoding,
             ..arkavo_llm::SamplingConfig::default()
         }
     } else if let Some((temp, top_p, thinking)) = model.optimal_sampling() {
@@ -20,10 +22,14 @@ fn sampling_config_for(
             temperature: temp,
             top_p,
             thinking_mode: Some(thinking),
+            use_spec_decoding,
             ..arkavo_llm::SamplingConfig::default()
         }
     } else {
-        arkavo_llm::SamplingConfig::default()
+        arkavo_llm::SamplingConfig {
+            use_spec_decoding,
+            ..arkavo_llm::SamplingConfig::default()
+        }
     }
 }
 
@@ -107,6 +113,7 @@ impl super::Router {
         model: &ModelChoice,
         repo: &str,
         filename: &str,
+        use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
         let registry_name = model.name();
         // Resolve model path unconditionally — hf_hub returns the cached path
@@ -144,7 +151,7 @@ impl super::Router {
         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
             self.model_registry.clone(),
             registry_name.to_string(),
-            sampling_config_for(model, &self.optimal_configs),
+            sampling_config_for(model, &self.optimal_configs, use_spec_decoding),
         )
         .map_err(|e| {
             Error::ModelExecution(format!(
@@ -237,7 +244,23 @@ impl super::Router {
         &self,
         model: &ModelChoice,
     ) -> Result<Box<dyn Provider>> {
-        tracing::debug!(model = %model.name(), "Instantiating provider");
+        // Default: spec decoding enabled unless per-model stats say otherwise.
+        // Call sites that already hold a RoutingDecision should use
+        // `instantiate_provider_with_spec` to forward the flag.
+        self.instantiate_provider_with_spec(model, true).await
+    }
+
+    /// Instantiate a provider with an explicit spec-decoding flag.
+    ///
+    /// Pass `use_spec_decoding` from `RoutingDecision.use_spec_decoding` so the
+    /// router's per-model rolling stats reach the llama.cpp `SamplingConfig`.
+    /// Cloud providers ignore the flag; it only affects local llama.cpp paths.
+    pub(crate) async fn instantiate_provider_with_spec(
+        &self,
+        model: &ModelChoice,
+        use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        tracing::debug!(model = %model.name(), use_spec_decoding, "Instantiating provider");
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
@@ -326,7 +349,8 @@ impl super::Router {
                 let file = m
                     .gguf_filename()
                     .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {m:?}")))?;
-                self.load_local_model(m, repo, file).await
+                self.load_local_model(m, repo, file, use_spec_decoding)
+                    .await
             }
             #[cfg(feature = "kimi")]
             ModelChoice::KimiK2 => {

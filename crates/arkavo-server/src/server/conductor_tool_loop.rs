@@ -358,6 +358,21 @@ pub(super) async fn run_tool_loop(
             first_inference_timing.clone_from(&response.inference_timing);
         }
 
+        // Feed spec-decoding outcome back to the router's per-model rolling stats.
+        // Only record when spec actually ran — bypassed paths (grammar, stops, etc.)
+        // give no quality signal for this model's spec compatibility.
+        if let Some(ref timing) = response.inference_timing
+            && timing.spec_bypassed.is_none()
+            && let (Some(n_d), Some(n_a)) = (timing.n_draft, timing.n_accepted)
+        {
+            let model_name = router
+                .last_routed_model()
+                .or_else(|| model_hint.map(|h| h.name().to_string()));
+            if let Some(model) = model_name {
+                router.spec_stats().record(&model, n_d, n_a);
+            }
+        }
+
         info!(
             "Tool loop iteration {}: {} chars, {} tool calls",
             iteration + 1,

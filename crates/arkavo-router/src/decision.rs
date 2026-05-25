@@ -547,6 +547,13 @@ pub struct RoutingDecision {
     pub task_category: TaskCategory,
     pub should_compress: bool,
     pub compression_target: Option<f64>,
+    /// Whether the router recommends using NGRAM spec decoding for this request.
+    ///
+    /// Defaults to `true` (optimistic) until the per-model rolling window fills
+    /// with enough samples to detect a low accept rate. Flips to `false` when
+    /// the model's rolling accept rate drops below the threshold (15% over 20
+    /// requests). The provider reads this from `SamplingConfig.use_spec_decoding`.
+    pub use_spec_decoding: bool,
     /// Full decision trace for learning
     pub trace: DecisionTrace,
 }
@@ -584,6 +591,7 @@ impl RoutingDecision {
             task_category: category,
             should_compress,
             compression_target,
+            use_spec_decoding: true,
             trace,
         }
     }

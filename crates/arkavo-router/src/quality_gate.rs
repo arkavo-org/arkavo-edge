@@ -125,7 +125,8 @@ impl super::Router {
             None => None,
         };
 
-        let provider = self.instantiate_provider(model).await?;
+        let use_spec = self.decide_spec_with_event(model.name());
+        let provider = self.instantiate_provider_with_spec(model, use_spec).await?;
         let _permit = self
             .inference_semaphore
             .acquire()
@@ -373,8 +374,11 @@ impl super::Router {
                 self.instantiate_provider_execution(&current_decision.recommended_model)
                     .await?
             } else {
-                self.instantiate_provider(&current_decision.recommended_model)
-                    .await?
+                self.instantiate_provider_with_spec(
+                    &current_decision.recommended_model,
+                    current_decision.use_spec_decoding,
+                )
+                .await?
             };
 
             // Execution iterations use the chat semaphore — they're fast, sub-second

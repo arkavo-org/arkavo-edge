@@ -43,6 +43,48 @@ pub struct InferenceTiming {
     /// counting and so latency analysis can attribute spikes correctly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub n_thinking_eval: Option<u32>,
+    /// Tokens drafted by spec decoding (sum across all draft calls).
+    /// None when spec was disabled for the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_draft: Option<u32>,
+    /// Tokens accepted from drafts (n_accepted <= n_draft).
+    /// None when spec was disabled for the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_accepted: Option<u32>,
+    /// Set when the caller requested spec decoding but the streaming layer
+    /// declined to engage it (e.g., grammar active, stops active). The router
+    /// uses this to avoid penalizing the model's accept-rate stats for cases
+    /// where spec never had a chance to run. None means either spec wasn't
+    /// requested, or spec ran (in which case n_draft/n_accepted are Some).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_bypassed: Option<String>,
+}
+
+/// Per-request completion options that the router populates and the
+/// provider reads. Today only the local llama.cpp path consumes
+/// `use_spec_decoding`; cloud providers ignore unknown fields.
+///
+/// This struct is intentionally narrow: only carries decisions the
+/// router needs to push down per-call (spec on/off, future: cache
+/// salt, retrieval budget). Sampling parameters (temperature, top_p,
+/// max_tokens) stay on the provider's static config so we don't
+/// double-source them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionOptions {
+    /// Max tokens override; falls back to provider config when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    /// Sampler seed override; falls back to provider config when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+    /// Sampler temperature override; falls back to provider config when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Enable NGRAM self-speculative decoding for this request. Router
+    /// decides per-model based on rolling accept-rate stats. Default
+    /// false (caller opts in explicitly).
+    #[serde(default)]
+    pub use_spec_decoding: bool,
 }
 
 #[async_trait]

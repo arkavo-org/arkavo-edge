@@ -60,7 +60,8 @@ arkavo_chat_result arkavo_chat_templates_apply(
     const arkavo_chat_tool *tools, int num_tools,
     int tool_choice,
     int enable_thinking,
-    int add_generation_prompt);
+    int add_generation_prompt,
+    int parallel_tool_calls);
 
 void arkavo_chat_result_free(arkavo_chat_result *result);
 

@@ -58,7 +58,7 @@ run_chat_test() {
     echo -n "Testing: $test_name ... "
 
     local output_file="$TEST_DIR/test_${TESTS_TOTAL}.txt"
-    if timeout "${timeout_secs}s" "$ARKAVO_BIN" chat --prompt "$prompt" > "$output_file" 2>&1; then
+    if timeout "${timeout_secs}s" "$ARKAVO_BIN" chat --model kimi-k2.5 --prompt "$prompt" > "$output_file" 2>&1; then
         if grep -qiE "$pattern" "$output_file"; then
             echo -e "${GREEN}PASS${NC}"
             ((TESTS_PASSED++))
@@ -93,7 +93,7 @@ run_chat_test_negative() {
     echo -n "Testing: $test_name ... "
 
     local output_file="$TEST_DIR/test_${TESTS_TOTAL}.txt"
-    if timeout "${timeout_secs}s" "$ARKAVO_BIN" chat --prompt "$prompt" > "$output_file" 2>&1; then
+    if timeout "${timeout_secs}s" "$ARKAVO_BIN" chat --model kimi-k2.5 --prompt "$prompt" > "$output_file" 2>&1; then
         if grep -qiE "$forbidden_pattern" "$output_file"; then
             echo -e "${RED}FAIL${NC} (forbidden pattern '$forbidden_pattern' found)"
             echo "  Output: $(head -3 "$output_file")"

@@ -346,6 +346,9 @@ fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
         n_prompt_eval: usage.prompt_token_count.unwrap_or(0),
         n_eval: usage.candidates_token_count.unwrap_or(0),
         n_thinking_eval: usage.thoughts_token_count,
+        n_draft: None,
+        n_accepted: None,
+        spec_bypassed: None,
     }
 }
 

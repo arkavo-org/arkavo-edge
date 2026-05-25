@@ -52,6 +52,10 @@ pub struct SamplingConfig {
     /// Serialized PEG parser from Jinja template (for native output parsing)
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub chat_parser_str: Option<String>,
+    /// Enable NGRAM self-speculative decoding for this provider. The router
+    /// flips this per-request based on rolling accept-rate stats; default
+    /// false so existing callers keep their exact sampling path.
+    pub use_spec_decoding: bool,
 }
 
 impl Default for SamplingConfig {
@@ -75,6 +79,7 @@ impl Default for SamplingConfig {
             chat_format: 0,
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             chat_parser_str: None,
+            use_spec_decoding: false,
         }
     }
 }
@@ -399,6 +404,12 @@ impl LlamaCppProvider {
                     tool_choice: self.config.chat_tool_choice,
                     enable_thinking,
                     add_generation_prompt: true,
+                    // Cap the grammar at one tool call per inference. Prevents the
+                    // runaway-batch failure mode (repetition-prone models emit the
+                    // same `<|tool_call>` block dozens of times in a single
+                    // response) at the grammar layer, before the downstream
+                    // degenerate-batch dedup has to clean up.
+                    parallel_tool_calls: false,
                 };
                 match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
                     Ok(result) => {
@@ -605,6 +616,7 @@ impl LlamaCppProvider {
             grammar_triggers: grammar_triggers_merged,
             additional_stops,
             generation_prompt: template_generation_prompt,
+            use_spec_decoding: self.config.use_spec_decoding,
         };
 
         // Try pooled context first (avoids context allocation contention).
@@ -676,6 +688,7 @@ impl LlamaCppProvider {
             grammar_triggers: None,
             additional_stops: Vec::new(),
             generation_prompt: None,
+            use_spec_decoding: self.config.use_spec_decoding,
         };
 
         let agent_name = self.name.clone();
