@@ -75,6 +75,14 @@ int arkavo_spec_process(arkavo_spec *spec, const struct llama_batch *batch) {
     }
 }
 
+// Storage contract: `prompt_buf` and `result_buf` below are local stack
+// variables whose addresses are written into `params.prompt` / `params.result`.
+// This is safe ONLY because `common_speculative_draft()` is documented as
+// synchronous — it reads from `*params.prompt` and writes to `*params.result`
+// entirely within the call, and stores nothing past return. If upstream ever
+// makes drafting asynchronous or caches those pointers across calls, these
+// references become dangling and we'd need to move the buffers into the
+// `arkavo_spec` handle (or a per-seq cache) instead.
 uint32_t arkavo_spec_draft(
     arkavo_spec *spec,
     int32_t seq_id,

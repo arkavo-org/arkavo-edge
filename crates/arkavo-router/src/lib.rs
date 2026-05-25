@@ -373,6 +373,37 @@ impl Router {
         &self.spec_stats
     }
 
+    /// Decide whether the next request to `model_name` should use spec
+    /// decoding, and emit a `SpecDecodingDisabled` event on the first
+    /// below-threshold crossing.
+    ///
+    /// All call sites that consult `spec_stats.decide(...)` must go through
+    /// this helper. Calling `decide()` directly silently discards the
+    /// `crossed_below_threshold` signal — the threshold-crossing event would
+    /// never reach the `pending_events` queue, so operators would never see
+    /// that spec was auto-disabled for a model.
+    pub(crate) fn decide_spec_with_event(&self, model_name: &str) -> bool {
+        let decision = self.spec_stats.decide(model_name);
+        if let Some(rate_pct) = decision.crossed_below_threshold {
+            let sample_size = self.spec_stats.window();
+            if let Ok(mut g) = self.pending_events.lock() {
+                // Cap to prevent unbounded growth in the absence of a
+                // drain_events() consumer. In practice the queue fires
+                // at most once per model per threshold crossing, but a
+                // long-running process with many models flapping above
+                // and below threshold would accumulate otherwise.
+                if g.len() < 1024 {
+                    g.push(RouterEvent::SpecDecodingDisabled {
+                        model: model_name.to_string(),
+                        accept_rate_pct: rate_pct,
+                        sample_size,
+                    });
+                }
+            }
+        }
+        decision.use_spec
+    }
+
     /// Drain all pending structured router events.
     ///
     /// Returns all events accumulated since the last call and clears the queue.
@@ -656,19 +687,7 @@ impl Router {
         // they can benefit from (or be hurt by) NGRAM spec decoding. Cloud models
         // are unaffected and we leave their flag at the default `true` so the field
         // stays consistent if spec ever applies to remote paths in the future.
-        let spec_decision = self.spec_stats.decide(decision.recommended_model.name());
-        decision.use_spec_decoding = spec_decision.use_spec;
-        if let Some(rate_pct) = spec_decision.crossed_below_threshold {
-            let model_name = decision.recommended_model.name().to_string();
-            let sample_size = self.spec_stats.window();
-            if let Ok(mut g) = self.pending_events.lock() {
-                g.push(RouterEvent::SpecDecodingDisabled {
-                    model: model_name,
-                    accept_rate_pct: rate_pct,
-                    sample_size,
-                });
-            }
-        }
+        decision.use_spec_decoding = self.decide_spec_with_event(decision.recommended_model.name());
 
         Ok(decision)
     }
@@ -823,7 +842,7 @@ impl Router {
         let model = preferred;
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
 
-        let use_spec = self.spec_stats.decide(model.name()).use_spec;
+        let use_spec = self.decide_spec_with_event(model.name());
         let provider = self
             .instantiate_provider_with_spec(&model, use_spec)
             .await?;
@@ -872,7 +891,7 @@ impl Router {
             .unwrap_or_else(|| self.selector.fastest_local_model());
         tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
 
-        let use_spec = self.spec_stats.decide(model.name()).use_spec;
+        let use_spec = self.decide_spec_with_event(model.name());
         let provider = self
             .instantiate_provider_with_spec(&model, use_spec)
             .await?;

@@ -125,7 +125,7 @@ impl super::Router {
             None => None,
         };
 
-        let use_spec = self.spec_stats.decide(model.name()).use_spec;
+        let use_spec = self.decide_spec_with_event(model.name());
         let provider = self.instantiate_provider_with_spec(model, use_spec).await?;
         let _permit = self
             .inference_semaphore
