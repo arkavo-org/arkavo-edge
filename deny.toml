@@ -25,7 +25,16 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 allow = []
-deny = []
+# CLAUDE.md mandates rustls everywhere (musl compatibility + CVE blast radius).
+# These bans prevent any future dep change from silently re-introducing the
+# OpenSSL chain via reqwest/default-tls, ureq/native-tls, or fastembed defaults.
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+    { name = "native-tls" },
+    { name = "hyper-tls" },
+    { name = "tokio-native-tls" },
+]
 
 # Skip expected duplicates that cannot be easily resolved
 skip = [
