@@ -33,7 +33,13 @@ purpose: |
 
   NEVER call only observe. NEVER write text without a tool call.
 
-model: gemini-3.5-flash
+# Supported local models for this agent (single-line swap):
+#   model: qwen3.6                # Qwen3.6-35B-A3B  — M-RoPE, spec auto-disabled
+#   model: gemma-4-26b-a4b        # Gemma 4 26B-A4B  — non-M-RoPE, spec ~85% accept
+# Both are tested with the b9292 fixes (NGRAM spec safe on M-RoPE, parallel
+# tool calls capped at 1). Leaving model blank lets the router auto-select
+# the largest already-loaded local model.
+model: gemma-4-26b-a4b
 action_interval: 120
 listen: 0.0.0.0:8401
 mdns: true
