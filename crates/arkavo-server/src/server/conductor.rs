@@ -538,11 +538,17 @@ pub async fn execute_with_conductor_and_learning(
     } else {
         "general"
     };
+    // Post-tool-loop scoring of the whole task outcome. Tools-required
+    // detection happens upstream in quality_gate per-inference; here we
+    // pass `false` so this aggregate score isn't double-penalized when an
+    // earlier round legitimately had no tool calls (e.g., final summary
+    // response).
     let response_quality = compute_response_quality(
         &final_result,
         0,
         quality_category,
         loop_result.tool_call_count,
+        false,
     );
 
     let burst_result =

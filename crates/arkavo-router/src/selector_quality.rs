@@ -330,11 +330,23 @@ impl ModelSelector {
 /// Heuristic quality score for a model response (0.0 to 1.0, no LLM call).
 ///
 /// Category-aware: complex task types expect longer, more detailed responses.
+///
+/// `tools_required` should be `true` when the caller attached tools and the
+/// model was expected to call at least one of them (e.g., the orchestrator
+/// planner). A non-empty *text* response with `tool_call_count == 0` under
+/// this condition is a failure — the planner emitted prose instead of an
+/// action and the agent loop gets nothing executable. Without this flag the
+/// router used to score such responses at 1.0 ("looks like good prose"),
+/// rewarding the model for unhelpful chatter.
+///
+/// Pass `false` for chat / synthesis / non-tool paths where text output is
+/// the goal.
 pub fn compute_response_quality(
     response: &str,
     latency_ms: u64,
     category: &str,
     tool_call_count: usize,
+    tools_required: bool,
 ) -> f64 {
     if response.trim().is_empty() {
         if tool_call_count > 0 {
@@ -351,6 +363,13 @@ pub fn compute_response_quality(
     }
 
     let mut score: f64 = 1.0;
+
+    // Tool-required failure: text response with no tool call when tools
+    // were attached. The agent loop can't act on this — heavily penalize
+    // so Thompson Sampling pushes the model toward tool-producing arms.
+    if tools_required && tool_call_count == 0 {
+        score -= 0.7;
+    }
 
     // Error responses should not score high
     let lower = response.to_lowercase();
@@ -617,22 +636,25 @@ mod tests {
 
     #[test]
     fn test_compute_response_quality_empty() {
-        assert_eq!(compute_response_quality("", 100, "general", 0), 0.0);
-        assert_eq!(compute_response_quality("   ", 100, "general", 0), 0.0);
+        assert_eq!(compute_response_quality("", 100, "general", 0, false), 0.0);
+        assert_eq!(
+            compute_response_quality("   ", 100, "general", 0, false),
+            0.0
+        );
     }
 
     #[test]
     fn test_compute_response_quality_tool_only() {
         // Tool-only responses (empty text, function calls present) should score well
-        let q1 = compute_response_quality("", 100, "general", 1);
+        let q1 = compute_response_quality("", 100, "general", 1, false);
         assert!(q1 >= 0.7, "Single tool call should score >= 0.7: {q1}");
 
-        let q3 = compute_response_quality("", 100, "general", 3);
+        let q3 = compute_response_quality("", 100, "general", 3, false);
         assert!(q3 >= 0.9, "Three tool calls should score >= 0.9: {q3}");
         assert!(q3 <= 1.0, "Quality should not exceed 1.0: {q3}");
 
         // Whitespace-only with tool calls should also score well
-        let qw = compute_response_quality("   ", 100, "general", 2);
+        let qw = compute_response_quality("   ", 100, "general", 2, false);
         assert!(qw >= 0.8, "Whitespace + 2 tool calls: {qw}");
     }
 
@@ -643,6 +665,7 @@ mod tests {
             500,
             "general",
             0,
+            false,
         );
         assert!(
             quality > 0.8,
@@ -654,22 +677,25 @@ mod tests {
     fn test_compute_response_quality_loop_detection() {
         let looped =
             "same line\nsame line\nsame line\nsame line\nsame line\nsame line\nsame line\n";
-        let quality = compute_response_quality(looped, 100, "general", 0);
+        let quality = compute_response_quality(looped, 100, "general", 0, false);
         assert!(quality < 0.7, "Looped response should score low: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_high_latency() {
-        let quality = compute_response_quality("A reasonable response.", 35_000, "general", 0);
+        let quality =
+            compute_response_quality("A reasonable response.", 35_000, "general", 0, false);
         assert!(quality < 1.0, "High latency should reduce score: {quality}");
     }
 
     #[test]
     fn test_compute_response_quality_category_aware() {
         let short_response = "Fixed the bug.";
-        let general_quality = compute_response_quality(short_response, 100, "general", 0);
-        let test_gen_quality = compute_response_quality(short_response, 100, "test_generation", 0);
-        let code_search_quality = compute_response_quality(short_response, 100, "code_search", 0);
+        let general_quality = compute_response_quality(short_response, 100, "general", 0, false);
+        let test_gen_quality =
+            compute_response_quality(short_response, 100, "test_generation", 0, false);
+        let code_search_quality =
+            compute_response_quality(short_response, 100, "code_search", 0, false);
         assert!(
             test_gen_quality < general_quality,
             "Complex category should penalize: test_gen={test_gen_quality}, general={general_quality}"
@@ -683,7 +709,7 @@ mod tests {
     #[test]
     fn test_compute_response_quality_adequate_for_complex() {
         let response = "Here is a comprehensive test suite with multiple test cases covering edge cases, error handling, and happy paths. Each test verifies the expected behavior of the function under different conditions.";
-        let quality = compute_response_quality(response, 500, "test_generation", 0);
+        let quality = compute_response_quality(response, 500, "test_generation", 0, false);
         assert!(
             quality > 0.9,
             "Adequate response should score high: {quality}"
@@ -693,18 +719,18 @@ mod tests {
     #[test]
     fn test_compute_response_quality_error_detection() {
         let error_resp = "Error: Tool execution error: Serialization error: data did not match any variant of untagged enum";
-        let quality = compute_response_quality(error_resp, 500, "general", 0);
+        let quality = compute_response_quality(error_resp, 500, "general", 0, false);
         assert!(quality < 0.5, "Error response should score low: {quality}");
 
         let tool_error = "Something happened then tool execution error occurred in the process";
-        let quality2 = compute_response_quality(tool_error, 500, "general", 0);
+        let quality2 = compute_response_quality(tool_error, 500, "general", 0, false);
         assert!(
             quality2 < 0.5,
             "Tool error response should score low: {quality2}"
         );
 
         let failed = "failed to execute the requested tool call";
-        let quality3 = compute_response_quality(failed, 500, "general", 0);
+        let quality3 = compute_response_quality(failed, 500, "general", 0, false);
         assert!(
             quality3 < 0.5,
             "Failed execution should score low: {quality3}"
@@ -714,7 +740,7 @@ mod tests {
     #[test]
     fn quality_penalizes_degenerate_tool_call_count() {
         // 125 tool calls with empty response = degenerate output loop
-        let score = compute_response_quality("", 55_000, "general", 125);
+        let score = compute_response_quality("", 55_000, "general", 125, false);
         assert!(
             score < 0.1,
             "125 tool calls should score near 0, got {score}"
@@ -724,15 +750,51 @@ mod tests {
     #[test]
     fn quality_rewards_moderate_tool_call_count() {
         // 3 tool calls = healthy batch
-        let score = compute_response_quality("", 10_000, "general", 3);
+        let score = compute_response_quality("", 10_000, "general", 3, false);
         assert!(score >= 0.7, "3 tool calls should score >=0.7, got {score}");
     }
 
     #[test]
     fn quality_penalizes_borderline_tool_call_count() {
         // 15 tool calls = suspicious but less severe
-        let score = compute_response_quality("", 20_000, "general", 15);
+        let score = compute_response_quality("", 20_000, "general", 15, false);
         assert!(score < 0.3, "15 tool calls should score low, got {score}");
+    }
+
+    #[test]
+    fn quality_penalizes_text_only_when_tools_required() {
+        // Regression: planner with tools attached emits 566 chars of prose
+        // and 0 tool calls. Used to score 1.0 ("looks like nice text"),
+        // which rewarded the model for being unhelpful to the agent loop.
+        // With tools_required=true the same response must score low.
+        let prose = "I will analyze the situation and consider my options. The colony \
+                     needs food, defense, and beds. Let me think about the priority order.";
+        let with_tools = compute_response_quality(prose, 500, "general", 0, true);
+        let without_tools = compute_response_quality(prose, 500, "general", 0, false);
+        assert!(
+            with_tools < 0.5,
+            "tool-required text response should score < 0.5, got {with_tools}"
+        );
+        assert!(
+            without_tools > 0.7,
+            "non-tool path: same prose should score > 0.7, got {without_tools}"
+        );
+        assert!(
+            with_tools < without_tools,
+            "tool-required penalty must lower score vs same response on non-tool path"
+        );
+    }
+
+    #[test]
+    fn quality_does_not_double_penalize_tool_only_response() {
+        // Empty text + non-empty tool calls is GOOD even when tools_required.
+        // The function's empty-response branch returns early before the penalty
+        // can apply — verify that contract holds.
+        let score = compute_response_quality("", 1000, "general", 1, true);
+        assert!(
+            score >= 0.7,
+            "tool-only response with tools_required=true should still score >=0.7, got {score}"
+        );
     }
 
     #[tokio::test]

@@ -133,6 +133,7 @@ impl super::Router {
             .await
             .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
 
+        let tools_were_attached = tools_json.is_some();
         let mut response = provider
             .complete_with_tools(messages, tools_json, None)
             .await
@@ -153,6 +154,7 @@ impl super::Router {
             elapsed.as_millis() as u64,
             "general",
             response.tool_calls.len(),
+            tools_were_attached,
         );
         tracing::info!(
             model = model.name(),
@@ -399,6 +401,9 @@ impl super::Router {
             );
 
             let max_tokens = if execution_mode { Some(200usize) } else { None };
+            // Capture before moving tools_json into complete_with_tools — the
+            // quality scorer below needs to know whether tools were attached.
+            let tools_were_attached = tools_json.is_some();
             let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, max_tokens)
                 .await
@@ -633,6 +638,7 @@ impl super::Router {
                 elapsed.as_millis() as u64,
                 current_decision.task_category.as_str(),
                 response.tool_calls.len(),
+                tools_were_attached,
             );
             tracing::info!(
                 model = %current_decision.recommended_model.name(),
