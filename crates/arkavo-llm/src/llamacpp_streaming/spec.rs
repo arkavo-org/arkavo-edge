@@ -337,7 +337,21 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                 // from the tail of the batch, starting at `pos` (the next
                 // position to write).
                 if n_accepted < drafts.len() {
-                    ctx.get_memory().seq_rm(seq_id, pos, -1);
+                    if !ctx.get_memory().seq_rm(seq_id, pos, -1) {
+                        // Partial removal isn't supported by this memory
+                        // backend (M-RoPE / SWA / certain unified caches).
+                        // Continuing would leave the next decode submitting a
+                        // batch starting at a position the KV already covers,
+                        // which b9292 rejects with code -1. Bail out so the
+                        // caller can fall back to the non-spec path. The
+                        // gating in `generate_tokens_pooled` already filters
+                        // M-RoPE models statically; this guard catches any
+                        // other backend that fails partial seq_rm at runtime.
+                        return Err(Error::Config(format!(
+                            "spec rollback: seq_rm(seq={seq_id}, p0={pos}, p1=-1) returned false; \
+                             memory backend does not support partial sequence removal"
+                        )));
+                    }
                     // We already sampled the divergent token at batch idx
                     // n_accepted — forward it to the next iteration so the
                     // sampler isn't run twice on the same logits.
@@ -658,7 +672,21 @@ pub(super) async fn generate_tokens_with_spec(
                 // from the tail of the batch, starting at `pos` (the next
                 // position to write).
                 if n_accepted < drafts.len() {
-                    ctx.get_memory().seq_rm(seq_id, pos, -1);
+                    if !ctx.get_memory().seq_rm(seq_id, pos, -1) {
+                        // Partial removal isn't supported by this memory
+                        // backend (M-RoPE / SWA / certain unified caches).
+                        // Continuing would leave the next decode submitting a
+                        // batch starting at a position the KV already covers,
+                        // which b9292 rejects with code -1. Bail out so the
+                        // caller can fall back to the non-spec path. The
+                        // gating in `generate_tokens_pooled` already filters
+                        // M-RoPE models statically; this guard catches any
+                        // other backend that fails partial seq_rm at runtime.
+                        return Err(Error::Config(format!(
+                            "spec rollback: seq_rm(seq={seq_id}, p0={pos}, p1=-1) returned false; \
+                             memory backend does not support partial sequence removal"
+                        )));
+                    }
                     // We already sampled the divergent token at batch idx
                     // n_accepted — forward it to the next iteration so the
                     // sampler isn't run twice on the same logits.

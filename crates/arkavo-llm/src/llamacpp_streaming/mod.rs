@@ -199,11 +199,19 @@ pub(crate) async fn generate_tokens_pooled(
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
 ) {
-    let spec_safe =
-        config.use_spec_decoding && config.grammar.is_none() && config.additional_stops.is_empty();
+    let mrope_model = model.uses_mrope();
+    let spec_safe = config.use_spec_decoding
+        && config.grammar.is_none()
+        && config.additional_stops.is_empty()
+        && !mrope_model;
 
     let spec_bypass_reason: Option<&'static str> = if config.use_spec_decoding && !spec_safe {
-        if config.grammar.is_some() {
+        if mrope_model {
+            // M-RoPE forbids batches whose start position is <= seq_pos_max,
+            // so the spec rollback (seq_rm unaccepted-draft tail and resubmit)
+            // is unsafe even when seq_rm itself succeeds.
+            Some("mrope_no_partial_rollback")
+        } else if config.grammar.is_some() {
             Some("grammar_active")
         } else if !config.additional_stops.is_empty() {
             Some("stops_active")
@@ -509,11 +517,21 @@ pub(crate) async fn generate_tokens_with_context(
     // decoding of the *single* most-recently-sampled token (the spec path
     // would need to replay them per accepted draft). When either is active,
     // fall through to the original single-token loop.
-    let spec_safe =
-        config.use_spec_decoding && config.grammar.is_none() && config.additional_stops.is_empty();
+    //
+    // M-RoPE models forbid batches whose start position is `<=` the KV's
+    // seq_pos_max, which makes the unaccepted-draft rollback unsafe: even
+    // when `seq_rm` shrinks the KV correctly, the next batch start triggers
+    // the M-RoPE position-monotonicity check and the decode is rejected.
+    let mrope_model = model.uses_mrope();
+    let spec_safe = config.use_spec_decoding
+        && config.grammar.is_none()
+        && config.additional_stops.is_empty()
+        && !mrope_model;
 
     let spec_bypass_reason: Option<&'static str> = if config.use_spec_decoding && !spec_safe {
-        if config.grammar.is_some() {
+        if mrope_model {
+            Some("mrope_no_partial_rollback")
+        } else if config.grammar.is_some() {
             Some("grammar_active")
         } else if !config.additional_stops.is_empty() {
             Some("stops_active")
@@ -1125,5 +1143,23 @@ mod tests {
     fn test_classify_decode_error_generic() {
         let err = super::classify_decode_error("token at pos 42", "some other error");
         assert!(matches!(err, crate::Error::Config(_)));
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn test_classify_decode_code_minus_one_is_config_error() {
+        // Regression: code -1 ("invalid input batch") used to be classified
+        // as a GpuFault, which triggered reset_gpu_status() + retry — both
+        // pointless and noisy for what's actually a batch-construction bug.
+        // It now propagates as a Config error so callers abort the round
+        // instead of looping.
+        let err = super::classify_decode_error(
+            "spec batch at pos 4110",
+            "llama_decode failed with code: -1",
+        );
+        assert!(
+            matches!(err, crate::Error::Config(_)),
+            "code -1 must be Config, got: {err:?}"
+        );
     }
 }

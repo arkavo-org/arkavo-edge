@@ -50,6 +50,16 @@ pub fn classify_gpu_fault(error_msg: &str) -> Option<GpuFaultKind> {
         return Some(GpuFaultKind::MetalKill);
     }
 
+    // llama_decode code -1 = "invalid input batch" (b9292 llama.h). This is a
+    // programming/state error in batch construction (e.g. non-monotonic
+    // positions in M-RoPE mode after a spec rollback), not a GPU issue.
+    // Retrying with `reset_gpu_status()` will produce the exact same -1 and
+    // burns time pretending it could recover. Return None so the caller
+    // propagates it as a regular Error::Config and aborts instead.
+    if error_msg.contains("code: -1") {
+        return None;
+    }
+
     // Any other llama_decode failure is a generic decode error
     if error_msg.contains("llama_decode failed") {
         return Some(GpuFaultKind::DecodeFailure);
@@ -157,8 +167,21 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_invalid_batch_is_not_gpu_fault() {
+        // llama.h: code -1 = "invalid input batch". It's a batch-construction
+        // bug (e.g. spec rollback on an M-RoPE model), not a GPU issue. The
+        // GPU-reset/retry path can't fix it and only hides the real error,
+        // so the classifier must return None and let it propagate as a
+        // regular Config error.
+        let msg = "spec batch at pos 4110: llama_decode failed with code: -1";
+        assert_eq!(classify_gpu_fault(msg), None);
+    }
+
+    #[test]
     fn test_classify_generic_decode_error() {
-        let msg = "llama_decode failed with code: -1";
+        // Other non-zero codes (-2, fatal errors, etc.) are still treated as
+        // generic decode failures eligible for the GPU-reset retry path.
+        let msg = "llama_decode failed with code: -2";
         assert_eq!(classify_gpu_fault(msg), Some(GpuFaultKind::DecodeFailure));
     }
 

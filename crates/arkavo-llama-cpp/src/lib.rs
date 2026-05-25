@@ -333,6 +333,27 @@ impl LlamaModel {
     pub fn chat_templates(&self) -> Result<ChatTemplates, String> {
         ChatTemplates::new(self.ptr as *const ffi::llama_model)
     }
+
+    /// True when the model uses multimodal/interleaved RoPE (M-RoPE / I-MROPE / VISION).
+    ///
+    /// b9292's batch validator enforces strict position monotonicity for
+    /// M-RoPE — batches whose `seq_pos_min(s)` is `<=` the KV cache's
+    /// `seq_pos_max(s)` are rejected with `llama_decode` code -1
+    /// ("invalid input batch"). That makes the spec-decoding rollback
+    /// pattern (`seq_rm` the unaccepted draft tail and re-submit) unsafe:
+    /// even when the rollback succeeds at the KV level, the next batch's
+    /// start position triggers the M-RoPE check.
+    ///
+    /// Callers should bypass speculative decoding for these models.
+    pub fn uses_mrope(&self) -> bool {
+        // SAFETY: `self.ptr` is non-null for any value of `Self` constructed via
+        // `from_file`/`from_file_with_ctx`. `llama_model_rope_type` is documented
+        // as a pure accessor that takes a `const llama_model *`.
+        let rope_type = unsafe { ffi::llama_model_rope_type(self.ptr) };
+        rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_MROPE
+            || rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_IMROPE
+            || rope_type == ffi::llama_rope_type_LLAMA_ROPE_TYPE_VISION
+    }
 }
 
 /// Result of llama_params_fit operation
