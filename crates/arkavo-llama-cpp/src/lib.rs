@@ -958,6 +958,13 @@ pub struct ChatInputs {
     pub tool_choice: ToolChoice,
     pub enable_thinking: bool,
     pub add_generation_prompt: bool,
+    /// When false, the generated grammar caps the model at exactly one
+    /// tool call per inference. When true, the grammar's `repeat` rule
+    /// has max=-1 (unbounded), which lets repetition-prone models emit
+    /// runaway batches (observed: 297 identical `<|tool_call>` blocks in
+    /// a single 43 KB response under Gemma 4). Default `false` matches
+    /// the "Pick ONE action per cycle" agent loop discipline.
+    pub parallel_tool_calls: bool,
 }
 
 /// Per-message metadata for Jinja template rendering (tool results)
@@ -1093,6 +1100,7 @@ impl ChatTemplates {
                 inputs.tool_choice as i32,
                 if inputs.enable_thinking { 1 } else { 0 },
                 if inputs.add_generation_prompt { 1 } else { 0 },
+                if inputs.parallel_tool_calls { 1 } else { 0 },
             )
         };
 

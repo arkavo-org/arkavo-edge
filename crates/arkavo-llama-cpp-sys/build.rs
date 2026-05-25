@@ -160,6 +160,12 @@ fn main() {
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/mtmd.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/clip.h");
+    // Track our own C wrappers so bindgen re-runs when their signatures change
+    println!("cargo:rerun-if-changed=arkavo_chat_wrapper.h");
+    println!("cargo:rerun-if-changed=arkavo_chat_wrapper.cpp");
+    println!("cargo:rerun-if-changed=arkavo_grammar_wrapper.h");
+    println!("cargo:rerun-if-changed=arkavo_spec_wrapper.h");
+    println!("cargo:rerun-if-changed=arkavo_spec_wrapper.cpp");
     // Track git HEAD to detect submodule updates
     let git_path = std::path::Path::new("../../vendor/llama.cpp/.git");
     if git_path.exists() {

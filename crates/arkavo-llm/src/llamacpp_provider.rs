@@ -404,6 +404,12 @@ impl LlamaCppProvider {
                     tool_choice: self.config.chat_tool_choice,
                     enable_thinking,
                     add_generation_prompt: true,
+                    // Cap the grammar at one tool call per inference. Prevents the
+                    // runaway-batch failure mode (repetition-prone models emit the
+                    // same `<|tool_call>` block dozens of times in a single
+                    // response) at the grammar layer, before the downstream
+                    // degenerate-batch dedup has to clean up.
+                    parallel_tool_calls: false,
                 };
                 match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
                     Ok(result) => {
