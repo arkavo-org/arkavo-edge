@@ -309,6 +309,60 @@ fn is_degenerate_lesson_action(action: &str) -> bool {
     repetition_phrases.iter().any(|p| lower.contains(p))
 }
 
+/// Reject lessons that recommend destructive tool actions without an explicit
+/// catastrophic-failure condition.
+///
+/// The motivating bad lesson (observed in the wild, then persisted across
+/// sessions): action=`game-rl:registerAgent followed by game-rl:reset`,
+/// condition=`when starting a new session or after a failure occurs`. This
+/// reads as "always reset on session start" — wiping the colony every time
+/// the agent reconnects. Safe destructive lessons must scope the trigger
+/// to something like "TotalReward < -20", "colony dead", "irrecoverable",
+/// or "terminal failure".
+pub(super) fn is_destructive_unconditional_lesson(condition: &str, action: &str) -> bool {
+    let action_lower = action.to_lowercase();
+    let destructive_verbs = [
+        "reset",
+        "restart",
+        "wipe",
+        "delete all",
+        "drop database",
+        "rm -rf",
+        "kill all",
+        "destroy",
+    ];
+    let mentions_destructive = destructive_verbs.iter().any(|v| action_lower.contains(v));
+    if !mentions_destructive {
+        return false;
+    }
+
+    // The action is destructive; allow it only if the condition explicitly
+    // names a catastrophic-failure trigger. Anything vaguer ("new session",
+    // "after a failure", "when problems occur") is rejected — the cost of a
+    // false positive (one extra real reset slipping through) is far lower
+    // than the cost of a false negative (wiping colony state on session start).
+    let condition_lower = condition.to_lowercase();
+    let catastrophic_triggers = [
+        "totalreward",
+        "colony lost",
+        "colony is dead",
+        "colony dead",
+        "colony died",
+        "all colonists dead",
+        "irrecoverable",
+        "terminal",
+        "catastrophic",
+        "game over",
+        "below -20",
+        "< -20",
+    ];
+    let condition_is_specific = catastrophic_triggers
+        .iter()
+        .any(|t| condition_lower.contains(t));
+
+    !condition_is_specific
+}
+
 /// Reject lessons about loop mechanics (observation sequencing, tool ordering).
 /// The agent loop already handles when to observe — lessons about this are
 /// tautological and crowd out strategic lessons about which actions to take.
@@ -375,6 +429,12 @@ fn parse_lesson_pattern(content: &str) -> Result<(String, String, f64, String), 
             if is_procedural_lesson(&condition, a) {
                 return Err(format!(
                     "Procedural lesson about loop mechanics rejected: {a}"
+                ));
+            }
+            if is_destructive_unconditional_lesson(&condition, a) {
+                return Err(format!(
+                    "Destructive-action lesson without catastrophic-failure condition rejected: \
+                     action={a:?} condition={condition:?}"
                 ));
             }
             a.to_string()
@@ -554,5 +614,64 @@ This pattern was found across all episodes."#;
                 "Should accept: {action}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_destructive_action_with_vague_condition() {
+        // Regression: this exact lesson leaked into production caches and
+        // told agents to reset the colony every time they reconnected.
+        assert!(super::is_destructive_unconditional_lesson(
+            "when starting a new session or after a failure occurs",
+            "game-rl:registerAgent followed by game-rl:reset",
+        ));
+
+        // Other vague triggers paired with destructive actions
+        assert!(super::is_destructive_unconditional_lesson(
+            "after errors",
+            "call reset to recover",
+        ));
+        assert!(super::is_destructive_unconditional_lesson(
+            "when things go wrong",
+            "restart the scenario",
+        ));
+        assert!(super::is_destructive_unconditional_lesson(
+            "to recover from any failure",
+            "wipe and reload",
+        ));
+    }
+
+    #[test]
+    fn accepts_destructive_action_with_catastrophic_condition() {
+        // Legitimate use of reset: explicit catastrophic-failure trigger
+        assert!(!super::is_destructive_unconditional_lesson(
+            "when TotalReward is below -20",
+            "call reset(Scenario=\"training_base\")",
+        ));
+        assert!(!super::is_destructive_unconditional_lesson(
+            "after the colony is dead",
+            "reset the game",
+        ));
+        assert!(!super::is_destructive_unconditional_lesson(
+            "when all colonists dead",
+            "restart from checkpoint",
+        ));
+        assert!(!super::is_destructive_unconditional_lesson(
+            "irrecoverable state detected",
+            "reset",
+        ));
+    }
+
+    #[test]
+    fn accepts_non_destructive_actions_regardless_of_condition() {
+        // The filter is destructive-action-targeted; non-destructive actions
+        // pass through any condition.
+        assert!(!super::is_destructive_unconditional_lesson(
+            "starting a new session",
+            "call registerAgent then observe",
+        ));
+        assert!(!super::is_destructive_unconditional_lesson(
+            "when things go wrong",
+            "step with Action={Type:SetSpeed, Speed:0}",
+        ));
     }
 }

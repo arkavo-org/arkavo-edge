@@ -148,7 +148,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.76.0"
+version = "0.76.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -248,8 +248,14 @@ tokenizers = { version = "0.22.1", default-features = false, features = ["fancy-
 torg-core = { version = "0.2", features = ["serde"] }
 torg-mask = "0.2"
 torg-serde = "0.2"
-hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = false, features = ["tokio", "rustls-tls"] }
-fastembed = "5"
+hf-hub = { git = "https://github.com/huggingface/hf-hub", rev = "cc015aa814e46ef880b57e6c955674f9fcc5084b", default-features = false, features = ["tokio", "rustls-tls"] }
+# fastembed defaults to native-tls (openssl) for both ort and hf-hub.
+# Force rustls everywhere — CLAUDE.md forbids OpenSSL.
+fastembed = { version = "5", default-features = false, features = [
+    "ort-download-binaries-rustls-tls",
+    "hf-hub-rustls-tls",
+    "image-models",
+] }
 hnsw_rs = "0.3"
 tiktoken-rs = "0.9"
 

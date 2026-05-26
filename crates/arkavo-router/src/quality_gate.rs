@@ -97,7 +97,12 @@ impl super::Router {
     ) -> Result<ProviderResponse> {
         let inference_start = std::time::Instant::now();
 
-        let tools_json = match tool_registry {
+        // Track whether tools were actually attached (non-empty) so the
+        // quality scorer can penalize text-only responses correctly. A
+        // registry that returns zero matches must NOT count as attached —
+        // otherwise the model gets penalized for legitimately producing
+        // text when no tools were callable.
+        let (tools_json, tools_were_attached) = match tool_registry {
             Some(registry) => {
                 let detail_level = tool_extraction::detail_level_for_model(model);
                 let keywords = tool_extraction::extract_keywords(task_description);
@@ -109,6 +114,7 @@ impl super::Router {
                     Some(input_tokens),
                 )
                 .await;
+                let attached = !tool_infos.is_empty();
                 let json = match model {
                     crate::ModelChoice::GeminiFlash
                     | crate::ModelChoice::Gemini35Flash
@@ -120,9 +126,9 @@ impl super::Router {
                     }
                     _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
                 };
-                Some(json)
+                (Some(json), attached)
             }
-            None => None,
+            None => (None, false),
         };
 
         let use_spec = self.decide_spec_with_event(model.name());
@@ -132,7 +138,6 @@ impl super::Router {
             .acquire()
             .await
             .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-
         let mut response = provider
             .complete_with_tools(messages, tools_json, None)
             .await
@@ -153,6 +158,7 @@ impl super::Router {
             elapsed.as_millis() as u64,
             "general",
             response.tool_calls.len(),
+            tools_were_attached,
         );
         tracing::info!(
             model = model.name(),
@@ -262,7 +268,10 @@ impl super::Router {
         for attempt in 0..MAX_RETRIES {
             let inference_start = std::time::Instant::now();
 
-            let tools_json = match tool_registry {
+            // Track whether tools were actually attached (non-empty) so the
+            // quality scorer below can penalize text-only responses correctly.
+            // A registry that returns zero matches must NOT count as attached.
+            let (tools_json, tools_were_attached) = match tool_registry {
                 Some(registry) => {
                     // Execution mode uses NameAndDescription to keep Jinja template
                     // expansion compact — the model already saw full schemas in round 0.
@@ -281,6 +290,7 @@ impl super::Router {
                     )
                     .await;
 
+                    let attached = !tool_infos.is_empty();
                     let json = match current_decision.recommended_model {
                         crate::ModelChoice::GeminiFlash
                         | crate::ModelChoice::Gemini35Flash
@@ -289,9 +299,9 @@ impl super::Router {
                         }
                         _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
                     };
-                    Some(json)
+                    (Some(json), attached)
                 }
-                None => None,
+                None => (None, false),
             };
 
             let (advised_messages, advice_labels) = if let Some(advice) = self
@@ -633,6 +643,7 @@ impl super::Router {
                 elapsed.as_millis() as u64,
                 current_decision.task_category.as_str(),
                 response.tool_calls.len(),
+                tools_were_attached,
             );
             tracing::info!(
                 model = %current_decision.recommended_model.name(),
@@ -688,5 +699,65 @@ impl super::Router {
             inference_timing: None,
             quality_gate_retries: MAX_RETRIES,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::selector_quality::compute_response_quality;
+    use crate::tool_extraction;
+    use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
+
+    /// Regression for the bug surfaced by gitar-bot on PR #598: an empty
+    /// `ToolRegistry` (or a registry whose keyword search yields zero hits)
+    /// produced `Some(json!([]))` for `tools_json`, and the prior derivation
+    /// `tools_were_attached = tools_json.is_some()` collapsed that to `true`.
+    /// That triggered the `-0.7` text-without-tool-call penalty in
+    /// `compute_response_quality` and poisoned Thompson Sampling for models
+    /// that had behaved correctly (no tools were ever actually offered).
+    ///
+    /// The fix derives `tools_were_attached` from `!tool_infos.is_empty()`,
+    /// so the empty-tools path scores the same as the no-registry path.
+    #[tokio::test]
+    async fn empty_tool_search_does_not_count_as_attached() {
+        let registry = ToolRegistry::empty();
+        let tool_infos = tool_extraction::search_tools_hybrid(
+            &registry,
+            "nonexistent_keyword_xyz",
+            DetailLevel::NameAndDescription,
+            Some(100),
+        )
+        .await;
+        assert!(
+            tool_infos.is_empty(),
+            "empty registry must return zero search hits"
+        );
+
+        // The Anthropic JSON wrapper still produces Some(json!([])), but the
+        // fix derives attachment from tool_infos, not the JSON wrapper.
+        let json_wrapper = arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos);
+        assert!(
+            json_wrapper
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(false),
+            "empty tools should serialize to an empty JSON array"
+        );
+
+        let tools_were_attached = !tool_infos.is_empty();
+        assert!(
+            !tools_were_attached,
+            "zero tool infos must NOT be treated as 'tools attached'"
+        );
+
+        let prose = "I will analyze the situation and consider my options before acting.";
+        let quality_no_penalty =
+            compute_response_quality(prose, 500, "general", 0, tools_were_attached);
+        let quality_with_penalty = compute_response_quality(prose, 500, "general", 0, true);
+        assert!(
+            quality_no_penalty > quality_with_penalty,
+            "empty-tools path must avoid the -0.7 tool-required penalty \
+             (no_penalty={quality_no_penalty}, with_penalty={quality_with_penalty})"
+        );
     }
 }

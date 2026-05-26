@@ -164,7 +164,8 @@ impl ArchitectResult {
                         &r.response,
                         0, // latency not tracked per-subtask currently
                         &self.plan.subtasks[r.index].category.as_str(),
-                        0, // subtask results are text, not tool calls
+                        0,     // subtask results are text, not tool calls
+                        false, // subtasks are text outputs, not tool-required
                     )
                 } else {
                     0.0
@@ -205,6 +206,7 @@ impl ArchitectResult {
                         0,
                         &self.plan.subtasks[r.index].category.as_str(),
                         0,
+                        false, // subtasks are text outputs, not tool-required
                     )
                 } else {
                     0.0
