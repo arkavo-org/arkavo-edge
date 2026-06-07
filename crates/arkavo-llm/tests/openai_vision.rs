@@ -35,6 +35,7 @@ async fn test_gpt4o_vision_basic() {
         images: Some(vec![test_image_base64.to_string()]),
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let response = provider
@@ -78,6 +79,7 @@ async fn test_gpt4o_vision_with_text() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -85,6 +87,7 @@ async fn test_gpt4o_vision_with_text() {
             images: Some(vec![test_image_base64]),
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
     ];
 
@@ -125,6 +128,7 @@ async fn test_gpt4o_multiple_images() {
         images: Some(vec![red_pixel.to_string(), blue_pixel.to_string()]),
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let response = provider
@@ -165,6 +169,7 @@ async fn test_gpt4o_vision_streaming() {
         images: Some(vec![test_image_base64.to_string()]),
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     use futures::StreamExt;
@@ -221,6 +226,7 @@ async fn test_non_vision_model_with_image_fails() {
         images: Some(vec![test_image_base64.to_string()]),
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let result = provider.complete(messages).await;
@@ -280,6 +286,7 @@ async fn test_gpt4o_with_local_image_file() {
         images: Some(vec![encoded_image]),
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let response = provider

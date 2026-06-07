@@ -10,6 +10,21 @@ pub enum Role {
     Tool,
 }
 
+/// A tool call issued by the assistant in a single turn.
+///
+/// Carried on assistant messages so chat templates can render a faithful call
+/// block (real name + arguments) instead of reconstructing it from the
+/// following tool results, which only know the call id and lose the arguments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolCall {
+    pub name: String,
+    /// Arguments as a JSON string ("{}" when the call took none).
+    pub arguments: String,
+    /// Provider-assigned call id, paired with the tool result's tool_call_id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
@@ -22,6 +37,11 @@ pub struct Message {
     /// Tool name for tool result messages (role=Tool)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// Tool calls the assistant issued this turn (role=Assistant). Carried so
+    /// downstream chat templates render a faithful call block rather than
+    /// reconstructing one with empty arguments from the following tool results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
 }
 
 impl Message {
@@ -32,6 +52,7 @@ impl Message {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -42,6 +63,7 @@ impl Message {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         }
     }
 
@@ -52,6 +74,24 @@ impl Message {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    /// Create an assistant message that records the tool calls it issued.
+    /// The calls carry real arguments so chat templates can render a faithful
+    /// call block; tool result messages later pair to them by call id.
+    pub fn assistant_with_tool_calls(
+        content: impl Into<String>,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+            images: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_calls,
         }
     }
 
@@ -69,6 +109,7 @@ impl Message {
             images: None,
             tool_call_id: Some(call_id.into()),
             tool_name: Some(name.into()),
+            tool_calls: Vec::new(),
         }
     }
 
@@ -79,6 +120,7 @@ impl Message {
             images: Some(images),
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         }
     }
 }
@@ -220,5 +262,40 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("tool_call_id"));
         assert!(!json.contains("tool_name"));
+        assert!(!json.contains("tool_calls"));
+    }
+
+    #[test]
+    fn test_assistant_with_tool_calls() {
+        let msg = Message::assistant_with_tool_calls(
+            "checking the weather",
+            vec![ToolCall {
+                name: "get_weather".to_string(),
+                arguments: r#"{"location":"Paris"}"#.to_string(),
+                id: Some("call_0".to_string()),
+            }],
+        );
+        assert_eq!(msg.role, Role::Assistant);
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].name, "get_weather");
+        assert_eq!(msg.tool_calls[0].arguments, r#"{"location":"Paris"}"#);
+    }
+
+    #[test]
+    fn test_tool_calls_roundtrip_serialization() {
+        let msg = Message::assistant_with_tool_calls(
+            "",
+            vec![ToolCall {
+                name: "get_time".to_string(),
+                arguments: "{}".to_string(),
+                id: None,
+            }],
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""tool_calls""#));
+        // Id is omitted when absent.
+        assert!(!json.contains(r#""id""#));
+        let back: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tool_calls, msg.tool_calls);
     }
 }

@@ -117,6 +117,7 @@ async fn test_format_with_model(
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let start = Instant::now();

@@ -798,17 +798,26 @@ impl LlamaCppProvider {
                     tool_calls: Vec::new(),
                 };
                 if synthesize && m.role == Role::Assistant {
-                    for next in &messages[i + 1..] {
-                        if next.role != Role::Tool {
-                            break;
-                        }
+                    // The tool results that immediately follow this assistant
+                    // turn are emitted in the same order as the calls it made,
+                    // and their tool_call_id is what the template pairs against.
+                    // Prefer the faithful name/arguments carried on the
+                    // assistant message; fall back to the result's name and an
+                    // empty object when the call wasn't threaded through.
+                    let following_tools = messages[i + 1..]
+                        .iter()
+                        .take_while(|next| next.role == Role::Tool);
+                    for (j, next) in following_tools.enumerate() {
+                        let orig = m.tool_calls.get(j);
                         meta.tool_calls.push(ChatToolCall {
                             id: next.tool_call_id.clone(),
-                            name: next.tool_name.clone().unwrap_or_default(),
-                            // Original call arguments aren't recoverable from the
-                            // tool result; an empty object still renders a valid
-                            // call block so the response is anchored to it.
-                            arguments: "{}".to_string(),
+                            name: orig
+                                .map(|c| c.name.clone())
+                                .or_else(|| next.tool_name.clone())
+                                .unwrap_or_default(),
+                            arguments: orig
+                                .map(|c| c.arguments.clone())
+                                .unwrap_or_else(|| "{}".to_string()),
                         });
                     }
                 }
@@ -1329,7 +1338,7 @@ mod tests {
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     mod chat_meta {
         use super::super::LlamaCppProvider;
-        use crate::{Message, Role};
+        use crate::{Message, ToolCall};
 
         fn convo() -> Vec<Message> {
             vec![
@@ -1341,9 +1350,10 @@ mod tests {
 
         #[test]
         fn gemma4_synthesizes_assistant_tool_calls_from_following_tool_turns() {
+            // Fallback path: the assistant turn carries no structured tool_calls,
+            // so the call is reconstructed from the following tool message with
+            // empty arguments — enough for the template to render a call block.
             let meta = LlamaCppProvider::build_chat_meta(&convo(), "gemma-4-12b");
-            // The assistant turn (index 1) gains a structured tool call derived
-            // from the following tool message so the Gemma 4 template renders it.
             assert_eq!(meta[1].tool_calls.len(), 1);
             assert_eq!(meta[1].tool_calls[0].name, "get_weather");
             assert_eq!(meta[1].tool_calls[0].id.as_deref(), Some("call_0"));
@@ -1351,6 +1361,62 @@ mod tests {
             // Tool-role message keeps its id/name; no synthesized calls of its own.
             assert_eq!(meta[2].tool_call_id.as_deref(), Some("call_0"));
             assert!(meta[2].tool_calls.is_empty());
+        }
+
+        #[test]
+        fn gemma4_preserves_faithful_arguments_carried_on_assistant_turn() {
+            // When the assistant message carries the real call (as the conductor
+            // now threads it), the rendered call block reflects the actual
+            // arguments instead of an empty object, while the id still pairs with
+            // the following tool result.
+            let msgs = vec![
+                Message::user("What's the weather in Paris?"),
+                Message::assistant_with_tool_calls(
+                    "checking the weather",
+                    vec![ToolCall {
+                        name: "get_weather".to_string(),
+                        arguments: r#"{"location":"Paris"}"#.to_string(),
+                        id: Some("call_0".to_string()),
+                    }],
+                ),
+                Message::tool_result("Sunny, 18C", "call_0", "get_weather"),
+            ];
+            let meta = LlamaCppProvider::build_chat_meta(&msgs, "gemma-4-12b");
+            assert_eq!(meta[1].tool_calls.len(), 1);
+            assert_eq!(meta[1].tool_calls[0].name, "get_weather");
+            assert_eq!(meta[1].tool_calls[0].arguments, r#"{"location":"Paris"}"#);
+            // Id is taken from the paired tool result, preserving template pairing.
+            assert_eq!(meta[1].tool_calls[0].id.as_deref(), Some("call_0"));
+        }
+
+        #[test]
+        fn gemma4_pairs_multiple_calls_to_their_results_positionally() {
+            let msgs = vec![
+                Message::user("Weather in Paris and Berlin?"),
+                Message::assistant_with_tool_calls(
+                    "checking both",
+                    vec![
+                        ToolCall {
+                            name: "get_weather".to_string(),
+                            arguments: r#"{"location":"Paris"}"#.to_string(),
+                            id: Some("call_0".to_string()),
+                        },
+                        ToolCall {
+                            name: "get_weather".to_string(),
+                            arguments: r#"{"location":"Berlin"}"#.to_string(),
+                            id: Some("call_1".to_string()),
+                        },
+                    ],
+                ),
+                Message::tool_result("Sunny, 18C", "call_0", "get_weather"),
+                Message::tool_result("Rainy, 12C", "call_1", "get_weather"),
+            ];
+            let meta = LlamaCppProvider::build_chat_meta(&msgs, "gemma-4-12b");
+            assert_eq!(meta[1].tool_calls.len(), 2);
+            assert_eq!(meta[1].tool_calls[0].arguments, r#"{"location":"Paris"}"#);
+            assert_eq!(meta[1].tool_calls[0].id.as_deref(), Some("call_0"));
+            assert_eq!(meta[1].tool_calls[1].arguments, r#"{"location":"Berlin"}"#);
+            assert_eq!(meta[1].tool_calls[1].id.as_deref(), Some("call_1"));
         }
 
         #[test]

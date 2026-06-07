@@ -32,7 +32,7 @@ pub use config::LlmConfig;
 pub use error::{Error, Result};
 pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file};
 pub use mcp_converter::{LocalToolFormat, McpConverter};
-pub use message::{Message, Role};
+pub use message::{Message, Role, ToolCall};
 pub use provider::{InferenceTiming, Provider, ProviderResponse};
 pub use stream::StreamResponse;
 pub use tool_executor::{ToolExecutionError, ToolExecutionResult, ToolExecutor};

@@ -101,6 +101,7 @@ mod tests {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         }];
 
         println!("\n=== Testing: What's the weather in New York? ===");
@@ -162,6 +163,7 @@ mod tests {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         }];
 
         println!("\n=== Testing: Read the file at /tmp/test.txt ===");
@@ -228,6 +230,7 @@ mod tests {
                 images: None,
                 tool_call_id: None,
                 tool_name: None,
+                tool_calls: Vec::new(),
             }];
 
             let fence_result = fence_provider

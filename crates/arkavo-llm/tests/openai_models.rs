@@ -30,6 +30,7 @@ async fn test_gpt_4o_model() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let start = Instant::now();
@@ -68,6 +69,7 @@ async fn test_gpt_4_turbo_model() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let start = Instant::now();
@@ -109,6 +111,7 @@ async fn test_gpt_35_turbo_model() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let start = Instant::now();
@@ -157,6 +160,7 @@ async fn test_model_performance_comparison() {
                     images: None,
                     tool_call_id: None,
                     tool_name: None,
+                    tool_calls: Vec::new(),
                 }];
 
                 let start = Instant::now();
@@ -207,6 +211,7 @@ async fn test_context_window_handling() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -216,6 +221,7 @@ async fn test_context_window_handling() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
     ];
 
@@ -250,6 +256,7 @@ async fn test_json_mode_response() {
             images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -257,6 +264,7 @@ async fn test_json_mode_response() {
             images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
         },
     ];
 
@@ -301,6 +309,7 @@ async fn test_model_fallback() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let result = provider.complete(messages.clone()).await;

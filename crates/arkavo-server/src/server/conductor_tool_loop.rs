@@ -441,7 +441,24 @@ pub(super) async fn run_tool_loop(
         let tool_count = response.tool_calls.len();
         info!("Executing {tool_count} tool calls (step {})", iteration + 1);
 
-        messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+        // Record the calls the assistant issued, with their real arguments, so
+        // chat templates (Gemma 4) render a faithful call block instead of
+        // reconstructing one with empty arguments from the tool results. Calls
+        // are emitted in the same order as the tool results pushed below, so the
+        // template pairs them positionally and by call id.
+        let assistant_tool_calls: Vec<arkavo_llm::ToolCall> = response
+            .tool_calls
+            .iter()
+            .map(|tc| arkavo_llm::ToolCall {
+                name: tc.tool_name.clone(),
+                arguments: tc.arguments.to_string(),
+                id: tc.call_id.clone(),
+            })
+            .collect();
+        messages.push(arkavo_llm::Message::assistant_with_tool_calls(
+            response.content.clone(),
+            assistant_tool_calls,
+        ));
 
         let tool_result_parts = execute_tool_calls(
             &response.tool_calls,

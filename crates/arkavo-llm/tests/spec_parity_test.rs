@@ -48,6 +48,7 @@ fn make_messages() -> Vec<Message> {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }]
 }
 
@@ -74,6 +75,7 @@ fn make_long_messages(approx_tokens: usize) -> Vec<Message> {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }]
 }
 
