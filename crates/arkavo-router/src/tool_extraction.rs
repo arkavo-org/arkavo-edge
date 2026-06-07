@@ -37,6 +37,7 @@ pub(crate) fn detail_level_for_model(
         ModelChoice::LocalGemma4E4B
         | ModelChoice::LocalGemma4_26B
         | ModelChoice::LocalGemma4_31B
+        | ModelChoice::LocalGemma4_12B
         | ModelChoice::LocalMinistral8B
         | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B

@@ -646,6 +646,7 @@ fn discover_cached_models() -> Vec<String> {
         ModelChoice::LocalGemma4_26B,
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_9B,
+        ModelChoice::LocalGemma4_12B,
         ModelChoice::LocalQwen35_27B,
         ModelChoice::LocalQwen36A3B,
     ];

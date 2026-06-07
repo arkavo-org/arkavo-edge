@@ -8,8 +8,9 @@ type TemplateParseTuple = (i32, Option<String>, Option<String>);
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
-    ChatInputs, ChatMessageMeta, LlamaModel, ModelFormat, apply_chat_template_with_format,
-    detect_model_format, ffi, init_llama_logging, test_minimal_init,
+    ChatInputs, ChatMessageMeta, ChatToolCall, LlamaModel, ModelFormat,
+    apply_chat_template_with_format, detect_model_format, ffi, init_llama_logging,
+    test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -365,14 +366,9 @@ impl LlamaCppProvider {
 
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
 
-        // Build per-message metadata for tool-role messages
-        let meta: Vec<ChatMessageMeta> = messages
-            .iter()
-            .map(|m| ChatMessageMeta {
-                tool_call_id: m.tool_call_id.clone(),
-                tool_name: m.tool_name.clone(),
-            })
-            .collect();
+        // Build per-message metadata for tool-role messages (and assistant
+        // tool_calls for Gemma 4 multi-turn rendering).
+        let meta = Self::build_chat_meta(&messages, &self.name);
 
         // Detect model format from model name
         let format = detect_model_format(&self.name);
@@ -498,13 +494,7 @@ impl LlamaCppProvider {
                                 .collect();
                             let (fixed_llama, _fixed_cstrings) =
                                 Self::messages_to_llama_chat_static(&fixed)?;
-                            let fixed_meta: Vec<ChatMessageMeta> = fixed
-                                .iter()
-                                .map(|m| ChatMessageMeta {
-                                    tool_call_id: m.tool_call_id.clone(),
-                                    tool_name: m.tool_name.clone(),
-                                })
-                                .collect();
+                            let fixed_meta = Self::build_chat_meta(&fixed, &self.name);
                             match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
                                 Ok(result) => (
                                     result.prompt,
@@ -783,6 +773,48 @@ impl LlamaCppProvider {
             }
             return Ok((full_response, timing));
         }
+    }
+
+    /// Build per-message metadata for the chat template.
+    ///
+    /// Carries tool_call_id/tool_name for tool-role messages. For Gemma 4,
+    /// also reconstructs each assistant message's structured `tool_calls` from
+    /// the tool-role messages that immediately follow it. The Gemma 4 template
+    /// (via llama.cpp's `convert_tool_responses_gemma4`) only renders a tool
+    /// response when the preceding assistant message carries a non-empty
+    /// `tool_calls` list — otherwise the result is dropped from the prompt and
+    /// the model, never seeing the result, re-issues the same call. Callers
+    /// push assistant turns as plain content (the parser strips the tool-call
+    /// markup), so we re-derive the calls here from the following tool turns.
+    fn build_chat_meta(messages: &[Message], model_name: &str) -> Vec<ChatMessageMeta> {
+        let synthesize = detect_model_format(model_name) == ModelFormat::Gemma4;
+        messages
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let mut meta = ChatMessageMeta {
+                    tool_call_id: m.tool_call_id.clone(),
+                    tool_name: m.tool_name.clone(),
+                    tool_calls: Vec::new(),
+                };
+                if synthesize && m.role == Role::Assistant {
+                    for next in &messages[i + 1..] {
+                        if next.role != Role::Tool {
+                            break;
+                        }
+                        meta.tool_calls.push(ChatToolCall {
+                            id: next.tool_call_id.clone(),
+                            name: next.tool_name.clone().unwrap_or_default(),
+                            // Original call arguments aren't recoverable from the
+                            // tool result; an empty object still renders a valid
+                            // call block so the response is anchored to it.
+                            arguments: "{}".to_string(),
+                        });
+                    }
+                }
+                meta
+            })
+            .collect()
     }
 
     fn messages_to_llama_chat_static(
@@ -1292,5 +1324,54 @@ mod tests {
         assert!(!is_small_model("ministral-3b"));
         assert!(!is_small_model("ministral-8b"));
         assert!(!is_small_model("glm-4.7-flash"));
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    mod chat_meta {
+        use super::super::LlamaCppProvider;
+        use crate::{Message, Role};
+
+        fn convo() -> Vec<Message> {
+            vec![
+                Message::user("What's the weather in Paris?"),
+                Message::assistant("<|channel>thought\nuse get_weather<channel|>"),
+                Message::tool_result("Sunny, 18C", "call_0", "get_weather"),
+            ]
+        }
+
+        #[test]
+        fn gemma4_synthesizes_assistant_tool_calls_from_following_tool_turns() {
+            let meta = LlamaCppProvider::build_chat_meta(&convo(), "gemma-4-12b");
+            // The assistant turn (index 1) gains a structured tool call derived
+            // from the following tool message so the Gemma 4 template renders it.
+            assert_eq!(meta[1].tool_calls.len(), 1);
+            assert_eq!(meta[1].tool_calls[0].name, "get_weather");
+            assert_eq!(meta[1].tool_calls[0].id.as_deref(), Some("call_0"));
+            assert_eq!(meta[1].tool_calls[0].arguments, "{}");
+            // Tool-role message keeps its id/name; no synthesized calls of its own.
+            assert_eq!(meta[2].tool_call_id.as_deref(), Some("call_0"));
+            assert!(meta[2].tool_calls.is_empty());
+        }
+
+        #[test]
+        fn non_gemma_models_do_not_synthesize() {
+            for model in ["qwen3.5-9b", "ministral-8b", "glm-4.7-flash"] {
+                let meta = LlamaCppProvider::build_chat_meta(&convo(), model);
+                assert!(
+                    meta.iter().all(|m| m.tool_calls.is_empty()),
+                    "{model} should not synthesize assistant tool_calls"
+                );
+            }
+        }
+
+        #[test]
+        fn assistant_without_following_tool_turn_is_unchanged() {
+            let msgs = vec![
+                Message::user("hi"),
+                Message::assistant("hello, how can I help?"),
+            ];
+            let meta = LlamaCppProvider::build_chat_meta(&msgs, "gemma-4-12b");
+            assert!(meta.iter().all(|m| m.tool_calls.is_empty()));
+        }
     }
 }

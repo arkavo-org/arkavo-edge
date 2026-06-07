@@ -88,6 +88,9 @@ impl ModelSelector {
             ModelChoice::LocalGemma4_31B => {
                 "Gemma 4 dense (12s), zero cost, vision, 31B params, strong reasoning"
             }
+            ModelChoice::LocalGemma4_12B => {
+                "Gemma 4 dense (6s), zero cost, vision, 12B params, strong reasoning"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
