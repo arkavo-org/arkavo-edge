@@ -179,7 +179,7 @@ fn linear_slope(values: impl Iterator<Item = f64>) -> f64 {
         let x = i as f64;
         sum_x += x;
         sum_y += y;
-        sum_xy = x.mul_add(y, sum_xy);
+        sum_xy = x.mul_add(*y, sum_xy);
         sum_x2 = x.mul_add(x, sum_x2);
     }
 
