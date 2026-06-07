@@ -286,15 +286,15 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("Welcome Friend\n");
     }
 
-    // Small model for classification, large model based on system
-    let small_model = RecommendedModel::Qwen35_0_8B;
+    // Small model for fast routing, medium model for capable agentic inference.
+    let small_model = RecommendedModel::Gemma4E2B;
     let large_model = caps.recommended_model;
 
     let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;
     let large_gb = large_model.size_bytes() as f64 / 1_000_000_000.0;
     let total_gb = small_gb + large_gb;
 
-    println!("To run AI locally, you'll need to download two models:");
+    println!("Arkavo Edge runs AI locally. First-time setup downloads two models:");
     println!();
     println!(
         "  Small (fast routing):  {} ({:.1} GB)",
@@ -302,7 +302,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         small_gb
     );
     println!(
-        "  Large (inference):     {} ({:.1} GB)",
+        "  Medium (inference):    {} ({:.1} GB)",
         large_model.display_name(),
         large_gb
     );

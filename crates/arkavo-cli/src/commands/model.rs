@@ -263,6 +263,11 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             let caps = detect_capabilities();
 
             let model = match name.as_deref() {
+                Some("gemma-4-e2b" | "gemma4-e2b" | "gemma-e2b") => RecommendedModel::Gemma4E2B,
+                Some("gemma-4-e4b" | "gemma4-e4b" | "gemma-e4b") => RecommendedModel::Gemma4E4B,
+                Some("gemma-4-12b" | "gemma4-12b" | "gemma-12b" | "gemma") => {
+                    RecommendedModel::Gemma4_12B
+                }
                 Some("qwen3.5-0.8b" | "qwen3-0.6b" | "qwen" | "qwen3") => {
                     RecommendedModel::Qwen35_0_8B
                 }
@@ -273,9 +278,16 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                     println!("Unknown model: {other}");
                     println!();
                     println!("Available models:");
+                    println!(
+                        "  gemma-4-e2b   - Gemma 4 E2B (~2.9 GB) - Default small, fast routing"
+                    );
+                    println!(
+                        "  gemma-4-12b   - Gemma 4 12B (~6.9 GB) - Default medium, most capable"
+                    );
+                    println!("  gemma-4-e4b   - Gemma 4 E4B (~5 GB) - Edge medium");
                     println!("  qwen3.5-0.8b  - Qwen3.5 0.8B (~550 MB) - Best for embedded");
-                    println!("  ministral-3b  - Ministral 3B (~2.5 GB) - Recommended");
-                    println!("  ministral-8b  - Ministral 8B (~5.5 GB) - Higher quality");
+                    println!("  ministral-3b  - Ministral 3B (~2.5 GB)");
+                    println!("  ministral-8b  - Ministral 8B (~5.5 GB)");
                     println!(
                         "  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM"
                     );
