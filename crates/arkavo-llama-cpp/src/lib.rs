@@ -297,6 +297,16 @@ impl LlamaModel {
         unsafe { ffi::llama_vocab_eos(vocab) }
     }
 
+    /// Whether `token` is an end-of-generation token. Unlike a single EOS id,
+    /// this covers every terminator the model defines — e.g. Gemma 4's
+    /// `<end_of_turn>` and `<turn|>` in addition to `<eos>`. Generation loops
+    /// must stop on any of these or they run to max_tokens and repeat output.
+    pub fn is_eog(&self, token: i32) -> bool {
+        let vocab = self.get_vocab();
+        // SAFETY: vocab is valid for the model's lifetime
+        unsafe { ffi::llama_vocab_is_eog(vocab, token) }
+    }
+
     pub fn get_bos_token(&self) -> i32 {
         let vocab = self.get_vocab();
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime

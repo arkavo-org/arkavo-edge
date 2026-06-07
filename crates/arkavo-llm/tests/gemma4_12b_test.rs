@@ -288,5 +288,14 @@ mod tests {
             "round 1: expected no further tool call once the result is known, got {:?}",
             r1.tool_calls
         );
+        // Generation must stop at the <turn|> EOG token, not run to max_tokens
+        // repeating the answer. A clean single answer is well under 500 chars;
+        // the pre-fix repetition ran to ~2000+ chars.
+        assert!(
+            r1.content.len() < 500,
+            "round 1: answer looks repeated (EOG not honored), {} chars: {}",
+            r1.content.len(),
+            r1.content
+        );
     }
 }
