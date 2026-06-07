@@ -30,6 +30,7 @@ async fn test_openai_basic_connectivity() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let response = provider
@@ -62,6 +63,7 @@ async fn test_openai_authentication_error() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let result = provider.complete(messages).await;
@@ -102,6 +104,7 @@ async fn test_openai_rate_limiting() {
                 images: None,
                 tool_call_id: None,
                 tool_name: None,
+                tool_calls: Vec::new(),
             }];
             provider.complete(messages).await
         });
@@ -182,6 +185,7 @@ async fn test_openai_system_message() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -189,6 +193,7 @@ async fn test_openai_system_message() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
     ];
 
@@ -230,6 +235,7 @@ async fn test_openai_multi_turn_conversation() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::Assistant,
@@ -237,6 +243,7 @@ async fn test_openai_multi_turn_conversation() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -244,6 +251,7 @@ async fn test_openai_multi_turn_conversation() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
     ];
 

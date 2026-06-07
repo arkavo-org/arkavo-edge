@@ -101,7 +101,9 @@ fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
 fn stop_sequences_for_format(format: ModelFormat) -> &'static [&'static str] {
     match format {
         ModelFormat::Qwen3 => &["<|im_start|>user"],
-        ModelFormat::Gemma3 | ModelFormat::Gemma4 => &["<start_of_turn>user"],
+        ModelFormat::Gemma3 => &["<start_of_turn>user"],
+        // Gemma 4 uses <|turn>role markers rather than <start_of_turn>.
+        ModelFormat::Gemma4 => &["<|turn>user"],
         ModelFormat::MistralV3 => &["[INST]"],
         ModelFormat::GLM4 => &["<|user|>"],
     }
@@ -349,7 +351,6 @@ async fn generate_tokens_pooled_baseline(
             }
         }
 
-        let eos_token = model.get_eos_token();
         process_input_tokens(&ctx, &input_tokens)?;
         let start_pos = i32::try_from(input_tokens.len()).unwrap_or(0);
         // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
@@ -374,8 +375,8 @@ async fn generate_tokens_pooled_baseline(
             validate_logits(&ctx)?;
             let token = sampler.sample(&ctx, -1);
 
-            if token == eos_token {
-                tracing::info!("Generation stopped at EOS token");
+            if model.is_eog(token) {
+                tracing::info!("Generation stopped at EOG token");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
@@ -701,8 +702,8 @@ async fn generate_tokens_baseline(
                 eprintln!("Sampled token: {token} at pos {pos}");
             }
 
-            if token == eos_token {
-                tracing::info!("Generation stopped at EOS token");
+            if model.is_eog(token) {
+                tracing::info!("Generation stopped at EOG token");
                 // Flush any remaining buffer as lossy UTF-8
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
@@ -1078,6 +1079,23 @@ mod tests {
     fn test_stop_sequences_glm4() {
         let seqs = stop_sequences_for_format(ModelFormat::GLM4);
         assert!(seqs.contains(&"<|user|>"));
+    }
+
+    #[test]
+    fn test_stop_sequences_gemma4() {
+        // Gemma 4 uses <|turn>role markers, not Gemma 3's <start_of_turn>.
+        let seqs = stop_sequences_for_format(ModelFormat::Gemma4);
+        assert!(seqs.contains(&"<|turn>user"));
+        assert!(!seqs.contains(&"<start_of_turn>user"));
+    }
+
+    #[test]
+    fn test_detect_self_prompting_gemma4() {
+        let text = "The weather is sunny.\n<|turn>user\nAnother prompt";
+        let pos = detect_self_prompting(text, ModelFormat::Gemma4);
+        assert!(pos.is_some());
+        // Gemma 3's marker must not match Gemma 4 output.
+        assert!(detect_self_prompting("no markers here", ModelFormat::Gemma4).is_none());
     }
 
     #[test]

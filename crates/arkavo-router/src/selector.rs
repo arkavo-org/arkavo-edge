@@ -311,6 +311,9 @@ impl ModelSelector {
             if Self::is_local_model_cached(&ModelChoice::LocalGemma4_31B) {
                 models.push(ModelChoice::LocalGemma4_31B);
             }
+            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_12B) {
+                models.push(ModelChoice::LocalGemma4_12B);
+            }
             if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
             {

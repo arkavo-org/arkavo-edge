@@ -88,6 +88,9 @@ impl ModelSelector {
             ModelChoice::LocalGemma4_31B => {
                 "Gemma 4 dense (12s), zero cost, vision, 31B params, strong reasoning"
             }
+            ModelChoice::LocalGemma4_12B => {
+                "Gemma 4 dense (6s), zero cost, vision, 12B params, strong reasoning"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -393,7 +396,7 @@ pub fn compute_response_quality(
     };
     if response.len() < min_expected {
         let ratio = response.len() as f64 / min_expected as f64;
-        score -= 0.3 * (1.0 - ratio);
+        score = 0.3_f64.mul_add(-(1.0 - ratio), score);
     }
 
     let lines: Vec<&str> = response.lines().filter(|l| !l.trim().is_empty()).collect();

@@ -489,16 +489,28 @@ fn main() {
         );
     }
 
-    // Only regenerate bindings if they don't exist or header changed
+    // Only regenerate bindings if they don't exist or any input header changed.
+    // The arkavo wrapper headers are bindgen inputs too, so a change to them
+    // (e.g. a new field on arkavo_chat_msg) must force regeneration — otherwise
+    // bindings silently drift from the C structs they mirror.
+    let binding_input_headers = [
+        header.clone(),
+        manifest_dir.join("arkavo_chat_wrapper.h"),
+        manifest_dir.join("arkavo_grammar_wrapper.h"),
+        manifest_dir.join("arkavo_spec_wrapper.h"),
+    ];
     let should_regenerate = !bindings_path.exists() || {
-        let header_mtime = std::fs::metadata(&header).and_then(|m| m.modified()).ok();
         let bindings_mtime = std::fs::metadata(&bindings_path)
             .and_then(|m| m.modified())
             .ok();
-
-        match (header_mtime, bindings_mtime) {
-            (Some(h), Some(b)) => h > b,
-            _ => true,
+        match bindings_mtime {
+            Some(b) => binding_input_headers.iter().any(|h| {
+                std::fs::metadata(h)
+                    .and_then(|m| m.modified())
+                    .map(|hm| hm > b)
+                    .unwrap_or(false)
+            }),
+            None => true,
         }
     };
 

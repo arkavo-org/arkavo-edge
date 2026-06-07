@@ -31,6 +31,7 @@ async fn test_openai_streaming_basic() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let mut stream = provider
@@ -91,6 +92,7 @@ async fn test_openai_streaming_performance() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let start = Instant::now();
@@ -160,6 +162,7 @@ async fn test_openai_streaming_interruption() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let mut stream = provider
@@ -212,6 +215,7 @@ async fn test_openai_streaming_with_system_message() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
         Message {
             role: Role::User,
@@ -219,6 +223,7 @@ async fn test_openai_streaming_with_system_message() {
             images: None,
             tool_call_id: None,
             tool_name: None,
+            tool_calls: Vec::new(),
         },
     ];
 
@@ -289,6 +294,7 @@ async fn test_openai_streaming_concurrent() {
                 images: None,
                 tool_call_id: None,
                 tool_name: None,
+                tool_calls: Vec::new(),
             }];
 
             let mut stream = provider
@@ -360,6 +366,7 @@ async fn test_openai_streaming_error_handling() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
     }];
 
     let result = provider.stream(messages).await;

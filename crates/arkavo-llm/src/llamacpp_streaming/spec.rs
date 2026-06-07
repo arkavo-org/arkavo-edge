@@ -174,7 +174,6 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
 
-        let eos_token = model.get_eos_token();
         // Pooled path is always sequence 0; there is no caller-provided
         // seq_id option (unlike the non-pooled context-reuse variant).
         let seq_id: i32 = 0;
@@ -222,8 +221,8 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                 None => sampler.sample(&ctx, -1),
             };
 
-            if target_token == eos_token {
-                tracing::info!("Generation stopped at EOS token (pooled spec)");
+            if model.is_eog(target_token) {
+                tracing::info!("Generation stopped at EOG token (pooled spec)");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
@@ -337,7 +336,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                     tokens_generated += 1;
                     history.push(accepted_tok);
                     pos += 1;
-                    if accepted_tok == eos_token || e.stopped {
+                    if model.is_eog(accepted_tok) || e.stopped {
                         early_stop = true;
                         break;
                     }
@@ -502,7 +501,6 @@ pub(super) async fn generate_tokens_with_spec(
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
 
-        let eos_token = model.get_eos_token();
         let seq_id = context_options.seq_id.unwrap_or(0);
 
         let initial_pos = if let Some(start_pos) = context_options.start_position {
@@ -570,8 +568,8 @@ pub(super) async fn generate_tokens_with_spec(
                 None => sampler.sample(&ctx, -1),
             };
 
-            if target_token == eos_token {
-                tracing::info!("Generation stopped at EOS token (spec)");
+            if model.is_eog(target_token) {
+                tracing::info!("Generation stopped at EOG token (spec)");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
@@ -684,7 +682,7 @@ pub(super) async fn generate_tokens_with_spec(
                     tokens_generated += 1;
                     history.push(accepted_tok);
                     pos += 1;
-                    if accepted_tok == eos_token || e.stopped {
+                    if model.is_eog(accepted_tok) || e.stopped {
                         early_stop = true;
                         break;
                     }

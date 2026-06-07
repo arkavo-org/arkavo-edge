@@ -297,6 +297,16 @@ impl LlamaModel {
         unsafe { ffi::llama_vocab_eos(vocab) }
     }
 
+    /// Whether `token` is an end-of-generation token. Unlike a single EOS id,
+    /// this covers every terminator the model defines — e.g. Gemma 4's
+    /// `<end_of_turn>` and `<turn|>` in addition to `<eos>`. Generation loops
+    /// must stop on any of these or they run to max_tokens and repeat output.
+    pub fn is_eog(&self, token: i32) -> bool {
+        let vocab = self.get_vocab();
+        // SAFETY: vocab is valid for the model's lifetime
+        unsafe { ffi::llama_vocab_is_eog(vocab, token) }
+    }
+
     pub fn get_bos_token(&self) -> i32 {
         let vocab = self.get_vocab();
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
@@ -967,12 +977,26 @@ pub struct ChatInputs {
     pub parallel_tool_calls: bool,
 }
 
-/// Per-message metadata for Jinja template rendering (tool results)
+/// A tool call made by an assistant message, carried back into the chat
+/// template so templates that render from a structured list (e.g. Gemma 4)
+/// emit the prior call — and, by extension, the following tool responses.
+#[cfg(not(target_env = "musl"))]
+#[derive(Debug, Clone, Default)]
+pub struct ChatToolCall {
+    pub id: Option<String>,
+    pub name: String,
+    /// Arguments as a JSON string (must be valid JSON; "{}" when unknown).
+    pub arguments: String,
+}
+
+/// Per-message metadata for Jinja template rendering (tool results and the
+/// assistant's own tool calls).
 #[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Default)]
 pub struct ChatMessageMeta {
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
+    pub tool_calls: Vec<ChatToolCall>,
 }
 
 /// Safe wrapper around llama.cpp's common_chat_templates (Jinja template engine)
@@ -1045,6 +1069,46 @@ impl ChatTemplates {
             })
             .collect();
 
+        // Build per-message tool-call arrays. The CStrings and the
+        // arkavo_tool_call Vecs must outlive the FFI call, so keep them in
+        // owner Vecs indexed parallel to `messages`.
+        struct ToolCallOwner {
+            _strings: Vec<CString>,
+            calls: Vec<ffi::arkavo_tool_call>,
+        }
+        let tc_owners: Vec<ToolCallOwner> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let mut strings = Vec::new();
+                let mut calls = Vec::new();
+                if let Some(m) = meta.get(i) {
+                    for tc in &m.tool_calls {
+                        let name = CString::new(tc.name.as_str()).unwrap_or_default();
+                        let args = CString::new(tc.arguments.as_str()).unwrap_or_default();
+                        let id = tc.id.as_deref().and_then(|s| CString::new(s).ok());
+                        let name_ptr = name.as_ptr();
+                        let args_ptr = args.as_ptr();
+                        let id_ptr = id.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+                        strings.push(name);
+                        strings.push(args);
+                        if let Some(id) = id {
+                            strings.push(id);
+                        }
+                        calls.push(ffi::arkavo_tool_call {
+                            name: name_ptr,
+                            arguments: args_ptr,
+                            id: id_ptr,
+                        });
+                    }
+                }
+                ToolCallOwner {
+                    _strings: strings,
+                    calls,
+                }
+            })
+            .collect();
+
         let c_msgs: Vec<ffi::arkavo_chat_msg> = messages
             .iter()
             .enumerate()
@@ -1059,6 +1123,12 @@ impl ChatTemplates {
                     .1
                     .as_ref()
                     .map_or(std::ptr::null(), |c| c.as_ptr()),
+                tool_calls: if tc_owners[i].calls.is_empty() {
+                    std::ptr::null()
+                } else {
+                    tc_owners[i].calls.as_ptr()
+                },
+                num_tool_calls: tc_owners[i].calls.len() as i32,
             })
             .collect();
 

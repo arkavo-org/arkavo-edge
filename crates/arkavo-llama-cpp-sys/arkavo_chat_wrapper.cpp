@@ -94,6 +94,16 @@ arkavo_chat_result arkavo_chat_templates_apply(
             if (messages[i].tool_name) {
                 msg.tool_name = messages[i].tool_name;
             }
+            for (int j = 0; j < messages[i].num_tool_calls; j++) {
+                const arkavo_tool_call &src = messages[i].tool_calls[j];
+                common_chat_tool_call tc;
+                tc.name = src.name ? src.name : "";
+                tc.arguments = src.arguments ? src.arguments : "{}";
+                if (src.id) {
+                    tc.id = src.id;
+                }
+                msg.tool_calls.push_back(std::move(tc));
+            }
             inputs.messages.push_back(std::move(msg));
         }
 
