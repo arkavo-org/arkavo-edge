@@ -84,7 +84,10 @@ impl LearningModule {
         // Add exploration bonus for high-uncertainty agents
         let prior = utility.get_prior(category);
         if prior.std_dev() > 0.2 {
-            utility_sample += self.config.exploration_bonus * prior.std_dev();
+            utility_sample = self
+                .config
+                .exploration_bonus
+                .mul_add(prior.std_dev(), utility_sample);
         }
 
         self.config
