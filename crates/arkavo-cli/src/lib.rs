@@ -142,17 +142,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
-        "serve" | "mcp" => {
-            // Always create a new runtime for the MCP server
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { commands::mcp::run().await })
-        }
-        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
-        "serve" | "mcp" => {
-            eprintln!("MCP server is not available on this platform");
-            Err("MCP server requires macOS with mcp-tools feature (uses iOS simulator)".into())
-        }
         "tdf" => {
             let run_async = async {
                 use clap::Parser;
@@ -239,7 +228,6 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
-    println!("    serve          Run as MCP server");
     println!("    tdf            TDF encryption and P2P transport");
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");

@@ -45,7 +45,6 @@ arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-mcp-identity = { path = "../arkavo-mcp-identity" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
@@ -76,7 +75,6 @@ base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
