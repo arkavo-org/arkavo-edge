@@ -148,6 +148,9 @@ fn is_suppressed_log_line(text: &str) -> bool {
         "llama_context",
         "control-looking token",
         "special_eog_ids",
+        // llama.cpp rewriting a model's tokenizer metadata at load (e.g. forcing
+        // add_bos_token for Gemma 4) — a model-file quirk it auto-corrects.
+        "override 'tokenizer",
     ];
     BENIGN_SUBSTRINGS.iter().any(|p| text.contains(p))
 }
@@ -186,16 +189,30 @@ pub fn init_llama_logging() {
     // Logging disabled by default, can be enabled with set_debug_logging
     LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
 
-    // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
+    // SAFETY: setting the global ggml/llama log callback; the function pointer is 'static.
     unsafe {
         ffi::llama_log_set(Some(llama_log_callback_filtered), std::ptr::null_mut());
     }
+    // The "common" library (chat templates, speculative decoding) logs through a separate
+    // system the ggml callback above never sees. Quiet its info/warn chatter by default.
+    set_common_log_quiet(true);
 }
 
 /// Enable or disable debug logging for llama.cpp
 #[cfg(not(target_env = "musl"))]
 pub fn set_debug_logging(enabled: bool) {
     LLAMA_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
+    // Restore full "common" library verbosity in debug, quiet it otherwise.
+    set_common_log_quiet(!enabled);
+}
+
+/// Quiet (or restore) llama.cpp's "common" library logging — see the C wrapper for details.
+#[cfg(not(target_env = "musl"))]
+fn set_common_log_quiet(quiet: bool) {
+    // SAFETY: thin extern "C" setter over a global int threshold; no pointers involved.
+    unsafe {
+        ffi::arkavo_set_common_log_quiet(i32::from(quiet));
+    }
 }
 
 #[cfg(not(target_env = "musl"))]
@@ -2137,6 +2154,9 @@ mod tests {
         ));
         assert!(is_suppressed_log_line(
             "load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list\n"
+        ));
+        assert!(is_suppressed_log_line(
+            "load: override 'tokenizer.ggml.add_bos_token' to 'true' for Gemma4\n"
         ));
     }
 

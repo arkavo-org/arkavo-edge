@@ -154,7 +154,10 @@ impl LlamaCppProvider {
     ) -> Result<Self> {
         init_llama_logging();
 
-        if config.debug {
+        // Benign llama.cpp load/runtime chatter is quiet by default; ARKAVO_DEBUG (or an
+        // explicit config flag) restores full verbosity across both the ggml/llama log
+        // callback and the separate "common" library log, plus our own template/grammar dumps.
+        if config.debug || std::env::var_os("ARKAVO_DEBUG").is_some() {
             arkavo_llama_cpp::set_debug_logging(true);
             crate::llamacpp_streaming::set_debug(true);
         }
@@ -431,7 +434,7 @@ impl LlamaCppProvider {
                         // Token triggers are converted to word triggers in
                         // add_grammar_lazy_with_triggers to avoid the
                         // token_to_piece mismatch issue.
-                        if result.grammar.is_some() {
+                        if result.grammar.is_some() && crate::llamacpp_streaming::is_debug() {
                             eprintln!(
                                 "  grammar: {} bytes, lazy={}, {} triggers",
                                 result.grammar.as_ref().map_or(0, |g| g.len()),
