@@ -13,6 +13,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Parse all arguments for flags
     let mut config_path: Option<String> = None;
     let mut verbose = false;
+    let mut trust = false;
     let mut subcommand: Option<&str> = None;
     let mut init_name: Option<String> = None;
     let mut override_port: Option<u16> = None;
@@ -46,6 +47,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "-v" | "--verbose" => verbose = true,
+            "--trust" => trust = true,
             "-h" | "--help" | "help" => {
                 print_usage();
                 return Ok(());
@@ -86,6 +88,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             run_agent_with_options(
                 config_path.as_deref(),
                 verbose,
+                trust,
                 override_port,
                 override_name,
             )
@@ -113,12 +116,15 @@ fn print_usage() {
     println!("    -p, --port <PORT>   Override the listen port (default: random available port)");
     println!("    -n, --name <NAME>   Override the agent name");
     println!("    -v, --verbose       Show startup messages and status");
+    println!("    --trust             Show the agent authorization QR code (DID:key) on startup,");
+    println!("                        for scanning to authorize/trust this agent");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo agent                           # Run with auto-discovery");
     println!("    arkavo agent --config AGENTS.md        # Run with specific config");
     println!("    arkavo agent --port 8343 -v            # Run on specific port with verbose");
     println!("    arkavo agent -n my-agent -p 8343       # Run with custom name and port");
+    println!("    arkavo agent run --trust               # Show the QR code to trust this agent");
 }
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
@@ -272,6 +278,7 @@ Your agent will start and be available at the configured address."#
 fn run_agent_with_options(
     config_file: Option<&str>,
     verbose: bool,
+    trust: bool,
     override_port: Option<u16>,
     override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -396,10 +403,12 @@ fn run_agent_with_options(
 
     // Start the A2A server with the agent configuration
     let result = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle.block_on(async { agent::start_agent_server(&agent_config).await }),
+        Ok(handle) => {
+            handle.block_on(async { agent::start_agent_server(&agent_config, trust).await })
+        }
         Err(_) => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { agent::start_agent_server(&agent_config).await })
+            runtime.block_on(async { agent::start_agent_server(&agent_config, trust).await })
         }
     };
 
@@ -450,12 +459,12 @@ fn run_agent_with_options(
 
             // Try again with default config
             match tokio::runtime::Handle::try_current() {
-                Ok(handle) => {
-                    handle.block_on(async { agent::start_agent_server(&default_config).await })
-                }
+                Ok(handle) => handle
+                    .block_on(async { agent::start_agent_server(&default_config, trust).await }),
                 Err(_) => {
                     let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(async { agent::start_agent_server(&default_config).await })
+                    runtime
+                        .block_on(async { agent::start_agent_server(&default_config, trust).await })
                 }
             }
         } else {
@@ -1140,7 +1149,10 @@ fn parse_yaml_properties(
 
 #[allow(clippy::future_not_send)]
 #[allow(clippy::missing_panics_doc)]
-pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_agent_server(
+    config: &AgentConfig,
+    show_trust_qr: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
     use arkavo_gossip::GossipConfig;
@@ -1440,8 +1452,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         server.start_orchestrator_loop().await;
     }
 
-    // Generate and display QR code for registration
-    if !quiet {
+    // Generate and display QR code for registration. Shown in verbose runs, or on demand
+    // via `--trust` (which surfaces only the QR, without the rest of the verbose output).
+    if !quiet || show_trust_qr {
         use arkavo_device_identity::get_or_create_device_id;
         use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
