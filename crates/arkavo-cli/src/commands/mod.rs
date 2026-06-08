@@ -6,7 +6,6 @@ pub mod model;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;
-pub mod tdf;
 pub mod terminal;
 pub mod terminal_ui;
 #[cfg(all(target_os = "macos", feature = "mcp-macos"))]

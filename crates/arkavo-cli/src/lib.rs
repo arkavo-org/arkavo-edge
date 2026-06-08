@@ -142,34 +142,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        "tdf" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "tdf")]
-                #[command(about = "TDF encryption, decryption, and P2P transport")]
-                struct Cli {
-                    #[command(subcommand)]
-                    command: commands::tdf::TdfCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("tdf").chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::tdf::handle_tdf_command(cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         #[cfg(feature = "llama-cpp")]
         "tool-bench" => {
             let run_async = async {
@@ -228,7 +200,6 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
-    println!("    tdf            TDF encryption and P2P transport");
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();

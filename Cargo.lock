@@ -725,8 +725,6 @@ dependencies = [
  "arkavo-router",
  "arkavo-server",
  "arkavo-session",
- "arkavo-tdf",
- "arkavo-tdf-iroh",
  "arkavo-terminal",
  "arkavo-ucp",
  "arkavo-ui-core",
