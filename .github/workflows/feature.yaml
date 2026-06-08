@@ -859,23 +859,23 @@ jobs:
           echo "✅ --help works"
           
           # Verify expected commands are present
-          grep -q "serve" help.txt || { echo "❌ 'serve' command missing"; exit 1; }
-          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
           grep -q "chat" help.txt || { echo "❌ 'chat' command missing"; exit 1; }
+          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
+          grep -q "ui" help.txt || { echo "❌ 'ui' command missing"; exit 1; }
           echo "✅ Expected commands present"
-      
-      - name: Test server startup
+
+      - name: Test UI startup
         run: |
-          echo "=== Testing Server Startup ==="
-          
-          # Try to start the server and check it responds
-          timeout 5 ./arkavo-x86_64-linux serve 2>&1 | tee server.log || true
-          
+          echo "=== Testing UI Startup ==="
+
+          # Try to start the UI gateway and check it responds
+          timeout 5 ./arkavo-x86_64-linux ui 2>&1 | tee server.log || true
+
           # Check for expected startup messages
-          if grep -qE "Starting|Listening|serve|Server" server.log; then
-            echo "✅ Server startup messages detected"
+          if grep -qE "Starting|Listening|Arkavo UI|Server" server.log; then
+            echo "✅ UI startup messages detected"
           else
-            echo "⚠️ Server might not have started properly"
+            echo "⚠️ UI might not have started properly"
             cat server.log
           fi
       
