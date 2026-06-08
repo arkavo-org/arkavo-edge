@@ -11,12 +11,14 @@ Download the installer from the [releases page](https://github.com/arkavo-org/ar
 **For advanced users:** Install via Homebrew
 ```bash
 brew tap arkavo-org/homebrew-arkavo
+brew trust --formula arkavo-org/arkavo/arkavo  # required on Homebrew 5.2+
 brew install arkavo
 ```
 
 ### Install on Linux
 ```bash
 brew tap arkavo-org/homebrew-arkavo
+brew trust --formula arkavo-org/arkavo/arkavo  # required on Homebrew 5.2+
 brew install arkavo
 ```
 
