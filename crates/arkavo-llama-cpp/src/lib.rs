@@ -120,6 +120,44 @@ pub fn reset_gpu_status() {
     GPU_STATUS.store(0, Ordering::Relaxed);
 }
 
+/// Whether a llama.cpp log line is benign enough to hide during normal (non-debug) runs.
+///
+/// llama.cpp writes load-time and runtime info/warn lines straight to its log callback. Some
+/// describe quirks in a GGUF model's own tokenizer metadata — e.g. a token that "looks" like a
+/// control token but isn't typed as one, or special-EOG reconciliation — which llama.cpp then
+/// auto-corrects at load. We can't fix those without re-converting the model and they are not
+/// actionable by the end user, so they are hidden unless `ARKAVO_DEBUG` enables debug logging.
+/// Genuine errors never match here and always surface.
+#[cfg(not(target_env = "musl"))]
+fn is_suppressed_log_line(text: &str) -> bool {
+    // Progress dots printed during model load.
+    if text == "." {
+        return true;
+    }
+    // Metal BF16 kernels: unsupported on this hardware and intentionally skipped.
+    if text.contains("ggml_metal_init: skipping") && text.contains("bf16") {
+        return true;
+    }
+    // Informational lines we surface ourselves, plus unfixable model-metadata quirks (the
+    // tokenizer entries). Matches are kept reasonably specific so a genuine error that merely
+    // mentions one of these subsystems isn't swallowed — the two special_eog_ids phrases are the
+    // exact benign messages, not the bare token.
+    const BENIGN_SUBSTRINGS: &[&str] = &[
+        "llama_kv_cache",
+        "n_ctx_per_seq",
+        "n_ctx_train",
+        "tensor API disabled for pre-M",
+        "llama_context",
+        "control-looking token",
+        "is not in special_eog_ids",
+        "special_eog_ids contains",
+        // llama.cpp rewriting a model's tokenizer metadata at load (e.g. forcing
+        // add_bos_token for Gemma 4) — a model-file quirk it auto-corrects.
+        "override 'tokenizer",
+    ];
+    BENIGN_SUBSTRINGS.iter().any(|p| text.contains(p))
+}
+
 // Custom log callback that filters based on log level and our debug flag
 #[cfg(not(target_env = "musl"))]
 extern "C" fn llama_log_callback_filtered(
@@ -138,37 +176,9 @@ extern "C" fn llama_log_callback_filtered(
         unsafe {
             let c_str = std::ffi::CStr::from_ptr(text);
             if let Ok(str_slice) = c_str.to_str() {
-                // Skip various non-critical messages unless debug is on
-                if !debug_enabled {
-                    // Skip progress dots
-                    if str_slice == "." {
-                        return;
-                    }
-                    // Skip cache messages
-                    if str_slice.contains("llama_kv_cache") {
-                        return;
-                    }
-                    // Skip Metal BF16 kernel messages (not supported, not needed)
-                    if str_slice.contains("ggml_metal_init: skipping") && str_slice.contains("bf16")
-                    {
-                        return;
-                    }
-                    // Skip context size info messages (we handle this ourselves)
-                    if str_slice.contains("n_ctx_per_seq") || str_slice.contains("n_ctx_train") {
-                        return;
-                    }
-                    // Skip Metal tensor API message (informational for pre-M5/A19 devices)
-                    if str_slice.contains("tensor API disabled for pre-M") {
-                        return;
-                    }
-                    // Skip tokenizer config warnings for models with non-standard special token handling
-                    if str_slice.contains("is not in special_eog_ids") {
-                        return;
-                    }
-                    // Skip llama_context informational messages (yarn_attn_factor, etc.)
-                    if str_slice.contains("llama_context") {
-                        return;
-                    }
+                // Hide benign/unfixable llama.cpp chatter unless debug logging is on.
+                if !debug_enabled && is_suppressed_log_line(str_slice) {
+                    return;
                 }
                 eprint!("{}", str_slice);
             }
@@ -182,16 +192,30 @@ pub fn init_llama_logging() {
     // Logging disabled by default, can be enabled with set_debug_logging
     LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
 
-    // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
+    // SAFETY: setting the global ggml/llama log callback; the function pointer is 'static.
     unsafe {
         ffi::llama_log_set(Some(llama_log_callback_filtered), std::ptr::null_mut());
     }
+    // The "common" library (chat templates, speculative decoding) logs through a separate
+    // system the ggml callback above never sees. Quiet its info/warn chatter by default.
+    set_common_log_quiet(true);
 }
 
 /// Enable or disable debug logging for llama.cpp
 #[cfg(not(target_env = "musl"))]
 pub fn set_debug_logging(enabled: bool) {
     LLAMA_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
+    // Restore full "common" library verbosity in debug, quiet it otherwise.
+    set_common_log_quiet(!enabled);
+}
+
+/// Quiet (or restore) llama.cpp's "common" library logging — see the C wrapper for details.
+#[cfg(not(target_env = "musl"))]
+fn set_common_log_quiet(quiet: bool) {
+    // SAFETY: thin extern "C" setter over a global int threshold; no pointers involved.
+    unsafe {
+        ffi::arkavo_set_common_log_quiet(i32::from(quiet));
+    }
 }
 
 #[cfg(not(target_env = "musl"))]
@@ -2120,6 +2144,40 @@ pub fn test_minimal_init() -> Result<(), String> {
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
+
+    // Regression: llama.cpp printed these GGUF tokenizer-metadata warnings straight to the
+    // terminal during a normal `arkavo chat`. They are unfixable on our side (llama.cpp
+    // auto-corrects the token types at load), so they must be hidden unless debug logging is
+    // on — but never suppress genuine load errors.
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn suppresses_unfixable_model_metadata_warnings() {
+        assert!(is_suppressed_log_line(
+            "load: control-looking token:     50 '<|tool_response>' was not control-type; this is probably a bug in the model. its type will be overridden\n"
+        ));
+        assert!(is_suppressed_log_line(
+            "load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list\n"
+        ));
+        assert!(is_suppressed_log_line(
+            "load: override 'tokenizer.ggml.add_bos_token' to 'true' for Gemma4\n"
+        ));
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn does_not_suppress_genuine_errors() {
+        assert!(!is_suppressed_log_line(
+            "error loading model: unknown (magic, version) combination\n"
+        ));
+        assert!(!is_suppressed_log_line(
+            "llama_model_load: error loading model architecture\n"
+        ));
+        // A genuine error that merely mentions a suppressed subsystem must still surface:
+        // the special_eog_ids matches are the exact benign phrases, not the bare token.
+        assert!(!is_suppressed_log_line(
+            "error: failed to configure special_eog_ids for vocab\n"
+        ));
+    }
 
     #[spec("LLAMA-006")]
     #[test]

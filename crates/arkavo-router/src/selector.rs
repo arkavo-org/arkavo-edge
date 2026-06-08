@@ -154,17 +154,31 @@ impl ModelSelector {
         }
     }
 
+    /// Preference order for the fast internal model (judging, synthesis, classification),
+    /// most-preferred first. Gemma 4 E2B leads because first-run setup provisions it as the
+    /// "Small (fast routing)" model; the legacy entries keep older installs working without a
+    /// download. The fallback when none are cached MUST stay a setup-provisioned model.
+    const FAST_LOCAL_PREFERENCE: [ModelChoice; 3] = [
+        ModelChoice::LocalGemma4E2B,
+        ModelChoice::LocalMinistral3B,
+        ModelChoice::LocalQwen3,
+    ];
+
     /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// Ministral-3B preferred: 690ms avg, 8/8 tool accuracy.
-    /// Qwen3.5-0.8B fallback: 525ms but poor tool calling in practice.
+    /// Prefers a cached model from [`Self::FAST_LOCAL_PREFERENCE`]; falls back to Gemma 4 E2B —
+    /// the model first-run setup downloads — so chat never silently pulls an un-provisioned
+    /// model the user never opted into.
     pub fn fastest_local_model(&self) -> ModelChoice {
-        if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
-            ModelChoice::LocalMinistral3B
-        } else if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
-            ModelChoice::LocalQwen3
-        } else {
-            ModelChoice::LocalMinistral3B
-        }
+        Self::pick_fast_local_model(Self::is_local_model_cached)
+    }
+
+    /// Policy half of [`Self::fastest_local_model`], split out so the preference order and
+    /// fallback can be unit-tested without touching the on-disk model cache.
+    fn pick_fast_local_model(is_cached: impl Fn(&ModelChoice) -> bool) -> ModelChoice {
+        Self::FAST_LOCAL_PREFERENCE
+            .into_iter()
+            .find(|m| is_cached(m))
+            .unwrap_or(ModelChoice::LocalGemma4E2B)
     }
 
     /// Check if system has at least `min_gb` of RAM
@@ -506,5 +520,42 @@ mod tests {
         let selector = ModelSelector::with_availability(ProviderAvailability::default());
         let feasible = selector.feasible_models();
         assert!(!feasible.is_empty());
+    }
+
+    // Regression: a fresh install provisions Gemma 4 E2B + Gemma 4 12B (no Ministral/Qwen).
+    // The fast-model selector must not fall through to a hardcoded Ministral 3B, which made
+    // `arkavo chat` silently download an un-provisioned model on first use.
+    #[test]
+    fn test_fast_local_model_falls_back_to_provisioned_gemma() {
+        let nothing_cached = |_: &ModelChoice| false;
+        assert_eq!(
+            ModelSelector::pick_fast_local_model(nothing_cached),
+            ModelChoice::LocalGemma4E2B,
+        );
+    }
+
+    #[test]
+    fn test_fast_local_model_uses_cached_gemma_e2b() {
+        // Fresh install: only the two setup models are present.
+        let gemma_cached = |m: &ModelChoice| {
+            matches!(
+                m,
+                ModelChoice::LocalGemma4E2B | ModelChoice::LocalGemma4_12B
+            )
+        };
+        assert_eq!(
+            ModelSelector::pick_fast_local_model(gemma_cached),
+            ModelChoice::LocalGemma4E2B,
+        );
+    }
+
+    #[test]
+    fn test_fast_local_model_honors_legacy_ministral_install() {
+        // Older install with only Ministral 3B cached still resolves to it (no download).
+        let ministral_cached = |m: &ModelChoice| matches!(m, ModelChoice::LocalMinistral3B);
+        assert_eq!(
+            ModelSelector::pick_fast_local_model(ministral_cached),
+            ModelChoice::LocalMinistral3B,
+        );
     }
 }

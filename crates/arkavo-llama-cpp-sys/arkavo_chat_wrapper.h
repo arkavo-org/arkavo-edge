@@ -109,6 +109,13 @@ struct llama_sampler *arkavo_sampler_init_grammar_lazy_with_tokens(
     const int32_t *trigger_tokens,
     int num_trigger_tokens);
 
+// Quiet llama.cpp's "common" library logging — the chat-template and
+// speculative-decoding notices emitted as LOG_INF/LOG_WRN. When quiet != 0,
+// only errors are emitted; when quiet == 0, the upstream default verbosity is
+// restored so debug runs see everything. This is a separate logging system from
+// the ggml/llama_log_set callback, so it needs its own control.
+void arkavo_set_common_log_quiet(int quiet);
+
 #ifdef __cplusplus
 }
 #endif

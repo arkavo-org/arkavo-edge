@@ -31,12 +31,12 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-ter
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
-iroh = ["dep:arkavo-tdf-iroh", "arkavo-server/iroh"]
-kas = ["arkavo-protocol/kas", "arkavo-tdf/kas", "arkavo-server/kas"]
+iroh = ["arkavo-server/iroh"]
+kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
@@ -45,7 +45,6 @@ arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-mcp-identity = { path = "../arkavo-mcp-identity" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
@@ -62,22 +61,18 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-ucp = { path = "../arkavo-ucp" }
-arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-agent-auth = { path = "../arkavo-agent-auth" }
-arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf"] }
-arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

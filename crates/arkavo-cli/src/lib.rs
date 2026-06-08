@@ -142,74 +142,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        "orchestrator" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "orchestrator")]
-                #[command(about = "GitHub issue orchestration")]
-                struct Cli {
-                    #[command(flatten)]
-                    command: commands::orchestrator::OrchestratorCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("orchestrator")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::orchestrator::run(&cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
-        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
-        "serve" | "mcp" => {
-            // Always create a new runtime for the MCP server
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { commands::mcp::run().await })
-        }
-        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
-        "serve" | "mcp" => {
-            eprintln!("MCP server is not available on this platform");
-            Err("MCP server requires macOS with mcp-tools feature (uses iOS simulator)".into())
-        }
-        "tdf" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "tdf")]
-                #[command(about = "TDF encryption, decryption, and P2P transport")]
-                struct Cli {
-                    #[command(subcommand)]
-                    command: commands::tdf::TdfCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("tdf").chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::tdf::handle_tdf_command(cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         #[cfg(feature = "llama-cpp")]
         "tool-bench" => {
             let run_async = async {
@@ -246,6 +178,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             print_usage();
             Ok(())
         }
+        // Leading options with no subcommand run the default `agent` command, so
+        // `arkavo --trust` behaves like `arkavo agent run --trust`. (`-v`/`--version`
+        // and `-h`/`--help` are handled above / in main before reaching here.)
+        flag if flag.starts_with('-') => commands::agent::execute(args),
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
@@ -264,15 +200,13 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
-    println!("    orchestrator   GitHub issue orchestration");
-    println!("    serve          Run as MCP server");
-    println!("    tdf            TDF encryption and P2P transport");
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Show help");
     println!("    -v, --version    Show version");
+    println!("    --trust          Run the agent and show its authorization QR code (DID:key)");
 }
 
 /// Handle first-run experience for new users

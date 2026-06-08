@@ -44,14 +44,22 @@ chrono-tz = "0.9"
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
+# Code-search (ripgrep/comby/tree-sitter) and ephemeral-workspace tools. Optional so the
+# musl static/slim and Windows builds can opt out of tree-sitter C-grammar compilation.
+arkavo-mcp-code-search = { path = "../arkavo-mcp-code-search", optional = true }
+arkavo-mcp-workspace = { path = "../arkavo-mcp-workspace", optional = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
 
 [features]
-default = ["iroh"]
+default = ["iroh", "code-tools"]
 ntp-server = []
 iroh = ["dep:arkavo-tdf-iroh"]
+# Code-search + ephemeral-workspace MCP tools (codegrep_search, struct_find_replace,
+# syntax_tree, workspace_container). On by default; off for slim/Windows targets.
+code-tools = ["dep:arkavo-mcp-code-search", "dep:arkavo-mcp-workspace"]
 
 [lints]
 workspace = true

@@ -53,6 +53,32 @@ impl Tool for McpToolWrapper {
     }
 }
 
+/// Adapts a tool implementing `arkavo_mcp::Tool` to this crate's `server::Tool`. The two
+/// traits are near-identical — same `ToolSchema`, differing only in the execute() error type.
+//
+// TODO: unify arkavo_mcp::Tool and server::Tool. This adapter exists only because the error
+// types diverge (arkavo_mcp uses Box<dyn Error>, here ToolError). Unification is where
+// category-aware (retryable vs fatal) error handling should land, for all wrapped tools at once.
+#[cfg(feature = "code-tools")]
+struct McpToolAdapter(Box<dyn arkavo_mcp::Tool>);
+
+#[cfg(feature = "code-tools")]
+#[async_trait]
+impl Tool for McpToolAdapter {
+    async fn execute(&self, params: Value) -> crate::Result<Value> {
+        // arkavo_mcp::Tool type-erases its error to Box<dyn Error>, so no category survives to
+        // preserve here — map to the coarse Execution variant, as McpToolWrapper/mcp_bridge do.
+        self.0
+            .execute(params)
+            .await
+            .map_err(|e| crate::ToolError::Execution(e.to_string()))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        self.0.schema()
+    }
+}
+
 /// Level of detail to return when discovering tools
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DetailLevel {
@@ -282,6 +308,31 @@ impl ToolRegistry {
             "context_restore",
             Box::new(ContextRestoreTool::new(storage)),
         );
+
+        // Code-search and ephemeral-workspace tools. These implement `arkavo_mcp::Tool`, so
+        // they are wrapped in `McpToolAdapter` to satisfy `server::Tool`.
+        #[cfg(feature = "code-tools")]
+        {
+            use arkavo_mcp_code_search::{CodeGrepTool, CombyTool, TreeSitterTool};
+            use arkavo_mcp_workspace::WorkspaceTool;
+            self.register(
+                "codegrep_search",
+                Box::new(McpToolAdapter(Box::new(CodeGrepTool::new()))),
+            );
+            self.register(
+                "struct_find_replace",
+                Box::new(McpToolAdapter(Box::new(CombyTool::new()))),
+            );
+            self.register(
+                "syntax_tree",
+                Box::new(McpToolAdapter(Box::new(TreeSitterTool::new()))),
+            );
+            // workspace_container needs Docker/Podman at runtime; it fails gracefully when absent.
+            self.register(
+                "workspace_container",
+                Box::new(McpToolAdapter(Box::new(WorkspaceTool::new()))),
+            );
+        }
 
         // Note: Apple platform tools (simulator, Xcode, debugger, UI automation)
         // have been moved to arkavo-mcp-macos crate for better organization.
@@ -739,6 +790,22 @@ mod tests {
         let registry = create_test_registry().await;
         let tools = registry.list_tools();
         assert!(!tools.is_empty());
+    }
+
+    // The code-search + workspace tools are exposed via McpToolAdapter (they implement
+    // arkavo_mcp::Tool rather than server::Tool). Guard that the wiring stays registered.
+    #[cfg(feature = "code-tools")]
+    #[tokio::test]
+    async fn test_code_tools_registered() {
+        let registry = create_test_registry().await;
+        for name in [
+            "codegrep_search",
+            "struct_find_replace",
+            "syntax_tree",
+            "workspace_container",
+        ] {
+            assert!(registry.get(name).is_some(), "{name} should be registered");
+        }
     }
 
     #[tokio::test]
