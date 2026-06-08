@@ -67,7 +67,6 @@ Four shipped kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `com
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
 - **Ministral 3 support** - Local edge models (3B/8B/14B) with vision via llama.cpp
 - Cost-aware model selection
-- GitHub issue orchestration
 - iOS simulator automation (macOS only)
 - Security scanning (Semgrep, OSV, SBOM)
 
@@ -116,14 +115,6 @@ Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
 ### Test & Automation
 - **browser_cdp**: Chrome DevTools Protocol automation via chromiumoxide
 - **test_run**: Multi-language test runner (pytest, jest, go test, cargo test, xcodebuild)
-
-### GitHub Orchestration
-```bash
-# Auto-handle GitHub issues with AI agents
-GITHUB_TOKEN=ghp_token arkavo orchestrator poll --repo owner/repo
-```
-
-Features: Issue classification, agent assignment, PR reviews, budget tracking. See [orchestrator docs](crates/arkavo-orchestrator/README.md).
 
 ### Ephemeral Workspaces
 - **workspace_container**: Container-based isolated execution with resource quotas (Docker/Podman)

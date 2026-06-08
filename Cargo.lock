@@ -706,7 +706,6 @@ dependencies = [
  "arkavo-device-identity",
  "arkavo-events",
  "arkavo-git",
- "arkavo-github",
  "arkavo-gossip",
  "arkavo-hrm",
  "arkavo-kimi",

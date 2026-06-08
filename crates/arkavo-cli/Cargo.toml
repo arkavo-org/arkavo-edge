@@ -62,7 +62,6 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-ucp = { path = "../arkavo-ucp" }
-arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }

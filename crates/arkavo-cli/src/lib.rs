@@ -142,35 +142,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        "orchestrator" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "orchestrator")]
-                #[command(about = "GitHub issue orchestration")]
-                struct Cli {
-                    #[command(flatten)]
-                    command: commands::orchestrator::OrchestratorCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("orchestrator")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::orchestrator::run(&cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "serve" | "mcp" => {
             // Always create a new runtime for the MCP server
@@ -268,7 +239,6 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
-    println!("    orchestrator   GitHub issue orchestration");
     println!("    serve          Run as MCP server");
     println!("    tdf            TDF encryption and P2P transport");
     println!();
