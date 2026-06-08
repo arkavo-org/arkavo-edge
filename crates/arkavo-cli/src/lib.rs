@@ -246,6 +246,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             print_usage();
             Ok(())
         }
+        // Leading options with no subcommand run the default `agent` command, so
+        // `arkavo --trust` behaves like `arkavo agent run --trust`. (`-v`/`--version`
+        // and `-h`/`--help` are handled above / in main before reaching here.)
+        flag if flag.starts_with('-') => commands::agent::execute(args),
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
@@ -273,6 +277,7 @@ fn print_usage() {
     println!("OPTIONS:");
     println!("    -h, --help       Show help");
     println!("    -v, --version    Show version");
+    println!("    --trust          Run the agent and show its authorization QR code (DID:key)");
 }
 
 /// Handle first-run experience for new users
