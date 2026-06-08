@@ -60,9 +60,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "run" => subcommand = Some("run"),
+            // An unrecognized option must surface an error rather than silently booting
+            // the agent — e.g. a typo like `arkavo --trsut` (also reachable via the bare
+            // `arkavo <flag>` top-level route, which dispatches here).
+            unknown if unknown.starts_with('-') => {
+                eprintln!("Error: Unknown option '{unknown}'");
+                print_usage();
+                return Err(format!("Unknown option: {unknown}").into());
+            }
             _ => {
-                // Unknown argument - check if it's a subcommand we don't recognize
-                if subcommand.is_none() && !arg.starts_with('-') {
+                // Unknown non-dash token: an unrecognized subcommand.
+                if subcommand.is_none() {
                     eprintln!("Error: Unknown agent subcommand '{arg}'");
                     print_usage();
                     return Err(format!("Unknown subcommand: {arg}").into());
@@ -2200,6 +2208,14 @@ fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // An unrecognized option must error, not silently boot an agent (regression: the bare
+    // `arkavo <flag>` route dispatches here, and unknown dash args were previously ignored).
+    #[test]
+    fn unknown_option_errors_instead_of_running() {
+        assert!(execute(&["--bogus".to_string()]).is_err());
+        assert!(execute(&["--trsut".to_string()]).is_err()); // typo of --trust
+    }
 
     #[test]
     fn parse_frontmatter_basic() {

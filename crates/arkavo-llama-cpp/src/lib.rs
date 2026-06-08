@@ -139,7 +139,9 @@ fn is_suppressed_log_line(text: &str) -> bool {
         return true;
     }
     // Informational lines we surface ourselves, plus unfixable model-metadata quirks (the
-    // tokenizer entries). `special_eog_ids` covers both the "is not in" and "contains" variants.
+    // tokenizer entries). Matches are kept reasonably specific so a genuine error that merely
+    // mentions one of these subsystems isn't swallowed — the two special_eog_ids phrases are the
+    // exact benign messages, not the bare token.
     const BENIGN_SUBSTRINGS: &[&str] = &[
         "llama_kv_cache",
         "n_ctx_per_seq",
@@ -147,7 +149,8 @@ fn is_suppressed_log_line(text: &str) -> bool {
         "tensor API disabled for pre-M",
         "llama_context",
         "control-looking token",
-        "special_eog_ids",
+        "is not in special_eog_ids",
+        "special_eog_ids contains",
         // llama.cpp rewriting a model's tokenizer metadata at load (e.g. forcing
         // add_bos_token for Gemma 4) — a model-file quirk it auto-corrects.
         "override 'tokenizer",
@@ -2168,6 +2171,11 @@ mod tests {
         ));
         assert!(!is_suppressed_log_line(
             "llama_model_load: error loading model architecture\n"
+        ));
+        // A genuine error that merely mentions a suppressed subsystem must still surface:
+        // the special_eog_ids matches are the exact benign phrases, not the bare token.
+        assert!(!is_suppressed_log_line(
+            "error: failed to configure special_eog_ids for vocab\n"
         ));
     }
 
