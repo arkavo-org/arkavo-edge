@@ -14,13 +14,13 @@ pub trait TokenEstimator: Send + Sync {
 /// Wraps an already-loaded llama.cpp model's tokenizer.
 /// llama_tokenize() is a pure vocabulary lookup — no GPU, no inference.
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-pub struct LlamaTokenEstimator {
+pub(super) struct LlamaTokenEstimator {
     model: std::sync::Arc<arkavo_llama_cpp::LlamaModel>,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl LlamaTokenEstimator {
-    pub fn new(model: std::sync::Arc<arkavo_llama_cpp::LlamaModel>) -> Self {
+    pub(super) fn new(model: std::sync::Arc<arkavo_llama_cpp::LlamaModel>) -> Self {
         Self { model }
     }
 }
