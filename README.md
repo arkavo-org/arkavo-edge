@@ -22,7 +22,7 @@ brew trust --formula arkavo-org/arkavo/arkavo  # required on Homebrew 5.2+
 brew install arkavo
 ```
 
-**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup. Recommended models: Ministral 3B (text+vision) or gemma-3 270M.
+**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup. First run auto-selects an edge model for the device (Pi 5 → Gemma 4 E4B).
 
 ### Install on Windows
 Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and run the .exe file.
@@ -38,13 +38,23 @@ arkavo ui
 
 That's it. No configuration files, no setup. Agents auto-discover via mDNS and form a mesh.
 
+On first run, Arkavo downloads two local models sized to your device — a small model for fast routing (Gemma 4 E2B) and a larger model for inference (Gemma 4 12B on desktop/workstation; Gemma 4 E4B on a Raspberry Pi 5).
+
+### Trusting an agent
+
+To authorize an agent (e.g. from another device), show its identity QR — the agent's `DID:key` and entitlements:
+
+```bash
+arkavo agent run --trust   # or simply: arkavo --trust
+```
+
 ## Coming from OpenClaw?
 
 See the [migration guide](docs/openclaw-migration-guide.md) for a full comparison: what you gain (budget controls, TDF encryption, PII preflight, offline operation), what's different, and step-by-step setup.
 
 ## Why Arkavo?
 - **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, auto-discovery.
-- **Fast:** Low-latency agent-to-agent communication. Run `cargo bench -p arkavo-protocol --bench a2a_latency` to measure.
+- **Fast:** Low-latency agent-to-agent communication (benchmarkable from source — see [Building from Source](#building-from-source)).
 - **Visual:** See live agent communication flows in real-time.
 
 ## SwarmKit
@@ -52,21 +62,17 @@ See the [migration guide](docs/openclaw-migration-guide.md) for a full compariso
 Declarative multi-agent kits where each role declares its own TDF Attribute Release Policy. The orchestrator constructs role-scoped policies before any data reaches the role — push the trust boundary inward.
 
 ```bash
-# Validate the compliance kit (per-role TDF policies in action)
-cargo run -p arkavo-swarmkit --example validate_kit -- \
-  examples/compliance-kit/compliance-kit.swarmkit.yaml
-
-# Or launch any kit at gateway boot
+# Launch any kit at gateway boot
 ARKAVO_SWARMKIT_PATH=examples/code-review-kit/code-review-kit.swarmkit.yaml arkavo
 ```
 
-Four shipped kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `compliance-kit`. Full guide: [docs/SWARMKIT.md](docs/SWARMKIT.md).
+Four shipped kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `compliance-kit`. Full guide: [docs/SWARMKIT.md](docs/SWARMKIT.md). To validate a kit manifest from source, see [Building from Source](#building-from-source).
 
 ## Features
 - **SwarmKit** - Declarative multi-agent kits with per-role TDF attribute-release policies. Four shipped examples covering marketing, code review, creative, and regulated domains. See [docs/SWARMKIT.md](docs/SWARMKIT.md).
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
-- **Ministral 3 support** - Local edge models (3B/8B/14B) with vision via llama.cpp
-- Cost-aware model selection
+- **Local edge models via llama.cpp** - Gemma 4 (E2B/E4B/12B) by default; Ministral 3B/8B (with vision) also supported
+- Cost-aware model selection (real per-token estimates on full macOS/Linux builds; the musl-slim and Windows binaries use an approximate estimator)
 - iOS simulator automation (macOS only)
 - Security scanning (Semgrep, OSV, SBOM)
 
@@ -100,14 +106,14 @@ arkavo  # Runs with your config
 
 ## Coding Agent Toolset
 
-Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
+The agent uses these MCP tools in-process during `chat` and `task` — there's no separate server to start. Tools that shell out to an external binary register only when that binary is on `PATH` (noted below).
 
 ### Code Search & Intelligence
 - **codegrep_search**: Fast repository-wide code search with ripgrep
 - **struct_find_replace**: Language-aware structural search and replace with Comby
 - **syntax_tree**: AST parsing for syntax-aware code analysis with tree-sitter
 
-### Security & Quality
+### Security & Quality (require the named binary on `PATH`)
 - **sec_semgrep**: SAST scanning with Semgrep
 - **deps_osv**: Dependency vulnerability scanning with OSV-Scanner
 - **sbom_syft**: SBOM generation with Syft
@@ -116,11 +122,14 @@ Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
 - **browser_cdp**: Chrome DevTools Protocol automation via chromiumoxide
 - **test_run**: Multi-language test runner (pytest, jest, go test, cargo test, xcodebuild)
 
-### Ephemeral Workspaces
-- **workspace_container**: Container-based isolated execution with resource quotas (Docker/Podman)
+### Ephemeral Workspaces (requires Docker/Podman)
+- **workspace_container**: Container-based isolated execution with resource quotas
 
-### SWE-bench Evaluation
-- **swe_bench**: Objective benchmarking harness with metrics tracking
+These nine tools are the ones the running agent can call (the binary also registers git, GitHub, web-search, shell, and TDF tools — see the full reference below).
+
+### Benchmark harness
+
+SWE-bench evaluation lives in the separate `arkavo-mcp-bench` crate, run from source — it is **not** a registered agent tool (it depends on the orchestration engine, which would form a dependency cycle if exposed through the tool registry).
 
 See [docs/coding-agent-toolset.md](docs/coding-agent-toolset.md) for complete tool documentation.
 
@@ -161,7 +170,7 @@ Clone the llama.cpp dependency (not tracked in git):
 ```bash
 git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 cd vendor/llama.cpp
-git checkout d23355afc
+git checkout ef570f63087b6a5a2930210a13f87990e8113927
 cd ../..
 ```
 
@@ -172,3 +181,16 @@ cargo build
 ```
 
 The default build includes mDNS discovery using a pure Rust implementation (`mdns-sd` crate) that doesn't require system libraries like Avahi or Bonjour. This provides true portability across all platforms.
+
+### Development
+
+These commands run against the source tree (not the installed binary):
+
+```bash
+# Measure agent-to-agent latency
+cargo bench -p arkavo-protocol --bench a2a_latency
+
+# Validate a SwarmKit manifest
+cargo run -p arkavo-swarmkit --example validate_kit -- \
+  examples/compliance-kit/compliance-kit.swarmkit.yaml
+```

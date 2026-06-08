@@ -96,13 +96,12 @@ cargo test -p arkavo-cli mock_provider
 
 ## Local Model Support
 
-### Ministral 3 (Recommended for Edge)
-Mistral's edge-optimized models with vision capabilities:
-- **3B**: Raspberry Pi 5, 8GB RAM minimum
-- **8B**: Desktop/laptop, 12GB VRAM recommended
-- **14B**: Server/workstation, 16GB+ VRAM
+### Local edge models
+First run auto-downloads Gemma 4 sized to the device (E2B + 12B on desktop/workstation; E4B on a Raspberry Pi 5). Ministral 3B/8B (Mistral's edge models, with vision) are also supported:
+- **Ministral 3B**: Raspberry Pi 5 / low-memory, 8GB RAM minimum
+- **Ministral 8B**: Desktop/laptop, 12GB VRAM recommended
 
-Models auto-download from HuggingFace on first use via `Ministral3ModelLoader`.
+Local models auto-download from HuggingFace on first use. The canonical model registry is `ModelChoice` in `crates/arkavo-router/src/decision.rs`.
 
 ### Reasoning Mode
 For complex tasks requiring step-by-step thinking, use Ministral Reasoning variants or add a system prompt:
