@@ -57,14 +57,32 @@ impl ThinkingConfig {
     }
 }
 
-/// Claude models on the adaptive-thinking API surface (Fable 5 and Opus 4.7+).
-/// These reject sampling parameters (`temperature`, `top_p`, `top_k`) and
-/// fixed thinking budgets with HTTP 400; requests must omit them and opt into
-/// `thinking: {"type": "adaptive"}` instead.
+/// Claude models on the adaptive-thinking API surface (Fable/Mythos and
+/// Opus 4.7+). These reject sampling parameters (`temperature`, `top_p`,
+/// `top_k`) and fixed thinking budgets with HTTP 400; requests must omit them
+/// and opt into `thinking: {"type": "adaptive"}` instead.
+///
+/// The Opus cutoff is parsed from the version rather than enumerated, so a
+/// future snapshot (4.9, 5.x, ...) pinned in `ModelChoice::name()` — or set
+/// via `ANTHROPIC_MODEL` — is covered without editing this in lockstep. The
+/// model id is the only signal available here; the provider is a lower layer
+/// than the router's `ModelChoice` and also sees raw operator-set ids.
 fn uses_adaptive_thinking(model: &str) -> bool {
-    model.starts_with("claude-fable")
-        || model.starts_with("claude-opus-4-7")
-        || model.starts_with("claude-opus-4-8")
+    // Fable and Mythos are adaptive-thinking-only from their first release.
+    if model.starts_with("claude-fable") || model.starts_with("claude-mythos") {
+        return true;
+    }
+    // Opus removed sampling params + fixed thinking budgets starting at 4.7.
+    if let Some(rest) = model.strip_prefix("claude-opus-") {
+        let mut parts = rest.split('-');
+        if let (Some(Ok(major)), Some(Ok(minor))) = (
+            parts.next().map(str::parse::<u32>),
+            parts.next().map(str::parse::<u32>),
+        ) {
+            return major > 4 || (major == 4 && minor >= 7);
+        }
+    }
+    false
 }
 
 /// Anthropic API request structures
@@ -875,12 +893,28 @@ mod tests {
 
     #[test]
     fn test_adaptive_thinking_surface_detection() {
+        // Current adaptive-surface ids.
         assert!(uses_adaptive_thinking("claude-fable-5"));
+        assert!(uses_adaptive_thinking("claude-mythos-5"));
         assert!(uses_adaptive_thinking("claude-opus-4-7"));
         assert!(uses_adaptive_thinking("claude-opus-4-8"));
-        assert!(!uses_adaptive_thinking("claude-sonnet-4-5-20250929"));
+        // Future snapshots must be covered without editing this function in
+        // lockstep with ModelChoice::name() — a non-adaptive request to one of
+        // these is a hard 400, which the prior hardcoded list would have
+        // missed.
+        assert!(uses_adaptive_thinking("claude-opus-4-9"));
+        assert!(uses_adaptive_thinking("claude-opus-4-12-20270101"));
+        assert!(uses_adaptive_thinking("claude-opus-5-0"));
+        assert!(uses_adaptive_thinking("claude-opus-6-3"));
+        // Pre-adaptive Opus and non-Opus families keep the legacy surface.
+        assert!(!uses_adaptive_thinking("claude-opus-4-6"));
         assert!(!uses_adaptive_thinking("claude-opus-4-5-20251101"));
+        assert!(!uses_adaptive_thinking("claude-sonnet-4-6"));
+        assert!(!uses_adaptive_thinking("claude-sonnet-4-5-20250929"));
         assert!(!uses_adaptive_thinking("kimi-k2.5"));
+        // Malformed / unparseable ids fall back to the legacy surface.
+        assert!(!uses_adaptive_thinking("claude-opus"));
+        assert!(!uses_adaptive_thinking("claude-opus-latest"));
     }
 
     // Regression: Fable 5 / Opus 4.7+ return HTTP 400 if `temperature` or an
