@@ -238,9 +238,9 @@ impl ArchitectExecutor {
 
     async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         match model {
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
-                AnthropicProvider::from_env()
+                AnthropicProvider::from_env_with_model(model.name())
                     .map(|p| Box::new(p) as Box<dyn Provider>)
                     .map_err(|e| {
                         Error::ModelExecution(format!("Failed to create Anthropic provider: {e}"))
@@ -299,7 +299,9 @@ impl ArchitectExecutor {
             ModelChoice::Gemini35FlashHigh => ModelChoice::ClaudeSonnet,
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
-            ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
+            // Fable 5 is the most capable tier — the escalation ceiling.
+            ModelChoice::ClaudeOpus => ModelChoice::ClaudeFable5,
+            ModelChoice::ClaudeFable5 => ModelChoice::ClaudeFable5,
             ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
         }
     }
@@ -327,7 +329,11 @@ impl ArchitectExecutor {
                 (input_tokens / 1_000_000.0).mul_add(3.00, (output_tokens / 1_000_000.0) * 15.00)
             }
             ModelChoice::ClaudeOpus => {
-                (input_tokens / 1_000_000.0).mul_add(15.00, (output_tokens / 1_000_000.0) * 75.00)
+                // Opus 4.8 pricing ($5/$25); the old $15/$75 was Opus 4.1.
+                (input_tokens / 1_000_000.0).mul_add(5.00, (output_tokens / 1_000_000.0) * 25.00)
+            }
+            ModelChoice::ClaudeFable5 => {
+                (input_tokens / 1_000_000.0).mul_add(10.00, (output_tokens / 1_000_000.0) * 50.00)
             }
             _ => 0.0,
         }
@@ -408,7 +414,12 @@ mod tests {
             );
             assert_eq!(
                 executor.escalate_model(&ModelChoice::ClaudeOpus),
-                ModelChoice::ClaudeOpus
+                ModelChoice::ClaudeFable5
+            );
+            // Fable 5 is the escalation ceiling — it must not escalate past itself.
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::ClaudeFable5),
+                ModelChoice::ClaudeFable5
             );
         }
     }

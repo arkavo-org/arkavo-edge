@@ -36,6 +36,11 @@ pub enum ModelChoice {
     GeminiPro,
     ClaudeSonnet,
     ClaudeOpus,
+    /// Claude Fable 5 - Anthropic's most capable tier, above Opus. 1M context,
+    /// 128K max output, adaptive-thinking-only API surface. At $10/$50 per
+    /// MTok (2x Opus) it is the escalation ceiling and explicit-selection
+    /// premium arm, never a silent default.
+    ClaudeFable5,
     /// Qwen3.5-0.8B - fast DeltaNet, TØRG-compatible (preferred default)
     LocalQwen3,
     /// Ministral-3B - TØRG-compatible, higher quality
@@ -88,7 +93,13 @@ impl ModelChoice {
             Self::Gemini35FlashHigh => "gemini-3.5-flash-high",
             Self::GeminiPro => "gemini-3-pro-preview",
             Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
-            Self::ClaudeOpus => "claude-opus-4-5-20251101",
+            // Dateless ids are pinned snapshots, not evergreen pointers.
+            // Opus 4.8 is adaptive-thinking-only (same surface as Fable 5);
+            // the provider gates sampling params off via `uses_adaptive_thinking`.
+            Self::ClaudeOpus => "claude-opus-4-8",
+            // Alias, not a dated snapshot — Anthropic serves Fable 5 under
+            // the bare id only.
+            Self::ClaudeFable5 => "claude-fable-5",
             Self::LocalQwen3 => "qwen3.5-0.8b",
             Self::LocalMinistral3B => "ministral-3b",
             Self::LocalMinistral8B => "ministral-8b",
@@ -134,7 +145,7 @@ impl ModelChoice {
             | Self::Gemini35FlashMedium
             | Self::Gemini35FlashHigh
             | Self::GeminiPro => "google",
-            Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
+            Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::KimiK2 => "kimi",
         }
     }
@@ -182,6 +193,7 @@ impl ModelChoice {
             "gemini-3-pro-preview" => Some(Self::GeminiPro),
             _ if name.contains("claude-sonnet") => Some(Self::ClaudeSonnet),
             _ if name.contains("claude-opus") => Some(Self::ClaudeOpus),
+            _ if name.contains("fable") => Some(Self::ClaudeFable5),
             _ => None,
         }
     }
@@ -233,7 +245,10 @@ impl ModelChoice {
     ];
 
     pub fn is_anthropic(&self) -> bool {
-        matches!(self, Self::ClaudeSonnet | Self::ClaudeOpus)
+        matches!(
+            self,
+            Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5
+        )
     }
 
     pub fn is_gemini(&self) -> bool {
@@ -297,7 +312,7 @@ impl ModelChoice {
             | Self::Gemini35FlashMedium
             | Self::Gemini35FlashHigh
             | Self::GeminiPro => "google",
-            Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
+            Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::LocalQwen3
             | Self::LocalQwen35_9B
             | Self::LocalQwen35_27B
@@ -347,6 +362,7 @@ impl ModelChoice {
             | Self::GeminiPro
             | Self::ClaudeSonnet
             | Self::ClaudeOpus
+            | Self::ClaudeFable5
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
             | Self::KimiK2 => PlannerTier::Large,
@@ -545,6 +561,7 @@ impl ModelChoice {
             Self::GeminiPro => "Gemini Pro",
             Self::ClaudeSonnet => "Claude Sonnet",
             Self::ClaudeOpus => "Claude Opus",
+            Self::ClaudeFable5 => "Claude Fable 5",
             Self::DeepSeekV32 => "DeepSeek V3.2",
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
@@ -666,6 +683,13 @@ impl RoutingDecision {
                     ModelChoice::LocalMinistral8B,
                 ]
             }
+            (ModelChoice::ClaudeFable5, _) => {
+                vec![
+                    ModelChoice::ClaudeOpus,
+                    ModelChoice::GeminiPro,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             // Qwen3 -> Ministral-3B -> Ministral-8B -> GLM-4.7-Flash
             (ModelChoice::LocalQwen3, _) => {
                 vec![ModelChoice::LocalMinistral3B, ModelChoice::GeminiFlash]
@@ -757,9 +781,19 @@ impl RoutingDecision {
                 input_cost + output_cost
             }
             ModelChoice::ClaudeOpus => {
-                // Claude Opus 4.5: $15/1M input, $75/1M output
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 15.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 75.00;
+                // Claude Opus 4.8: $5/1M input, $25/1M output. The old
+                // $15/$75 figure here was Opus 4.1 pricing and overstated
+                // Opus cost 3x in every routing comparison.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 5.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 25.00;
+                input_cost + output_cost
+            }
+            ModelChoice::ClaudeFable5 => {
+                // Claude Fable 5: $10/1M input, $50/1M output — 2x Opus.
+                // Premium capability tier; cost-justified only on escalation
+                // or explicit selection.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 10.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 50.00;
                 input_cost + output_cost
             }
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
@@ -806,7 +840,10 @@ impl RoutingDecision {
             ModelChoice::Gemini35FlashHigh => Duration::from_secs(20),
             ModelChoice::GeminiPro => Duration::from_secs(10),
             ModelChoice::ClaudeSonnet => Duration::from_secs(5),
-            ModelChoice::ClaudeOpus => Duration::from_secs(15),
+            // Opus 4.8 and Fable 5 both reason via adaptive thinking, which
+            // spends extra wall-clock on hard tasks.
+            ModelChoice::ClaudeOpus => Duration::from_secs(18),
+            ModelChoice::ClaudeFable5 => Duration::from_secs(20),
             ModelChoice::LocalQwen3 => Duration::from_millis(500),
             ModelChoice::LocalMinistral3B => Duration::from_secs(2),
             ModelChoice::LocalMinistral8B => Duration::from_secs(4),
@@ -846,6 +883,92 @@ mod tests {
         assert_eq!(ModelChoice::GeminiFlash.name(), "gemini-flash-latest");
         assert_eq!(ModelChoice::Gemini35Flash.name(), "gemini-3.5-flash");
         assert_eq!(ModelChoice::LocalGemma270M.name(), "gemma-3-270m-it");
+    }
+
+    // Regression: ClaudeOpus must pin the current dateless Opus snapshot.
+    // The provider routes `claude-opus-4-8` onto the adaptive-thinking surface
+    // (no sampling params), so a stale dated id here would also send the wrong
+    // request shape.
+    #[test]
+    fn test_claude_opus_pins_opus_4_8() {
+        assert_eq!(ModelChoice::ClaudeOpus.name(), "claude-opus-4-8");
+        assert_eq!(
+            ModelChoice::from_name("claude-opus-4-8"),
+            Some(ModelChoice::ClaudeOpus)
+        );
+    }
+
+    #[test]
+    fn test_claude_fable_5_properties() {
+        let model = ModelChoice::ClaudeFable5;
+        assert_eq!(model.name(), "claude-fable-5");
+        assert_eq!(model.provider(), "anthropic");
+        assert_eq!(model.family(), "anthropic");
+        assert_eq!(model.display_name(), "Claude Fable 5");
+        assert!(model.is_anthropic());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert_eq!(model.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_claude_fable_5_name_resolution() {
+        for alias in ["claude-fable-5", "claude-fable", "fable"] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::ClaudeFable5),
+                "alias {alias} should resolve to ClaudeFable5"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::ClaudeFable5.name()),
+            Some(ModelChoice::ClaudeFable5),
+            "round-trip via primary name"
+        );
+    }
+
+    #[test]
+    fn test_claude_fable_5_costs_double_opus() {
+        // Fable 5 is $10/$50 vs Opus 4.8 at $5/$25 — the premium tier must
+        // estimate at exactly 2x Opus so budget policies see the real spread.
+        let fable = RoutingDecision::estimate_cost(
+            &ModelChoice::ClaudeFable5,
+            TaskCategory::CodeGeneration,
+        );
+        let opus =
+            RoutingDecision::estimate_cost(&ModelChoice::ClaudeOpus, TaskCategory::CodeGeneration);
+        assert!(fable > 0.0);
+        assert!(
+            (fable - opus * 2.0).abs() < 1e-9,
+            "fable={fable} opus={opus}"
+        );
+    }
+
+    // Regression: ClaudeOpus pins claude-opus-4-8, which is $5/$25 per MTok.
+    // The previous $15/$75 figure (Opus 4.1 pricing) overstated cost 3x.
+    #[test]
+    fn test_claude_opus_cost_uses_opus_4_8_pricing() {
+        let opus =
+            RoutingDecision::estimate_cost(&ModelChoice::ClaudeOpus, TaskCategory::CodeGeneration);
+        let tokens = TaskCategory::CodeGeneration.estimated_tokens();
+        let expected = (f64::from(tokens.input) / 1_000_000.0) * 5.00
+            + (f64::from(tokens.output) / 1_000_000.0) * 25.00;
+        assert!((opus - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_claude_fable_5_fallback_chain_steps_down_to_opus() {
+        let decision = RoutingDecision::new(
+            ModelChoice::ClaudeFable5,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        assert_eq!(
+            decision.fallback_chain.first(),
+            Some(&ModelChoice::ClaudeOpus)
+        );
+        assert!(decision.fallback_chain.iter().any(ModelChoice::is_local));
     }
 
     #[test]

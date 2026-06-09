@@ -371,6 +371,12 @@ impl ModelSelector {
         if self.availability.anthropic {
             models.push(ModelChoice::ClaudeSonnet);
             models.push(ModelChoice::ClaudeOpus);
+            // Fable 5 is 2x Opus pricing; exposed as a Thompson Sampling arm
+            // so the learning module can converge on the task categories
+            // where the capability gain justifies the premium. It is never a
+            // category default — it's reached via learning, escalation, or an
+            // explicit AGENTS.md `model:` hint.
+            models.push(ModelChoice::ClaudeFable5);
         }
         if self.availability.deepseek {
             models.push(ModelChoice::DeepSeekV32);

@@ -269,8 +269,14 @@ Guidelines:
                 input_cost + output_cost
             }
             ModelChoice::ClaudeOpus => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 15.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 75.00;
+                // Opus 4.8 pricing ($5/$25); the old $15/$75 was Opus 4.1.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 5.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 25.00;
+                input_cost + output_cost
+            }
+            ModelChoice::ClaudeFable5 => {
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 10.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 50.00;
                 input_cost + output_cost
             }
             _ => 0.0, // Local models are free
@@ -279,19 +285,19 @@ Guidelines:
 
     fn estimate_costs(&self, plan: &mut ArchitectPlan) {
         // Calculate architect mode total cost
-        let planning_cost = 0.015; // ~200 output tokens from Opus at $75/1M
+        let planning_cost = 0.005; // ~200 output tokens from Opus at $25/1M
         let execution_cost: f64 = plan.subtasks.iter().map(|s| s.estimated_cost_usd).sum();
         plan.architect_estimate_usd = planning_cost + execution_cost;
 
-        // Calculate Opus-only estimate
+        // Calculate Opus-only estimate (Opus 4.8: $5/$25 per MTok)
         let total_output_tokens: u32 = plan
             .subtasks
             .iter()
             .map(|s| s.category.estimated_tokens().output)
             .sum();
         let total_input_tokens = total_output_tokens / 3;
-        let input_cost = (total_input_tokens as f64 / 1_000_000.0) * 15.00;
-        let output_cost = (total_output_tokens as f64 / 1_000_000.0) * 75.00;
+        let input_cost = (total_input_tokens as f64 / 1_000_000.0) * 5.00;
+        let output_cost = (total_output_tokens as f64 / 1_000_000.0) * 25.00;
         plan.opus_only_estimate_usd = input_cost + output_cost;
     }
 }

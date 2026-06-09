@@ -11,12 +11,13 @@ impl ModelSelector {
         classification: &Classification,
     ) -> String {
         let category_reason = match (classification.category, model) {
-            (TaskCategory::FrontendUI, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Frontend task: Claude Sonnet excellent for UI development"
-            }
+            (
+                TaskCategory::FrontendUI,
+                ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5,
+            ) => "Frontend task: Claude excellent for UI development",
             (TaskCategory::FrontendUI, _) => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
-            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus) => {
-                "Backend API: Claude Opus for highest quality code"
+            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5) => {
+                "Backend API: top-tier Claude for highest quality code"
             }
             (TaskCategory::BackendAPI, ModelChoice::ClaudeSonnet) => {
                 "Backend API: Claude Sonnet for fast, high-quality code"
@@ -25,16 +26,17 @@ impl ModelSelector {
             (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
             (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
             (TaskCategory::CodeReview, _) => "Code review: Capable model for thorough analysis",
-            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
-                "Test generation: Claude Opus for comprehensive tests"
+            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5) => {
+                "Test generation: top-tier Claude for comprehensive tests"
             }
             (TaskCategory::TestGeneration, _) => {
                 "Test generation: Gemini Pro for comprehensive tests"
             }
             (TaskCategory::Documentation, _) => "Documentation: Local Gemma 4B sufficient",
-            (TaskCategory::Refactoring, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Refactoring: Claude for excellent code transformations"
-            }
+            (
+                TaskCategory::Refactoring,
+                ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5,
+            ) => "Refactoring: Claude for excellent code transformations",
             (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
             (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
                 "Code generation: DeepSeek V3.2 with tool support for code generation"
@@ -70,7 +72,10 @@ impl ModelSelector {
             }
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
             ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
-            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
+            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.030-0.075)",
+            ModelChoice::ClaudeFable5 => {
+                "Most capable tier, adaptive deep reasoning ($0.060-0.150)"
+            }
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
@@ -469,6 +474,13 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
         ModelChoice::ClaudeOpus => {
             vec![("test_generation", 5.0, 2.0), ("backend_api", 5.0, 2.0)]
         }
+        // Seeded below Opus so the cheaper tier wins ties; real feedback must
+        // earn Fable 5 its premium slot per category.
+        ModelChoice::ClaudeFable5 => vec![
+            ("test_generation", 4.0, 2.0),
+            ("backend_api", 4.0, 2.0),
+            ("code_review", 4.0, 2.0),
+        ],
         ModelChoice::GeminiFlash => vec![("frontend_ui", 5.0, 2.0)],
         // Gemini 3.5 Flash: pro-tier reasoning + agentic; warm-start for code & agent tasks.
         ModelChoice::Gemini35Flash => vec![

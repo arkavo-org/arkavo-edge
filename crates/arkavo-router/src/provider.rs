@@ -83,7 +83,9 @@ impl super::Router {
 
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => self.is_anthropic_available(),
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
+                self.is_anthropic_available()
+            }
             ModelChoice::GeminiFlash
             | ModelChoice::Gemini35Flash
             | ModelChoice::Gemini35FlashMinimal
@@ -262,9 +264,11 @@ impl super::Router {
     ) -> Result<Box<dyn Provider>> {
         tracing::debug!(model = %model.name(), use_spec_decoding, "Instantiating provider");
         match model {
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
-                if let Ok(provider) = AnthropicProvider::from_env() {
+                // Pass the routed model id so distinct arms reach distinct
+                // API models instead of collapsing to the env/default model.
+                if let Ok(provider) = AnthropicProvider::from_env_with_model(model.name()) {
                     Ok(Box::new(provider))
                 } else {
                     #[cfg(feature = "gemini")]

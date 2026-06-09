@@ -55,9 +55,11 @@ impl LlmIntegration {
                     anyhow::bail!("Gemini feature not enabled")
                 }
             }
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
-                if let Ok(provider) = AnthropicProvider::from_env() {
+                if let Ok(provider) =
+                    AnthropicProvider::from_env_with_model(decision.recommended_model.name())
+                {
                     Ok(LlmClient::new(Box::new(provider)))
                 } else {
                     anyhow::bail!("ANTHROPIC_API_KEY not set")
