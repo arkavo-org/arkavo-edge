@@ -995,11 +995,13 @@ async fn create_client_from_routing(
                 Err("Gemini feature not enabled".into())
             }
         }
-        ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+        ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
             #[cfg(feature = "llm-remote")]
             {
                 use arkavo_llm::providers::AnthropicProvider;
-                let provider = Box::new(AnthropicProvider::from_env()?);
+                let provider = Box::new(AnthropicProvider::from_env_with_model(
+                    decision.recommended_model.name(),
+                )?);
                 Ok(LlmClient::new(provider))
             }
             #[cfg(not(feature = "llm-remote"))]

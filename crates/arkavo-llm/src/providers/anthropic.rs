@@ -42,6 +42,31 @@ struct ToolDefinition {
     input_schema: Value,
 }
 
+/// `thinking` request parameter. Adaptive-surface models reject an explicit
+/// `{"type": "disabled"}` (Fable 5 returns 400), so the field is omitted
+/// entirely when thinking is off rather than sent as disabled.
+#[derive(Debug, Clone, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "type")]
+    mode: &'static str,
+}
+
+impl ThinkingConfig {
+    fn adaptive() -> Self {
+        Self { mode: "adaptive" }
+    }
+}
+
+/// Claude models on the adaptive-thinking API surface (Fable 5 and Opus 4.7+).
+/// These reject sampling parameters (`temperature`, `top_p`, `top_k`) and
+/// fixed thinking budgets with HTTP 400; requests must omit them and opt into
+/// `thinking: {"type": "adaptive"}` instead.
+fn uses_adaptive_thinking(model: &str) -> bool {
+    model.starts_with("claude-fable")
+        || model.starts_with("claude-opus-4-7")
+        || model.starts_with("claude-opus-4-8")
+}
+
 /// Anthropic API request structures
 #[derive(Debug, Clone, Serialize)]
 struct CreateMessageRequest {
@@ -51,6 +76,8 @@ struct CreateMessageRequest {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,11 +233,19 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create provider from environment variables
     pub fn from_env() -> ProviderResult<Self> {
+        Self::from_env_with_model("claude-sonnet-4-5-20250929")
+    }
+
+    /// Create provider from environment with an explicit model id.
+    ///
+    /// `ANTHROPIC_MODEL` still wins when set so operators can pin a model
+    /// globally; otherwise the routed model id is sent to the API. Without
+    /// this, every routing decision collapses to the env/default model.
+    pub fn from_env_with_model(model: &str) -> ProviderResult<Self> {
         let api_key = env::var("ANTHROPIC_API_KEY")
             .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY environment variable not set"))?;
 
-        let model = env::var("ANTHROPIC_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
+        let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| model.to_string());
 
         let config = AnthropicConfig {
             api_key,
@@ -234,7 +269,9 @@ impl AnthropicProvider {
         let http_config = HttpClientConfig {
             base_url: config.base_url.clone(),
             auth_token: None, // Anthropic uses a custom header
-            timeout_secs: 60,
+            // Adaptive-thinking models (Fable 5, Opus 4.7+) can reason for tens
+            // of seconds before a non-streaming response completes.
+            timeout_secs: 120,
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             backoff_factor: 2.0,
@@ -247,6 +284,35 @@ impl AnthropicProvider {
         let client = Arc::new(RetryableHttpClient::new(builder)?);
 
         Ok(Self { config, client })
+    }
+
+    /// Build a request honoring the configured model's API surface.
+    ///
+    /// Adaptive-surface models get `thinking: {"type": "adaptive"}` with no
+    /// sampling parameters (sending them is a 400), plus a larger default
+    /// output ceiling because thinking tokens count toward `max_tokens` and
+    /// would truncate answers at the legacy 4096 cap.
+    fn build_request(
+        &self,
+        messages: Vec<ApiMessage>,
+        system: Option<String>,
+        stream: bool,
+        tools: Option<Vec<ToolDefinition>>,
+        max_tokens: Option<u32>,
+    ) -> CreateMessageRequest {
+        let adaptive = uses_adaptive_thinking(&self.config.model);
+        let default_max_tokens = if adaptive { 16_000 } else { 4_096 };
+
+        CreateMessageRequest {
+            model: self.config.model.clone(),
+            messages,
+            max_tokens: Some(max_tokens.unwrap_or(default_max_tokens)),
+            temperature: if adaptive { None } else { Some(0.7) },
+            thinking: adaptive.then(ThinkingConfig::adaptive),
+            system,
+            stream: Some(stream),
+            tools,
+        }
     }
 
     /// Convert messages to Anthropic's 3-role format
@@ -444,15 +510,7 @@ impl Provider for AnthropicProvider {
     ) -> Result<String, crate::Error> {
         let (system_content, api_messages) = self.convert_messages(messages);
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(4096),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(false),
-            tools: None,
-        };
+        let request = self.build_request(api_messages, system_content, false, None, None);
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -514,15 +572,7 @@ impl Provider for AnthropicProvider {
     > {
         let (system_content, api_messages) = self.convert_messages(messages);
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(4096),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(true),
-            tools: None,
-        };
+        let request = self.build_request(api_messages, system_content, true, None, None);
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -640,15 +690,13 @@ impl Provider for AnthropicProvider {
             .map(Self::convert_tools_to_definitions)
             .transpose()?;
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(max_tokens.unwrap_or(4096) as u32),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(false),
-            tools: tool_definitions,
-        };
+        let request = self.build_request(
+            api_messages,
+            system_content,
+            false,
+            tool_definitions,
+            max_tokens.map(|t| t as u32),
+        );
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -823,6 +871,81 @@ mod tests {
         let config = AnthropicConfig::default();
         let provider = AnthropicProvider::new(config).unwrap();
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn test_adaptive_thinking_surface_detection() {
+        assert!(uses_adaptive_thinking("claude-fable-5"));
+        assert!(uses_adaptive_thinking("claude-opus-4-7"));
+        assert!(uses_adaptive_thinking("claude-opus-4-8"));
+        assert!(!uses_adaptive_thinking("claude-sonnet-4-5-20250929"));
+        assert!(!uses_adaptive_thinking("claude-opus-4-5-20251101"));
+        assert!(!uses_adaptive_thinking("kimi-k2.5"));
+    }
+
+    // Regression: Fable 5 / Opus 4.7+ return HTTP 400 if `temperature` or an
+    // explicit `thinking: {"type": "disabled"}` is sent. Requests for these
+    // models must omit sampling params and opt into adaptive thinking.
+    #[test]
+    fn test_fable_request_omits_sampling_and_uses_adaptive_thinking() {
+        let config = AnthropicConfig {
+            model: "claude-fable-5".to_string(),
+            ..Default::default()
+        };
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(
+            vec![ApiMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            None,
+            false,
+            None,
+            None,
+        );
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json.get("temperature").is_none(), "must omit temperature");
+        assert_eq!(json["thinking"]["type"], "adaptive");
+        // Thinking tokens count toward max_tokens; 4096 truncates answers.
+        assert_eq!(json["max_tokens"], 16_000);
+    }
+
+    #[test]
+    fn test_legacy_model_request_keeps_sampling_without_thinking() {
+        let config = AnthropicConfig::default(); // Sonnet 4.5
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(
+            vec![ApiMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            None,
+            false,
+            None,
+            None,
+        );
+
+        let json = serde_json::to_value(&request).unwrap();
+        let temperature = json["temperature"].as_f64().expect("temperature present");
+        assert!((temperature - 0.7).abs() < 1e-6);
+        assert!(json.get("thinking").is_none(), "must omit thinking field");
+        assert_eq!(json["max_tokens"], 4096);
+    }
+
+    #[test]
+    fn test_explicit_max_tokens_overrides_default() {
+        let config = AnthropicConfig {
+            model: "claude-fable-5".to_string(),
+            ..Default::default()
+        };
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(Vec::new(), None, false, None, Some(2048));
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["max_tokens"], 2048);
     }
 
     #[test]

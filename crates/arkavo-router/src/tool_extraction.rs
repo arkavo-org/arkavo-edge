@@ -51,6 +51,7 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::GeminiPro
         | ModelChoice::ClaudeSonnet
         | ModelChoice::ClaudeOpus
+        | ModelChoice::ClaudeFable5
         | ModelChoice::DeepSeekV32
         | ModelChoice::DeepSeekV32Speciale
         | ModelChoice::KimiK2 => arkavo_mcp_tools::DetailLevel::FullSchema,
