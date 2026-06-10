@@ -14,6 +14,31 @@ pub fn validate(doc: &ArpDocument) -> Result<(), ValidationError> {
     validate_quarantine_invariants(doc)?;
     validate_quality_gate_threshold(doc)?;
     validate_proposal_policy(doc)?;
+    validate_distilled_decay(doc)?;
+    Ok(())
+}
+
+fn validate_distilled_decay(doc: &ArpDocument) -> Result<(), ValidationError> {
+    if let Some(pm) = &doc.adaptation.prior_management
+        && let Some(decay) = &pm.distilled_decay
+    {
+        if let Some(factor) = decay.displacement_factor
+            && !(factor > 0.0 && factor <= 1.0)
+        {
+            return Err(ValidationError {
+                field: "adaptation.prior_management.distilled_decay.displacement_factor".into(),
+                message: format!("displacement_factor must be in (0, 1], got {factor}"),
+            });
+        }
+        if let Some(floor) = decay.floor
+            && !(0.0..=1.0).contains(&floor)
+        {
+            return Err(ValidationError {
+                field: "adaptation.prior_management.distilled_decay.floor".into(),
+                message: format!("floor must be in [0, 1], got {floor}"),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -301,6 +326,40 @@ mod tests {
         }
     }
 
+    fn doc_with_decay(factor: Option<f64>, floor: Option<f64>) -> ArpDocument {
+        use crate::adaptation::{DistilledDecay, DistilledDecayStrategy, PriorManagement};
+        let mut doc = minimal_doc();
+        doc.adaptation.prior_management = Some(PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(DistilledDecay {
+                strategy: DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: factor,
+                floor,
+            }),
+        });
+        doc
+    }
+
+    #[test]
+    fn accept_valid_distilled_decay() {
+        assert!(validate(&doc_with_decay(Some(0.05), Some(0.1))).is_ok());
+        // Both fields optional — defaults apply.
+        assert!(validate(&doc_with_decay(None, None)).is_ok());
+    }
+
+    #[test]
+    fn reject_distilled_decay_out_of_range() {
+        let err = validate(&doc_with_decay(Some(0.0), None)).unwrap_err();
+        assert!(err.field.contains("displacement_factor"));
+        let err = validate(&doc_with_decay(Some(1.5), None)).unwrap_err();
+        assert!(err.field.contains("displacement_factor"));
+        let err = validate(&doc_with_decay(Some(0.05), Some(1.5))).unwrap_err();
+        assert!(err.field.contains("floor"));
+    }
+
     #[test]
     fn valid_minimal_document() {
         let doc = minimal_doc();
@@ -483,6 +542,8 @@ mod tests {
                     alpha: 1.0,
                     beta: -0.5,
                 }),
+                provenance_tracking: None,
+                distilled_decay: None,
             }),
             signal_separation: None,
         };
