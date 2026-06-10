@@ -33,15 +33,18 @@ pub enum Severity {
 }
 
 impl Severity {
-    /// Parse a model-emitted severity string, defaulting to [`Severity::Medium`]
-    /// when the value is missing or unrecognized — a candidate tightening with
-    /// an unclear severity still warrants human review.
-    #[must_use]
-    pub fn parse_lenient(raw: Option<&str>) -> Self {
+    /// Parse a model-emitted severity string strictly. Only the contract
+    /// values `low | medium | high` (plus `critical` as a high alias) are
+    /// accepted; anything else is a contract violation the caller must record
+    /// as a reject — leniency here would hide non-conformance from the
+    /// morning's contract-conformance rate.
+    pub fn parse_strict(raw: Option<&str>) -> Result<Self, String> {
         match raw.map(str::trim).map(str::to_lowercase).as_deref() {
-            Some("low") => Self::Low,
-            Some("high" | "critical") => Self::High,
-            _ => Self::Medium,
+            Some("low") => Ok(Self::Low),
+            Some("medium") => Ok(Self::Medium),
+            Some("high" | "critical") => Ok(Self::High),
+            Some(other) => Err(format!("unrecognized severity {other:?}")),
+            None => Err("missing severity".to_string()),
         }
     }
 }
@@ -255,6 +258,10 @@ impl FindingCard {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LedgerEntry {
     pub category: String,
+    /// Store row ids of the episodes behind this batch — the batch→episode
+    /// linkage that lets a proposal be backfilled into trace references and
+    /// findings-inbox cards keep their evidence.
+    pub episode_ids: Vec<String>,
     pub episode_count: u32,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -292,6 +299,12 @@ pub struct CostLedger {
     pub categories_total: u64,
     pub categories_consolidated: u64,
     pub categories_skipped: u64,
+    pub categories_budget_stopped: u64,
+    pub run_budget: RunBudget,
+    pub conformance: Conformance,
+    /// Headline metric: share of model-emitted items that conformed to the
+    /// output contract ([`Conformance::rate`]).
+    pub contract_conformance_rate: f64,
     pub fable_calls: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -315,6 +328,47 @@ pub struct RunStats {
     pub episodes_consolidated: u64,
     pub categories_total: u64,
     pub categories_skipped: u64,
+    /// Categories left unconsolidated because the run-level cost ceiling was
+    /// hit before they were reached.
+    pub categories_budget_stopped: u64,
+}
+
+/// Accepted/rejected tallies for the run — the source of the morning's
+/// contract-conformance rate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Conformance {
+    pub lessons_accepted: u64,
+    pub lessons_rejected: u64,
+    pub tightenings_accepted: u64,
+    pub tightenings_rejected: u64,
+    /// Replies that could not be parsed as the output contract at all.
+    pub responses_rejected: u64,
+}
+
+impl Conformance {
+    /// Share of emitted items that conformed to the output contract.
+    /// `1.0` when the model emitted nothing (an empty run is not a violation).
+    #[must_use]
+    pub fn rate(&self) -> f64 {
+        let accepted = self.lessons_accepted + self.tightenings_accepted;
+        let rejected = self.lessons_rejected + self.tightenings_rejected + self.responses_rejected;
+        let total = accepted + rejected;
+        if total == 0 {
+            1.0
+        } else {
+            accepted as f64 / total as f64
+        }
+    }
+}
+
+/// Run-level spend ceiling state, recorded in the ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RunBudget {
+    /// The hard ceiling the run was given (`--max-run-cost-usd`).
+    pub max_run_cost_usd: f64,
+    /// True when the run stopped early because cumulative spend reached the
+    /// ceiling; the artifacts on disk are then partial by design.
+    pub exhausted: bool,
 }
 
 impl CostLedger {
@@ -326,13 +380,17 @@ impl CostLedger {
         model: String,
         dry_run: bool,
         stats: RunStats,
+        conformance: Conformance,
+        run_budget: RunBudget,
         entries: Vec<LedgerEntry>,
         headroom: f64,
     ) -> Self {
         let fable_calls = entries.len() as u64;
         let input_tokens = entries.iter().map(|e| e.input_tokens).sum();
         let output_tokens = entries.iter().map(|e| e.output_tokens).sum();
-        let total_cost_usd: f64 = entries.iter().map(|e| e.cost_usd).sum();
+        // `+ 0.0` normalizes the `-0.0` that f64's empty Sum identity yields,
+        // which would otherwise surface as "$-0.0000" in reports.
+        let total_cost_usd: f64 = entries.iter().map(|e| e.cost_usd).sum::<f64>() + 0.0;
         let max_call_cost_usd = entries.iter().map(|e| e.cost_usd).fold(0.0_f64, f64::max);
         let mean_call_cost_usd = if fable_calls == 0 {
             0.0
@@ -359,6 +417,10 @@ impl CostLedger {
             categories_total: stats.categories_total,
             categories_consolidated: fable_calls,
             categories_skipped: stats.categories_skipped,
+            categories_budget_stopped: stats.categories_budget_stopped,
+            run_budget,
+            contract_conformance_rate: conformance.rate(),
+            conformance,
             fable_calls,
             input_tokens,
             output_tokens,
@@ -409,11 +471,32 @@ mod tests {
     }
 
     #[test]
-    fn severity_parse_is_lenient() {
-        assert_eq!(Severity::parse_lenient(Some("LOW")), Severity::Low);
-        assert_eq!(Severity::parse_lenient(Some("critical")), Severity::High);
-        assert_eq!(Severity::parse_lenient(Some("weird")), Severity::Medium);
-        assert_eq!(Severity::parse_lenient(None), Severity::Medium);
+    fn severity_parse_is_strict() {
+        assert_eq!(Severity::parse_strict(Some("LOW")).unwrap(), Severity::Low);
+        assert_eq!(
+            Severity::parse_strict(Some("medium")).unwrap(),
+            Severity::Medium
+        );
+        assert_eq!(
+            Severity::parse_strict(Some("critical")).unwrap(),
+            Severity::High
+        );
+        assert!(Severity::parse_strict(Some("weird")).is_err());
+        assert!(Severity::parse_strict(None).is_err());
+    }
+
+    #[test]
+    fn conformance_rate_over_emitted_items() {
+        let c = Conformance {
+            lessons_accepted: 3,
+            lessons_rejected: 1,
+            tightenings_accepted: 4,
+            tightenings_rejected: 1,
+            responses_rejected: 1,
+        };
+        // 7 accepted / 10 total
+        assert!((c.rate() - 0.7).abs() < 1e-9);
+        assert!((Conformance::default().rate() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -468,6 +551,7 @@ mod tests {
         let entries = vec![
             LedgerEntry {
                 category: "a".into(),
+                episode_ids: vec!["ep-1".into(), "ep-2".into(), "ep-3".into()],
                 episode_count: 3,
                 input_tokens: 1000,
                 output_tokens: 500,
@@ -478,6 +562,7 @@ mod tests {
             },
             LedgerEntry {
                 category: "b".into(),
+                episode_ids: vec!["ep-4".into(); 4],
                 episode_count: 4,
                 input_tokens: 2000,
                 output_tokens: 800,
@@ -492,9 +577,30 @@ mod tests {
             episodes_consolidated: 7,
             categories_total: 5,
             categories_skipped: 3,
+            categories_budget_stopped: 0,
         };
-        let ledger = CostLedger::summarize("claude-fable-5".into(), false, stats, entries, 1.5);
+        let conformance = Conformance {
+            lessons_accepted: 2,
+            tightenings_accepted: 2,
+            ..Conformance::default()
+        };
+        let run_budget = RunBudget {
+            max_run_cost_usd: 25.0,
+            exhausted: false,
+        };
+        let ledger = CostLedger::summarize(
+            "claude-fable-5".into(),
+            false,
+            stats,
+            conformance,
+            run_budget,
+            entries,
+            1.5,
+        );
         assert_eq!(ledger.fable_calls, 2);
+        assert_eq!(ledger.per_call[0].episode_ids.len(), 3);
+        assert!((ledger.contract_conformance_rate - 1.0).abs() < f64::EPSILON);
+        assert!(!ledger.run_budget.exhausted);
         assert_eq!(ledger.input_tokens, 3000);
         assert_eq!(ledger.output_tokens, 1300);
         assert!((ledger.total_cost_usd - 0.095).abs() < 1e-9);
@@ -518,8 +624,20 @@ mod tests {
             episodes_consolidated: 0,
             categories_total: 0,
             categories_skipped: 0,
+            categories_budget_stopped: 0,
         };
-        let ledger = CostLedger::summarize("claude-fable-5".into(), true, stats, vec![], 1.5);
+        let ledger = CostLedger::summarize(
+            "claude-fable-5".into(),
+            true,
+            stats,
+            Conformance::default(),
+            RunBudget {
+                max_run_cost_usd: 25.0,
+                exhausted: false,
+            },
+            vec![],
+            1.5,
+        );
         assert_eq!(ledger.fable_calls, 0);
         assert!((ledger.mean_call_cost_usd).abs() < f64::EPSILON);
         assert!(

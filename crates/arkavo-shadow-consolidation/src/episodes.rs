@@ -49,6 +49,9 @@ pub struct ActionOutcome {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CategoryBatch {
     pub category: String,
+    /// Store row ids of the episodes in this batch, preserved so tonight's
+    /// proposals can be back-linked to their evidence later.
+    pub episode_ids: Vec<String>,
     pub outcomes: Vec<ActionOutcome>,
 }
 
@@ -86,28 +89,28 @@ fn strip_observe(tools: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Group raw `(category, observation_json, outcome_json)` rows into batches,
-/// stripping observe calls and dropping categories below `min_episodes`.
-fn group_rows(rows: Vec<(String, String, String)>, min_episodes: usize) -> LoadResult {
+/// Group raw `(id, category, observation_json, outcome_json)` rows into
+/// batches, stripping observe calls and dropping categories below
+/// `min_episodes`.
+fn group_rows(rows: Vec<(String, String, String, String)>, min_episodes: usize) -> LoadResult {
     let episodes_total = rows.len() as u64;
     // BTreeMap keeps category order stable for reproducible output.
-    let mut by_category: BTreeMap<String, Vec<ActionOutcome>> = BTreeMap::new();
+    let mut by_category: BTreeMap<String, (Vec<String>, Vec<ActionOutcome>)> = BTreeMap::new();
 
-    for (category, obs_json, outcome_json) in rows {
+    for (id, category, obs_json, outcome_json) in rows {
         let actions = serde_json::from_str::<RawObservation>(&obs_json)
             .map(|o| strip_observe(&o.tools_used))
             .unwrap_or_default();
         let (success, quality) = serde_json::from_str::<RawOutcome>(&outcome_json)
             .map(|o| (o.success, o.quality_metrics.correctness.clamp(0.0, 1.0)))
             .unwrap_or((false, 0.0));
-        by_category
-            .entry(category)
-            .or_default()
-            .push(ActionOutcome {
-                actions,
-                success,
-                quality,
-            });
+        let (ids, outcomes) = by_category.entry(category).or_default();
+        ids.push(id);
+        outcomes.push(ActionOutcome {
+            actions,
+            success,
+            quality,
+        });
     }
 
     let categories_total = by_category.len() as u64;
@@ -115,10 +118,14 @@ fn group_rows(rows: Vec<(String, String, String)>, min_episodes: usize) -> LoadR
     let mut categories_skipped = 0_u64;
     let mut episodes_consolidated = 0_u64;
 
-    for (category, outcomes) in by_category {
+    for (category, (episode_ids, outcomes)) in by_category {
         if outcomes.len() >= min_episodes {
             episodes_consolidated += outcomes.len() as u64;
-            batches.push(CategoryBatch { category, outcomes });
+            batches.push(CategoryBatch {
+                category,
+                episode_ids,
+                outcomes,
+            });
         } else {
             categories_skipped += 1;
         }
@@ -163,15 +170,16 @@ impl EpisodeReader {
     /// Load and group all episodes into per-category batches.
     pub async fn load_batches(&self, min_episodes: usize) -> anyhow::Result<LoadResult> {
         let rows =
-            sqlx::query("SELECT task_category, observation_json, outcome_json FROM episodes")
+            sqlx::query("SELECT id, task_category, observation_json, outcome_json FROM episodes")
                 .fetch_all(&self.pool)
                 .await
                 .context("querying episodes table")?;
 
-        let raw: Vec<(String, String, String)> = rows
+        let raw: Vec<(String, String, String, String)> = rows
             .into_iter()
             .map(|row| {
                 Ok::<_, sqlx::Error>((
+                    row.try_get::<String, _>("id")?,
                     row.try_get::<String, _>("task_category")?,
                     row.try_get::<String, _>("observation_json")?,
                     row.try_get::<String, _>("outcome_json")?,
@@ -221,21 +229,25 @@ mod tests {
     fn grouping_drops_below_threshold() {
         let rows = vec![
             (
+                "ep-1".to_string(),
                 "a".to_string(),
                 r#"{"tools_used":["observe","step"]}"#.to_string(),
                 r#"{"success":true,"quality_metrics":{"correctness":0.9}}"#.to_string(),
             ),
             (
+                "ep-2".to_string(),
                 "a".to_string(),
                 r#"{"tools_used":["step"]}"#.to_string(),
                 r#"{"success":false,"quality_metrics":{"correctness":0.2}}"#.to_string(),
             ),
             (
+                "ep-3".to_string(),
                 "a".to_string(),
                 r#"{"tools_used":["reset"]}"#.to_string(),
                 r#"{"success":true,"quality_metrics":{"correctness":0.5}}"#.to_string(),
             ),
             (
+                "ep-4".to_string(),
                 "b".to_string(),
                 r#"{"tools_used":["step"]}"#.to_string(),
                 r#"{"success":true,"quality_metrics":{"correctness":1.0}}"#.to_string(),
@@ -248,6 +260,11 @@ mod tests {
         assert_eq!(result.batches[0].category, "a");
         assert_eq!(result.episodes_consolidated, 3);
         assert_eq!(result.categories_skipped, 1);
+        // Episode ids preserved so proposals can be back-linked to evidence.
+        assert_eq!(
+            result.batches[0].episode_ids,
+            vec!["ep-1".to_string(), "ep-2".to_string(), "ep-3".to_string()]
+        );
         // observe stripped from the first episode.
         assert_eq!(
             result.batches[0].outcomes[0].actions,
@@ -259,12 +276,19 @@ mod tests {
     fn malformed_json_yields_empty_action_failed_outcome() {
         let rows = vec![
             (
+                "ep-1".to_string(),
                 "a".to_string(),
                 "not json".to_string(),
                 "not json".to_string(),
             ),
-            ("a".to_string(), "{}".to_string(), "{}".to_string()),
             (
+                "ep-2".to_string(),
+                "a".to_string(),
+                "{}".to_string(),
+                "{}".to_string(),
+            ),
+            (
+                "ep-3".to_string(),
                 "a".to_string(),
                 r#"{"tools_used":["step"]}"#.to_string(),
                 r#"{"success":true,"quality_metrics":{"correctness":0.7}}"#.to_string(),
@@ -319,6 +343,8 @@ mod tests {
         assert_eq!(result.episodes_total, 3);
         assert_eq!(result.batches.len(), 1);
         assert_eq!(result.batches[0].category, "colony");
+        assert_eq!(result.batches[0].episode_ids.len(), 3);
+        assert!(result.batches[0].episode_ids.contains(&"id-0".to_string()));
         assert_eq!(
             result.batches[0].outcomes[0].actions,
             vec!["set_priority".to_string()]

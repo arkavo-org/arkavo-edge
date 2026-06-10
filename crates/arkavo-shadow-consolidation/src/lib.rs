@@ -10,16 +10,23 @@
 //!
 //! It also emits `findings.json` — [`proposal::FindingCard`] seed cards
 //! projected from the genuine lessons and proposals, so the findings-inbox UI
-//! can be populated from real output instead of invented fixtures.
+//! can be populated from real output instead of invented fixtures — plus
+//! `rejects.json` ([`validate::Reject`]) recording every contract violation
+//! with a reason (the source of the ledger's contract-conformance rate), and
+//! a `raw/` archive of each verbatim Fable reply for contract-evolution
+//! regression.
 //!
 //! The job has **zero runtime contact**: it depends on no arkavo runtime
 //! crate, opens the episode store read-only, and reaches only Fable over the
-//! network.
+//! network — under a hard run-level cost ceiling (`--max-run-cost-usd`) that
+//! stops the run between batches, keeps partial outputs, and marks the ledger
+//! budget-exhausted.
 
 pub mod episodes;
 pub mod fable;
 pub mod proposal;
 pub mod run;
 pub mod synthesis;
+pub mod validate;
 
 pub use run::{Config, RunSummary, execute};
