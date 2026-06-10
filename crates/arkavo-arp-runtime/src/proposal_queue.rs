@@ -337,11 +337,6 @@ impl ProposalQueue {
                 layer,
                 new_limit_usd,
             } => {
-                if *layer == BudgetLayerName::Consolidation {
-                    return Err(
-                        "consolidation layer budget is not wired into per_layer yet".to_string()
-                    );
-                }
                 if let Some(current) = self.layer_limit(*layer)
                     && *new_limit_usd >= current
                 {
@@ -408,7 +403,7 @@ impl ProposalQueue {
             BudgetLayerName::Execution => per.execution,
             BudgetLayerName::Data => per.data,
             BudgetLayerName::Network => per.network,
-            BudgetLayerName::Consolidation => None,
+            BudgetLayerName::Consolidation => per.consolidation,
         };
         lb.and_then(|l| l.limit_usd)
     }
@@ -531,13 +526,14 @@ impl ProposalQueue {
             execution: None,
             data: None,
             network: None,
+            consolidation: None,
         });
         let slot = match layer {
             BudgetLayerName::Cognitive => &mut per.cognitive,
             BudgetLayerName::Execution => &mut per.execution,
             BudgetLayerName::Data => &mut per.data,
             BudgetLayerName::Network => &mut per.network,
-            BudgetLayerName::Consolidation => return,
+            BudgetLayerName::Consolidation => &mut per.consolidation,
         };
         *slot = Some(LayerBudget {
             limit_usd: Some(limit),
@@ -551,7 +547,7 @@ impl ProposalQueue {
                 BudgetLayerName::Execution => &mut per.execution,
                 BudgetLayerName::Data => &mut per.data,
                 BudgetLayerName::Network => &mut per.network,
-                BudgetLayerName::Consolidation => return,
+                BudgetLayerName::Consolidation => &mut per.consolidation,
             };
             *slot = None;
         }

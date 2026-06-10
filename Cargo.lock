@@ -1773,6 +1773,7 @@ dependencies = [
  "clap",
  "crossbeam-queue",
  "dashmap",
+ "ed25519-dalek 2.2.0",
  "futures",
  "governor",
  "hex",

@@ -11,6 +11,7 @@ mod conductor_planner;
 mod conductor_tool_loop;
 pub mod config_helpers;
 mod consolidation;
+pub mod consolidation_teacher;
 mod contract_negotiation;
 mod conversation_window;
 mod curiosity;

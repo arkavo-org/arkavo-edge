@@ -138,6 +138,13 @@ enum ResponseContentBlock {
     Other,
 }
 
+/// Token usage reported by a completion, for caller-side cost accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct Usage {
@@ -516,6 +523,69 @@ impl AnthropicProvider {
                 _ => ProviderError::Other(anyhow::anyhow!("Anthropic API error: {status}")),
             }
         }
+    }
+
+    /// Non-streaming completion that also returns the API-reported token
+    /// usage, for callers that do their own cost accounting (e.g. the
+    /// consolidation teacher's per-layer budget ledger).
+    pub async fn complete_with_usage(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<(String, CompletionUsage), crate::Error> {
+        let (system_content, api_messages) = self.convert_messages(messages);
+        let request = self.build_request(api_messages, system_content, false, None, None);
+        let url = format!("{}/v1/messages", self.config.base_url);
+
+        let result = self
+            .client
+            .execute_with_retry(|client| {
+                let config = self.config.clone();
+                let url = url.clone();
+                let request = request.clone();
+                Box::pin(async move {
+                    let response = client
+                        .post(&url)
+                        .header("x-api-key", &config.api_key)
+                        .header("anthropic-version", &config.api_version)
+                        .header("content-type", "application/json")
+                        .json(&request)
+                        .send()
+                        .await?;
+
+                    if response.status().is_success() {
+                        let message: MessageResponse = response.json().await?;
+                        let content = message
+                            .content
+                            .iter()
+                            .filter_map(|block| match block {
+                                ResponseContentBlock::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Ok((
+                            content,
+                            CompletionUsage {
+                                input_tokens: message.usage.input_tokens,
+                                output_tokens: message.usage.output_tokens,
+                            },
+                        ))
+                    } else {
+                        let status = response.status();
+                        let error_text = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| "Failed to read error response".to_string());
+                        Err(anyhow::anyhow!(
+                            "Anthropic API error {status}: {error_text}"
+                        ))
+                    }
+                })
+            })
+            .await
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
+
+        Ok(result)
     }
 }
 

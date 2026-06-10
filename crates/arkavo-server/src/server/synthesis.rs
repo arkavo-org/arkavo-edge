@@ -13,6 +13,19 @@ use uuid::Uuid;
 
 use super::episode_buffer::ToolObservation;
 
+/// The lesson-synthesis rule: a tool is an *action* tool only when it is not
+/// a read-only observe/list/hash/summary call. Lessons must reason about
+/// which actions produce good outcomes, not tool-calling mechanics. This is
+/// the single in-crate definition — the consolidation teacher consumes it
+/// too; do not re-inline it elsewhere.
+pub(super) fn is_action_tool(tool: &str) -> bool {
+    let lower = tool.to_lowercase();
+    !lower.contains("observe")
+        && !lower.contains("list")
+        && !lower.contains("hash")
+        && !lower.contains("summary")
+}
+
 /// Truncate a result string to fit within a character budget.
 fn truncate_result(result: &str, max_chars: usize) -> String {
     if result.len() <= max_chars {
@@ -149,13 +162,7 @@ pub(super) async fn synthesize_lesson(
                 .observation
                 .tools_used
                 .iter()
-                .filter(|t| {
-                    let lower = t.to_lowercase();
-                    !lower.contains("observe")
-                        && !lower.contains("list")
-                        && !lower.contains("hash")
-                        && !lower.contains("summary")
-                })
+                .filter(|t| is_action_tool(t))
                 .cloned()
                 .collect();
             serde_json::json!({

@@ -102,7 +102,9 @@ arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-trust = { path = "../arkavo-trust" }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+ed25519-dalek = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
@@ -124,7 +126,6 @@ llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-llama-cpp"]
 claude-agent = ["dep:arkavo-mcp-claude"]
 
 [dev-dependencies]
-arkavo-arp = { path = "../arkavo-arp" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
