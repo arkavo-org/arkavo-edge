@@ -511,7 +511,7 @@ mod tests {
                 "https://attr.arkavo.com/jurisdiction/us-ca".into(),
                 "https://attr.arkavo.com/audit_authority/true".into(),
             ],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         });
         validate(&m).expect("custom attribute strings should validate");
         let attrs = &m.roles[0]

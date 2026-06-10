@@ -23,9 +23,12 @@ pub use coordination::{
     Routing, Signature,
 };
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
+#[allow(deprecated)]
+pub use role::ArpRule;
 pub use role::{
-    AgentProvisioning, ArpRule, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
-    Model, Observability, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, ToolUse,
+    AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
+    Observability, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
+    ToolUse,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use validate::{ValidationError, validate};

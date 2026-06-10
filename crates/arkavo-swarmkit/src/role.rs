@@ -257,16 +257,25 @@ pub enum AuthMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TdfAttributeReleasePolicy {
     pub attributes: Vec<String>,
-    pub rule: ArpRule,
+    pub rule: TdfReleaseRule,
 }
 
+/// TDF attribute-release rule (allOf/anyOf/hierarchy), evaluated KAS-side.
+///
+/// Unrelated to Agent Runtime Policy — renamed from `ArpRule` so the name
+/// can't collide with ARP proposal vocabulary. The wire format is only the
+/// camelCase variant names, so existing manifests are unaffected.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum ArpRule {
+pub enum TdfReleaseRule {
     AllOf,
     AnyOf,
     Hierarchy,
 }
+
+/// Compatibility alias for the pre-rename name.
+#[deprecated(since = "0.79.0", note = "renamed to TdfReleaseRule")]
+pub type ArpRule = TdfReleaseRule;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Handoff {
@@ -306,9 +315,23 @@ mod tests {
     }
 
     #[test]
-    fn arp_rule_serializes_camel_case() {
-        let r = ArpRule::AllOf;
+    fn tdf_release_rule_serializes_camel_case() {
+        let r = TdfReleaseRule::AllOf;
         assert_eq!(serde_json::to_string(&r).unwrap(), "\"allOf\"");
+    }
+
+    #[test]
+    fn tdf_release_rule_wire_format_unchanged_by_rename() {
+        // Regression for the ArpRule → TdfReleaseRule rename: manifests
+        // serialized before the rename must still deserialize.
+        for (json, expected) in [
+            ("\"allOf\"", TdfReleaseRule::AllOf),
+            ("\"anyOf\"", TdfReleaseRule::AnyOf),
+            ("\"hierarchy\"", TdfReleaseRule::Hierarchy),
+        ] {
+            let parsed: TdfReleaseRule = serde_json::from_str(json).unwrap();
+            assert_eq!(parsed, expected);
+        }
     }
 
     #[spec("SK-016")]

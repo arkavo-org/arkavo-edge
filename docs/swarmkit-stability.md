@@ -208,13 +208,13 @@ The current published spec drafts are `swarmkit-spec-draft-00` and `swarmkit-spe
 | `McpToolGrant.auth` (AuthMode) | stable | |
 | `AuthMode` (enum: Delegated, Passthrough, None) | stable | Runtime grant issuance is aspirational; field set stable. |
 
-## TdfAttributeReleasePolicy / ArpRule
+## TdfAttributeReleasePolicy / TdfReleaseRule
 
 | Field | Tier | Note |
 |---|---|---|
 | `TdfAttributeReleasePolicy.attributes` (Vec<String>) | stable | Free-form FQN strings (SK-008). Each must be `<fqn>/<value>` form. |
-| `TdfAttributeReleasePolicy.rule` (ArpRule) | stable | |
-| `ArpRule` (enum: AllOf, AnyOf, Hierarchy) | stable | Hierarchy semantics evaluated KAS-side at attribute-definition time. |
+| `TdfAttributeReleasePolicy.rule` (TdfReleaseRule) | stable | |
+| `TdfReleaseRule` (enum: AllOf, AnyOf, Hierarchy) | stable | Hierarchy semantics evaluated KAS-side at attribute-definition time. Renamed from `ArpRule` (it is a TDF attribute-release rule, not Agent Runtime Policy); wire format unchanged — only camelCase variant names are serialized. A deprecated `ArpRule` type alias remains for one release. |
 
 ## Handoff / ContextScope
 
