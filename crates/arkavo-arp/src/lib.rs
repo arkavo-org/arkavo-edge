@@ -5,6 +5,7 @@
 //! and parser only — no policy engine or business logic.
 
 pub mod adaptation;
+pub mod capability;
 pub mod constraints;
 pub mod feedback;
 pub mod layers;
@@ -13,6 +14,7 @@ pub mod observability;
 pub mod proposal;
 pub mod validate;
 
+pub use capability::{CapabilityGates, CapabilityProposal, CapabilityRef, CapabilityState};
 pub use model::ArpDocument;
 pub use proposal::{
     BlastRadius, ProposalOrigin, ProposalPolicy, ProposalState, TighteningEffect,
