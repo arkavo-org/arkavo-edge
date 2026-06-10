@@ -425,6 +425,40 @@ async fn dispatch_event(
         AgUiEvent::FlightStopped { .. } => {
             // Server-emitted event; ignore if it ever round-trips back.
         }
+        AgUiEvent::RequestArpProposalAction {
+            agent_id,
+            proposal_id,
+            action,
+        } => {
+            let approve = action == "approve";
+            let error = if approve || action == "reject" {
+                arp_handler
+                    .review_proposal(&agent_id, &proposal_id, approve, "agui-operator")
+                    .await
+                    .err()
+            } else {
+                Some(format!("unknown action {action:?}"))
+            };
+            tx.send(AgUiEvent::ArpProposalActionResult {
+                agent_id,
+                proposal_id,
+                error,
+            })
+            .await?;
+
+            // Push a fresh snapshot so the card re-renders in its new
+            // state on the same cycle instead of the next 5s poll.
+            let mut snapshot = arp_handler.snapshot().await;
+            snapshot.swarmkit_launch_errors = swarm_flights.launch_errors_snapshot().await;
+            tx.send(AgUiEvent::ArpStatusUpdate {
+                snapshot,
+                event_id: uuid::Uuid::new_v4().to_string(),
+            })
+            .await?;
+        }
+        AgUiEvent::ArpProposalActionResult { .. } => {
+            // Server-emitted event; ignore if it ever round-trips back.
+        }
         AgUiEvent::RequestLearningStatus => {
             let lesson_count = lesson_store.read().await.len();
             gateway_routing::handle_request_learning_status(
