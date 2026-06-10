@@ -135,6 +135,81 @@ impl ProposalQueue {
         state
     }
 
+    /// Side-effect-free admission check: would this proposal pass validation
+    /// and the direction check right now? The flight controller uses this as
+    /// phase one of check-then-apply across all role queues.
+    pub fn check(&self, proposal: &TighteningProposal) -> Result<(), String> {
+        let Some(policy) = self.policy.as_ref() else {
+            return Err("document has no proposal_policy".to_string());
+        };
+        validate_proposal(proposal, policy).map_err(|e| e.to_string())?;
+        self.direction_violation(&proposal.effect)
+    }
+
+    /// Ingest a proposal whose review already happened upstream (kit-level
+    /// flight approval): check, then apply immediately regardless of this
+    /// document's auto-apply radius. Used by the flight controller after the
+    /// kit's flight_approval mechanism approved a flight-radius proposal.
+    pub fn ingest_reviewed(
+        &mut self,
+        mut proposal: TighteningProposal,
+        reviewer: &str,
+        now_epoch_sec: u64,
+    ) -> Result<ProposalState, String> {
+        self.check(&proposal)?;
+        let window = self
+            .policy
+            .as_ref()
+            .and_then(|p| p.observation_window_sec)
+            .unwrap_or(3600);
+        proposal.reviewed_by = Some(reviewer.to_string());
+        proposal.state = ProposalState::Reviewed;
+        self.apply(&mut proposal, now_epoch_sec, window);
+        let state = proposal.state;
+        self.proposals.push(proposal);
+        Ok(state)
+    }
+
+    /// Current state of a proposal, if known to this queue.
+    pub fn proposal_state(&self, proposal_id: &str) -> Option<ProposalState> {
+        self.proposals
+            .iter()
+            .find(|p| p.id == proposal_id)
+            .map(|p| p.state)
+    }
+
+    /// Revert an applied/observed proposal out of band — the convergence
+    /// path when a flight-wide apply partially failed. Restores the
+    /// displaced value and emits the auditable revert trace entry exactly
+    /// like an observation-window revert.
+    pub fn force_revert(&mut self, proposal_id: &str, reason: &str) -> Result<(), String> {
+        let idx = self
+            .proposals
+            .iter()
+            .position(|p| p.id == proposal_id)
+            .ok_or_else(|| format!("unknown proposal {proposal_id}"))?;
+        let state = self.proposals[idx].state;
+        if !matches!(state, ProposalState::Applied | ProposalState::Observed) {
+            return Err(format!(
+                "proposal {proposal_id} is {state:?}; only applied/observed proposals revert"
+            ));
+        }
+        let obs = self
+            .observations
+            .remove(proposal_id)
+            .ok_or_else(|| format!("proposal {proposal_id} has no observation record"))?;
+        let effect = self.proposals[idx].effect.clone();
+        self.restore(&effect, &obs.displaced);
+        self.proposals[idx].state = ProposalState::Reverted;
+        self.proposals[idx].disposition_reason = Some(reason.to_string());
+        self.emit_trace(
+            &self.proposals[idx].clone(),
+            "reverted",
+            Some(reason.to_string()),
+        );
+        Ok(())
+    }
+
     /// HITL review of a held proposal: approve applies it, deny rejects it.
     pub fn review(
         &mut self,

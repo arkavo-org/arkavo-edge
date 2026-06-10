@@ -1907,6 +1907,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "ureq 2.12.1",
  "uuid",
 ]
