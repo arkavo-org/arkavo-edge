@@ -530,6 +530,7 @@ fn trace_event_label(event: TraceEventType) -> &'static str {
         TraceEventType::BudgetEvent => "budget_event",
         TraceEventType::Quarantine => "quarantine",
         TraceEventType::HitlAction => "hitl_action",
+        TraceEventType::ProposalLifecycle => "proposal_lifecycle",
     }
 }
 

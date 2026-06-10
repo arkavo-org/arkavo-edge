@@ -190,6 +190,8 @@ pub enum TraceEventType {
     BudgetEvent,
     Quarantine,
     HitlAction,
+    /// Tightening-proposal lifecycle transition (apply/revert/confirm).
+    ProposalLifecycle,
 }
 
 /// Decision details: who chose what and why.

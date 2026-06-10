@@ -369,6 +369,7 @@ mod tests {
             TraceEventType::BudgetEvent,
             TraceEventType::Quarantine,
             TraceEventType::HitlAction,
+            TraceEventType::ProposalLifecycle,
         ];
 
         for event_type in event_types {
