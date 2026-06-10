@@ -124,6 +124,7 @@ llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-llama-cpp"]
 claude-agent = ["dep:arkavo-mcp-claude"]
 
 [dev-dependencies]
+arkavo-arp = { path = "../arkavo-arp" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }

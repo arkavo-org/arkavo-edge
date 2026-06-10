@@ -139,6 +139,11 @@ pub trait A2aRpc {
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
 
+    /// This agent's effective ARP document (post-applied tightenings), for
+    /// per-agent mesh audit polling.
+    #[method(name = "arp/get")]
+    async fn arp_get(&self) -> RpcResult<serde_json::Value>;
+
     // A2A Protocol Methods
 
     /// Send a message synchronously
@@ -541,6 +546,10 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {
         handlers::discovery::handle_rpc_discover(&self.metrics).await
+    }
+
+    async fn arp_get(&self) -> RpcResult<serde_json::Value> {
+        handlers::arp::handle_arp_get().await
     }
 
     // A2A Protocol Method Implementations

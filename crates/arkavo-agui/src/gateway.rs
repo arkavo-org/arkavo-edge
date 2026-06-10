@@ -431,6 +431,13 @@ impl AgUiGateway {
             HealthRegistry::global().register(reporter).await;
         }
 
+        // Per-agent A2A ARP polling: mesh agents report their own effective
+        // documents instead of everything keying off the synthetic "(local)".
+        crate::gateway_monitors::spawn_arp_poller(
+            state.agent_connections.clone(),
+            state.arp_handler.clone(),
+        );
+
         // Sync agent-internal HRM tasks into the UI dashboard
         crate::gateway_task_sync::spawn_agent_task_sync(
             state.connections.clone(),
