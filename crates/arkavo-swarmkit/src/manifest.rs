@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::coordination::{
     CompletionSpec, ConstraintsSpec, CoordinationSpec, EvaluationSpec, ProvenanceSpec,
 };
+use crate::governance::ProposalGovernanceSpec;
 use crate::role::RoleSpec;
 
 /// Top-level SwarmKit manifest. Cleartext document inside the TDF payload.
@@ -22,6 +23,10 @@ pub struct Manifest {
     pub constraints: ConstraintsSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation: Option<EvaluationSpec>,
+    /// Kit-level tightening-proposal governance. Optional: absent means no
+    /// derived proposal policy (roles ingest nothing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal_governance: Option<ProposalGovernanceSpec>,
     pub completion: CompletionSpec,
     pub provenance: ProvenanceSpec,
 }

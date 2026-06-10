@@ -12,13 +12,17 @@
 
 use arkavo_arp::ArpDocument;
 use arkavo_arp::adaptation::{Adaptation, AdaptationMethod};
-use arkavo_arp::constraints::{Budget, BudgetExhaustionAction, Velocity};
+use arkavo_arp::constraints::{ApprovalMechanism, Budget, BudgetExhaustionAction, Velocity};
 use arkavo_arp::feedback::{
     DecayStrategy, FeedbackLoops, ImmediateFeedback, PolicyCacheConfig, QualityFailureAction,
     QualityGate, QualityMetric, ShortTermFeedback,
 };
 use arkavo_arp::model::AdlRef;
-use arkavo_swarmkit::{GlobalBudget, RoleSpec};
+use arkavo_arp::proposal::{BlastRadius, ProposalOrigin, ProposalPolicy};
+use arkavo_swarmkit::{
+    GlobalBudget, ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec,
+    ProposalOriginSpec, RoleSpec,
+};
 
 /// Tunables for the default-ARP derivation.
 ///
@@ -79,6 +83,21 @@ pub fn derive_arp_for_role(
     role_count: usize,
     opts: DeriveOptions,
 ) -> ArpDocument {
+    derive_arp_for_role_with_governance(role, global, role_count, opts, None)
+}
+
+/// Same derivation, plus a per-role `proposal_policy` derived from the kit's
+/// `proposal_governance` block — the same kit-config-to-role-ARP pattern as
+/// the global budget split. No governance means no proposal policy: the
+/// role's queue rejects every ingest.
+pub fn derive_arp_for_role_with_governance(
+    role: &RoleSpec,
+    global: &GlobalBudget,
+    role_count: usize,
+    opts: DeriveOptions,
+    governance: Option<&ProposalGovernanceSpec>,
+) -> ArpDocument {
+    let proposal_policy = governance.map(|gov| derive_proposal_policy(role, gov));
     let role_count = role_count.max(1) as f64;
     let task_ceiling = (global.max_cost_usd / role_count).max(f64::EPSILON);
     let velocity_per_min = (task_ceiling / opts.velocity_window_minutes).max(f64::EPSILON);
@@ -144,8 +163,63 @@ pub fn derive_arp_for_role(
         session: None,
         state_storage: None,
         observability: None,
-        proposal_policy: None,
+        proposal_policy,
         metadata: None,
+    }
+}
+
+/// Map the kit-level governance block onto one role's ARP proposal policy.
+fn derive_proposal_policy(role: &RoleSpec, gov: &ProposalGovernanceSpec) -> ProposalPolicy {
+    // Conservative default when the kit lists no origins: human only.
+    let accepted_origins = if gov.accepted_origins.is_empty() {
+        vec![ProposalOrigin::Human]
+    } else {
+        gov.accepted_origins.iter().map(map_origin).collect()
+    };
+    // Per-role ceiling, defaulting to single_entity. Mesh is rejected at
+    // manifest validation; clamp defensively anyway.
+    let ceiling = gov
+        .role_ceilings
+        .iter()
+        .find(|c| c.role == role.id)
+        .map(|c| map_radius(c.auto_apply_max_blast_radius))
+        .unwrap_or(BlastRadius::SingleEntity)
+        .min(BlastRadius::Flight);
+    ProposalPolicy {
+        accepted_origins,
+        auto_apply_max_blast_radius: ceiling,
+        review: gov.flight_approval.map(map_approval),
+        observation_window_sec: gov.observation_window_sec,
+    }
+}
+
+fn map_origin(o: &ProposalOriginSpec) -> ProposalOrigin {
+    match o {
+        ProposalOriginSpec::Consolidation => ProposalOrigin::Consolidation,
+        ProposalOriginSpec::Critic => ProposalOrigin::Critic,
+        ProposalOriginSpec::Historian => ProposalOrigin::Historian,
+        ProposalOriginSpec::Human => ProposalOrigin::Human,
+    }
+}
+
+fn map_radius(r: ProposalBlastRadius) -> BlastRadius {
+    match r {
+        ProposalBlastRadius::SingleEntity => BlastRadius::SingleEntity,
+        ProposalBlastRadius::SingleAgent => BlastRadius::SingleAgent,
+        ProposalBlastRadius::Flight => BlastRadius::Flight,
+        ProposalBlastRadius::Mesh => BlastRadius::Mesh,
+    }
+}
+
+fn map_approval(a: ProposalApprovalMechanism) -> ApprovalMechanism {
+    match a {
+        ProposalApprovalMechanism::CredentialPresentation => {
+            ApprovalMechanism::CredentialPresentation
+        }
+        ProposalApprovalMechanism::SignedCommand => ApprovalMechanism::SignedCommand,
+        ProposalApprovalMechanism::InteractiveConfirmation => {
+            ApprovalMechanism::InteractiveConfirmation
+        }
     }
 }
 
@@ -221,5 +295,102 @@ mod tests {
     fn zero_role_count_does_not_divide_by_zero() {
         let doc = derive_arp_for_role(&role("r1"), &budget(), 0, DeriveOptions::default());
         assert!(doc.budget.task_ceiling_usd > 0.0);
+    }
+    #[test]
+    fn no_governance_derives_no_proposal_policy() {
+        let doc = derive_arp_for_role(&role("r1"), &budget(), 1, DeriveOptions::default());
+        assert!(doc.proposal_policy.is_none());
+    }
+
+    #[test]
+    fn governance_derives_per_role_policy() {
+        use arkavo_swarmkit::{
+            ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec,
+            ProposalOriginSpec, RoleProposalCeiling,
+        };
+        let gov = ProposalGovernanceSpec {
+            accepted_origins: vec![ProposalOriginSpec::Consolidation, ProposalOriginSpec::Human],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "commander".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::SingleAgent,
+            }],
+            flight_approval: Some(ProposalApprovalMechanism::InteractiveConfirmation),
+            observation_window_sec: Some(900),
+        };
+
+        // Role with an explicit ceiling.
+        let doc = derive_arp_for_role_with_governance(
+            &role("commander"),
+            &budget(),
+            2,
+            DeriveOptions::default(),
+            Some(&gov),
+        );
+        let policy = doc.proposal_policy.unwrap();
+        assert_eq!(policy.auto_apply_max_blast_radius, BlastRadius::SingleAgent);
+        assert_eq!(policy.accepted_origins.len(), 2);
+        assert_eq!(policy.observation_window_sec, Some(900));
+        assert_eq!(
+            policy.review,
+            Some(ApprovalMechanism::InteractiveConfirmation)
+        );
+
+        // Role without an entry derives the single_entity default.
+        let doc = derive_arp_for_role_with_governance(
+            &role("historian"),
+            &budget(),
+            2,
+            DeriveOptions::default(),
+            Some(&gov),
+        );
+        let policy = doc.proposal_policy.unwrap();
+        assert_eq!(
+            policy.auto_apply_max_blast_radius,
+            BlastRadius::SingleEntity
+        );
+    }
+
+    #[test]
+    fn empty_origins_default_to_human_only() {
+        use arkavo_swarmkit::ProposalGovernanceSpec;
+        let gov = ProposalGovernanceSpec {
+            accepted_origins: vec![],
+            role_ceilings: vec![],
+            flight_approval: None,
+            observation_window_sec: None,
+        };
+        let doc = derive_arp_for_role_with_governance(
+            &role("r1"),
+            &budget(),
+            1,
+            DeriveOptions::default(),
+            Some(&gov),
+        );
+        let policy = doc.proposal_policy.unwrap();
+        assert_eq!(policy.accepted_origins, vec![ProposalOrigin::Human]);
+    }
+
+    #[test]
+    fn derived_document_passes_arp_validation() {
+        use arkavo_swarmkit::{
+            ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec, RoleProposalCeiling,
+        };
+        let gov = ProposalGovernanceSpec {
+            accepted_origins: vec![ProposalOriginSpec::Consolidation],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "r1".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::Flight,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        };
+        let doc = derive_arp_for_role_with_governance(
+            &role("r1"),
+            &budget(),
+            1,
+            DeriveOptions::default(),
+            Some(&gov),
+        );
+        assert!(arkavo_arp::validate::validate(&doc).is_ok());
     }
 }

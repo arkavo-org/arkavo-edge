@@ -10,6 +10,9 @@
 //!   cargo run -p arkavo-swarmkit-runtime --example swarmkit_agui_demo \
 //!     -- examples/campaign-kit/campaign-kit.swarmkit.yaml
 
+// #[tokio::main] expands to Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 
 use arkavo_agui::arp_handler::ArpHandler;

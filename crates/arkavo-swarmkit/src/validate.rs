@@ -59,6 +59,16 @@ pub enum ValidationError {
     #[error("evaluation.rubric.dimensions is empty; at least one dimension is required (§4.6)")]
     EmptyRubricDimensions,
 
+    #[error(
+        "proposal_governance.role_ceilings references role {0:?} which does not resolve to a known role"
+    )]
+    UnresolvedGovernanceRole(String),
+
+    #[error(
+        "proposal_governance.role_ceilings: role {role:?} sets auto_apply_max_blast_radius=mesh; mesh-radius proposals are never auto-applied"
+    )]
+    MeshAutoApplyCeiling { role: String },
+
     #[error("evaluation.rubric.dimensions weight sum {sum} is not 1.0 (within ±1e-6)")]
     RubricWeightsDoNotSumToOne { sum: f64 },
 
@@ -146,12 +156,35 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         }
     }
 
+    validate_proposal_governance(m, &role_ids)?;
+
     validate_expiry(m)?;
 
     if !m.kit.id.is_empty() {
         validate_kit_id(m)?;
     }
 
+    Ok(())
+}
+
+fn validate_proposal_governance(
+    m: &Manifest,
+    role_ids: &HashSet<&str>,
+) -> Result<(), ValidationError> {
+    if let Some(gov) = &m.proposal_governance {
+        for ceiling in &gov.role_ceilings {
+            if !role_ids.contains(ceiling.role.as_str()) {
+                return Err(ValidationError::UnresolvedGovernanceRole(
+                    ceiling.role.clone(),
+                ));
+            }
+            if ceiling.auto_apply_max_blast_radius == crate::governance::ProposalBlastRadius::Mesh {
+                return Err(ValidationError::MeshAutoApplyCeiling {
+                    role: ceiling.role.clone(),
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -309,6 +342,7 @@ mod tests {
                 },
             },
             evaluation: None,
+            proposal_governance: None,
             completion: CompletionSpec {
                 rules: vec!["all deliverables present".into()],
                 on_failure: OnFailure::Abort,
@@ -534,5 +568,60 @@ mod tests {
         ];
         validate(&m).expect("custom data_classifications should validate");
         assert_eq!(m.constraints.data_classifications.len(), 3);
+    }
+    #[test]
+    fn governance_with_known_roles_validates() {
+        use crate::governance::{
+            ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec, RoleProposalCeiling,
+        };
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![ProposalOriginSpec::Human],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "r1".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::SingleAgent,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(validate(&m).is_ok());
+    }
+
+    #[test]
+    fn governance_unknown_role_rejected() {
+        use crate::governance::{ProposalBlastRadius, ProposalGovernanceSpec, RoleProposalCeiling};
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "ghost".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::SingleEntity,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::UnresolvedGovernanceRole(r)) if r == "ghost"
+        ));
+    }
+
+    #[test]
+    fn governance_mesh_auto_apply_rejected() {
+        use crate::governance::{ProposalBlastRadius, ProposalGovernanceSpec, RoleProposalCeiling};
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "r1".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::Mesh,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::MeshAutoApplyCeiling { role }) if role == "r1"
+        ));
     }
 }

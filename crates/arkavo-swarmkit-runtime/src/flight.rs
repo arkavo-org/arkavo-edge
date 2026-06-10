@@ -18,7 +18,7 @@ use arkavo_arp_runtime::{ArpRuntime, ToolOutcomeContext};
 use arkavo_swarmkit::Manifest;
 use uuid::Uuid;
 
-use crate::derive::{DeriveOptions, derive_arp_for_role};
+use crate::derive::{DeriveOptions, derive_arp_for_role_with_governance};
 
 /// Per-role task envelope handed to a [`RoleTaskTransport`] for delivery.
 #[derive(Debug, Clone)]
@@ -234,11 +234,12 @@ impl SwarmFlight {
                 .get(&role.id)
                 .cloned()
                 .unwrap_or_else(|| {
-                    derive_arp_for_role(
+                    derive_arp_for_role_with_governance(
                         role,
                         &manifest.constraints.global_budget,
                         role_count,
                         options.derive_options,
+                        manifest.proposal_governance.as_ref(),
                     )
                 });
             let arp = Arc::new(ArpRuntime::from_document(&arp_doc));

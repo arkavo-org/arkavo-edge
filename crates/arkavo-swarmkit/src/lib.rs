@@ -11,6 +11,7 @@
 
 pub mod canonical;
 pub mod coordination;
+pub mod governance;
 pub mod manifest;
 pub mod role;
 pub mod skill_content;
@@ -21,6 +22,10 @@ pub use coordination::{
     CompactionSpec, CompletionSpec, ConstraintsSpec, CoordinationSpec, EvaluationDimension,
     EvaluationRubric, EvaluationSpec, GlobalBudget, NetworkConstraints, OnFailure, ProvenanceSpec,
     Routing, Signature,
+};
+pub use governance::{
+    ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec,
+    RoleProposalCeiling,
 };
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 #[allow(deprecated)]

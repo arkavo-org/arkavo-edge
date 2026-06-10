@@ -66,6 +66,9 @@ pub fn canonical_full_manifest(
 
 #[cfg(test)]
 mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
     use crate::{LaunchOptions, SwarmFlight};
     use arkavo_swarmkit::parse_yaml;
     use arkavo_test_macros::spec;
