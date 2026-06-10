@@ -2,6 +2,7 @@
 
 use crate::feedback::DecayStrategy;
 use crate::model::{ArpDocument, SignedContent};
+use crate::proposal::{BlastRadius, ProposalPolicy, TighteningProposal};
 
 /// Validate semantic constraints that cannot be expressed in JSON Schema alone.
 pub fn validate(doc: &ArpDocument) -> Result<(), ValidationError> {
@@ -12,6 +13,7 @@ pub fn validate(doc: &ArpDocument) -> Result<(), ValidationError> {
     validate_escalation_invariants(doc)?;
     validate_quarantine_invariants(doc)?;
     validate_quality_gate_threshold(doc)?;
+    validate_proposal_policy(doc)?;
     Ok(())
 }
 
@@ -126,6 +128,58 @@ fn validate_quality_gate_threshold(doc: &ArpDocument) -> Result<(), ValidationEr
     Ok(())
 }
 
+fn validate_proposal_policy(doc: &ArpDocument) -> Result<(), ValidationError> {
+    if let Some(policy) = &doc.proposal_policy {
+        if policy.accepted_origins.is_empty() {
+            return Err(ValidationError {
+                field: "proposal_policy.accepted_origins".into(),
+                message: "accepted_origins must be non-empty when proposal_policy is present"
+                    .into(),
+            });
+        }
+        if policy.auto_apply_max_blast_radius >= BlastRadius::Mesh {
+            return Err(ValidationError {
+                field: "proposal_policy.auto_apply_max_blast_radius".into(),
+                message: "mesh-radius proposals are never auto-applied; the ceiling must be \
+                          below 'mesh'"
+                    .into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Ingest-side validation of a single proposal against a policy: non-empty
+/// evidence, accepted origin, and per-effect value sanity. The runtime layers
+/// the current-value direction comparison on top of this.
+pub fn validate_proposal(
+    proposal: &TighteningProposal,
+    policy: &ProposalPolicy,
+) -> Result<(), ValidationError> {
+    if proposal.evidence.is_empty() {
+        return Err(ValidationError {
+            field: "proposal.evidence".into(),
+            message: format!("proposal {} has no evidence", proposal.id),
+        });
+    }
+    if !policy.accepted_origins.contains(&proposal.origin) {
+        return Err(ValidationError {
+            field: "proposal.origin".into(),
+            message: format!(
+                "origin {:?} is not in this document's accepted_origins",
+                proposal.origin
+            ),
+        });
+    }
+    if let Some(violation) = proposal.effect.value_violation() {
+        return Err(ValidationError {
+            field: "proposal.effect".into(),
+            message: violation,
+        });
+    }
+    Ok(())
+}
+
 /// A semantic validation error.
 #[derive(Debug)]
 pub struct ValidationError {
@@ -151,6 +205,7 @@ mod tests {
         QualityMetric, ShortTermFeedback,
     };
     use crate::model::{AdlRef, BetaPrior};
+    use crate::proposal::{ProposalOrigin, TraceRef};
 
     fn minimal_doc() -> ArpDocument {
         ArpDocument {
@@ -214,7 +269,35 @@ mod tests {
             session: None,
             state_storage: None,
             observability: None,
+            proposal_policy: None,
             metadata: None,
+        }
+    }
+
+    fn proposal(origin: ProposalOrigin, evidence: Vec<TraceRef>) -> TighteningProposal {
+        TighteningProposal {
+            id: "prop-1".into(),
+            origin,
+            state: crate::proposal::ProposalState::Proposed,
+            effect: crate::proposal::TighteningEffect::DenyTool {
+                tool: "game-rl:reset".into(),
+            },
+            rationale: "reset correlated with colony loss".into(),
+            blast_radius: BlastRadius::SingleAgent,
+            evidence,
+            created_at: "2026-06-10T00:00:00Z".into(),
+            applied_at: None,
+            reviewed_by: None,
+            disposition_reason: None,
+        }
+    }
+
+    fn policy() -> ProposalPolicy {
+        ProposalPolicy {
+            accepted_origins: vec![ProposalOrigin::Consolidation, ProposalOrigin::Human],
+            auto_apply_max_blast_radius: BlastRadius::SingleEntity,
+            review: None,
+            observation_window_sec: Some(3600),
         }
     }
 
@@ -222,6 +305,82 @@ mod tests {
     fn valid_minimal_document() {
         let doc = minimal_doc();
         assert!(validate(&doc).is_ok());
+    }
+
+    #[test]
+    fn accept_document_with_proposal_policy() {
+        let mut doc = minimal_doc();
+        doc.proposal_policy = Some(policy());
+        assert!(validate(&doc).is_ok());
+    }
+
+    #[test]
+    fn reject_proposal_policy_with_empty_origins() {
+        let mut doc = minimal_doc();
+        doc.proposal_policy = Some(ProposalPolicy {
+            accepted_origins: vec![],
+            ..policy()
+        });
+        let err = validate(&doc).unwrap_err();
+        assert!(err.field.contains("accepted_origins"));
+    }
+
+    #[test]
+    fn reject_mesh_auto_apply_ceiling() {
+        let mut doc = minimal_doc();
+        doc.proposal_policy = Some(ProposalPolicy {
+            auto_apply_max_blast_radius: BlastRadius::Mesh,
+            ..policy()
+        });
+        let err = validate(&doc).unwrap_err();
+        assert!(err.field.contains("auto_apply_max_blast_radius"));
+    }
+
+    #[test]
+    fn reject_proposal_without_evidence() {
+        let p = proposal(ProposalOrigin::Consolidation, vec![]);
+        let err = validate_proposal(&p, &policy()).unwrap_err();
+        assert_eq!(err.field, "proposal.evidence");
+    }
+
+    #[test]
+    fn reject_proposal_from_unaccepted_origin() {
+        let p = proposal(
+            ProposalOrigin::Critic,
+            vec![TraceRef {
+                trace_id: "t-1".into(),
+                episode_ids: vec![],
+            }],
+        );
+        let err = validate_proposal(&p, &policy()).unwrap_err();
+        assert_eq!(err.field, "proposal.origin");
+    }
+
+    #[test]
+    fn reject_proposal_with_insane_effect_value() {
+        let mut p = proposal(
+            ProposalOrigin::Consolidation,
+            vec![TraceRef {
+                trace_id: "t-1".into(),
+                episode_ids: vec![],
+            }],
+        );
+        p.effect =
+            crate::proposal::TighteningEffect::RaiseQualityGateThreshold { new_threshold: 7.0 };
+        let err = validate_proposal(&p, &policy()).unwrap_err();
+        assert_eq!(err.field, "proposal.effect");
+    }
+
+    #[test]
+    fn accept_conformant_proposal() {
+        let p = proposal(
+            ProposalOrigin::Consolidation,
+            vec![TraceRef {
+                trace_id: "t-1".into(),
+                episode_ids: vec!["ep-1".into()],
+            }],
+        );
+        assert!(validate_proposal(&p, &policy()).is_ok());
     }
 
     #[test]
