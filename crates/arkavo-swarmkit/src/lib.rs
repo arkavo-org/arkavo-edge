@@ -32,7 +32,7 @@ pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Ob
 pub use role::ArpRule;
 pub use role::{
     AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
-    Observability, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
+    Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
     ToolUse,
 };
 pub use skill_content::{SkillContent, SkillResource};

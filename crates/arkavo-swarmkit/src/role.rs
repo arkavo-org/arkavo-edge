@@ -2,11 +2,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which plane a role operates on. Coordination roles drive work;
+/// learning and audit roles observe it. The wiring rule is type-level:
+/// learning/audit roles may not have coordination outputs — no handoff
+/// delegation and no shared-context writes (enforced by validation). They
+/// emit only tightening proposals and provenance-tagged prior observations.
+/// This is the encoding of "the teacher rides the audit plane, never the
+/// coordination plane."
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Plane {
+    Coordination,
+    Learning,
+    Audit,
+}
+
 /// RoleSpec per §4.3. `role_type` is free-form per Appendix C.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoleSpec {
     pub id: String,
     pub role_type: String,
+    /// Plane declaration. Absent means coordination (the historical
+    /// default for every existing manifest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<Plane>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub agent_provisioning: AgentProvisioning,

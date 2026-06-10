@@ -233,6 +233,7 @@ mod tests {
         RoleSpec {
             id: id.into(),
             role_type: "specialist".into(),
+            plane: None,
             description: None,
             agent_provisioning: AgentProvisioning::default(),
             skills: vec![],

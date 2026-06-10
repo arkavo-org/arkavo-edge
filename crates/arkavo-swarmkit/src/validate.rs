@@ -69,6 +69,15 @@ pub enum ValidationError {
     )]
     MeshAutoApplyCeiling { role: String },
 
+    #[error(
+        "role {role:?} declares plane={plane} but has coordination outputs ({output}); learning/audit roles may emit only tightening proposals and provenance-tagged prior observations"
+    )]
+    PlaneWiringViolation {
+        role: String,
+        plane: &'static str,
+        output: &'static str,
+    },
+
     #[error("evaluation.rubric.dimensions weight sum {sum} is not 1.0 (within ±1e-6)")]
     RubricWeightsDoNotSumToOne { sum: f64 },
 
@@ -139,6 +148,7 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         }
         validate_role_budget(role, &m.constraints.global_budget)?;
         validate_network_egress(role, m.constraints.network.egress_allowed)?;
+        validate_plane_wiring(role)?;
     }
 
     if let Some(eval) = &m.evaluation {
@@ -164,6 +174,35 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         validate_kit_id(m)?;
     }
 
+    Ok(())
+}
+
+/// Learning/audit roles must not have coordination outputs: no handoff
+/// delegation, no shared-context writes. The type-level half of "Fable on
+/// the audit plane, never the coordination plane".
+fn validate_plane_wiring(role: &crate::role::RoleSpec) -> Result<(), ValidationError> {
+    use crate::role::Plane;
+    let plane = match role.plane {
+        Some(Plane::Learning) => "learning",
+        Some(Plane::Audit) => "audit",
+        Some(Plane::Coordination) | None => return Ok(()),
+    };
+    if !role.handoffs.is_empty() {
+        return Err(ValidationError::PlaneWiringViolation {
+            role: role.id.clone(),
+            plane,
+            output: "handoffs (A2A delegation)",
+        });
+    }
+    if let Some(scope) = &role.context_scope
+        && !scope.can_write.is_empty()
+    {
+        return Err(ValidationError::PlaneWiringViolation {
+            role: role.id.clone(),
+            plane,
+            output: "context_scope.can_write",
+        });
+    }
     Ok(())
 }
 
@@ -311,6 +350,7 @@ mod tests {
             roles: vec![RoleSpec {
                 id: "r1".into(),
                 role_type: "specialist".into(),
+                plane: None,
                 description: None,
                 agent_provisioning: AgentProvisioning::default(),
                 skills: vec![],
@@ -623,5 +663,58 @@ mod tests {
             validate(&m),
             Err(ValidationError::MeshAutoApplyCeiling { role }) if role == "r1"
         ));
+    }
+    #[test]
+    fn audit_plane_role_with_handoffs_rejected() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Audit);
+        m.roles[0].handoffs = vec![Handoff {
+            to: "r1".into(),
+            on: "done".into(),
+        }];
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::PlaneWiringViolation { plane: "audit", .. })
+        ));
+    }
+
+    #[test]
+    fn learning_plane_role_with_context_writes_rejected() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Learning);
+        m.roles[0].context_scope = Some(ContextScope {
+            can_read: vec!["*".into()],
+            can_write: vec!["lessons".into()],
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::PlaneWiringViolation {
+                plane: "learning",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn audit_plane_role_without_outputs_validates() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Audit);
+        m.roles[0].context_scope = Some(ContextScope {
+            can_read: vec!["*".into()],
+            can_write: vec![],
+        });
+        assert!(validate(&m).is_ok());
+    }
+
+    #[test]
+    fn coordination_role_keeps_handoffs() {
+        // Handoffs stay legal for coordination roles (declared or default).
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Coordination);
+        m.roles[0].handoffs = vec![Handoff {
+            to: "r1".into(),
+            on: "done".into(),
+        }];
+        assert!(validate(&m).is_ok());
     }
 }
