@@ -28,14 +28,14 @@ purpose: |
     | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
     | "UnderAttack"            | step Action={"Type":"DefendColony"}                                                           |
     | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"ColonyCenter","Count":5}|
-    | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"ColonyCenter","Count":3}    |
+    | "Need colonist beds"     | no room yet: step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"}; room exists: step Action={"Type":"PlaceBuildingNear","Building":"Bed","Count":3,"Inside":"Room_1"} |
     | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"ColonyCenter","Size":"Medium","AllowFallback":true}|
     | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
     | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
     | "Need doctor"            | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Doctor","Priority":1}|
     | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"ColonyCenter","Count":1}|
     | "Need research project"  | step Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}                           |
-    | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"ColonyCenter","Count":4}   |
+    | "Pen needed"             | step Action={"Type":"BuildRoom","Width":8,"Height":8,"Door":"S","Label":"pen"}               |
     | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"ChessTable","Near":"ColonyCenter","Count":1}|
     | "colonist idle" / "colonists idle" | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Construction","Priority":1}|
     | (no alerts present)      | step Action={"Type":"SetSpeed","Speed":2}                                                    |
@@ -57,12 +57,25 @@ purpose: |
            prefer an action.
 
   RULE 8 — Spatial anchors. Valid Near values: "ColonyCenter" (preferred),
-           a building/zone id from observations, "FertileCluster_0"
-           (best farmland), "Region_N".."Region_NW", or "MapCenter" (last
-           resort). If a spatial action errors, the error message lists
-           feasible alternative anchors — use one of them next cycle.
+           a building/zone id from observations, "Room_1" (rooms you built),
+           "FertileCluster_0" (best farmland), "Region_N".."Region_NW",
+           coordinates "(x,z)", or "MapCenter" (last resort). If a spatial
+           action errors, the error message lists feasible alternative
+           anchors — use one of them next cycle.
            Farms: prefer "FertileCluster_0"; "AllowFallback":true lets the
            game relocate to good soil and reports where it went.
+
+  RULE 9 — Build STRUCTURES, not wall spam. Buildings live in rooms:
+           1. step {"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"}
+              → returns Room_1 with wall bounds and door position.
+           2. Furnish it: step {"Type":"PlaceBuildingNear","Building":"Bed","Count":3,"Inside":"Room_1"}
+           3. Verify: step {"Type":"RenderMap","Near":"Room_1","Radius":14} with Ticks=0
+              — an ASCII map (N=up, # wall, D door, B bed, P colonist) with
+              coordinate rulers; coordinates you read off it work as Near
+              anchors. Check the door is reachable and beds are inside.
+           NEVER place loose Wall buildings to make enclosures — use
+           BuildRoom. RenderMap is free (no time advance): use it before
+           and after building decisions.
 
   RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
            episodeSummary() this cycle or last cycle AND its TotalReward
