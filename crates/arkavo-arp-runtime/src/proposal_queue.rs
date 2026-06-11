@@ -124,6 +124,15 @@ impl ProposalQueue {
         if let Err(reason) = self.direction_violation(&proposal.effect) {
             return self.reject(proposal, &reason);
         }
+        // A replayed id is refused without recording: pushing a second entry
+        // under the same id would corrupt every id-keyed lookup, and the id
+        // is already on the books.
+        if self.duplicate_id(&proposal.id) {
+            return ProposalState::Rejected;
+        }
+        if let Err(reason) = self.overlap_violation(&proposal.effect) {
+            return self.reject(proposal, &reason);
+        }
 
         proposal.state = ProposalState::Proposed;
         if proposal.blast_radius <= policy.auto_apply_max_blast_radius {
@@ -143,6 +152,13 @@ impl ProposalQueue {
             return Err("document has no proposal_policy".to_string());
         };
         validate_proposal(proposal, policy).map_err(|e| e.to_string())?;
+        if self.duplicate_id(&proposal.id) {
+            return Err(format!(
+                "proposal id {} already exists in this queue; retry with a fresh id",
+                proposal.id
+            ));
+        }
+        self.overlap_violation(&proposal.effect)?;
         self.direction_violation(&proposal.effect)
     }
 
@@ -239,8 +255,12 @@ impl ProposalQueue {
         proposal.reviewed_by = Some(reviewer.to_string());
         proposal.state = ProposalState::Reviewed;
         if approve {
-            // Re-check direction: current values may have moved since ingest.
-            if let Err(reason) = self.direction_violation(&proposal.effect) {
+            // Re-check direction and overlap: current values and active
+            // observations may have moved since ingest.
+            let recheck = self
+                .direction_violation(&proposal.effect)
+                .and_then(|()| self.overlap_violation(&proposal.effect));
+            if let Err(reason) = recheck {
                 proposal.state = ProposalState::Rejected;
                 proposal.disposition_reason = Some(reason);
             } else {
@@ -318,6 +338,35 @@ impl ProposalQueue {
         proposal.disposition_reason = Some(reason.to_string());
         self.proposals.push(proposal);
         ProposalState::Rejected
+    }
+
+    fn duplicate_id(&self, id: &str) -> bool {
+        self.proposals.iter().any(|p| p.id == id)
+    }
+
+    /// Refuse a scalar proposal while another proposal on the same document
+    /// field is still under observation. A revert restores a point-in-time
+    /// displaced value, so two live observations on one field would let an
+    /// automatic revert of the earlier proposal silently overwrite the later,
+    /// still-active tightening — a machine-initiated loosening. Set-based
+    /// effects revert by removal and are already deduplicated by the
+    /// direction check.
+    fn overlap_violation(&self, effect: &TighteningEffect) -> Result<(), String> {
+        let Some(key) = scalar_field_key(effect) else {
+            return Ok(());
+        };
+        let owner = self.proposals.iter().find(|p| {
+            self.observations.contains_key(&p.id)
+                && scalar_field_key(&p.effect).as_deref() == Some(key.as_str())
+        });
+        match owner {
+            Some(p) => Err(format!(
+                "field {key} is still under observation by proposal {}; \
+                 wait for it to confirm or revert",
+                p.id
+            )),
+            None => Ok(()),
+        }
     }
 
     /// Direction check against *current* values: the typed effect already
@@ -593,6 +642,25 @@ impl ProposalQueue {
             decision,
             outcome,
         );
+    }
+}
+
+/// The document field a scalar effect tightens; `None` for set-based effects.
+fn scalar_field_key(effect: &TighteningEffect) -> Option<String> {
+    match effect {
+        TighteningEffect::LowerTaskCeiling { .. } => Some("budget.task_ceiling_usd".to_string()),
+        TighteningEffect::LowerLayerBudget { layer, .. } => {
+            Some(format!("budget.per_layer.{layer:?}"))
+        }
+        TighteningEffect::RaiseQualityGateThreshold { .. } => {
+            Some("quality_gate.threshold_default".to_string())
+        }
+        TighteningEffect::LowerRateLimit { .. } => {
+            Some("rate_limiting.global.requests_per_second".to_string())
+        }
+        TighteningEffect::AddQuarantine { .. }
+        | TighteningEffect::DenyTool { .. }
+        | TighteningEffect::DenyEgress { .. } => None,
     }
 }
 
@@ -914,6 +982,156 @@ mod tests {
         );
         // Auto-applied — no longer awaiting review.
         assert!(q.review("p1", true, "op", 0).is_err());
+    }
+
+    #[test]
+    fn duplicate_id_is_refused_everywhere_and_does_not_corrupt_state() {
+        let mut q = queue();
+        q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool { tool: "a".into() },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        // A replayed id must be refused outright — a second entry under the
+        // same id would corrupt every id-keyed lookup (state, review, revert)
+        // and overwrite the observation's displaced value.
+        let state = q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool { tool: "b".into() },
+                BlastRadius::SingleEntity,
+            ),
+            1_001,
+        );
+        assert_eq!(state, ProposalState::Rejected);
+        assert_eq!(q.proposals().len(), 1);
+        assert!(q.is_tool_denied("a"));
+        assert!(!q.is_tool_denied("b"));
+
+        // The flight precheck and the reviewed path refuse the same id too.
+        let dup = proposal(
+            "p1",
+            TighteningEffect::DenyTool { tool: "c".into() },
+            BlastRadius::SingleEntity,
+        );
+        assert!(q.check(&dup).is_err());
+        assert!(q.ingest_reviewed(dup, "op", 1_002).is_err());
+        assert_eq!(q.proposals().len(), 1);
+    }
+
+    #[test]
+    fn scalar_field_under_observation_refuses_overlapping_proposal() {
+        let mut q = queue();
+        let s1 = q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 1.0,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        assert_eq!(s1, ProposalState::Observed);
+
+        // p2 tightens further, but the field's displaced value is still owned
+        // by p1's observation — reverting p1 later would write 2.5 over p2's
+        // active 0.5, a machine-initiated loosening. Refuse the overlap.
+        let s2 = q.ingest(
+            proposal(
+                "p2",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 0.5,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_010,
+        );
+        assert_eq!(s2, ProposalState::Rejected);
+        assert!((q.document().budget.task_ceiling_usd - 1.0).abs() < 1e-9);
+
+        // Reverting p1 restores the pre-p1 value with no later tightening to
+        // clobber — the loosening path is closed.
+        q.force_revert("p1", "operator rollback").unwrap();
+        assert!((q.document().budget.task_ceiling_usd - 2.5).abs() < 1e-9);
+
+        // The field is free again once no observation owns it.
+        let s3 = q.ingest(
+            proposal(
+                "p3",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 0.5,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_020,
+        );
+        assert_eq!(s3, ProposalState::Observed);
+        assert!((q.document().budget.task_ceiling_usd - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scalar_field_frees_after_confirmation() {
+        let mut q = queue();
+        q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 1.0,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        // Window (600s) elapses without regression: p1 confirms and releases
+        // the field.
+        q.evaluate_observations(1_700);
+        assert_eq!(q.proposal_state("p1"), Some(ProposalState::Confirmed));
+        let state = q.ingest(
+            proposal(
+                "p2",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 0.5,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_710,
+        );
+        assert_eq!(state, ProposalState::Observed);
+    }
+
+    #[test]
+    fn review_approval_rechecks_field_overlap() {
+        let mut q = queue();
+        // Held for review: wider than the auto-apply radius.
+        q.ingest(
+            proposal(
+                "held",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 0.8,
+                },
+                BlastRadius::SingleAgent,
+            ),
+            1_000,
+        );
+        // Meanwhile an auto-applied proposal takes the field.
+        q.ingest(
+            proposal(
+                "auto",
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: 1.0,
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_001,
+        );
+        // Approval must refuse: the field is under observation by "auto".
+        let state = q.review("held", true, "op", 1_010).unwrap();
+        assert_eq!(state, ProposalState::Rejected);
+        assert!((q.document().budget.task_ceiling_usd - 1.0).abs() < 1e-9);
     }
 
     #[test]
