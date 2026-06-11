@@ -185,3 +185,44 @@ scenarios:
       - Ring gauges show actual context window pressure
     refs: [crates/arkavo-server/src/server/conductor.rs:17-20, crates/arkavo-server/src/server/mod.rs:1272-1280]
     changed: "2026-03-24"
+
+  - id: AGUI-013
+    name: Findings inbox renders tightening proposals as per-agent cards
+    criticality: high
+    given:
+      - An ArpStatusUpdate snapshot carrying per-agent proposal lists
+    when: renderArp runs
+    then:
+      - Each proposal renders as a card keyed by agent, never gateway-global
+      - Card shows state, effect summary, rationale, and evidence counts
+      - Proposals in proposed state expose Approve/Reject buttons carrying
+        the agent id and proposal id
+    refs: [crates/arkavo-agui/static/js/panels/arp.js, crates/arkavo-agui/src/arp_handler.rs]
+    changed: "2026-06-10"
+
+  - id: AGUI-014
+    name: Proposal review action round-trips to a fresh snapshot
+    criticality: high
+    given:
+      - A held proposal rendered in the findings inbox
+    when: RequestArpProposalAction arrives from the client
+    then:
+      - The review is applied to that agent's ProposalQueue
+      - An ArpProposalActionResult plus a fresh ArpStatusUpdate push to the
+        acting client without waiting for the panel poll
+      - Direction is re-checked at approval time
+    refs: [crates/arkavo-agui/src/arp_handler.rs, crates/arkavo-agui/src/gateway_ws.rs]
+    changed: "2026-06-10"
+
+  - id: AGUI-015
+    name: Bandit health view summarizes adaptation priors per agent
+    criticality: medium
+    given:
+      - Agent snapshots carrying adaptation prior summaries
+    when: the bandit health view renders
+    then:
+      - Beta curves render from alpha/beta counts as inline SVG
+      - Evidence split separates live from distilled mass
+      - Numeric interpolation only — no remote strings enter attributes
+    refs: [crates/arkavo-agui/static/js/panels/arp.js, crates/arkavo-agui/src/types.rs]
+    changed: "2026-06-10"

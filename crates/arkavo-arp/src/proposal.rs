@@ -192,6 +192,7 @@ pub struct ProposalPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn blast_radius_ordering_is_load_bearing() {
@@ -276,6 +277,7 @@ mod tests {
         assert_eq!(p, p2);
     }
 
+    #[spec("ARP-007")]
     #[test]
     fn there_is_no_loosen_variant() {
         // The closed-enum guarantee: deserializing a loosening "effect"

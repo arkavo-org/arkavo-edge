@@ -231,6 +231,7 @@ mod tests {
     };
     use crate::model::{AdlRef, BetaPrior};
     use crate::proposal::{ProposalOrigin, TraceRef};
+    use arkavo_test_macros::spec;
 
     fn minimal_doc() -> ArpDocument {
         ArpDocument {
@@ -384,6 +385,7 @@ mod tests {
         assert!(err.field.contains("accepted_origins"));
     }
 
+    #[spec("ARP-006")]
     #[test]
     fn reject_mesh_auto_apply_ceiling() {
         let mut doc = minimal_doc();

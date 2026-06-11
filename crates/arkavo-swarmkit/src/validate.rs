@@ -664,6 +664,7 @@ mod tests {
             Err(ValidationError::MeshAutoApplyCeiling { role }) if role == "r1"
         ));
     }
+    #[spec("SK-093")]
     #[test]
     fn audit_plane_role_with_handoffs_rejected() {
         let mut m = minimal_manifest();
@@ -678,6 +679,7 @@ mod tests {
         ));
     }
 
+    #[spec("SK-093")]
     #[test]
     fn learning_plane_role_with_context_writes_rejected() {
         let mut m = minimal_manifest();
@@ -695,6 +697,7 @@ mod tests {
         ));
     }
 
+    #[spec("SK-093")]
     #[test]
     fn audit_plane_role_without_outputs_validates() {
         let mut m = minimal_manifest();

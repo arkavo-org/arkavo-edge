@@ -8,6 +8,12 @@
 //! There is deliberately no auto-apply field on this type at all.
 //!
 //! Two channels, asymmetric friction: tightenings flow, capabilities crawl.
+//!
+//! These types are declarative only: nothing in this crate (or any runtime
+//! crate) constructs or enforces a capability proposal. The gates name
+//! checks (conformance suite, canary) whose runners do not exist yet —
+//! [`CapabilityProposal::is_approvable`] is the admission predicate a future
+//! enforcement point must call, never a guarantee that it was called.
 
 use serde::{Deserialize, Serialize};
 
@@ -151,6 +157,7 @@ impl CapabilityProposal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn proposal(gates: CapabilityGates) -> CapabilityProposal {
         CapabilityProposal {
@@ -192,6 +199,7 @@ mod tests {
         assert_eq!(p.gates.remaining().len(), 6);
     }
 
+    #[spec("ARP-008")]
     #[test]
     fn every_gate_plus_named_human_is_approvable() {
         let p = proposal(all_gates());
@@ -199,6 +207,7 @@ mod tests {
         assert!(p.gates.remaining().is_empty());
     }
 
+    #[spec("ARP-008")]
     #[test]
     fn any_single_missing_gate_blocks() {
         for missing in 0..6 {
@@ -217,6 +226,7 @@ mod tests {
         }
     }
 
+    #[spec("ARP-008")]
     #[test]
     fn human_approval_is_an_identity_not_a_boolean() {
         let p = proposal(all_gates());
@@ -238,6 +248,7 @@ mod tests {
         assert!(p.intake_violation().unwrap().contains("component_digest"));
     }
 
+    #[spec("ARP-007")]
     #[test]
     fn capability_addition_cannot_ride_the_tightening_channel() {
         // The structural exclusion: there is no TighteningEffect variant

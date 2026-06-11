@@ -462,6 +462,7 @@ mod tests {
 
     use super::*;
     use arkavo_router::learning::{EpisodeOutcome, Observation, QualityMetrics};
+    use arkavo_test_macros::spec;
     use std::sync::Mutex;
 
     struct MockTeacher {
@@ -638,6 +639,7 @@ mod tests {
         assert!(run.rejects[0].reason.contains("not a valid tightening"));
     }
 
+    #[spec("SRV-011")]
     #[tokio::test]
     async fn non_local_teacher_without_layer_budget_is_refused() {
         let teacher = MockTeacher::scripted(vec![(GOOD_REPLY, 0.05)], false);
@@ -647,6 +649,7 @@ mod tests {
         assert!(err.contains("per_layer.consolidation"));
     }
 
+    #[spec("SRV-011")]
     #[tokio::test]
     async fn local_teacher_runs_without_layer_budget() {
         let teacher = MockTeacher::scripted(vec![(GOOD_REPLY, 0.0)], true);
@@ -656,6 +659,7 @@ mod tests {
         assert_eq!(run.categories_consolidated, 1);
     }
 
+    #[spec("SRV-012")]
     #[tokio::test]
     async fn budget_exhaustion_stops_between_batches_with_trace() {
         use arkavo_arp::observability::DecisionTraceConfig;

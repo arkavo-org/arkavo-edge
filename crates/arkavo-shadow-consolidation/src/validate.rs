@@ -202,6 +202,7 @@ mod tests {
     use super::*;
     use crate::episodes::ActionOutcome;
     use crate::proposal::Severity;
+    use arkavo_test_macros::spec;
 
     fn evidence() -> BTreeSet<String> {
         evidence_actions(&[
@@ -250,6 +251,7 @@ mod tests {
         assert!(lesson_violation(&lesson("game-rl:set_priority"), &evidence()).is_none());
     }
 
+    #[spec("SC-005")]
     #[test]
     fn lesson_naming_unknown_action_rejected() {
         let reason = lesson_violation(&lesson("teleport"), &evidence()).unwrap();
@@ -268,6 +270,7 @@ mod tests {
         assert!(tightening_violation(&proposal("must not reset on reconnect")).is_none());
     }
 
+    #[spec("SC-005")]
     #[test]
     fn loosening_constraint_rejected() {
         let reason =

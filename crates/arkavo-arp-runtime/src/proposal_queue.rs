@@ -676,6 +676,7 @@ mod tests {
     use arkavo_arp::constraints::QuarantineScope;
     use arkavo_arp::observability::DecisionTraceConfig;
     use arkavo_arp::proposal::{BlastRadius, ProposalOrigin, TraceRef};
+    use arkavo_test_macros::spec;
 
     const DOC: &str = r#"{
         "arp_spec": "0.1.0",
@@ -738,6 +739,7 @@ mod tests {
         }
     }
 
+    #[spec("ARP-001")]
     #[test]
     fn auto_apply_within_radius_goes_to_observed() {
         let mut q = queue();
@@ -757,6 +759,7 @@ mod tests {
         assert_eq!(q.trace.len(), 1);
     }
 
+    #[spec("ARP-002")]
     #[test]
     fn wider_radius_waits_for_review_then_applies() {
         let mut q = queue();
@@ -780,6 +783,7 @@ mod tests {
         assert_eq!(p.reviewed_by.as_deref(), Some("operator"));
     }
 
+    #[spec("ARP-002")]
     #[test]
     fn reviewer_denial_rejects() {
         let mut q = queue();
@@ -833,6 +837,7 @@ mod tests {
         assert!(q.proposals().iter().all(|p| p.disposition_reason.is_some()));
     }
 
+    #[spec("ARP-001")]
     #[test]
     fn clean_window_confirms() {
         let mut q = queue();
@@ -864,6 +869,7 @@ mod tests {
         );
     }
 
+    #[spec("ARP-003")]
     #[test]
     fn regression_reverts_and_restores_prior_value() {
         let mut q = queue();
@@ -902,6 +908,7 @@ mod tests {
         assert!(p.disposition_reason.unwrap().contains("regression"));
     }
 
+    #[spec("ARP-003")]
     #[test]
     fn revert_removes_set_insertions() {
         let mut q = queue();
@@ -984,8 +991,9 @@ mod tests {
         assert!(q.review("p1", true, "op", 0).is_err());
     }
 
+    #[spec("ARP-004")]
     #[test]
-    fn duplicate_id_is_refused_everywhere_and_does_not_corrupt_state() {
+    fn duplicate_id_ingest_is_refused_and_does_not_corrupt_state() {
         let mut q = queue();
         q.ingest(
             proposal(
@@ -1010,8 +1018,21 @@ mod tests {
         assert_eq!(q.proposals().len(), 1);
         assert!(q.is_tool_denied("a"));
         assert!(!q.is_tool_denied("b"));
+    }
 
-        // The flight precheck and the reviewed path refuse the same id too.
+    #[spec("ARP-004")]
+    #[test]
+    fn duplicate_id_is_refused_by_check_and_reviewed_path() {
+        let mut q = queue();
+        q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool { tool: "a".into() },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        // The flight precheck and the kit-approved path refuse a known id.
         let dup = proposal(
             "p1",
             TighteningEffect::DenyTool { tool: "c".into() },
@@ -1020,8 +1041,10 @@ mod tests {
         assert!(q.check(&dup).is_err());
         assert!(q.ingest_reviewed(dup, "op", 1_002).is_err());
         assert_eq!(q.proposals().len(), 1);
+        assert!(!q.is_tool_denied("c"));
     }
 
+    #[spec("ARP-005")]
     #[test]
     fn scalar_field_under_observation_refuses_overlapping_proposal() {
         let mut q = queue();
@@ -1073,6 +1096,7 @@ mod tests {
         assert!((q.document().budget.task_ceiling_usd - 0.5).abs() < 1e-9);
     }
 
+    #[spec("ARP-005")]
     #[test]
     fn scalar_field_frees_after_confirmation() {
         let mut q = queue();
@@ -1103,6 +1127,8 @@ mod tests {
         assert_eq!(state, ProposalState::Observed);
     }
 
+    #[spec("ARP-002")]
+    #[spec("ARP-005")]
     #[test]
     fn review_approval_rechecks_field_overlap() {
         let mut q = queue();
@@ -1134,6 +1160,7 @@ mod tests {
         assert!((q.document().budget.task_ceiling_usd - 1.0).abs() < 1e-9);
     }
 
+    #[spec("ARP-003")]
     #[test]
     fn layer_budget_introduction_and_revert_clears_it() {
         let mut q = queue();

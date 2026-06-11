@@ -156,3 +156,29 @@ scenarios:
       - Resources reclaimed
     refs: [crates/arkavo-server/src/server.rs]
     changed: "2026-03-19"
+
+  - id: SRV-011
+    name: Consolidation teacher requires a layer budget for frontier models
+    criticality: critical
+    given:
+      - A non-local teacher model (Fable)
+    when: run_teacher starts
+    then:
+      - A missing budget.per_layer consolidation limit refuses the run
+      - A local teacher runs without a layer budget
+      - Every reply's cost accrues against the limit
+    refs: [crates/arkavo-server/src/server/consolidation_teacher.rs]
+    changed: "2026-06-10"
+
+  - id: SRV-012
+    name: Teacher budget exhaustion stops between batches keeping partial output
+    criticality: critical
+    given:
+      - Cumulative teacher spend reaching the consolidation layer limit
+    when: the next batch would start
+    then:
+      - The run stops between batches, never mid-call
+      - Lessons and proposals from completed batches are preserved
+      - A budget_exhausted BudgetEvent is traced
+    refs: [crates/arkavo-server/src/server/consolidation_teacher.rs]
+    changed: "2026-06-10"

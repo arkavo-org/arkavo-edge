@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Shadow Consolidation Audit Job
+module: arkavo_shadow_consolidation
+version: 0.80.0
+
+invariants:
+  - Zero runtime contact — episode store opened read-only, no arkavo runtime
+    crate dependency
+  - The run-level cost ceiling is enforced between batches and the ledger
+    records real token/dollar accounting
+  - Partial outputs survive both budget exhaustion and call failures
+  - Contract violations land in rejects.json with a reason; operational
+    failures never count against conformance
+
+scenarios:
+  - id: SC-001
+    name: Run-level cost ceiling stops between batches and marks the ledger
+    criticality: critical
+    given:
+      - Episode store with multiple categories
+      - max_run_cost_usd at or below cumulative spend
+    when: execute runs
+    then:
+      - The run stops before the next batch, never mid-call
+      - cost_ledger.json marks run_budget exhausted with categories_budget_stopped
+      - Partial artifacts are written
+      - A zero ceiling stops before the first call with no credentials needed
+    refs: [crates/arkavo-shadow-consolidation/src/run.rs]
+    changed: "2026-06-10"
+
+  - id: SC-002
+    name: Dry-run spends zero tokens and previews prompts
+    criticality: critical
+    given:
+      - --dry-run set
+    when: execute runs
+    then:
+      - No Fable client is constructed and no network call is made
+      - The ledger records zero cost
+      - prompts.json records every prompt that would have been sent
+    refs: [crates/arkavo-shadow-consolidation/src/run.rs]
+    changed: "2026-06-10"
+
+  - id: SC-003
+    name: A failed call records a reject and the run continues
+    criticality: critical
+    given:
+      - A category whose Fable call fails after retries
+    when: execute processes the remaining batches
+    then:
+      - The failure lands in rejects.json with kind call and the error reason
+      - The ledger and all artifacts are still written
+      - Conformance rate is untouched — operational failure is not a
+        contract violation
+    refs:
+      - crates/arkavo-shadow-consolidation/src/run.rs
+      - crates/arkavo-shadow-consolidation/tests/call_failure_resilience.rs
+    changed: "2026-06-10"
+
+  - id: SC-004
+    name: Transient API failures retry with backoff, billed calls never re-send
+    criticality: high
+    given:
+      - Fable returns 429/5xx then succeeds
+    when: FableClient::complete runs
+    then:
+      - Transient statuses retry with exponential backoff up to the attempt cap
+      - Non-retryable 4xx fails immediately
+      - A decode failure after a billed 200 is never re-sent
+    refs: [crates/arkavo-shadow-consolidation/src/fable.rs]
+    changed: "2026-06-10"
+
+  - id: SC-005
+    name: Contract violations are rejected with reasons, never dropped
+    criticality: critical
+    given:
+      - Fable output containing a lesson naming a non-evidence action and a
+        loosening phrased as a tightening
+    when: post-hoc validation runs
+    then:
+      - Both land in rejects.json with reasons and truncated payloads
+      - Conformance tallies count them against the contract rate
+      - Accepted lessons must name an action from the stripped evidence
+    refs:
+      - crates/arkavo-shadow-consolidation/src/validate.rs
+      - crates/arkavo-shadow-consolidation/src/run.rs
+    changed: "2026-06-10"

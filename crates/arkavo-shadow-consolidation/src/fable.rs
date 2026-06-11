@@ -209,6 +209,7 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
     use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -280,6 +281,7 @@ mod tests {
         }
     }
 
+    #[spec("SC-004")]
     #[tokio::test]
     async fn retries_transient_overload_then_succeeds() {
         let addr = serve(vec![
@@ -295,6 +297,7 @@ mod tests {
         assert_eq!(completion.usage.output_tokens, 5);
     }
 
+    #[spec("SC-004")]
     #[tokio::test]
     async fn non_retryable_status_fails_without_retry() {
         // One served response only: a retry would hit a closed listener and
@@ -308,6 +311,7 @@ mod tests {
         );
     }
 
+    #[spec("SC-004")]
     #[tokio::test]
     async fn exhausts_retries_and_reports_last_error() {
         let addr = serve(vec![(500, "boom"), (500, "boom"), (500, "boom")]).await;

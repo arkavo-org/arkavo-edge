@@ -20,4 +20,5 @@ tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["macros", "rt"] }

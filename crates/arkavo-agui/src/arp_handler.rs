@@ -989,6 +989,7 @@ mod proposal_tests {
     use arkavo_arp::proposal::{
         BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal, TraceRef,
     };
+    use arkavo_test_macros::spec;
 
     const DOC_WITH_POLICY: &str = r#"{
         "arp_spec": "0.1.0",
@@ -1051,6 +1052,7 @@ mod proposal_tests {
         queue.lock().await.ingest(p, 1_000);
     }
 
+    #[spec("AGUI-013")]
     #[tokio::test]
     async fn proposals_surface_in_snapshot_as_inbox_cards() {
         let handler = ArpHandler::new();
@@ -1076,6 +1078,7 @@ mod proposal_tests {
         assert_eq!(card.evidence[0].episode_ids, vec!["ep-1".to_string()]);
     }
 
+    #[spec("AGUI-014")]
     #[tokio::test]
     async fn review_proposal_approves_held_proposal() {
         let handler = ArpHandler::new();

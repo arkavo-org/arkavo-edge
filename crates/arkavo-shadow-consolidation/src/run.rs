@@ -361,6 +361,7 @@ mod tests {
     use super::*;
     use crate::episodes::ActionOutcome;
     use crate::proposal::Severity;
+    use arkavo_test_macros::spec;
 
     fn batch() -> CategoryBatch {
         CategoryBatch {
@@ -386,6 +387,7 @@ mod tests {
         }
     }
 
+    #[spec("SC-002")]
     #[tokio::test]
     async fn dry_run_makes_no_call_and_zero_cost() {
         let (output, entry, preview, raw) = consolidate_category(None, &batch()).await.unwrap();
@@ -400,6 +402,7 @@ mod tests {
         assert!(preview.user.contains("set_priority"));
     }
 
+    #[spec("SC-005")]
     #[test]
     fn validate_output_accepts_conformant_and_rejects_violations() {
         let b = batch();
@@ -452,6 +455,7 @@ mod tests {
         assert!((conformance.rate() - 2.0 / 3.0).abs() < 1e-9);
     }
 
+    #[spec("SC-005")]
     #[test]
     fn validate_output_rejects_lesson_not_in_evidence() {
         let b = batch();
@@ -511,6 +515,7 @@ mod tests {
         db
     }
 
+    #[spec("SC-002")]
     #[tokio::test]
     async fn dry_run_execute_writes_artifacts() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -558,6 +563,7 @@ mod tests {
         assert!((ledger["contract_conformance_rate"].as_f64().unwrap() - 1.0).abs() < 1e-9);
     }
 
+    #[spec("SC-001")]
     #[tokio::test]
     async fn ceiling_at_or_below_zero_stops_before_first_live_call() {
         // With a zero ceiling and dry_run=false, the run must stop before

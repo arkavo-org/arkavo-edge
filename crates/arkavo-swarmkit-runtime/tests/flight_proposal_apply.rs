@@ -11,6 +11,7 @@ use arkavo_swarmkit_runtime::flight::{LaunchOptions, SwarmFlight};
 use arkavo_swarmkit_runtime::flight_apply::{
     FlightApplyError, apply_flight_proposal, reconcile_flight_proposal,
 };
+use arkavo_test_macros::spec;
 
 const KIT: &str = r#"
 spec_version: "1.0.0"
@@ -73,6 +74,7 @@ fn flight_proposal(id: &str, effect: TighteningEffect) -> TighteningProposal {
     }
 }
 
+#[spec("SK-094")]
 #[tokio::test]
 async fn flight_apply_reaches_every_role() {
     let flight = launch();
@@ -99,6 +101,8 @@ async fn flight_apply_reaches_every_role() {
     }
 }
 
+#[spec("SK-094")]
+#[spec("ARP-006")]
 #[tokio::test]
 async fn mesh_radius_is_refused_outright() {
     let flight = launch();
@@ -114,6 +118,7 @@ async fn mesh_radius_is_refused_outright() {
     }
 }
 
+#[spec("SK-094")]
 #[tokio::test]
 async fn precheck_failure_applies_nothing_anywhere() {
     let flight = launch();
@@ -163,6 +168,7 @@ async fn precheck_failure_applies_nothing_anywhere() {
     }
 }
 
+#[spec("SK-095")]
 #[tokio::test]
 async fn kill_one_role_mid_apply_reconciles_to_convergence() {
     let flight = launch();
@@ -207,6 +213,7 @@ async fn kill_one_role_mid_apply_reconciles_to_convergence() {
     assert!(reconcile_flight_proposal(&flight, "fp-3").await.is_empty());
 }
 
+#[spec("SK-095")]
 #[tokio::test]
 async fn converged_flight_reconciles_as_noop() {
     let flight = launch();

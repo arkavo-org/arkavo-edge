@@ -17,10 +17,17 @@
 //! regression.
 //!
 //! The job has **zero runtime contact**: it depends on no arkavo runtime
-//! crate, opens the episode store read-only, and reaches only Fable over the
-//! network — under a hard run-level cost ceiling (`--max-run-cost-usd`) that
-//! stops the run between batches, keeps partial outputs, and marks the ledger
-//! budget-exhausted.
+//! crate (its only arkavo dependency is the std-only lesson-synthesis rules
+//! crate shared with the consolidation teacher), opens the episode store
+//! read-only, and reaches only Fable over the network — under a hard
+//! run-level cost ceiling (`--max-run-cost-usd`) that stops the run between
+//! batches, keeps partial outputs, and marks the ledger budget-exhausted.
+//!
+//! This crate is transitional: it exists to validate the consolidation
+//! contract before the runtime teacher takes over, and it folds into the
+//! runtime as a shadow mode once that validation holds. The artifacts are
+//! the durable contract — build consumers against the JSON shapes, not
+//! against this binary.
 
 pub mod episodes;
 pub mod fable;

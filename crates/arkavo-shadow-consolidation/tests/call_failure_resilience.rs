@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use arkavo_shadow_consolidation::{Config, execute};
+use arkavo_test_macros::spec;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -92,6 +93,7 @@ async fn seed_store(dir: &Path, categories: &[(&str, usize)]) -> PathBuf {
     db
 }
 
+#[spec("SC-003")]
 #[tokio::test]
 async fn call_failures_still_write_ledger_and_artifacts() {
     let addr = serve_400_forever().await;
