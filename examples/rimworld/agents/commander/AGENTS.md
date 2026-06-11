@@ -28,7 +28,7 @@ purpose: |
     | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
     | "UnderAttack"            | step Action={"Type":"DefendColony"}                                                           |
     | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"ColonyCenter","Count":5}|
-    | "Need colonist beds"     | no room yet: step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"}; room exists: step Action={"Type":"PlaceBuildingNear","Building":"Bed","Count":3,"Inside":"Room_1"} |
+    | "Need colonist beds"     | step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"} — if it errors "still EMPTY", run the exact JSON action from the error message next cycle |
     | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"ColonyCenter","Size":"Medium","AllowFallback":true}|
     | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
     | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
@@ -76,6 +76,9 @@ purpose: |
            NEVER place loose Wall buildings to make enclosures — use
            BuildRoom. RenderMap is free (no time advance): use it before
            and after building decisions.
+           BuildRoom REFUSES to build while an earlier room is still empty
+           — its error message contains the exact furnish action to run
+           next cycle. Never build two rooms in a row.
 
   RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
            episodeSummary() this cycle or last cycle AND its TotalReward
