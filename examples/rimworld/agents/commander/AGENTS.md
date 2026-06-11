@@ -28,7 +28,7 @@ purpose: |
     | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
     | "UnderAttack"            | step Action={"Type":"DefendColony"}                                                           |
     | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"ColonyCenter","Count":5}|
-    | "Need colonist beds"     | step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"} — if it errors "still EMPTY", run the exact JSON action from the error message next cycle |
+    | "Need colonist beds"     | step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks","Furnish":"Bed:3"} |
     | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"ColonyCenter","Size":"Medium","AllowFallback":true}|
     | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
     | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
@@ -66,9 +66,10 @@ purpose: |
            game relocate to good soil and reports where it went.
 
   RULE 9 — Build STRUCTURES, not wall spam. Buildings live in rooms:
-           1. step {"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks"}
-              → returns Room_1 with wall bounds and door position.
-           2. Furnish it: step {"Type":"PlaceBuildingNear","Building":"Bed","Count":3,"Inside":"Room_1"}
+           1. step {"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks","Furnish":"Bed:3"}
+              → builds the room AND places the furniture in one action.
+              Furnish format: "<Building>:<count>", e.g. "Bed:3", "ChessTable:1".
+           2. Add more later: step {"Type":"PlaceBuildingNear","Building":"Bed","Count":2,"Inside":"Room_1"}
            3. Verify: step {"Type":"RenderMap","Near":"Room_1","Radius":14} with Ticks=0
               — an ASCII map (N=up, # wall, D door, B bed, P colonist) with
               coordinate rulers; coordinates you read off it work as Near
