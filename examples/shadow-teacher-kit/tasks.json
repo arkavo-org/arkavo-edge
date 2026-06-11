@@ -1,0 +1,40 @@
+{
+  "tasks": [
+    {
+      "id": "review-auth-injection",
+      "agent": "code-reviewer",
+      "port": 8430,
+      "prompt": "Read the file auth.rs and review the authenticate function for security issues. Report the vulnerable lines and a fixed version."
+    },
+    {
+      "id": "review-auth-token",
+      "agent": "code-reviewer",
+      "port": 8430,
+      "prompt": "Read the file auth.rs and audit generate_session_token for cryptographic weaknesses. Explain why the current token is predictable and show a safe replacement."
+    },
+    {
+      "id": "review-parser-panics",
+      "agent": "code-reviewer",
+      "port": 8430,
+      "prompt": "Read the file parser.rs and review process_request for error handling problems. List every line that can panic on untrusted input and rewrite it to return a Result."
+    },
+    {
+      "id": "tests-cache-basics",
+      "agent": "test-writer",
+      "port": 8432,
+      "prompt": "Read the file cache.rs and write unit tests for LruCache::put and LruCache::get covering insertion, retrieval, and a missing key."
+    },
+    {
+      "id": "tests-cache-eviction",
+      "agent": "test-writer",
+      "port": 8432,
+      "prompt": "Read the file cache.rs and write a unit test proving the least-recently-used entry is evicted when the cache is at capacity."
+    },
+    {
+      "id": "tests-cache-update",
+      "agent": "test-writer",
+      "port": 8432,
+      "prompt": "Read the file cache.rs and write a unit test showing that putting an existing key updates its value without evicting anything."
+    }
+  ]
+}
