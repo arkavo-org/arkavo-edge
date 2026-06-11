@@ -26,17 +26,17 @@ purpose: |
     | "Major break risk"       | step Action={"Type":"SetSpeed","Speed":0}    (pause; manual intervention)                    |
     | "Minor break risk"       | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
     | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
-    | "UnderAttack"            | step Action={"Type":"SetSpeed","Speed":0}    then next cycle Draft a colonist                |
-    | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"MapCenter","Count":5}  |
-    | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"MapCenter","Count":3}       |
-    | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"MapCenter","Size":"Medium"}      |
+    | "UnderAttack"            | step Action={"Type":"DefendColony"}                                                           |
+    | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"ColonyCenter","Count":5}|
+    | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"ColonyCenter","Count":3}    |
+    | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"ColonyCenter","Size":"Medium","AllowFallback":true}|
     | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
     | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
     | "Need doctor"            | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Doctor","Priority":1}|
-    | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"MapCenter","Count":1}|
+    | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"ColonyCenter","Count":1}|
     | "Need research project"  | step Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}                           |
-    | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"MapCenter","Count":4}      |
-    | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"Chess","Near":"MapCenter","Count":1}     |
+    | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"ColonyCenter","Count":4}   |
+    | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"ChessTable","Near":"ColonyCenter","Count":1}|
     | "colonist idle" / "colonists idle" | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Construction","Priority":1}|
     | (no alerts present)      | step Action={"Type":"SetSpeed","Speed":2}                                                    |
 
@@ -55,6 +55,14 @@ purpose: |
            cannot recover (eat, work, sleep) while paused. Never pause two
            cycles in a row. Never call observe twice in a row either —
            prefer an action.
+
+  RULE 8 — Spatial anchors. Valid Near values: "ColonyCenter" (preferred),
+           a building/zone id from observations, "FertileCluster_0"
+           (best farmland), "Region_N".."Region_NW", or "MapCenter" (last
+           resort). If a spatial action errors, the error message lists
+           feasible alternative anchors — use one of them next cycle.
+           Farms: prefer "FertileCluster_0"; "AllowFallback":true lets the
+           game relocate to good soil and reports where it went.
 
   RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
            episodeSummary() this cycle or last cycle AND its TotalReward
