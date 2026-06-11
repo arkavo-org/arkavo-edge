@@ -21,6 +21,10 @@ LOG_DIR="$SCRIPT_DIR/logs"
 PIDS_FILE="$SCRIPT_DIR/.pids"
 RIMWORLD_SOCKET="/tmp/gamerl-rimworld.sock"
 
+# Game-RL MCP server binary. Resolution order: explicit env, PATH, sibling repo.
+# Referenced as ${GAME_RL_SERVER} in agents/commander/AGENTS.md.
+export GAME_RL_SERVER="${GAME_RL_SERVER:-$(command -v game-rl-server || echo "$HOME/Projects/intelligence/game-rl/target/release/game-rl-server")}"
+
 mkdir -p "$LOG_DIR"
 
 print_status() {
@@ -178,6 +182,13 @@ main() {
     esac
 
     check_binary
+
+    if [ ! -x "$GAME_RL_SERVER" ]; then
+        print_status "WARN" "game-rl-server not found (GAME_RL_SERVER=$GAME_RL_SERVER)"
+        print_status "INFO" "Set GAME_RL_SERVER or add game-rl-server to PATH"
+    else
+        print_status "INFO" "Using game-rl-server: $GAME_RL_SERVER"
+    fi
 
     # Check for RimWorld socket (warn but don't fail)
     if ! check_socket; then

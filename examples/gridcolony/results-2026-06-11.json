@@ -1,0 +1,78 @@
+{
+  "seed": 42,
+  "steps": 20,
+  "results": [
+    {
+      "scenario": "default",
+      "policy": "center-biased",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.072,
+      "food_production": 3.058,
+      "total_reward": 8.93
+    },
+    {
+      "scenario": "default",
+      "policy": "landmark-aware",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.4,
+      "food_production": 3.688,
+      "total_reward": 9.888
+    },
+    {
+      "scenario": "fertile-corner",
+      "policy": "center-biased",
+      "farm_placed": false,
+      "farm_error": "Invalid action: EstablishFarm near 'MapCenter': only 0 fertile cells within radius 8 of MapCenter (need 16). Alternative",
+      "farm_fertility_quality": 0.0,
+      "food_production": 1.0,
+      "total_reward": 5.8
+    },
+    {
+      "scenario": "fertile-corner",
+      "policy": "landmark-aware",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.378,
+      "food_production": 3.646,
+      "total_reward": 9.824
+    },
+    {
+      "scenario": "threat-south",
+      "policy": "center-biased",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.072,
+      "food_production": 1.72,
+      "total_reward": 4.112
+    },
+    {
+      "scenario": "threat-south",
+      "policy": "landmark-aware",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.4,
+      "food_production": 1.941,
+      "total_reward": 4.661
+    },
+    {
+      "scenario": "scattered-resources",
+      "policy": "center-biased",
+      "farm_placed": false,
+      "farm_error": "Invalid action: EstablishFarm near 'MapCenter': only 0 fertile cells within radius 8 of MapCenter (need 16). Alternative",
+      "farm_fertility_quality": 0.0,
+      "food_production": 1.0,
+      "total_reward": 5.8
+    },
+    {
+      "scenario": "scattered-resources",
+      "policy": "landmark-aware",
+      "farm_placed": true,
+      "farm_error": null,
+      "farm_fertility_quality": 1.069,
+      "food_production": 3.052,
+      "total_reward": 8.921
+    }
+  ]
+}

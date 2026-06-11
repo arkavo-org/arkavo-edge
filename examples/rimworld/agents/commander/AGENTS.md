@@ -101,5 +101,5 @@ a2a:
 
 mcp_servers:
   - name: game-rl
-    command: /Users/arkavo/Projects/intelligence/game-rl/target/release/game-rl-server
+    command: ${GAME_RL_SERVER}
     args: []

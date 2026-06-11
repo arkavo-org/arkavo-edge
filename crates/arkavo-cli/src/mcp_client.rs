@@ -161,11 +161,19 @@ impl McpClient {
         cmd: &str,
         args: &[String],
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Expand ${VAR} at the spawn site so every config parse path
+        // (frontmatter, markdown format, protocol crate) benefits.
+        let cmd = arkavo_protocol::agent_config::expand_env(cmd);
+        let cmd = cmd.as_str();
+        let args: Vec<String> = args
+            .iter()
+            .map(|a| arkavo_protocol::agent_config::expand_env(a))
+            .collect();
         log_mcp(&format!("Starting: {cmd} {}", args.join(" ")));
 
         // Start MCP server process
         let mut child = Command::new(cmd)
-            .args(args)
+            .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
