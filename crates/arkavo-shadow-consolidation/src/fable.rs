@@ -50,6 +50,12 @@ pub struct FableCompletion {
     pub latency_ms: u64,
 }
 
+/// Attempts per call on transient failures; an unattended overnight run must
+/// outlive a 3 a.m. overload spike, not die on it.
+const DEFAULT_RETRY_ATTEMPTS: u32 = 3;
+/// First backoff; doubles per retry.
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 2_000;
+
 /// Client configuration.
 #[derive(Debug, Clone)]
 pub struct FableConfig {
@@ -58,6 +64,8 @@ pub struct FableConfig {
     pub model: String,
     pub max_tokens: u32,
     pub effort: String,
+    pub retry_attempts: u32,
+    pub retry_backoff_ms: u64,
 }
 
 impl FableConfig {
@@ -75,6 +83,8 @@ impl FableConfig {
             model,
             max_tokens,
             effort,
+            retry_attempts: DEFAULT_RETRY_ATTEMPTS,
+            retry_backoff_ms: DEFAULT_RETRY_BACKOFF_MS,
         })
     }
 }
@@ -134,43 +144,74 @@ impl FableClient {
         &self.cfg.model
     }
 
-    /// Run one consolidation completion.
+    /// Run one consolidation completion, retrying transient failures with
+    /// exponential backoff. A decode failure after a successful status is
+    /// never retried: the call was already billed, and re-sending would bill
+    /// it again.
     pub async fn complete(&self, system: &str, user: &str) -> anyhow::Result<FableCompletion> {
         let body = build_request_body(&self.cfg, system, user);
         let url = format!("{}/v1/messages", self.cfg.base_url);
 
-        let started = Instant::now();
-        let resp = self
-            .http
-            .post(&url)
-            .header("x-api-key", &self.cfg.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .context("sending Fable request")?;
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let started = Instant::now();
+            let result = self
+                .http
+                .post(&url)
+                .header("x-api-key", &self.cfg.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await;
 
-        let status = resp.status();
-        if !status.is_success() {
-            let detail = resp.text().await.unwrap_or_default();
-            bail!("Fable API error {status}: {detail}");
+            let err = match result {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        let parsed: ApiResponse =
+                            resp.json().await.context("decoding Fable response")?;
+                        let latency_ms = started.elapsed().as_millis() as u64;
+                        return Ok(FableCompletion {
+                            text: extract_text(&parsed.content),
+                            usage: parsed.usage,
+                            latency_ms,
+                        });
+                    }
+                    let detail = resp.text().await.unwrap_or_default();
+                    if !retryable(status) {
+                        bail!("Fable API error {status}: {detail}");
+                    }
+                    anyhow::anyhow!("Fable API error {status}: {detail}")
+                }
+                Err(e) => anyhow::Error::new(e).context("sending Fable request"),
+            };
+
+            if attempt >= self.cfg.retry_attempts.max(1) {
+                return Err(err.context(format!("giving up after {attempt} attempts")));
+            }
+            let backoff = Duration::from_millis(self.cfg.retry_backoff_ms << (attempt - 1));
+            tokio::time::sleep(backoff).await;
         }
-
-        let parsed: ApiResponse = resp.json().await.context("decoding Fable response")?;
-        let latency_ms = started.elapsed().as_millis() as u64;
-
-        Ok(FableCompletion {
-            text: extract_text(&parsed.content),
-            usage: parsed.usage,
-            latency_ms,
-        })
     }
+}
+
+/// Transient statuses worth another attempt on an unattended run: rate
+/// limiting (429) and server-side errors including Anthropic overload (529).
+fn retryable(status: reqwest::StatusCode) -> bool {
+    status.as_u16() == 429 || status.is_server_error()
 }
 
 #[cfg(test)]
 mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
+    use std::net::SocketAddr;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn cfg() -> FableConfig {
         FableConfig {
@@ -179,7 +220,102 @@ mod tests {
             model: "claude-fable-5".into(),
             max_tokens: 8192,
             effort: "high".into(),
+            retry_attempts: 3,
+            retry_backoff_ms: 1,
         }
+    }
+
+    const SUCCESS_BODY: &str = r#"{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"output_tokens":5}}"#;
+
+    /// Serve the given (status, body) responses, one connection each, then
+    /// stop listening. Plain HTTP/1.1 over a loopback socket — enough to
+    /// exercise the client's status handling without any TLS or HTTP dep.
+    async fn serve(responses: Vec<(u16, &'static str)>) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                read_request(&mut sock).await;
+                let resp = format!(
+                    "HTTP/1.1 {status} STATUS\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                sock.write_all(resp.as_bytes()).await.unwrap();
+            }
+        });
+        addr
+    }
+
+    /// Read headers plus the content-length body so the client never sees a
+    /// reset mid-request.
+    async fn read_request(sock: &mut tokio::net::TcpStream) {
+        let mut data = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = sock.read(&mut buf).await.unwrap();
+            if n == 0 {
+                return;
+            }
+            data.extend_from_slice(&buf[..n]);
+            if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&data[..pos]).to_lowercase();
+                let len = headers
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if data.len() >= pos + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
+    fn local_cfg(addr: SocketAddr) -> FableConfig {
+        FableConfig {
+            base_url: format!("http://{addr}"),
+            ..cfg()
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_transient_overload_then_succeeds() {
+        let addr = serve(vec![
+            (529, "overloaded"),
+            (429, "rate limited"),
+            (200, SUCCESS_BODY),
+        ])
+        .await;
+        let client = FableClient::new(local_cfg(addr)).unwrap();
+        let completion = client.complete("sys", "usr").await.unwrap();
+        assert_eq!(completion.text, "ok");
+        assert_eq!(completion.usage.input_tokens, 10);
+        assert_eq!(completion.usage.output_tokens, 5);
+    }
+
+    #[tokio::test]
+    async fn non_retryable_status_fails_without_retry() {
+        // One served response only: a retry would hit a closed listener and
+        // surface a connect error instead of the 400 detail asserted here.
+        let addr = serve(vec![(400, "bad request")]).await;
+        let client = FableClient::new(local_cfg(addr)).unwrap();
+        let err = client.complete("sys", "usr").await.unwrap_err();
+        assert!(
+            format!("{err:#}").contains("400"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausts_retries_and_reports_last_error() {
+        let addr = serve(vec![(500, "boom"), (500, "boom"), (500, "boom")]).await;
+        let client = FableClient::new(local_cfg(addr)).unwrap();
+        let err = client.complete("sys", "usr").await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("500"), "unexpected error: {msg}");
+        assert!(msg.contains("attempts"), "unexpected error: {msg}");
     }
 
     #[test]

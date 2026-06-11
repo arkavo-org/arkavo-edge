@@ -177,6 +177,9 @@ fn validate_output(
             RejectKind::Lesson => conformance.lessons_rejected += 1,
             RejectKind::Tightening => conformance.tightenings_rejected += 1,
             RejectKind::Response => conformance.responses_rejected += 1,
+            // Operational failures never reach this path (recorded directly
+            // by the run loop) and never count against conformance.
+            RejectKind::Call => {}
         }
     }
 
@@ -268,7 +271,24 @@ pub async fn execute(cfg: Config) -> anyhow::Result<RunSummary> {
             client = Some(FableClient::new(fable_cfg)?);
         }
 
-        let (output, entry, preview, raw) = consolidate_category(client.as_ref(), batch).await?;
+        // One failed call must not abort the run: the ledger has to account
+        // for money already spent on earlier batches, so the failure is
+        // recorded as a call reject (its own usage never came back) and the
+        // run moves on. Call failures are operational, not contract
+        // violations — conformance is untouched.
+        let (output, entry, preview, raw) = match consolidate_category(client.as_ref(), batch).await
+        {
+            Ok(parts) => parts,
+            Err(e) => {
+                rejects.push(Reject::new(
+                    &batch.category,
+                    RejectKind::Call,
+                    format!("{e:#}"),
+                    serde_json::Value::Null,
+                ));
+                continue;
+            }
+        };
         cumulative_cost += entry.cost_usd;
 
         if let Some(raw) = raw {

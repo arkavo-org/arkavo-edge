@@ -25,6 +25,10 @@ pub enum RejectKind {
     Tightening,
     /// The whole reply failed to parse as the output contract.
     Response,
+    /// The call itself failed (transport or API error after retries) — an
+    /// operational failure, not a contract violation, so it never counts
+    /// against conformance.
+    Call,
 }
 
 /// A contract violation: the offending payload plus why it was rejected.
