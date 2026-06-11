@@ -1,0 +1,121 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: ARP Proposal Lifecycle and Capability Gates
+module: arkavo_arp
+version: 0.80.0
+
+invariants:
+  - TighteningEffect is a closed enum with no loosening variant — capability
+    additions cannot ride the tightening channel
+  - Proposals auto-apply only within the policy's blast-radius ceiling;
+    Mesh radius never auto-applies
+  - Every applied proposal records its displaced value and reverts restore it
+  - Every apply/revert/confirm transition emits a DecisionTrace entry
+  - Duplicate proposal ids and overlapping scalar observations are refused
+  - Capability proposals require every gate plus a named human approver
+
+scenarios:
+  - id: ARP-001
+    name: Auto-apply within blast radius moves proposal to observed
+    criticality: critical
+    given:
+      - ARP document with proposal_policy auto_apply_max_blast_radius single_entity
+      - Tightening proposal with single_entity radius and evidence
+    when: ProposalQueue::ingest called
+    then:
+      - Proposal state becomes observed
+      - Effect is live in the document (tool denied / ceiling lowered)
+      - A proposal_lifecycle trace entry is emitted
+    refs: [crates/arkavo-arp-runtime/src/proposal_queue.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-002
+    name: Wider-radius proposal holds for review and applies on approval
+    criticality: critical
+    given:
+      - Proposal whose blast_radius exceeds the auto-apply ceiling
+    when: ingest then review(approve) called
+    then:
+      - Proposal holds in proposed state with no document change
+      - Approval re-checks direction and overlap against current values
+      - Approved proposal applies and records reviewer identity
+      - Denial rejects with a disposition reason and no document change
+    refs: [crates/arkavo-arp-runtime/src/proposal_queue.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-003
+    name: Revert restores the displaced value and emits a trace
+    criticality: critical
+    given:
+      - An observed proposal whose observation window regressed, or a
+        force_revert call from flight reconciliation
+    when: the revert path runs
+    then:
+      - The displaced value is restored to the document
+      - Proposal state becomes reverted with a disposition reason
+      - A reverted trace entry is emitted
+    refs: [crates/arkavo-arp-runtime/src/proposal_queue.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-004
+    name: Duplicate proposal id is refused everywhere
+    criticality: critical
+    given:
+      - A proposal id already present in the queue
+    when: ingest, check, or ingest_reviewed sees the same id again
+    then:
+      - The replay is refused without creating a second entry
+      - Id-keyed lookups (state, review, revert) keep the original entry
+      - The original observation's displaced value is untouched
+    refs: [crates/arkavo-arp-runtime/src/proposal_queue.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-005
+    name: Scalar field under observation refuses overlapping proposals
+    criticality: critical
+    given:
+      - An observed proposal on a scalar field (ceiling, layer budget,
+        threshold, rate limit)
+    when: a second proposal targets the same field before confirm/revert
+    then:
+      - The second proposal is rejected with the owning proposal named
+      - Reverting the first cannot loosen past a later tightening
+      - The field frees once the observation confirms or reverts
+    refs: [crates/arkavo-arp-runtime/src/proposal_queue.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-006
+    name: Mesh blast radius never auto-applies
+    criticality: critical
+    given:
+      - ARP document text whose proposal_policy sets auto_apply_max_blast_radius mesh
+    when: arkavo_arp::parse validates the document
+    then:
+      - Validation rejects the document (mesh exceeds the auto-apply ceiling)
+    refs: [crates/arkavo-arp/src/validate.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-007
+    name: Loosening cannot be expressed as a tightening
+    criticality: critical
+    given:
+      - JSON payloads for allow_tool, add_capability, and raise_task_ceiling effects
+    when: deserialized as TighteningEffect
+    then:
+      - Deserialization fails — the enum has no loosening variant
+      - The exclusion is structural, not a bypassable validation layer
+    refs: [crates/arkavo-arp/src/proposal.rs]
+    changed: "2026-06-10"
+
+  - id: ARP-008
+    name: Capability proposal is approvable only with every gate and a human
+    criticality: critical
+    given:
+      - CapabilityProposal with gates for conformance, canary, and human approval
+    when: is_approvable evaluated
+    then:
+      - Any single missing gate makes the proposal unapprovable
+      - Human approval is a recorded identity, never a boolean
+      - No auto-apply field exists on the type
+    refs: [crates/arkavo-arp/src/capability.rs]
+    changed: "2026-06-10"

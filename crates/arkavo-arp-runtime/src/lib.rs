@@ -17,6 +17,8 @@
 //! tool-loop call site. The CLI installs an instance once at startup; the
 //! standalone AG-UI gateway constructs its own when no agent is running.
 
+pub mod proposal_queue;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -28,6 +30,7 @@ use arkavo_arp::observability::{
 };
 use arkavo_observability::decision_trace::DecisionTrace;
 use arkavo_policy_cache::{PolicyCache, PolicySource};
+pub use proposal_queue::ProposalQueue;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -79,6 +82,10 @@ pub struct ArpRuntime {
     adaptation: Arc<Mutex<AdaptationEngine>>,
     decision_trace: Arc<DecisionTrace>,
     quality_threshold: f64,
+    /// Tightening-proposal queue. Owns the canonical post-apply document;
+    /// an applied RaiseQualityGateThreshold takes effect on the next
+    /// outcome recorded through this runtime.
+    proposals: Arc<Mutex<ProposalQueue>>,
     /// Monotonic counter so each cache key is unique. Required because the
     /// PolicyCache hash chain doesn't tolerate same-key overwrites.
     outcome_seq: AtomicU64,
@@ -106,14 +113,25 @@ impl ArpRuntime {
                 cryptographic_signing: None,
             });
         let decision_trace = Arc::new(DecisionTrace::new(trace_cfg));
+        let proposals = Arc::new(Mutex::new(ProposalQueue::new(
+            doc.clone(),
+            decision_trace.clone(),
+            DEFAULT_AGENT_ID.to_string(),
+        )));
 
         Self {
             cache,
             adaptation,
             decision_trace,
             quality_threshold,
+            proposals,
             outcome_seq: AtomicU64::new(0),
         }
+    }
+
+    /// The tightening-proposal queue for this runtime.
+    pub fn proposal_queue(&self) -> Arc<Mutex<ProposalQueue>> {
+        self.proposals.clone()
     }
 
     pub fn cache(&self) -> Arc<PolicyCache> {
@@ -157,7 +175,21 @@ impl ArpRuntime {
         ctx: &ToolOutcomeContext,
     ) {
         let q = quality.clamp(0.0, 1.0);
-        let above_gate = q >= self.quality_threshold;
+        // The proposal queue owns the post-apply document: an applied
+        // RaiseQualityGateThreshold takes effect here. The queue also tallies
+        // gate outcomes to evaluate observation windows.
+        let above_gate = {
+            let mut queue = self.proposals.lock().await;
+            let threshold = queue
+                .document()
+                .feedback_loops
+                .immediate
+                .quality_gate
+                .threshold_default;
+            let above = q >= threshold;
+            queue.record_quality_gate(above);
+            above
+        };
         let effective_success = success && above_gate;
 
         // Update the prior, capturing before/after for the trace entry.
@@ -250,8 +282,47 @@ pub fn current() -> Option<Arc<ArpRuntime>> {
     GLOBAL.get().cloned()
 }
 
+// Test helpers — short string forms of the trace enums for assertion-readability.
+#[cfg(test)]
+trait EnumStringRepr {
+    fn to_string_repr(&self) -> &'static str;
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceLayer {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceLayer::Cognitive => "cognitive",
+            TraceLayer::Execution => "execution",
+            TraceLayer::DataSovereignty => "data_sovereignty",
+            TraceLayer::Network => "network",
+        }
+    }
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceEventType {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceEventType::RoutingDecision => "routing_decision",
+            TraceEventType::QualityGate => "quality_gate",
+            TraceEventType::ToolInvocation => "tool_invocation",
+            TraceEventType::DataAccess => "data_access",
+            TraceEventType::Delegation => "delegation",
+            TraceEventType::Escalation => "escalation",
+            TraceEventType::BudgetEvent => "budget_event",
+            TraceEventType::Quarantine => "quarantine",
+            TraceEventType::HitlAction => "hitl_action",
+            TraceEventType::ProposalLifecycle => "proposal_lifecycle",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     const MIN_DOC: &str = r#"{
@@ -389,6 +460,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn applied_threshold_raise_bites_on_next_outcome() {
+        // An auto-applied RaiseQualityGateThreshold must take effect on the
+        // very next recorded outcome — the queue owns the live document.
+        use arkavo_arp::proposal::{
+            BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal,
+            TraceRef,
+        };
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.proposal_policy = Some(arkavo_arp::proposal::ProposalPolicy {
+            accepted_origins: vec![ProposalOrigin::Consolidation],
+            auto_apply_max_blast_radius: BlastRadius::SingleEntity,
+            review: None,
+            observation_window_sec: Some(600),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        // Quality 0.75 passes the original 0.7 gate.
+        rt.record_tool_outcome("tool_x", true, 0.75).await;
+        let entries = rt.decision_trace().snapshot();
+        assert_eq!(entries.last().unwrap().outcome.success, Some(true));
+
+        let state = rt.proposal_queue().lock().await.ingest(
+            TighteningProposal {
+                id: "raise-gate".into(),
+                origin: ProposalOrigin::Consolidation,
+                state: ProposalState::Proposed,
+                effect: TighteningEffect::RaiseQualityGateThreshold { new_threshold: 0.8 },
+                rationale: "0.7 admitted low-quality outcomes".into(),
+                blast_radius: BlastRadius::SingleEntity,
+                evidence: vec![TraceRef {
+                    trace_id: "t-1".into(),
+                    episode_ids: vec![],
+                }],
+                created_at: "2026-06-10T00:00:00Z".into(),
+                applied_at: None,
+                reviewed_by: None,
+                disposition_reason: None,
+            },
+            1_000,
+        );
+        assert_eq!(state, ProposalState::Observed);
+
+        // The same 0.75 quality now fails the raised 0.8 gate.
+        rt.record_tool_outcome("tool_x", true, 0.75).await;
+        let entries = rt.decision_trace().snapshot();
+        let last = entries
+            .iter()
+            .rfind(|e| e.decision.chosen.as_deref() == Some("tool_x"))
+            .unwrap();
+        assert_eq!(last.outcome.success, Some(false));
+        assert_eq!(
+            last.outcome.error_type.as_deref(),
+            Some("below_quality_gate")
+        );
+    }
+
+    #[tokio::test]
     async fn explicit_error_type_overrides_default() {
         let rt = make_runtime();
         let ctx = ToolOutcomeContext::new().with_error_type("connection_refused");
@@ -400,40 +528,5 @@ mod tests {
             entries[0].outcome.error_type.as_deref(),
             Some("connection_refused")
         );
-    }
-}
-
-// Test helpers — short string forms of the trace enums for assertion-readability.
-#[cfg(test)]
-trait EnumStringRepr {
-    fn to_string_repr(&self) -> &'static str;
-}
-
-#[cfg(test)]
-impl EnumStringRepr for TraceLayer {
-    fn to_string_repr(&self) -> &'static str {
-        match self {
-            TraceLayer::Cognitive => "cognitive",
-            TraceLayer::Execution => "execution",
-            TraceLayer::DataSovereignty => "data_sovereignty",
-            TraceLayer::Network => "network",
-        }
-    }
-}
-
-#[cfg(test)]
-impl EnumStringRepr for TraceEventType {
-    fn to_string_repr(&self) -> &'static str {
-        match self {
-            TraceEventType::RoutingDecision => "routing_decision",
-            TraceEventType::QualityGate => "quality_gate",
-            TraceEventType::ToolInvocation => "tool_invocation",
-            TraceEventType::DataAccess => "data_access",
-            TraceEventType::Delegation => "delegation",
-            TraceEventType::Escalation => "escalation",
-            TraceEventType::BudgetEvent => "budget_event",
-            TraceEventType::Quarantine => "quarantine",
-            TraceEventType::HitlAction => "hitl_action",
-        }
     }
 }

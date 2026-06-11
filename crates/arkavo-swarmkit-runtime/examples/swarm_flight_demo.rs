@@ -6,6 +6,9 @@
 //!   cargo run -p arkavo-swarmkit-runtime --example swarm_flight_demo \
 //!     -- examples/campaign-kit/campaign-kit.swarmkit.yaml
 
+// #[tokio::main] expands to Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::PathBuf;
 
 use arkavo_swarmkit::{parse_json, parse_yaml};

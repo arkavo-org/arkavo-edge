@@ -84,6 +84,7 @@ arkavo-tasks = { path = "../arkavo-tasks" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-lesson-synthesis = { path = "../arkavo-lesson-synthesis" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
 # Direct llama.cpp handle for LlamaTokenEstimator (real tokenizer); only under llama-cpp.
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
@@ -102,7 +103,9 @@ arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-trust = { path = "../arkavo-trust" }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+ed25519-dalek = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 

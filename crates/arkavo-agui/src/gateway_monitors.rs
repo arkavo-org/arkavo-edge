@@ -1,8 +1,71 @@
+use crate::agent_connection::AgentConnection;
+use crate::arp_handler::ArpHandler;
 use crate::gateway::ConnectionInfo;
 use crate::types::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Poll interval for per-agent ARP documents. ARPs change on proposal
+/// application or operator edits — far slower than task state.
+const ARP_POLL_INTERVAL_SECS: u64 = 30;
+
+/// Apply one agent's `arp/get` response to the ARP handler. Returns true
+/// when a document was installed. Extracted from the poll loop for
+/// testability.
+pub(crate) async fn apply_arp_response(
+    arp_handler: &ArpHandler,
+    agent_id: &str,
+    response: &serde_json::Value,
+) -> bool {
+    match response.get("document") {
+        Some(doc) if !doc.is_null() => {
+            arp_handler.set_agent_arp(agent_id, &doc.to_string()).await;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Per-agent A2A ARP polling: every interval, ask each connected agent for
+/// its effective ARP document and install it under that agent's id. This is
+/// what retires the synthetic `(local)` placeholder as the only key — the
+/// gateway's own document keeps that id; mesh agents report their own.
+pub fn spawn_arp_poller(
+    agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    arp_handler: Arc<ArpHandler>,
+) {
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(ARP_POLL_INTERVAL_SECS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let conns: Vec<(String, Arc<AgentConnection>)> = {
+                let guard = agent_connections.read().await;
+                guard
+                    .iter()
+                    .map(|(id, conn)| (id.clone(), conn.clone()))
+                    .collect()
+            };
+            for (agent_id, conn) in conns {
+                match conn
+                    .send_request("arp/get", serde_json::json!({}), "arp-poll")
+                    .await
+                {
+                    Ok(response) => {
+                        apply_arp_response(&arp_handler, &agent_id, &response).await;
+                    }
+                    Err(e) => {
+                        // Older agents don't expose arp/get; absence is not
+                        // an error worth surfacing per poll.
+                        tracing::debug!(agent_id = %agent_id, error = %e, "arp/get poll failed");
+                    }
+                }
+            }
+        }
+    });
+}
 
 pub fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>) {
     tokio::spawn(async move {
@@ -144,4 +207,62 @@ pub fn spawn_agent_monitor(
             previous = current;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
+    use super::*;
+
+    const MIN_DOC: &str = r#"{
+        "arp_spec": "0.1.0",
+        "adl_ref": {"uri": "https://example.com/adl.json"},
+        "adaptation": {"method": "thompson_sampling"},
+        "feedback_loops": {
+            "immediate": {
+                "quality_gate": {
+                    "threshold_default": 0.7,
+                    "metric": "cosine_similarity",
+                    "on_failure": "update_prior_and_log"
+                }
+            },
+            "short_term": {
+                "policy_cache": {
+                    "default_ttl_sec": 3600,
+                    "decay_strategy": "linear"
+                }
+            }
+        },
+        "budget": {
+            "task_ceiling_usd": 2.5,
+            "on_exhaustion": "halt_and_report",
+            "velocity": {"max_spend_per_minute_usd": 0.5}
+        }
+    }"#;
+
+    #[tokio::test]
+    async fn apply_arp_response_installs_document_under_agent_id() {
+        let handler = ArpHandler::new();
+        let doc: serde_json::Value = serde_json::from_str(MIN_DOC).unwrap();
+        let response = serde_json::json!({ "document": doc });
+
+        assert!(apply_arp_response(&handler, "rover-alpha", &response).await);
+        let snapshot = handler.snapshot().await;
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "rover-alpha")
+            .expect("polled agent appears in the mesh snapshot");
+        assert!(agent.document.is_some());
+    }
+
+    #[tokio::test]
+    async fn apply_arp_response_ignores_null_or_missing_document() {
+        let handler = ArpHandler::new();
+        assert!(!apply_arp_response(&handler, "a", &serde_json::json!({ "document": null })).await);
+        assert!(!apply_arp_response(&handler, "a", &serde_json::json!({})).await);
+        assert!(handler.snapshot().await.agents.is_empty());
+    }
 }

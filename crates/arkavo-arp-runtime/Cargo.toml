@@ -13,10 +13,12 @@ arkavo-arp = { path = "../arkavo-arp" }
 arkavo-policy-cache = { path = "../arkavo-policy-cache" }
 arkavo-adaptation = { path = "../arkavo-adaptation" }
 arkavo-observability = { path = "../arkavo-observability" }
+chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["macros", "rt"] }

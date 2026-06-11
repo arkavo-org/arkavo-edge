@@ -1230,7 +1230,7 @@ jobs:
 
           # Check for env::var calls that require configuration
           # Exclude build.rs files and test files, and allow standard env vars and optional API keys
-          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL\|KIMI_API_KEY\|KIMI_MODEL\|ANTHROPIC_MODEL"; then
+          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL\|KIMI_API_KEY\|KIMI_MODEL\|ANTHROPIC_MODEL\|ANTHROPIC_BASE_URL"; then
             echo "::error::Found required environment variables"
             exit 1
           fi

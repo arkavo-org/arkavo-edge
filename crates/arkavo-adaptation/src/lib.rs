@@ -27,9 +27,20 @@ pub struct Outcome {
 }
 
 /// The adaptation engine selects entities using configured method (§6).
+///
+/// When `prior_management.provenance_tracking` is enabled, live (runtime)
+/// and distilled (teacher-provided) evidence are tracked separately and the
+/// engine samples the *effective* prior: live mass plus distilled mass
+/// decayed by accumulating live observations. This prevents synthetic warm
+/// starts from masking real-world divergence.
 pub struct AdaptationEngine {
     config: Adaptation,
+    /// Live prior mass: runtime outcomes plus the configured initial prior.
     priors: HashMap<String, BetaPrior>,
+    /// Distilled prior mass, seeded by consolidation warm starts.
+    distilled: HashMap<String, BetaPrior>,
+    /// Live outcome updates per entity — drives distilled displacement.
+    live_update_counts: HashMap<String, u32>,
     observation_counts: HashMap<String, u32>,
     version_hashes: HashMap<String, String>,
     total_selections: u64,
@@ -41,6 +52,8 @@ impl AdaptationEngine {
         Self {
             config,
             priors: HashMap::new(),
+            distilled: HashMap::new(),
+            live_update_counts: HashMap::new(),
             observation_counts: HashMap::new(),
             version_hashes: HashMap::new(),
             total_selections: 0,
@@ -73,7 +86,13 @@ impl AdaptationEngine {
     }
 
     /// Update the prior for an entity based on observed outcome.
+    /// Live evidence: always lands in the live prior and advances the
+    /// distilled displacement counter.
     pub fn update(&mut self, entity_id: &str, outcome: Outcome) {
+        *self
+            .live_update_counts
+            .entry(entity_id.to_string())
+            .or_insert(0) += 1;
         let prior = self.prior_for(entity_id);
         if outcome.success {
             prior.alpha += outcome.quality_score;
@@ -82,12 +101,80 @@ impl AdaptationEngine {
         }
     }
 
-    /// Get the current prior for an entity.
+    /// Seed distilled (teacher-provided) prior mass for an entity.
+    ///
+    /// With provenance tracking enabled the mass is tracked separately and
+    /// decays as live evidence accumulates. Without it (the default) the
+    /// mass merges into the live prior — exactly the pre-provenance
+    /// behavior, so warm starts remain possible either way.
+    pub fn seed_distilled(&mut self, entity_id: &str, mass: BetaPrior) {
+        let mass = mass.sanitize();
+        if self.provenance_enabled() {
+            let entry = self
+                .distilled
+                .entry(entity_id.to_string())
+                .or_insert(BetaPrior {
+                    alpha: 0.0,
+                    beta: 0.0,
+                });
+            entry.alpha += mass.alpha;
+            entry.beta += mass.beta;
+        } else {
+            let prior = self.prior_for(entity_id);
+            prior.alpha += mass.alpha;
+            prior.beta += mass.beta;
+        }
+    }
+
+    /// The effective prior the engine samples: live mass plus distilled mass
+    /// scaled by the displacement weight.
     pub fn get_prior(&self, entity_id: &str) -> BetaPrior {
+        let live = self.live_prior(entity_id);
+        match self.distilled.get(entity_id) {
+            Some(d) => {
+                let w = self.distilled_weight(entity_id);
+                BetaPrior::new(live.alpha + w * d.alpha, live.beta + w * d.beta)
+            }
+            None => live,
+        }
+    }
+
+    /// The live component of an entity's prior (runtime evidence + initial).
+    pub fn live_prior(&self, entity_id: &str) -> BetaPrior {
         self.priors
             .get(entity_id)
             .copied()
             .unwrap_or_else(|| self.initial_prior())
+    }
+
+    /// The undecayed distilled component, if any was seeded.
+    pub fn distilled_prior(&self, entity_id: &str) -> Option<BetaPrior> {
+        self.distilled.get(entity_id).copied()
+    }
+
+    /// Current weight applied to distilled mass:
+    /// `max(floor, 1 - displacement_factor * live_updates)`.
+    pub fn distilled_weight(&self, entity_id: &str) -> f64 {
+        let decay = self
+            .config
+            .prior_management
+            .as_ref()
+            .and_then(|pm| pm.distilled_decay.as_ref());
+        let factor = decay
+            .and_then(|d| d.displacement_factor)
+            .unwrap_or(0.05)
+            .clamp(f64::EPSILON, 1.0);
+        let floor = decay.and_then(|d| d.floor).unwrap_or(0.0).clamp(0.0, 1.0);
+        let live = f64::from(self.live_update_counts.get(entity_id).copied().unwrap_or(0));
+        (1.0 - factor * live).max(floor)
+    }
+
+    fn provenance_enabled(&self) -> bool {
+        self.config
+            .prior_management
+            .as_ref()
+            .and_then(|pm| pm.provenance_tracking)
+            .unwrap_or(false)
     }
 
     /// Get observation count for an entity.
@@ -106,18 +193,26 @@ impl AdaptationEngine {
         self.observations(entity_id) < warmup_period
     }
 
-    /// Reset the prior for a specific entity to initial state.
+    /// Reset the prior for a specific entity to initial state. Distilled
+    /// mass is cleared too: it was distilled for the old entity version.
     pub fn reset_prior(&mut self, entity_id: &str) {
         let initial = self.reset_state();
         self.priors.insert(entity_id.to_string(), initial);
+        self.distilled.remove(entity_id);
+        self.live_update_counts.remove(entity_id);
         self.observation_counts.insert(entity_id.to_string(), 0);
     }
 
     /// Snapshot of all known entity priors plus their observation counts.
-    /// Used by UIs and audit tooling to inspect engine state.
+    /// Used by UIs and audit tooling to inspect engine state. `alpha`/`beta`
+    /// are the effective prior the engine samples; the live/distilled split
+    /// is exposed alongside for provenance-aware views.
     pub fn snapshot(&self) -> Vec<EntityPriorSnapshot> {
         let mut ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for k in self.priors.keys() {
+            ids.insert(k.as_str());
+        }
+        for k in self.distilled.keys() {
             ids.insert(k.as_str());
         }
         for k in self.observation_counts.keys() {
@@ -133,6 +228,8 @@ impl AdaptationEngine {
             .into_iter()
             .map(|id| {
                 let prior = self.get_prior(id);
+                let live = self.live_prior(id);
+                let distilled = self.distilled_prior(id);
                 let observations = self.observations(id);
                 let mean = prior.alpha / (prior.alpha + prior.beta).max(f64::EPSILON);
                 EntityPriorSnapshot {
@@ -142,6 +239,11 @@ impl AdaptationEngine {
                     mean,
                     observations,
                     in_warmup: observations < warmup_period,
+                    live_alpha: live.alpha,
+                    live_beta: live.beta,
+                    distilled_alpha: distilled.map(|d| d.alpha),
+                    distilled_beta: distilled.map(|d| d.beta),
+                    distilled_weight: distilled.map(|_| self.distilled_weight(id)),
                 }
             })
             .collect();
@@ -300,6 +402,8 @@ impl AdaptationEngine {
 }
 
 /// Read-only snapshot of an entity's prior plus observation count.
+/// `alpha`/`beta` are the effective prior; the live/distilled split is
+/// `None` for distilled fields when no distilled mass was seeded.
 #[derive(Debug, Clone)]
 pub struct EntityPriorSnapshot {
     pub id: String,
@@ -308,6 +412,12 @@ pub struct EntityPriorSnapshot {
     pub mean: f64,
     pub observations: u32,
     pub in_warmup: bool,
+    pub live_alpha: f64,
+    pub live_beta: f64,
+    pub distilled_alpha: Option<f64>,
+    pub distilled_beta: Option<f64>,
+    /// Current displacement weight applied to distilled mass.
+    pub distilled_weight: Option<f64>,
 }
 
 #[cfg(test)]
@@ -362,6 +472,8 @@ mod tests {
                     alpha: 2.0,
                     beta: 1.0,
                 }),
+                provenance_tracking: None,
+                distilled_decay: None,
             }),
             signal_separation: None,
         }
@@ -569,6 +681,153 @@ mod tests {
         let mut engine = AdaptationEngine::new(config);
         let result = engine.select(&entities());
         assert_eq!(result, Some("model_a".into()));
+    }
+
+    fn provenance_config(displacement_factor: f64, floor: f64) -> Adaptation {
+        use arkavo_arp::adaptation::{DistilledDecay, DistilledDecayStrategy};
+        let mut config = thompson_config();
+        let pm = config.prior_management.as_mut().unwrap();
+        pm.provenance_tracking = Some(true);
+        pm.distilled_decay = Some(DistilledDecay {
+            strategy: DistilledDecayStrategy::LiveDisplacement,
+            displacement_factor: Some(displacement_factor),
+            floor: Some(floor),
+        });
+        config
+    }
+
+    #[test]
+    fn distilled_mass_contributes_when_tracking_on() {
+        let mut engine = AdaptationEngine::new(provenance_config(0.1, 0.0));
+        let live_before = engine.get_prior("model_a");
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 10.0,
+                beta: 2.0,
+            },
+        );
+        let effective = engine.get_prior("model_a");
+        // No live updates yet: full distilled weight.
+        assert!((effective.alpha - (live_before.alpha + 10.0)).abs() < 1e-9);
+        assert!((effective.beta - (live_before.beta + 2.0)).abs() < 1e-9);
+        // Live component unchanged by seeding.
+        let live = engine.live_prior("model_a");
+        assert_eq!(live.alpha, live_before.alpha);
+    }
+
+    #[test]
+    fn live_evidence_displaces_distilled_mass() {
+        // The motivating scenario: a teacher distills an optimistic prior,
+        // but the real world disagrees. Synthetic mass must not mask the
+        // divergence.
+        let mut engine = AdaptationEngine::new(provenance_config(0.1, 0.0));
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 50.0,
+                beta: 1.0,
+            },
+        );
+        let optimistic = engine.get_prior("model_a");
+        let optimistic_mean = optimistic.alpha / (optimistic.alpha + optimistic.beta);
+        assert!(optimistic_mean > 0.9);
+
+        // Ten live failures fully displace the distilled mass (0.1 * 10 = 1).
+        for _ in 0..10 {
+            engine.update(
+                "model_a",
+                Outcome {
+                    success: false,
+                    quality_score: 0.0,
+                },
+            );
+        }
+        assert!((engine.distilled_weight("model_a")).abs() < f64::EPSILON);
+        let effective = engine.get_prior("model_a");
+        let live = engine.live_prior("model_a");
+        // Effective prior has converged to live evidence only.
+        assert!((effective.alpha - live.alpha).abs() < 1e-9);
+        let effective_mean = effective.alpha / (effective.alpha + effective.beta);
+        assert!(
+            effective_mean < 0.3,
+            "live failures must dominate: mean {effective_mean}"
+        );
+    }
+
+    #[test]
+    fn floor_preserves_distilled_mass() {
+        let mut engine = AdaptationEngine::new(provenance_config(0.1, 0.25));
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 8.0,
+                beta: 4.0,
+            },
+        );
+        for _ in 0..100 {
+            engine.update(
+                "model_a",
+                Outcome {
+                    success: true,
+                    quality_score: 0.5,
+                },
+            );
+        }
+        assert!((engine.distilled_weight("model_a") - 0.25).abs() < 1e-9);
+        let effective = engine.get_prior("model_a");
+        let live = engine.live_prior("model_a");
+        assert!((effective.alpha - (live.alpha + 0.25 * 8.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn seed_merges_into_live_when_tracking_off() {
+        // Default (provenance_tracking unset): pre-provenance behavior.
+        let mut engine = AdaptationEngine::new(thompson_config());
+        let before = engine.get_prior("model_a");
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 5.0,
+                beta: 3.0,
+            },
+        );
+        let live = engine.live_prior("model_a");
+        assert!((live.alpha - (before.alpha + 5.0)).abs() < 1e-9);
+        assert!(engine.distilled_prior("model_a").is_none());
+    }
+
+    #[test]
+    fn snapshot_exposes_live_distilled_split() {
+        let mut engine = AdaptationEngine::new(provenance_config(0.1, 0.0));
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 6.0,
+                beta: 2.0,
+            },
+        );
+        let snap = engine.snapshot();
+        let a = snap.iter().find(|s| s.id == "model_a").unwrap();
+        assert_eq!(a.distilled_alpha, Some(6.0));
+        assert_eq!(a.distilled_beta, Some(2.0));
+        assert_eq!(a.distilled_weight, Some(1.0));
+        assert!(a.alpha > a.live_alpha);
+    }
+
+    #[test]
+    fn version_reset_clears_distilled_mass() {
+        let mut engine = AdaptationEngine::new(provenance_config(0.1, 0.0));
+        engine.seed_distilled(
+            "model_a",
+            BetaPrior {
+                alpha: 9.0,
+                beta: 1.0,
+            },
+        );
+        engine.reset_prior("model_a");
+        assert!(engine.distilled_prior("model_a").is_none());
+        assert!((engine.distilled_weight("model_a") - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

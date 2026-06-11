@@ -6,6 +6,9 @@
 //! described in spec §1.2 / §5 actually works end-to-end on a real
 //! manifest from arkavo-org/arkavo-edge#573.
 
+// #[tokio::test] expands to Runtime::block_on; harmless in tests.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_swarmkit::parse_yaml;
 use arkavo_swarmkit_runtime::{LaunchOptions, SwarmFlight};
 use arkavo_test_macros::spec;

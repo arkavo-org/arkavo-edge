@@ -95,6 +95,12 @@ function routeEvent(event) {
         case 'arpStatusUpdate':
             handleArpStatusUpdate(event);
             break;
+        case 'arpProposalActionResult':
+            if (event.error) {
+                console.warn('ARP proposal action failed:', event.proposalId, event.error);
+            }
+            // State change arrives via the paired arpStatusUpdate.
+            break;
         case 'publishedTrustUpdate':
             handlePublishedTrustUpdate(event);
             break;

@@ -796,3 +796,46 @@ scenarios:
     refs:
       - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)
     changed: "2026-05-08"
+
+  # --- Plane governance and flight proposal apply ---------------------------
+
+  - id: SK-093
+    name: Audit-plane roles cannot ride the coordination plane
+    criticality: critical
+    given:
+      - A kit manifest with a role declaring plane learning or audit
+    when: manifest validation runs
+    then:
+      - A learning/audit role with handoffs fails validation
+      - A learning/audit role with context_scope.can_write fails validation
+      - Coordination roles are unaffected
+    refs: [crates/arkavo-swarmkit/src/validate.rs, crates/arkavo-swarmkit/src/governance.rs]
+    changed: "2026-06-10"
+
+  - id: SK-094
+    name: Flight-wide proposal apply is all-or-reverted
+    criticality: critical
+    given:
+      - A flight whose roles each hold a ProposalQueue
+      - A flight-radius tightening proposal
+    when: apply_flight_proposal runs
+    then:
+      - Phase one prechecks every role side-effect-free before any apply
+      - A precheck failure rejects the whole flight with no role touched
+      - A phase-two failure force-reverts the roles already applied
+      - Success applies to every role with reviewer recorded
+    refs: [crates/arkavo-swarmkit-runtime/src/flight_apply.rs]
+    changed: "2026-06-10"
+
+  - id: SK-095
+    name: Reconciliation converges a crash-partial flight apply
+    criticality: high
+    given:
+      - Some flight roles hold an applied proposal and others never saw it
+    when: reconcile_flight_proposal runs
+    then:
+      - Roles holding the proposal in a revertible state are force-reverted
+      - The reverted role ids are returned for the audit trail
+      - A converged flight reconciles to a no-op
+    refs: [crates/arkavo-swarmkit-runtime/src/flight_apply.rs, crates/arkavo-swarmkit-runtime/tests/flight_proposal_apply.rs]
+    changed: "2026-06-10"

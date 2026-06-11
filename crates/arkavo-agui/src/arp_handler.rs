@@ -25,7 +25,8 @@ use tokio::sync::RwLock;
 use crate::types::{
     AgentArpStatus, ArpAdaptationEntity, ArpAdaptationSnapshot, ArpBudgetSummary,
     ArpDecisionTraceEntry, ArpDocumentSummary, ArpPolicyCacheConfigSummary, ArpPolicyCacheEntry,
-    ArpPolicyCacheSnapshot, ArpQualityGateSummary, ArpStatusSnapshot, FlightContext,
+    ArpPolicyCacheSnapshot, ArpProposalSnapshot, ArpQualityGateSummary, ArpStatusSnapshot,
+    ArpTraceRef, FlightContext,
 };
 
 const DEFAULT_DOC_FILENAME: &str = "arkavo.arp.json";
@@ -136,6 +137,33 @@ impl ArpHandler {
             },
         };
         self.install_loaded(agent_id, loaded).await;
+    }
+
+    /// Apply a findings-inbox HITL decision to one agent's proposal queue.
+    /// Returns the resulting state label, or an error when the agent has no
+    /// runtime or the proposal is not awaiting review.
+    pub async fn review_proposal(
+        &self,
+        agent_id: &str,
+        proposal_id: &str,
+        approve: bool,
+        reviewer: &str,
+    ) -> Result<String, String> {
+        let runtime = {
+            let guard = self.agents.read().await;
+            guard
+                .get(agent_id)
+                .and_then(|e| e.runtime.clone())
+                .ok_or_else(|| format!("agent {agent_id} has no ARP runtime"))?
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let queue = runtime.proposal_queue();
+        let mut guard = queue.lock().await;
+        let state = guard.review(proposal_id, approve, reviewer, now)?;
+        Ok(format!("{state:?}").to_lowercase())
     }
 
     /// Stash a parsed/erroneous document and, when valid, instantiate the
@@ -358,11 +386,29 @@ async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatu
                         mean: p.mean,
                         observations: p.observations,
                         in_warmup: p.in_warmup,
+                        live_alpha: p.live_alpha,
+                        live_beta: p.live_beta,
+                        distilled_alpha: p.distilled_alpha,
+                        distilled_beta: p.distilled_beta,
+                        distilled_weight: p.distilled_weight,
                     })
                     .collect(),
             })
         }
         None => None,
+    };
+
+    let proposals = match entry.runtime.as_ref() {
+        Some(rt) => {
+            let queue = rt.proposal_queue();
+            let guard = queue.lock().await;
+            guard
+                .proposals()
+                .into_iter()
+                .map(convert_proposal)
+                .collect()
+        }
+        None => Vec::new(),
     };
 
     // Prefer an explicitly attached trace; otherwise pull from the
@@ -396,8 +442,73 @@ async fn build_agent_status(agent_id: &str, entry: &AgentEntry) -> AgentArpStatu
         document: summary,
         policy_cache,
         adaptation,
+        proposals,
         decision_traces,
         flight_context: entry.flight_context.clone(),
+    }
+}
+
+/// Render a TighteningProposal as a findings-inbox card payload.
+fn convert_proposal(p: arkavo_arp::proposal::TighteningProposal) -> ArpProposalSnapshot {
+    use arkavo_arp::proposal::TighteningEffect;
+    let (effect_kind, effect_summary) = match &p.effect {
+        TighteningEffect::LowerTaskCeiling { new_ceiling_usd } => (
+            "lower_task_ceiling",
+            format!("lower task ceiling to ${new_ceiling_usd}"),
+        ),
+        TighteningEffect::LowerLayerBudget {
+            layer,
+            new_limit_usd,
+        } => (
+            "lower_layer_budget",
+            format!("lower {layer:?} layer budget to ${new_limit_usd}"),
+        ),
+        TighteningEffect::RaiseQualityGateThreshold { new_threshold } => (
+            "raise_quality_gate_threshold",
+            format!("raise quality gate to {new_threshold}"),
+        ),
+        TighteningEffect::AddQuarantine { scope, entity } => {
+            ("add_quarantine", format!("quarantine {entity} ({scope:?})"))
+        }
+        TighteningEffect::DenyTool { tool } => ("deny_tool", format!("deny tool {tool}")),
+        TighteningEffect::DenyEgress { host } => ("deny_egress", format!("deny egress to {host}")),
+        TighteningEffect::LowerRateLimit {
+            new_requests_per_second,
+        } => (
+            "lower_rate_limit",
+            format!("lower rate limit to {new_requests_per_second}/s"),
+        ),
+    };
+    ArpProposalSnapshot {
+        id: p.id,
+        origin: format!("{:?}", p.origin).to_lowercase(),
+        state: format!("{:?}", p.state).to_lowercase(),
+        effect_kind: effect_kind.to_string(),
+        effect_summary,
+        rationale: p.rationale,
+        blast_radius: blast_radius_label(p.blast_radius).to_string(),
+        evidence: p
+            .evidence
+            .into_iter()
+            .map(|t| ArpTraceRef {
+                trace_id: t.trace_id,
+                episode_ids: t.episode_ids,
+            })
+            .collect(),
+        created_at: p.created_at,
+        applied_at: p.applied_at,
+        reviewed_by: p.reviewed_by,
+        disposition_reason: p.disposition_reason,
+    }
+}
+
+fn blast_radius_label(r: arkavo_arp::proposal::BlastRadius) -> &'static str {
+    use arkavo_arp::proposal::BlastRadius;
+    match r {
+        BlastRadius::SingleEntity => "single_entity",
+        BlastRadius::SingleAgent => "single_agent",
+        BlastRadius::Flight => "flight",
+        BlastRadius::Mesh => "mesh",
     }
 }
 
@@ -530,6 +641,7 @@ fn trace_event_label(event: TraceEventType) -> &'static str {
         TraceEventType::BudgetEvent => "budget_event",
         TraceEventType::Quarantine => "quarantine",
         TraceEventType::HitlAction => "hitl_action",
+        TraceEventType::ProposalLifecycle => "proposal_lifecycle",
     }
 }
 
@@ -865,5 +977,142 @@ mod tests {
         assert_eq!(entry.layer, "execution");
         assert_eq!(entry.chosen_entity.as_deref(), Some("filesystem_tools"));
         assert_eq!(entry.success, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod proposal_tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
+    use super::*;
+    use arkavo_arp::proposal::{
+        BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal, TraceRef,
+    };
+    use arkavo_test_macros::spec;
+
+    const DOC_WITH_POLICY: &str = r#"{
+        "arp_spec": "0.1.0",
+        "adl_ref": {"uri": "https://example.com/adl.json"},
+        "adaptation": {"method": "thompson_sampling"},
+        "feedback_loops": {
+            "immediate": {
+                "quality_gate": {
+                    "threshold_default": 0.7,
+                    "metric": "cosine_similarity",
+                    "on_failure": "update_prior_and_log"
+                }
+            },
+            "short_term": {
+                "policy_cache": {
+                    "default_ttl_sec": 3600,
+                    "decay_strategy": "linear"
+                }
+            }
+        },
+        "budget": {
+            "task_ceiling_usd": 2.5,
+            "on_exhaustion": "halt_and_report",
+            "velocity": {"max_spend_per_minute_usd": 0.5}
+        },
+        "proposal_policy": {
+            "accepted_origins": ["consolidation", "human"],
+            "auto_apply_max_blast_radius": "single_entity",
+            "observation_window_sec": 600
+        }
+    }"#;
+
+    fn proposal(id: &str, radius: BlastRadius) -> TighteningProposal {
+        TighteningProposal {
+            id: id.into(),
+            origin: ProposalOrigin::Consolidation,
+            state: ProposalState::Proposed,
+            effect: TighteningEffect::DenyTool {
+                tool: "game-rl:reset".into(),
+            },
+            rationale: "reset correlated with colony loss".into(),
+            blast_radius: radius,
+            evidence: vec![TraceRef {
+                trace_id: "t-1".into(),
+                episode_ids: vec!["ep-1".into()],
+            }],
+            created_at: "2026-06-10T00:00:00Z".into(),
+            applied_at: None,
+            reviewed_by: None,
+            disposition_reason: None,
+        }
+    }
+
+    async fn ingest_into(handler: &ArpHandler, agent_id: &str, p: TighteningProposal) {
+        let runtime = {
+            let guard = handler.agents.read().await;
+            guard.get(agent_id).and_then(|e| e.runtime.clone()).unwrap()
+        };
+        let queue = runtime.proposal_queue();
+        queue.lock().await.ingest(p, 1_000);
+    }
+
+    #[spec("AGUI-013")]
+    #[tokio::test]
+    async fn proposals_surface_in_snapshot_as_inbox_cards() {
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", DOC_WITH_POLICY).await;
+        ingest_into(
+            &handler,
+            "rover-alpha",
+            proposal("p1", BlastRadius::SingleEntity),
+        )
+        .await;
+
+        let snapshot = handler.snapshot().await;
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "rover-alpha")
+            .unwrap();
+        assert_eq!(agent.proposals.len(), 1);
+        let card = &agent.proposals[0];
+        assert_eq!(card.effect_kind, "deny_tool");
+        // Within the auto-apply radius: applied and observing.
+        assert_eq!(card.state, "observed");
+        assert_eq!(card.evidence[0].episode_ids, vec!["ep-1".to_string()]);
+    }
+
+    #[spec("AGUI-014")]
+    #[tokio::test]
+    async fn review_proposal_approves_held_proposal() {
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", DOC_WITH_POLICY).await;
+        // single_agent radius exceeds the single_entity auto-apply ceiling.
+        ingest_into(
+            &handler,
+            "rover-alpha",
+            proposal("p2", BlastRadius::SingleAgent),
+        )
+        .await;
+
+        let state = handler
+            .review_proposal("rover-alpha", "p2", true, "operator")
+            .await
+            .unwrap();
+        assert_eq!(state, "observed");
+
+        let snapshot = handler.snapshot().await;
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "rover-alpha")
+            .unwrap();
+        assert_eq!(agent.proposals[0].reviewed_by.as_deref(), Some("operator"));
+    }
+
+    #[tokio::test]
+    async fn review_proposal_errors_for_unknown_agent() {
+        let handler = ArpHandler::new();
+        let err = handler
+            .review_proposal("ghost", "p1", true, "operator")
+            .await
+            .unwrap_err();
+        assert!(err.contains("no ARP runtime"));
     }
 }

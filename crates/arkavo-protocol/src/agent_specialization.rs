@@ -408,6 +408,7 @@ mod tests {
             session: None,
             state_storage: None,
             observability: None,
+            proposal_policy: None,
             metadata: None,
         }
     }

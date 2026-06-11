@@ -547,6 +547,24 @@ pub enum AgUiEvent {
         #[serde(rename = "eventId")]
         event_id: String,
     },
+    /// Findings-inbox HITL decision on a tightening proposal.
+    RequestArpProposalAction {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "proposalId")]
+        proposal_id: String,
+        /// "approve" or "reject".
+        action: String,
+    },
+    ArpProposalActionResult {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "proposalId")]
+        proposal_id: String,
+        /// `None` on success; the rejection reason otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 
     // MCP-T Published Trust panel — read-only view of what the agent
     // publishes externally via `trust/query` and `trust/history`.
@@ -1212,6 +1230,9 @@ pub struct AgentArpStatus {
     /// Adaptation engine state (None if engine not instantiated).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adaptation: Option<ArpAdaptationSnapshot>,
+    /// Tightening proposals (findings inbox).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<ArpProposalSnapshot>,
     /// Most recent decision-trace entries from arkavo-observability.
     #[serde(
         rename = "decisionTraces",
@@ -1358,6 +1379,53 @@ pub struct ArpAdaptationEntity {
     pub observations: u32,
     #[serde(rename = "inWarmup")]
     pub in_warmup: bool,
+    /// Live component of the effective prior (prior provenance).
+    #[serde(rename = "liveAlpha")]
+    pub live_alpha: f64,
+    #[serde(rename = "liveBeta")]
+    pub live_beta: f64,
+    /// Distilled (teacher-provided) mass; absent when none was seeded.
+    #[serde(rename = "distilledAlpha", skip_serializing_if = "Option::is_none")]
+    pub distilled_alpha: Option<f64>,
+    #[serde(rename = "distilledBeta", skip_serializing_if = "Option::is_none")]
+    pub distilled_beta: Option<f64>,
+    /// Current displacement weight applied to distilled mass.
+    #[serde(rename = "distilledWeight", skip_serializing_if = "Option::is_none")]
+    pub distilled_weight: Option<f64>,
+}
+
+/// One tightening proposal rendered as a findings-inbox card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpProposalSnapshot {
+    pub id: String,
+    pub origin: String,
+    pub state: String,
+    #[serde(rename = "effectKind")]
+    pub effect_kind: String,
+    #[serde(rename = "effectSummary")]
+    pub effect_summary: String,
+    pub rationale: String,
+    #[serde(rename = "blastRadius")]
+    pub blast_radius: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ArpTraceRef>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "appliedAt", skip_serializing_if = "Option::is_none")]
+    pub applied_at: Option<String>,
+    #[serde(rename = "reviewedBy", skip_serializing_if = "Option::is_none")]
+    pub reviewed_by: Option<String>,
+    #[serde(rename = "dispositionReason", skip_serializing_if = "Option::is_none")]
+    pub disposition_reason: Option<String>,
+}
+
+/// Evidence back-link on a proposal card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpTraceRef {
+    #[serde(rename = "traceId")]
+    pub trace_id: String,
+    #[serde(rename = "episodeIds", default, skip_serializing_if = "Vec::is_empty")]
+    pub episode_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -634,13 +634,13 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_splits_attributes_at_last_slash() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec![
                 "https://attr.arkavo.com/role/planner".to_string(),
                 "https://attr.arkavo.com/clearance/internal".to_string(),
             ],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let pol = role_policy("planner-1", &arp, None).unwrap();
         assert_eq!(pol.attributes.len(), 2);
@@ -662,13 +662,13 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_merges_repeated_fqns() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec![
                 "https://attr.arkavo.com/role/planner".to_string(),
                 "https://attr.arkavo.com/role/critic".to_string(),
             ],
-            rule: ArpRule::AnyOf,
+            rule: TdfReleaseRule::AnyOf,
         };
         let pol = role_policy("multi", &arp, None).unwrap();
         assert_eq!(pol.attributes.len(), 1);
@@ -680,10 +680,10 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_binds_to_agent_did_via_dissemination() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec!["https://attr.arkavo.com/clearance/public".to_string()],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let pol = role_policy("worker", &arp, Some("did:web:specialist.example.com")).unwrap();
         assert_eq!(
@@ -695,11 +695,11 @@ provenance:
     #[spec("SK-054")]
     #[test]
     fn role_policy_rejects_malformed_attribute() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             // Missing a slash → cannot split into (fqn, value).
             attributes: vec!["malformed".to_string()],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let err = role_policy("r1", &arp, None).unwrap_err();
         assert!(matches!(err, TdfError::Policy(_)));
