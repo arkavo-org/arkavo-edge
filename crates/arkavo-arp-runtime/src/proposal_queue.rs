@@ -59,6 +59,11 @@ pub struct ProposalQueue {
     doc: ArpDocument,
     proposals: Vec<TighteningProposal>,
     observations: HashMap<String, Observation>,
+    /// Displaced values for proposals that survived their observation window
+    /// and were confirmed. The observation record is gone, but the prior value
+    /// is retained so an out-of-band [`ProposalQueue::force_revert`] — the
+    /// flight-convergence path — can still undo a confirmed tightening.
+    confirmed_displaced: HashMap<String, DisplacedValue>,
     denied_tools: HashSet<String>,
     denied_hosts: HashSet<String>,
     /// `"{scope:?}:{entity}"` keys for applied quarantines.
@@ -78,6 +83,7 @@ impl ProposalQueue {
             doc,
             proposals: Vec::new(),
             observations: HashMap::new(),
+            confirmed_displaced: HashMap::new(),
             denied_tools: HashSet::new(),
             denied_hosts: HashSet::new(),
             quarantined: HashSet::new(),
@@ -117,18 +123,19 @@ impl ProposalQueue {
         let Some(policy) = self.policy.clone() else {
             return self.reject(proposal, "document has no proposal_policy");
         };
+        // A replayed id is refused without recording, and this must come first:
+        // `reject()` records the proposal, so any reject (validation, direction,
+        // overlap) on a known id would push a second entry under that id and
+        // corrupt every id-keyed lookup. The id is already on the books.
+        if self.duplicate_id(&proposal.id) {
+            return ProposalState::Rejected;
+        }
         if let Err(e) = validate_proposal(&proposal, &policy) {
             let reason = e.to_string();
             return self.reject(proposal, &reason);
         }
         if let Err(reason) = self.direction_violation(&proposal.effect) {
             return self.reject(proposal, &reason);
-        }
-        // A replayed id is refused without recording: pushing a second entry
-        // under the same id would corrupt every id-keyed lookup, and the id
-        // is already on the books.
-        if self.duplicate_id(&proposal.id) {
-            return ProposalState::Rejected;
         }
         if let Err(reason) = self.overlap_violation(&proposal.effect) {
             return self.reject(proposal, &reason);
@@ -205,17 +212,25 @@ impl ProposalQueue {
             .position(|p| p.id == proposal_id)
             .ok_or_else(|| format!("unknown proposal {proposal_id}"))?;
         let state = self.proposals[idx].state;
-        if !matches!(state, ProposalState::Applied | ProposalState::Observed) {
+        if !matches!(
+            state,
+            ProposalState::Applied | ProposalState::Observed | ProposalState::Confirmed
+        ) {
             return Err(format!(
-                "proposal {proposal_id} is {state:?}; only applied/observed proposals revert"
+                "proposal {proposal_id} is {state:?}; only applied/observed/confirmed proposals revert"
             ));
         }
-        let obs = self
+        // Applied/observed proposals carry a live observation record; a
+        // confirmed one's record was consumed at confirmation but its displaced
+        // value is retained separately. Either way the prior value is required.
+        let displaced = self
             .observations
             .remove(proposal_id)
-            .ok_or_else(|| format!("proposal {proposal_id} has no observation record"))?;
+            .map(|obs| obs.displaced)
+            .or_else(|| self.confirmed_displaced.remove(proposal_id))
+            .ok_or_else(|| format!("proposal {proposal_id} has no displaced-value record"))?;
         let effect = self.proposals[idx].effect.clone();
-        self.restore(&effect, &obs.displaced);
+        self.restore(&effect, &displaced);
         self.proposals[idx].state = ProposalState::Reverted;
         self.proposals[idx].disposition_reason = Some(reason.to_string());
         self.emit_trace(
@@ -326,6 +341,9 @@ impl ProposalQueue {
                 transitions.push((id, ProposalState::Reverted));
             } else {
                 self.proposals[idx].state = ProposalState::Confirmed;
+                // Retain the displaced value so flight reconcile can still
+                // force-revert this confirmed proposal to converge a flight.
+                self.confirmed_displaced.insert(id.clone(), obs.displaced);
                 self.emit_trace(&self.proposals[idx].clone(), "confirmed", None);
                 transitions.push((id, ProposalState::Confirmed));
             }
@@ -871,6 +889,43 @@ mod tests {
 
     #[spec("ARP-003")]
     #[test]
+    fn force_revert_undoes_a_confirmed_proposal() {
+        // Regression (#609): flight reconcile treats a Confirmed proposal as
+        // present and force-reverts it to converge a divergent flight. The
+        // confirm path drops the observation record, so force_revert must
+        // recover the displaced value from the confirmed store rather than
+        // failing — otherwise a confirmed role stays permanently tightened
+        // while its missing peers do not.
+        let mut q = queue();
+        q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool {
+                    tool: "game-rl:reset".into(),
+                },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        for _ in 0..10 {
+            q.record_quality_gate(true);
+        }
+        let transitions = q.evaluate_observations(1_700);
+        assert_eq!(transitions, vec![("p1".into(), ProposalState::Confirmed)]);
+        assert!(q.is_tool_denied("game-rl:reset"));
+
+        // Confirmed, yet still revertible out of band for flight convergence.
+        q.force_revert("p1", "flight reconcile").unwrap();
+        assert_eq!(q.proposal_state("p1"), Some(ProposalState::Reverted));
+        assert!(!q.is_tool_denied("game-rl:reset"));
+        let p = q.proposals().into_iter().find(|p| p.id == "p1").unwrap();
+        assert!(p.disposition_reason.unwrap().contains("reconcile"));
+        // A second revert is a no-op error: the displaced value is consumed.
+        assert!(q.force_revert("p1", "again").is_err());
+    }
+
+    #[spec("ARP-003")]
+    #[test]
     fn regression_reverts_and_restores_prior_value() {
         let mut q = queue();
         // Establish a clean baseline before the proposal.
@@ -1018,6 +1073,39 @@ mod tests {
         assert_eq!(q.proposals().len(), 1);
         assert!(q.is_tool_denied("a"));
         assert!(!q.is_tool_denied("b"));
+    }
+
+    #[spec("ARP-004")]
+    #[test]
+    fn replayed_id_failing_direction_check_does_not_record_a_duplicate() {
+        // Regression: a replayed id whose effect ALSO fails an earlier check
+        // (here the direction check — re-denying an already-denied tool) must
+        // still be refused without recording a second entry. The duplicate-id
+        // guard has to run before validate/direction, or `reject()` pushes a
+        // phantom entry under the same id and corrupts every id-keyed lookup.
+        let mut q = queue();
+        q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool { tool: "a".into() },
+                BlastRadius::SingleEntity,
+            ),
+            1_000,
+        );
+        let state = q.ingest(
+            proposal(
+                "p1",
+                TighteningEffect::DenyTool { tool: "a".into() },
+                BlastRadius::SingleEntity,
+            ),
+            1_001,
+        );
+        assert_eq!(state, ProposalState::Rejected);
+        assert_eq!(q.proposals().len(), 1);
+        // The single surviving entry is the original applied proposal (now
+        // under observation), so id-keyed lookups still resolve to it.
+        assert_eq!(q.proposal_state("p1"), Some(ProposalState::Observed));
+        assert!(q.is_tool_denied("a"));
     }
 
     #[spec("ARP-004")]

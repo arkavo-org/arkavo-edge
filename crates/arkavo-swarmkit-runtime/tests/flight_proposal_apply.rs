@@ -215,6 +215,54 @@ async fn kill_one_role_mid_apply_reconciles_to_convergence() {
 
 #[spec("SK-095")]
 #[tokio::test]
+async fn reconcile_reverts_a_confirmed_role_to_converge() {
+    // Regression (#609): a delayed reconcile can find a role whose proposal
+    // already passed its observation window and confirmed, while a peer never
+    // received it. Reconcile must still revert the confirmed role — otherwise
+    // it stays permanently tightened and the flight never converges.
+    let flight = launch();
+    let p = flight_proposal(
+        "fp-5",
+        TighteningEffect::DenyTool {
+            tool: "game-rl:reset".into(),
+        },
+    );
+    // commander + survival applied the proposal and then confirmed it (clean
+    // observation window elapsed); historian crashed before receiving it.
+    for role_id in ["commander", "survival"] {
+        let role = flight.role(role_id).unwrap();
+        let queue = role.arp().proposal_queue();
+        let mut guard = queue.lock().await;
+        guard
+            .ingest_reviewed(p.clone(), "kit-approver", 1_000)
+            .unwrap();
+        for _ in 0..10 {
+            guard.record_quality_gate(true);
+        }
+        let transitions = guard.evaluate_observations(1_700);
+        assert_eq!(transitions, vec![("fp-5".into(), ProposalState::Confirmed)]);
+    }
+
+    let reverted = reconcile_flight_proposal(&flight, "fp-5").await;
+    assert_eq!(
+        reverted,
+        vec!["commander".to_string(), "survival".to_string()]
+    );
+    for role in flight.roles() {
+        let queue = role.arp().proposal_queue();
+        let guard = queue.lock().await;
+        // Converged: the confirmed tightening was undone everywhere.
+        assert!(!guard.is_tool_denied("game-rl:reset"));
+        if ["commander", "survival"].contains(&role.role_id()) {
+            assert_eq!(guard.proposal_state("fp-5"), Some(ProposalState::Reverted));
+        }
+    }
+    // Idempotent: a second reconcile finds nothing left to revert.
+    assert!(reconcile_flight_proposal(&flight, "fp-5").await.is_empty());
+}
+
+#[spec("SK-095")]
+#[tokio::test]
 async fn converged_flight_reconciles_as_noop() {
     let flight = launch();
     let p = flight_proposal(
