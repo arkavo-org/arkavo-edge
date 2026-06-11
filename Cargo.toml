@@ -81,6 +81,7 @@ members = [
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-shadow-consolidation",
+    "crates/arkavo-lesson-synthesis",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]

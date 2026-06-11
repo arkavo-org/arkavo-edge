@@ -66,28 +66,11 @@ pub struct LoadResult {
     pub categories_skipped: u64,
 }
 
-/// The lesson-synthesis rule: keep only *action* tools.
-///
-/// A tool is read-only (and dropped) when its name contains observe/list/hash/
-/// summary. Lessons must reason about which actions produce good outcomes, not
-/// about tool-calling mechanics.
-#[must_use]
-pub fn is_action_tool(tool: &str) -> bool {
-    let lower = tool.to_lowercase();
-    !lower.contains("observe")
-        && !lower.contains("list")
-        && !lower.contains("hash")
-        && !lower.contains("summary")
-}
-
-/// Apply [`is_action_tool`] to a tool list.
-fn strip_observe(tools: &[String]) -> Vec<String> {
-    tools
-        .iter()
-        .filter(|t| is_action_tool(t))
-        .cloned()
-        .collect()
-}
+// The lesson-synthesis rule lives in arkavo-lesson-synthesis (a pure
+// std-only leaf crate, so the zero-runtime-contact property holds), shared
+// with the runtime consolidation teacher so the two planes cannot drift.
+pub use arkavo_lesson_synthesis::is_action_tool;
+use arkavo_lesson_synthesis::strip_observe;
 
 /// Group raw `(id, category, observation_json, outcome_json)` rows into
 /// batches, stripping observe calls and dropping categories below

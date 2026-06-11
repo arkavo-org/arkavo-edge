@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+arkavo-lesson-synthesis = { path = "../arkavo-lesson-synthesis" }
 chrono = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }
@@ -27,5 +28,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

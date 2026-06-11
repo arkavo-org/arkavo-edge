@@ -568,6 +568,7 @@ dependencies = [
 name = "arkavo-arp"
 version = "0.80.0"
 dependencies = [
+ "arkavo-test-macros",
  "serde",
  "serde_json",
 ]
@@ -580,6 +581,7 @@ dependencies = [
  "arkavo-arp",
  "arkavo-observability",
  "arkavo-policy-cache",
+ "arkavo-test-macros",
  "chrono",
  "serde",
  "serde_json",
@@ -1115,6 +1117,10 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
 ]
+
+[[package]]
+name = "arkavo-lesson-synthesis"
+version = "0.80.0"
 
 [[package]]
 name = "arkavo-llama-cpp"
@@ -1749,6 +1755,7 @@ dependencies = [
  "arkavo-evofabric",
  "arkavo-gossip",
  "arkavo-hrm",
+ "arkavo-lesson-synthesis",
  "arkavo-llama-cpp",
  "arkavo-llm",
  "arkavo-mcp",
@@ -1848,6 +1855,8 @@ name = "arkavo-shadow-consolidation"
 version = "0.80.0"
 dependencies = [
  "anyhow",
+ "arkavo-lesson-synthesis",
+ "arkavo-test-macros",
  "chrono",
  "clap",
  "reqwest 0.12.28",
