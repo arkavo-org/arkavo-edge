@@ -296,6 +296,9 @@ pub struct CostLedger {
     pub dry_run: bool,
     pub episodes_total: u64,
     pub episodes_consolidated: u64,
+    /// Episodes dropped by the per-category sampling cap — non-zero means
+    /// the run sampled rather than consolidated everything.
+    pub episodes_sampled_out: u64,
     pub categories_total: u64,
     pub categories_consolidated: u64,
     pub categories_skipped: u64,
@@ -326,6 +329,8 @@ fn ceil_cents(usd: f64) -> f64 {
 pub struct RunStats {
     pub episodes_total: u64,
     pub episodes_consolidated: u64,
+    /// Episodes dropped by the per-category sampling cap.
+    pub episodes_sampled_out: u64,
     pub categories_total: u64,
     pub categories_skipped: u64,
     /// Categories left unconsolidated because the run-level cost ceiling was
@@ -414,6 +419,7 @@ impl CostLedger {
             dry_run,
             episodes_total: stats.episodes_total,
             episodes_consolidated: stats.episodes_consolidated,
+            episodes_sampled_out: stats.episodes_sampled_out,
             categories_total: stats.categories_total,
             categories_consolidated: fable_calls,
             categories_skipped: stats.categories_skipped,
@@ -573,6 +579,7 @@ mod tests {
             },
         ];
         let stats = RunStats {
+            episodes_sampled_out: 0,
             episodes_total: 20,
             episodes_consolidated: 7,
             categories_total: 5,
@@ -620,6 +627,7 @@ mod tests {
     #[test]
     fn ledger_empty_run_is_zeroed() {
         let stats = RunStats {
+            episodes_sampled_out: 0,
             episodes_total: 0,
             episodes_consolidated: 0,
             categories_total: 0,

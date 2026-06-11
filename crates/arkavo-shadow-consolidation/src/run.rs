@@ -233,6 +233,7 @@ pub async fn execute(cfg: Config) -> anyhow::Result<RunSummary> {
         batches,
         episodes_total,
         episodes_consolidated,
+        episodes_sampled_out,
         categories_total,
         categories_skipped,
     } = reader.load_batches(cfg.min_episodes).await?;
@@ -315,6 +316,7 @@ pub async fn execute(cfg: Config) -> anyhow::Result<RunSummary> {
         RunStats {
             episodes_total,
             episodes_consolidated,
+            episodes_sampled_out,
             categories_total,
             categories_skipped,
             categories_budget_stopped,

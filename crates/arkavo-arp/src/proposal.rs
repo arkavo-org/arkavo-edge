@@ -111,13 +111,24 @@ impl TighteningEffect {
     /// state. Returns the violation, or `None` when sane.
     #[must_use]
     pub fn value_violation(&self) -> Option<String> {
+        // Scalar guards are written as negated conjunctions so NaN (every
+        // comparison false) and ±infinity fail closed instead of slipping
+        // through a `<= 0.0` check.
         match self {
-            Self::LowerTaskCeiling { new_ceiling_usd } if *new_ceiling_usd <= 0.0 => Some(format!(
-                "new_ceiling_usd must be positive, got {new_ceiling_usd}"
-            )),
-            Self::LowerLayerBudget { new_limit_usd, .. } if *new_limit_usd <= 0.0 => Some(format!(
-                "new_limit_usd must be positive, got {new_limit_usd}"
-            )),
+            Self::LowerTaskCeiling { new_ceiling_usd }
+                if !(new_ceiling_usd.is_finite() && *new_ceiling_usd > 0.0) =>
+            {
+                Some(format!(
+                    "new_ceiling_usd must be finite and positive, got {new_ceiling_usd}"
+                ))
+            }
+            Self::LowerLayerBudget { new_limit_usd, .. }
+                if !(new_limit_usd.is_finite() && *new_limit_usd > 0.0) =>
+            {
+                Some(format!(
+                    "new_limit_usd must be finite and positive, got {new_limit_usd}"
+                ))
+            }
             Self::RaiseQualityGateThreshold { new_threshold }
                 if !(*new_threshold > 0.0 && *new_threshold <= 1.0) =>
             {
@@ -136,9 +147,12 @@ impl TighteningEffect {
             }
             Self::LowerRateLimit {
                 new_requests_per_second,
-            } if *new_requests_per_second <= 0.0 => Some(format!(
-                "new_requests_per_second must be positive, got {new_requests_per_second}"
-            )),
+            } if !(new_requests_per_second.is_finite() && *new_requests_per_second > 0.0) => {
+                Some(format!(
+                    "new_requests_per_second must be finite and positive, got \
+                     {new_requests_per_second}"
+                ))
+            }
             _ => None,
         }
     }
@@ -253,6 +267,47 @@ mod tests {
             .value_violation()
             .is_none()
         );
+    }
+
+    #[test]
+    fn effect_value_sanity_rejects_nan_and_infinity() {
+        // Comparisons against NaN are false, so a `<= 0.0` guard silently
+        // admits NaN; +inf passes any positivity check. Every scalar arm
+        // must reject both — serde_json blocks them on the wire, but
+        // programmatically built proposals reach value_violation directly.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                TighteningEffect::LowerTaskCeiling {
+                    new_ceiling_usd: bad
+                }
+                .value_violation()
+                .is_some(),
+                "ceiling {bad} must be rejected"
+            );
+            assert!(
+                TighteningEffect::LowerLayerBudget {
+                    layer: BudgetLayerName::Consolidation,
+                    new_limit_usd: bad
+                }
+                .value_violation()
+                .is_some(),
+                "layer limit {bad} must be rejected"
+            );
+            assert!(
+                TighteningEffect::LowerRateLimit {
+                    new_requests_per_second: bad
+                }
+                .value_violation()
+                .is_some(),
+                "rate {bad} must be rejected"
+            );
+            assert!(
+                TighteningEffect::RaiseQualityGateThreshold { new_threshold: bad }
+                    .value_violation()
+                    .is_some(),
+                "threshold {bad} must be rejected"
+            );
+        }
     }
 
     #[test]

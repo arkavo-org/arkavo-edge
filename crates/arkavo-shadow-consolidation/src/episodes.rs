@@ -55,6 +55,14 @@ pub struct CategoryBatch {
     pub outcomes: Vec<ActionOutcome>,
 }
 
+/// Per-category episode cap.
+///
+/// One prompt carries a whole category, so an unbounded category can blow
+/// the model's input context (aborting the batch) and skew the budget
+/// recommendation upward. The most recent episodes are kept — they reflect
+/// current behavior.
+pub const MAX_EPISODES_PER_CATEGORY: usize = 200;
+
 /// Outcome of loading + grouping episodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadResult {
@@ -62,6 +70,9 @@ pub struct LoadResult {
     pub batches: Vec<CategoryBatch>,
     pub episodes_total: u64,
     pub episodes_consolidated: u64,
+    /// Episodes dropped by the per-category sampling cap — recorded so the
+    /// ledger never reads as "consolidated everything" when it sampled.
+    pub episodes_sampled_out: u64,
     pub categories_total: u64,
     pub categories_skipped: u64,
 }
@@ -73,9 +84,14 @@ pub use arkavo_lesson_synthesis::is_action_tool;
 use arkavo_lesson_synthesis::strip_observe;
 
 /// Group raw `(id, category, observation_json, outcome_json)` rows into
-/// batches, stripping observe calls and dropping categories below
-/// `min_episodes`.
-fn group_rows(rows: Vec<(String, String, String, String)>, min_episodes: usize) -> LoadResult {
+/// batches, stripping observe calls, dropping categories below
+/// `min_episodes`, and keeping at most `max_per_category` of the most
+/// recent episodes per category (rows arrive in insertion order).
+fn group_rows(
+    rows: Vec<(String, String, String, String)>,
+    min_episodes: usize,
+    max_per_category: usize,
+) -> LoadResult {
     let episodes_total = rows.len() as u64;
     // BTreeMap keeps category order stable for reproducible output.
     let mut by_category: BTreeMap<String, (Vec<String>, Vec<ActionOutcome>)> = BTreeMap::new();
@@ -100,24 +116,34 @@ fn group_rows(rows: Vec<(String, String, String, String)>, min_episodes: usize) 
     let mut batches = Vec::new();
     let mut categories_skipped = 0_u64;
     let mut episodes_consolidated = 0_u64;
+    let mut episodes_sampled_out = 0_u64;
 
-    for (category, (episode_ids, outcomes)) in by_category {
-        if outcomes.len() >= min_episodes {
-            episodes_consolidated += outcomes.len() as u64;
-            batches.push(CategoryBatch {
-                category,
-                episode_ids,
-                outcomes,
-            });
-        } else {
+    for (category, (mut episode_ids, mut outcomes)) in by_category {
+        if outcomes.len() < min_episodes {
             categories_skipped += 1;
+            continue;
         }
+        // Rows arrive in insertion order, so the tail is the most recent
+        // evidence; keep it and account for what was sampled out.
+        if outcomes.len() > max_per_category {
+            let dropped = outcomes.len() - max_per_category;
+            episodes_sampled_out += dropped as u64;
+            episode_ids.drain(..dropped);
+            outcomes.drain(..dropped);
+        }
+        episodes_consolidated += outcomes.len() as u64;
+        batches.push(CategoryBatch {
+            category,
+            episode_ids,
+            outcomes,
+        });
     }
 
     LoadResult {
         batches,
         episodes_total,
         episodes_consolidated,
+        episodes_sampled_out,
         categories_total,
         categories_skipped,
     }
@@ -152,11 +178,13 @@ impl EpisodeReader {
 
     /// Load and group all episodes into per-category batches.
     pub async fn load_batches(&self, min_episodes: usize) -> anyhow::Result<LoadResult> {
-        let rows =
-            sqlx::query("SELECT id, task_category, observation_json, outcome_json FROM episodes")
-                .fetch_all(&self.pool)
-                .await
-                .context("querying episodes table")?;
+        let rows = sqlx::query(
+            "SELECT id, task_category, observation_json, outcome_json FROM episodes \
+             ORDER BY rowid",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("querying episodes table")?;
 
         let raw: Vec<(String, String, String, String)> = rows
             .into_iter()
@@ -171,7 +199,7 @@ impl EpisodeReader {
             .collect::<Result<_, _>>()
             .context("decoding episode rows")?;
 
-        Ok(group_rows(raw, min_episodes))
+        Ok(group_rows(raw, min_episodes, MAX_EPISODES_PER_CATEGORY))
     }
 }
 
@@ -181,6 +209,54 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("SC-006")]
+    #[test]
+    fn oversized_category_samples_most_recent_and_records_dropped() {
+        // 8 episodes in insertion order, cap 5: the prompt must carry the
+        // most recent 5 and the ledger must see 3 sampled out.
+        let rows: Vec<_> = (0..8)
+            .map(|i| {
+                (
+                    format!("ep-{i}"),
+                    "colony".to_string(),
+                    r#"{"tools_used":["set_priority"]}"#.to_string(),
+                    r#"{"success":true,"quality_metrics":{"correctness":0.8}}"#.to_string(),
+                )
+            })
+            .collect();
+        let result = group_rows(rows, 3, 5);
+        assert_eq!(result.batches.len(), 1);
+        let batch = &result.batches[0];
+        assert_eq!(batch.outcomes.len(), 5);
+        assert_eq!(
+            batch.episode_ids,
+            vec!["ep-3", "ep-4", "ep-5", "ep-6", "ep-7"]
+        );
+        assert_eq!(result.episodes_total, 8);
+        assert_eq!(result.episodes_consolidated, 5);
+        assert_eq!(result.episodes_sampled_out, 3);
+    }
+
+    #[spec("SC-006")]
+    #[test]
+    fn category_within_cap_is_untouched() {
+        let rows: Vec<_> = (0..5)
+            .map(|i| {
+                (
+                    format!("ep-{i}"),
+                    "colony".to_string(),
+                    r#"{"tools_used":["set_priority"]}"#.to_string(),
+                    r#"{"success":true,"quality_metrics":{"correctness":0.8}}"#.to_string(),
+                )
+            })
+            .collect();
+        let result = group_rows(rows, 3, 5);
+        assert_eq!(result.batches[0].outcomes.len(), 5);
+        assert_eq!(result.episodes_sampled_out, 0);
+        assert_eq!(result.episodes_consolidated, 5);
+    }
 
     #[test]
     fn strips_read_only_tools() {
@@ -236,7 +312,7 @@ mod tests {
                 r#"{"success":true,"quality_metrics":{"correctness":1.0}}"#.to_string(),
             ),
         ];
-        let result = group_rows(rows, 3);
+        let result = group_rows(rows, 3, MAX_EPISODES_PER_CATEGORY);
         assert_eq!(result.episodes_total, 4);
         assert_eq!(result.categories_total, 2);
         assert_eq!(result.batches.len(), 1);
@@ -277,7 +353,7 @@ mod tests {
                 r#"{"success":true,"quality_metrics":{"correctness":0.7}}"#.to_string(),
             ),
         ];
-        let result = group_rows(rows, 1);
+        let result = group_rows(rows, 1, MAX_EPISODES_PER_CATEGORY);
         assert_eq!(result.batches.len(), 1);
         let outcomes = &result.batches[0].outcomes;
         assert!(outcomes[0].actions.is_empty());

@@ -86,3 +86,17 @@ scenarios:
       - crates/arkavo-shadow-consolidation/src/validate.rs
       - crates/arkavo-shadow-consolidation/src/run.rs
     changed: "2026-06-10"
+
+  - id: SC-006
+    name: Oversized categories sample the most recent episodes, never silently
+    criticality: high
+    given:
+      - A category holding more episodes than the per-category cap
+    when: load_batches groups the store rows
+    then:
+      - The batch keeps the most recent episodes up to the cap
+      - episode_ids stay aligned with the sampled outcomes for backfill
+      - The dropped count lands in the ledger as episodes_sampled_out
+      - Categories within the cap are untouched
+    refs: [crates/arkavo-shadow-consolidation/src/episodes.rs]
+    changed: "2026-06-10"
