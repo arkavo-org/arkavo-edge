@@ -372,6 +372,7 @@ mod tests {
             TraceEventType::ProposalLifecycle,
         ];
 
+        let expected = event_types.len();
         for event_type in event_types {
             trace.record(
                 TraceLayer::Execution,
@@ -383,7 +384,7 @@ mod tests {
             );
         }
 
-        assert_eq!(trace.len(), 9);
+        assert_eq!(trace.len(), expected);
     }
 
     #[test]
