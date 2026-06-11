@@ -88,8 +88,10 @@ impl TeacherModel for FableTeacher {
             .complete_with_usage(messages)
             .await
             .map_err(|e| e.to_string())?;
-        let cost_usd = f64::from(usage.input_tokens) / 1e6 * FABLE_INPUT_USD_PER_MTOK
-            + f64::from(usage.output_tokens) / 1e6 * FABLE_OUTPUT_USD_PER_MTOK;
+        let cost_usd = (f64::from(usage.input_tokens) / 1e6).mul_add(
+            FABLE_INPUT_USD_PER_MTOK,
+            f64::from(usage.output_tokens) / 1e6 * FABLE_OUTPUT_USD_PER_MTOK,
+        );
         Ok(TeacherReply { text, cost_usd })
     }
 
