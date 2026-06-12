@@ -237,9 +237,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // threads. Give each role its OWN OS thread with its own current-thread
     // runtime, so blocking/CPU work (e.g. local inference) in one role does
     // not stall the others' tick loops.
+    // Track each role name alongside its thread handle so that a panicked
+    // role thread (whose closure never returns a value) is still counted as a
+    // failure on join — otherwise `join().ok().flatten()` would silently drop
+    // the panic and the command would exit 0 despite a crashed role.
     let mut handles = Vec::new();
     for cfg in configs {
-        handles.push(std::thread::spawn(move || -> Option<String> {
+        let role_name = cfg.name.clone();
+        let handle = std::thread::spawn(move || -> Option<String> {
             let name = cfg.name.clone();
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -258,12 +263,20 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     Some(name)
                 }
             }
-        }));
+        });
+        handles.push((role_name, handle));
     }
-    let failures: Vec<String> = handles
-        .into_iter()
-        .filter_map(|h| h.join().ok().flatten())
-        .collect();
+    let mut failures: Vec<String> = Vec::new();
+    for (role_name, handle) in handles {
+        match handle.join() {
+            Ok(Some(failed)) => failures.push(failed),
+            Ok(None) => {}
+            Err(_) => {
+                eprintln!("[swarmkit] role '{role_name}' panicked");
+                failures.push(role_name);
+            }
+        }
+    }
     if !failures.is_empty() {
         return Err(format!("swarmkit roles failed: {}", failures.join(", ")).into());
     }
