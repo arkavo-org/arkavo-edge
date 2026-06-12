@@ -193,15 +193,26 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // role's agent loop concurrently on the single `block_on` thread via
     // `join_all`, which has no `Send` requirement.
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move {
+    let failures: Vec<String> = rt.block_on(async move {
         let tasks = configs.into_iter().map(|cfg| async move {
             let name = cfg.name.clone();
-            if let Err(e) = crate::commands::agent::start_agent_server(&cfg, false).await {
-                eprintln!("[swarmkit] role '{name}' exited: {e}");
+            match crate::commands::agent::start_agent_server(&cfg, false).await {
+                Ok(()) => None,
+                Err(e) => {
+                    eprintln!("[swarmkit] role '{name}' exited: {e}");
+                    Some(name)
+                }
             }
         });
-        futures::future::join_all(tasks).await;
+        futures::future::join_all(tasks)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     });
+    if !failures.is_empty() {
+        return Err(format!("swarmkit roles failed: {}", failures.join(", ")).into());
+    }
     Ok(())
 }
 
