@@ -5,7 +5,7 @@
 //! [`kit_to_agent_configs`]; the command/dispatch layer is a separate task.
 
 use crate::commands::agent::{AgentConfig, McpServerConfig};
-use arkavo_protocol::agent_config::{AgentMode, expand_env};
+use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::{McpServerDef, manifest::Manifest};
 
 /// First listen port assigned to role index 0; subsequent roles get
@@ -51,9 +51,11 @@ pub fn kit_to_agent_configs(manifest: &Manifest) -> Vec<AgentConfig> {
                     servers
                         .get(grant.server.as_str())
                         .map(|def| McpServerConfig {
+                            // ${VAR} is expanded once at the spawn site
+                            // (McpClient::new_with_command); do not pre-expand here.
                             name: def.name.clone(),
-                            command: Some(expand_env(&def.command)),
-                            args: def.args.iter().map(|a| expand_env(a)).collect(),
+                            command: Some(def.command.clone()),
+                            args: def.args.clone(),
                             url: None,
                         })
                 })
@@ -174,6 +176,11 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if configs.is_empty() {
             return Err(format!("no role named '{role}' in kit").into());
         }
+        // A single isolated role has no live peers to reach; clear the
+        // full-topology peer wiring so it doesn't spin retrying absent A2A peers.
+        for c in &mut configs {
+            c.peers.clear();
+        }
     }
 
     println!(
@@ -188,28 +195,75 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .join(", ")
     );
 
-    // `start_agent_server`'s future is not `Send` (it holds a `Box<dyn Error>`
-    // across an await), so we can't `tokio::spawn` it. Instead we run every
-    // role's agent loop concurrently on the single `block_on` thread via
-    // `join_all`, which has no `Send` requirement.
-    let rt = tokio::runtime::Runtime::new()?;
-    let failures: Vec<String> = rt.block_on(async move {
-        let tasks = configs.into_iter().map(|cfg| async move {
+    // The CLI agent runtime (AgentConfig) does not yet carry per-role budgets,
+    // inference params, context limits, or completion.rules. Warn loudly rather
+    // than dropping them silently (tracked: swarmkit play provisioning passthrough).
+    let mut unenforced: Vec<&str> = Vec::new();
+    if manifest
+        .roles
+        .iter()
+        .any(|r| r.agent_provisioning.budget.is_some())
+    {
+        unenforced.push("agent_provisioning.budget");
+    }
+    if manifest
+        .roles
+        .iter()
+        .any(|r| r.agent_provisioning.inference.is_some())
+    {
+        unenforced.push("agent_provisioning.inference");
+    }
+    if manifest
+        .roles
+        .iter()
+        .any(|r| r.agent_provisioning.context.is_some())
+    {
+        unenforced.push("agent_provisioning.context");
+    }
+    // `completion` is a required `CompletionSpec`; its `rules` is a `Vec<String>`.
+    // Treat a non-empty rule set as a declared-but-unenforced control.
+    if !manifest.completion.rules.is_empty() {
+        unenforced.push("completion.rules");
+    }
+    if !unenforced.is_empty() {
+        eprintln!(
+            "[swarmkit] note: these kit fields are NOT yet enforced by `swarmkit play` and are ignored this run: {}",
+            unenforced.join(", ")
+        );
+    }
+
+    // `start_agent_server`'s future is `!Send` (it holds a `Box<dyn Error>`
+    // across an await), so it cannot be `tokio::spawn`ed onto shared worker
+    // threads. Give each role its OWN OS thread with its own current-thread
+    // runtime, so blocking/CPU work (e.g. local inference) in one role does
+    // not stall the others' tick loops.
+    let mut handles = Vec::new();
+    for cfg in configs {
+        handles.push(std::thread::spawn(move || -> Option<String> {
             let name = cfg.name.clone();
-            match crate::commands::agent::start_agent_server(&cfg, false).await {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[swarmkit] role '{name}' runtime init failed: {e}");
+                    return Some(name);
+                }
+            };
+            match rt.block_on(crate::commands::agent::start_agent_server(&cfg, false)) {
                 Ok(()) => None,
                 Err(e) => {
                     eprintln!("[swarmkit] role '{name}' exited: {e}");
                     Some(name)
                 }
             }
-        });
-        futures::future::join_all(tasks)
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
-    });
+        }));
+    }
+    let failures: Vec<String> = handles
+        .into_iter()
+        .filter_map(|h| h.join().ok().flatten())
+        .collect();
     if !failures.is_empty() {
         return Err(format!("swarmkit roles failed: {}", failures.join(", ")).into());
     }
