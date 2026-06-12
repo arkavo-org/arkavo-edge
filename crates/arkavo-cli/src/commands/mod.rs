@@ -5,6 +5,7 @@ pub mod mesh;
 pub mod model;
 pub mod rlm_integration;
 pub mod security_audit;
+pub mod swarmkit;
 pub mod task;
 pub mod terminal;
 pub mod terminal_ui;

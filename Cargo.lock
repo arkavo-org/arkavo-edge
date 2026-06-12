@@ -728,6 +728,7 @@ dependencies = [
  "arkavo-router",
  "arkavo-server",
  "arkavo-session",
+ "arkavo-swarmkit",
  "arkavo-terminal",
  "arkavo-ucp",
  "arkavo-ui-core",
