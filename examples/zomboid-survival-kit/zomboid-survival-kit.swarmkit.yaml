@@ -1,0 +1,331 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:MnL_kCJFbmi0c5Unu_CLAqu8qAGoQKW7c_UKe-oDWqo"
+  name: "Zomboid Survival Kit"
+  version: "0.1.0"
+  description: >-
+    Five-role hub-spoke kit that plays Project Zomboid as a coordinated survivor
+    swarm: one survivor hub drives the game via game-rl, advised by threat,
+    scavenger, and medic roles, with a critic scoring the episode.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-06-12T00:00:00Z"
+  expires: "2026-12-11T00:00:00Z"
+  nonce: "ZmbdSurv0kit2026"
+
+objective:
+  goal: "Survive and scavenge in Project Zomboid as a coordinated survivor swarm."
+  success_criteria:
+    - "survivor alive at episode end"
+    - "weapon equipped"
+    - "food or water secured"
+
+inputs:
+  - name: "game_state"
+    type: "json"
+    required: true
+
+deliverables:
+  - name: "survival_log"
+    type: "json"
+
+roles:
+  - id: "survivor"
+    role_type: "survivor"
+    description: "Hub survivor that drives Project Zomboid via game-rl, one tool call per cycle."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 50
+        max_wallclock_ms: 600000
+        max_total_tokens: 80000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:survivor-playbook"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "survivor-playbook"
+          description: "Drive one survivor in Project Zomboid via game-rl, one tool call per cycle."
+          instructions: |
+            You control ONE survivor in Project Zomboid. Call exactly one tool per cycle; no prose. Cycle 1: registerAgent(AgentId=player1, AgentType=Entity). Then each cycle: read Observation.Alerts (highest Severity first), Observation.Survivors[0] (Position, Health, Hunger, Thirst, weapon), Observation.VisibleZombies, and Observation.Landmarks (PlayerPosition + Region_* compass points 20 tiles out are Move targets). Threat priority: UnderAttack with a zombie within 5 tiles -> AttackNearest if armed else Shove then flee; Zombies nearby within 15 -> hold if armed else Walk to the Region_* away from the nearest zombie; Unarmed -> EquipBest if inventory has a weapon else PickUp a nearby weapon or explore; Critically injured -> Walk away to break contact; Hungry/Thirsty -> Eat the matching item id from Survivors[0].Inventory. IDs must come from the latest observation (VisibleZombies[].Id, NearbyItems[].Id, Inventory[].Id) — never invent ids. RenderMap (Ticks=0) is free perception: it returns an ASCII map centered on you with coordinate rulers (P=you, Z=zombie, #=wall, D=door, W=window, T=tree, i=item); Move to any (x,y) you read off it; north is -y. When healthy, armed, and no zombies within 15, scavenge: Walk toward an unvisited Region_* then PickUpAll when NearbyItems is non-empty. Weigh advisor recommendations (threat, scavenger, medic) but you make the final call each cycle.
+          resources: []
+        signature: "5vNHSwYFNJEE3_2oq3buUNkZ1Liu4HRaHlHzebif2k9uyENZJLoSbt-vdPxcyS3-mxsZJ8vHjGo2rGdgjrcBCg"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools:
+      - server: "game-rl"
+        tools: ["registerAgent", "observe", "step", "episodeSummary", "reset"]
+        auth: "none"
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/survivor"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "threat"
+        on: "always"
+      - to: "scavenger"
+        on: "always"
+      - to: "medic"
+        on: "always"
+    context_scope:
+      can_read: ["threat", "scavenger", "medic", "self"]
+      can_write: ["self"]
+
+  - id: "threat"
+    role_type: "threat_advisor"
+    description: "Advise the survivor on combat versus flight from relayed observations."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 50
+        max_wallclock_ms: 600000
+        max_total_tokens: 80000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:threat-advisor"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "threat-advisor"
+          description: "Advise the survivor on combat versus flight."
+          instructions: "Advise the survivor on combat vs flight. From the survivor's relayed Observation.VisibleZombies and Alerts, recommend: attack (zombie in melee range and armed), shove-and-flee (cornered and unarmed), or reposition to a named Region_* away from the zombie cluster. Reply with one concise recommendation."
+          resources: []
+        signature: "lHkLW_-22h3gbqfp7DYCS0MjskMEkYaWre9klt8KEnEVr60yxOp6IWF5uxvT9cMU8lXQQSiIhIoofbS-YvmCCg"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/threat_advisor"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "survivor"
+        on: "always"
+    context_scope:
+      can_read: ["survivor", "self"]
+      can_write: ["self"]
+
+  - id: "scavenger"
+    role_type: "scavenge_advisor"
+    description: "Advise the survivor on loot and routing from relayed items and the rendered map."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 50
+        max_wallclock_ms: 600000
+        max_total_tokens: 80000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:scavenge-advisor"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "scavenge-advisor"
+          description: "Advise the survivor on loot and routing."
+          instructions: "Advise the survivor on loot and routing. From relayed NearbyItems and the RenderMap, recommend the highest-value nearby item to grab (weapon > food > medical > other) and a safe route (door/coordinate) to reach it. Reply with one concise recommendation."
+          resources: []
+        signature: "reL8v5kndK1M1kPWFjnsTOQc4Zn3NYIRyJoefdxBuwhOKHu-etNFGYGCLh71CHDzjfYQKfjCz_9MRvuQpv1iCg"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/scavenge_advisor"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "survivor"
+        on: "always"
+    context_scope:
+      can_read: ["survivor", "self"]
+      can_write: ["self"]
+
+  - id: "medic"
+    role_type: "health_advisor"
+    description: "Advise the survivor on health and sustenance from relayed stats."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 50
+        max_wallclock_ms: 600000
+        max_total_tokens: 80000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:health-advisor"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "health-advisor"
+          description: "Advise the survivor on health and sustenance."
+          instructions: "Advise the survivor on health and sustenance. From relayed Survivors[0] stats, recommend when to eat/drink (Hunger/Thirst high), rest (Fatigue high), or break contact and treat injuries (low Health). Reply with one concise recommendation."
+          resources: []
+        signature: "5vNHSwYFNJEE3_2oq3buUNkZ1Liu4HRaHlHzebif2k9uyENZJLoSbt-vdPxcyS3-mxsZJ8vHjGo2rGdgjrcBCg"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/health_advisor"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "survivor"
+        on: "always"
+    context_scope:
+      can_read: ["survivor", "self"]
+      can_write: ["self"]
+
+  - id: "critic"
+    role_type: "critic"
+    description: "Score the episode against the survival rubric and flag ignored critical alerts."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "9B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 50
+        max_wallclock_ms: 600000
+        max_total_tokens: 80000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:survival-critic"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "survival-critic"
+          description: "Score the episode against the survival rubric."
+          instructions: "Score the episode against the rubric: survival_trajectory (stayed alive, avoided damage), threat_response (handled zombies well), resource_security (secured weapon/food), coordination (used advisor input). Flag any cycle where the survivor ignored a critical alert."
+          resources: []
+        signature: "AzqNXKR_APggRBJKZ3XAkl5Kxlw21zoHyoVRbcG9-sTooJO4rlyidASm79nNHQWLZuheQ_oT-ivWugunwEMYcQ"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools: []
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/critic"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["survivor", "threat", "scavenger", "medic", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+    compaction:
+      strategy: "tool_result"
+
+mcp_servers:
+  - name: "game-rl"
+    command: "${GAME_RL_SERVER}"
+    args: []
+    transport: "stdio"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 400000
+    max_cost_usd: 2.0
+  data_classifications:
+    - "game"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+evaluation:
+  rubric:
+    reference: "game-rl-draft-03#survival"
+    dimensions:
+      - name: "survival_trajectory"
+        weight: 0.4
+        threshold: 0.6
+      - name: "threat_response"
+        weight: 0.3
+        threshold: 0.6
+      - name: "resource_security"
+        weight: 0.2
+        threshold: 0.5
+      - name: "coordination"
+        weight: 0.1
+        threshold: 0.5
+  critic_role: "critic"
+
+completion:
+  rules:
+    - "survivor registered and alive"
+    - "no role in error state"
+  on_failure: "retry"
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "AzqNXKR_APggRBJKZ3XAkl5Kxlw21zoHyoVRbcG9-sTooJO4rlyidASm79nNHQWLZuheQ_oT-ivWugunwEMYcQ"
