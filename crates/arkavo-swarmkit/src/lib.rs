@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod coordination;
 pub mod governance;
 pub mod manifest;
+pub mod mcp;
 pub mod role;
 pub mod skill_content;
 pub mod validate;
@@ -30,6 +31,7 @@ pub use governance::{
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 #[allow(deprecated)]
 pub use role::ArpRule;
+pub use mcp::{McpServerDef, Transport};
 pub use role::{
     AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
     Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
