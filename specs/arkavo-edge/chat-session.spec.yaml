@@ -6,7 +6,7 @@ version: 0.57.2
 
 invariants:
   - Each session has a unique UUID v4 identifier
-  - Sessions transition through states Active → Closing → Closed
+  - Sessions transition through states Active → Closing → Closed, with an abnormal Zombie state on handler exit
   - Sessions auto-expire after TTL (default 3600 seconds) with 60-second check interval
   - Maximum 100 in-flight deltas before back-pressure is applied
   - Delta sequences are monotonically increasing per message

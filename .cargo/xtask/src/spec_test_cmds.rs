@@ -1,6 +1,6 @@
 use crate::spec_test::{
-    CoverageAnalyzer, CoverageStatus, Criticality, SpecCoverage, SpecParser, TestDiscovery,
-    TestGenerator,
+    CoverageAnalyzer, CoverageStatus, Criticality, RefsValidator, SpecCoverage, SpecParser,
+    SpecStaleRefs, StaleRef, TestDiscovery, TestGenerator,
 };
 use crate::spec_test_diff;
 use crate::spec_test_export;
@@ -77,6 +77,18 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Validate that spec refs point to existing source files
+    ValidateRefs {
+        /// Optional spec name filter
+        #[arg(long)]
+        spec: Option<String>,
+        /// Fail with non-zero exit code if any stale refs are found
+        #[arg(long)]
+        fail: bool,
+        /// Skip refs on scenarios marked wip (work-in-progress)
+        #[arg(long)]
+        skip_wip: bool,
+    },
 }
 
 pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result<()> {
@@ -113,6 +125,11 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
         Commands::ExportJson { output } => cmd_export_json(&specs_dir, &crates_dir, output),
         Commands::ExportHtml { output } => cmd_export_html(&specs_dir, &crates_dir, output),
         Commands::Diff { baseline, output } => cmd_diff(&specs_dir, &crates_dir, baseline, output),
+        Commands::ValidateRefs {
+            spec,
+            fail,
+            skip_wip,
+        } => cmd_validate_refs(&specs_dir, spec, fail, skip_wip),
     }
 }
 
@@ -479,5 +496,90 @@ fn cmd_list(
         }
         println!();
     }
+    Ok(())
+}
+
+fn cmd_validate_refs(
+    specs_dir: &Path,
+    filter_spec: Option<String>,
+    fail: bool,
+    skip_wip: bool,
+) -> Result<()> {
+    println!(
+        "{}\n{}\n",
+        "Spec Refs Validation".bold().cyan(),
+        "====================".cyan()
+    );
+
+    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let stale_by_spec = RefsValidator::validate(&specs);
+
+    let mut stale_by_spec: Vec<SpecStaleRefs> = match filter_spec {
+        Some(f) => {
+            let f = f.to_lowercase();
+            stale_by_spec
+                .into_iter()
+                .filter(|s| spec_name(&s.spec_file).to_lowercase().contains(&f))
+                .collect()
+        }
+        None => stale_by_spec,
+    };
+
+    if skip_wip {
+        stale_by_spec = stale_by_spec
+            .into_iter()
+            .map(|mut s| {
+                s.stale_refs.retain(|r| !r.wip);
+                s
+            })
+            .filter(|s| !s.stale_refs.is_empty())
+            .collect();
+    }
+
+    let total_stale: usize = stale_by_spec.iter().map(|s| s.stale_refs.len()).sum();
+
+    if total_stale == 0 {
+        println!("{}", "All spec refs resolve to existing files.".green());
+        return Ok(());
+    }
+
+    println!(
+        "{} {} stale reference(s) found\n",
+        "⚠".yellow(),
+        total_stale
+    );
+
+    for spec_stale in &stale_by_spec {
+        let name = spec_name(&spec_stale.spec_file);
+        println!(
+            "{} {} ({} stale)",
+            "▶".yellow(),
+            name.bold(),
+            spec_stale.stale_refs.len()
+        );
+        // Group by scenario to avoid repeating the spec header
+        let mut by_scenario: std::collections::HashMap<&str, Vec<&StaleRef>> =
+            std::collections::HashMap::new();
+        for r in &spec_stale.stale_refs {
+            by_scenario.entry(&r.scenario_id).or_default().push(r);
+        }
+        for (scenario_id, refs) in by_scenario {
+            println!("  {} {}", "•".dimmed(), scenario_id.dimmed());
+            for r in refs {
+                println!(
+                    "    {} {}",
+                    "✗".red(),
+                    format!("{} -> {}", r.raw_ref, r.resolved_path.display()).dimmed()
+                );
+            }
+        }
+        println!();
+    }
+
+    if fail {
+        eprintln!("{} Stale spec refs detected", "FAILED:".red());
+        process::exit(1);
+    }
+
     Ok(())
 }

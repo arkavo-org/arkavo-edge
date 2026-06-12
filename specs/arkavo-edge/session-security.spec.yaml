@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../schema.json
 
 feature: Session Security Hardening
-module: arkavo_session::security
+module: arkavo_session
 version: 1.0.0
 
 invariants:
@@ -287,7 +287,7 @@ scenarios:
       - Arbitrary inputs are generated
       - Memory safety is verified (no crashes, use-after-free)
       - Return values are validated
-    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    refs: [crates/arkavo-session/tests/ffi_fuzz_test.rs:104-150, crates/arkavo-session/tests/ffi_fuzz_test.rs:185-255]
 
 
   - id: SESS-020
@@ -300,7 +300,7 @@ scenarios:
       - Seed corpus is generated from valid inputs
       - Edge cases are included (empty, max size, boundary values)
       - Mutation strategies target session-specific fields
-    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    refs: [crates/arkavo-session/tests/ffi_fuzz_test.rs:152-176, crates/arkavo-session/tests/ffi_fuzz_test.rs:257-300]
 
 
   - id: SESS-021
@@ -313,5 +313,5 @@ scenarios:
       - Fuzzing runs for minimum duration (5 minutes)
       - New crashes are reported immediately
       - Coverage reports are generated
-    refs: [crates/arkavo-session/fuzz/ffi_fuzz.rs]
+    refs: [crates/arkavo-session/tests/ffi_fuzz_test.rs:302-365]
 

@@ -3,7 +3,7 @@ module: crate::tdf_iroh
 version: 0.57.2
 
 invariants:
-  - Transport handles raw bytes only, no encryption
+  - Transport handles raw bytes; encryption occurs before handoff to Iroh
   - Tickets are self-contained and transferable
   - Embedded Iroh node lifecycle managed automatically
   - Content-addressed storage ensures data integrity

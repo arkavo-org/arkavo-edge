@@ -27,7 +27,9 @@ scenarios:
       - Transports initialized
       - Startup loops launched
       - Ready to accept connections
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/a2a_server.rs:990-1030
+      - crates/arkavo-server/src/server/a2a_server.rs:1319-1399
     changed: "2026-03-19"
     edge_cases:
       - condition: Port already in use
@@ -46,7 +48,9 @@ scenarios:
       - Method dispatched to handler
       - Response returned with matching id
       - Errors follow JSON-RPC 2.0 format
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/mod.rs:107-350
+      - crates/arkavo-server/src/server/mod.rs:414-1000
     changed: "2026-03-19"
 
   - id: SRV-003
@@ -60,7 +64,7 @@ scenarios:
       - ToolMemoryEntry created
       - Observation persisted
       - Pattern cache updated
-    refs: [crates/arkavo-server/src/server.rs]
+    refs: [crates/arkavo-server/src/server/tool_memory.rs:1-118]
     changed: "2026-03-19"
 
   - id: SRV-004
@@ -74,7 +78,11 @@ scenarios:
       - Episode buffered
       - AutoLearnBridge processes episodes
       - Behavior advice generated
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/episode_buffer.rs:1-174
+      - crates/arkavo-server/src/server/event_loop.rs:215-563
+      - crates/arkavo-server/src/server/learning_bus_synthesis.rs:1-49
+      - crates/arkavo-server/src/server/autolearn_bridge.rs:1-98
     changed: "2026-03-19"
 
   - id: SRV-005
@@ -87,7 +95,9 @@ scenarios:
       - Connections established
       - Messages propagated
       - Peer state tracked
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/gossip_transport.rs:12-47
+      - crates/arkavo-server/src/server/learning_bus.rs:386-527
     changed: "2026-03-19"
 
   - id: SRV-006
@@ -100,7 +110,9 @@ scenarios:
       - State compared with peers
       - Missing data requested
       - Consistency restored
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/gossip_transport.rs:49-68
+      - crates/arkavo-server/src/server/learning_bus_gossip.rs:214-243
     changed: "2026-03-19"
 
   - id: SRV-007
@@ -113,7 +125,10 @@ scenarios:
       - GoalStatus transitions tracked
       - AgentPlan generated
       - Completion or failure recorded
-    refs: [crates/arkavo-server/src/server.rs]
+    refs:
+      - crates/arkavo-server/src/server/startup.rs:7-27
+      - crates/arkavo-server/src/server/startup.rs:167-215
+      - crates/arkavo-server/src/server/agent_loop.rs:81-624
     changed: "2026-03-19"
 
   - id: SRV-008
@@ -126,7 +141,7 @@ scenarios:
       - Agent capabilities returned
       - Version information included
       - State reflects current runtime
-    refs: [crates/arkavo-server/src/server.rs]
+    refs: [crates/arkavo-server/src/server/well_known.rs:1-130]
     changed: "2026-03-19"
 
   - id: SRV-009
@@ -141,7 +156,7 @@ scenarios:
       - Task executed via conductor
       - Learning events emitted
       - Results returned to caller
-    refs: [crates/arkavo-server/src/server.rs]
+    refs: [crates/arkavo-server/src/server/conductor.rs:62-643]
     changed: "2026-03-19"
 
   - id: SRV-010
@@ -154,7 +169,7 @@ scenarios:
       - Stale sessions removed
       - Expired data purged
       - Resources reclaimed
-    refs: [crates/arkavo-server/src/server.rs]
+    refs: [crates/arkavo-server/src/server/gossip_transport.rs:108-136]
     changed: "2026-03-19"
 
   - id: SRV-011

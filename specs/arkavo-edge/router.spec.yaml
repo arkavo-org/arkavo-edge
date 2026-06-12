@@ -68,7 +68,7 @@ scenarios:
       - Content analyzed against moderation policies
       - Violations rejected with PolicyId
       - No model called for blocked content
-    refs: [crates/arkavo-router/src/preflight.rs]
+    refs: [crates/arkavo-router/src/preflight/moderator.rs:1-135]
 
   - id: ROUTER-005
     name: Stream backpressure handling
@@ -146,7 +146,11 @@ scenarios:
       - Subtasks generated with dependencies
       - Complexity scored for each subtask
       - Plan executed with result aggregation
-    refs: [crates/arkavo-router/src/architect.rs]
+    refs:
+      - crates/arkavo-router/src/architect/mod.rs:1-105
+      - crates/arkavo-router/src/architect/planner.rs:1-110
+      - crates/arkavo-router/src/architect/executor.rs:1-115
+      - crates/arkavo-router/src/architect/complexity.rs:1-110
     edge_cases:
       - condition: All models fail connectivity check
         expected: Returns Error::NoModelsAvailable
@@ -219,7 +223,9 @@ scenarios:
       - top_k controls vocabulary cutoff (default 40)
       - max_tokens limits response length (default 4096)
       - seed ensures reproducibility when set
-    refs: [crates/arkavo-router/src/config/sampling.rs:1-60]
+    refs:
+      - crates/arkavo-llm/src/llamacpp_provider.rs:29-80
+      - crates/arkavo-router/src/provider.rs:7-34
     changed: "2025-02-05"
     edge_cases:
       - condition: temperature=0
@@ -242,7 +248,11 @@ scenarios:
       - Image encoded to base64 or embeddings
       - Multi-modal prompt constructed
       - Model processes text + image
-    refs: [crates/arkavo-router/src/vision.rs:1-80]
+    refs:
+      - crates/arkavo-llm/src/image.rs:1-71
+      - crates/arkavo-llm/src/message.rs:116-120
+      - crates/arkavo-router/src/decision.rs:485-510
+      - crates/arkavo-router/src/selector.rs:270-280
     changed: "2025-02-05"
     edge_cases:
       - condition: Image file not found
@@ -263,7 +273,7 @@ scenarios:
       - Approximate token count returned
       - Used for RLM activation check
       - Used for context budget management
-    refs: [crates/arkavo-router/src/token_estimation.rs:1-40]
+    refs: [crates/arkavo-router/src/tool_extraction.rs:19-21]
     changed: "2025-02-05"
 
   - id: ROUTER-017
@@ -278,5 +288,5 @@ scenarios:
       - "270M: 2048, 1B: 4096, 7B: 8192, etc."
       - "Cloud models: 128K-1M tokens"
       - Default for unknown models
-    refs: [crates/arkavo-router/src/token_estimation.rs:41-80]
+    refs: [crates/arkavo-context/src/rlm_detection.rs:31-60]
     changed: "2025-02-05"

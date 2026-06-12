@@ -42,8 +42,12 @@ scenarios:
       - Bidirectional message passing works
       - Client tracks session state
       - Cleanup on drop
-    refs: [crates/anthropic-agent-sdk/src/client.rs]
-    changed: "2026-03-19"
+    refs:
+      - crates/anthropic-agent-sdk/src/client/mod.rs:182-398
+      - crates/anthropic-agent-sdk/src/client/messaging.rs:1-391
+      - crates/anthropic-agent-sdk/src/client/session/mod.rs:1-199
+      - crates/anthropic-agent-sdk/src/client/tasks.rs:15-202
+    changed: "2026-06-12"
 
   - id: CASDK-003
     name: MCP tool registration via rmcp
@@ -56,8 +60,11 @@ scenarios:
       - Tool discoverable by Claude
       - Schema passed to subprocess
       - Tool calls routed back
-    refs: [crates/anthropic-agent-sdk/src/mcp.rs]
-    changed: "2026-03-19"
+    refs:
+      - crates/anthropic-agent-sdk/src/mcp/mod.rs:74-84
+      - crates/anthropic-agent-sdk/src/mcp/sdk.rs:47-91
+      - crates/anthropic-agent-sdk/src/types/mcp.rs:62-99
+    changed: "2026-06-12"
 
   - id: CASDK-004
     name: Permission management
@@ -84,5 +91,8 @@ scenarios:
       - Hook callback invoked
       - HookOutput returned
       - Non-matching events pass through
-    refs: [crates/anthropic-agent-sdk/src/hooks.rs]
-    changed: "2026-03-19"
+    refs:
+      - crates/anthropic-agent-sdk/src/hooks/mod.rs:92-297
+      - crates/anthropic-agent-sdk/src/hooks/processing.rs:26-112
+      - crates/anthropic-agent-sdk/src/hooks/invocation.rs:31-91
+    changed: "2026-06-12"

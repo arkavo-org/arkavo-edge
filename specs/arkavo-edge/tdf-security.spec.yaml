@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../schema.json
 
 feature: TDF Security and Control Plane Protection
-module: arkavo_tdf::security
+module: arkavo_tdf
 version: 1.0.0
 
 invariants:
@@ -25,7 +25,10 @@ scenarios:
       - Only authorized agents can decrypt
       - Command integrity verified via policy binding
       - Unauthorized decryption attempts logged and rejected
-    refs: [crates/arkavo-tdf/src/control_plane.rs]
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:88-98
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:371-403
+      - crates/arkavo-tdf/src/opentdf_impl.rs:114-174
 
   - id: TDFS-002
     name: Configuration bundle TDF encryption
@@ -39,7 +42,10 @@ scenarios:
       - Policy restricts decryption to specific agent identities
       - Dissemination controls enforce geographic restrictions
       - Bundle integrity protected by policy binding
-    refs: [crates/arkavo-config-bundle/src/encryption.rs]
+    refs:
+      - crates/arkavo-config-encryption/src/lib.rs:35-98
+      - crates/arkavo-config-encryption/src/lib.rs:101-162
+      - crates/arkavo-config-encryption/src/policy.rs:1-11
 
   - id: TDFS-003
     name: TDF-JSON format for API compatibility
@@ -53,11 +59,16 @@ scenarios:
       - EncryptionInformation embedded in JSON structure
       - Payload base64-encoded in JSON field
       - Same security properties as binary TDF
-    refs: [crates/arkavo-tdf/src/formats/json.rs]
+    refs:
+      - crates/arkavo-tdf/src/types.rs:12-23
+      - crates/arkavo-tdf/src/types.rs:158-201
+      - crates/arkavo-tdf/src/opentdf_impl.rs:114-174
 
   - id: TDFS-004
     name: TDF-CBOR format for efficiency
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Bandwidth-constrained environment
       - Binary efficiency preferred over JSON
@@ -72,6 +83,8 @@ scenarios:
   - id: TDFS-005
     name: Format negotiation between agents
     criticality: medium
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Two agents communicating via A2A
       - Each supports different TDF formats
@@ -95,11 +108,15 @@ scenarios:
       - Modified policy fails integrity check
       - Decryption refused if binding invalid
       - Tampering attempt logged with forensic details
-    refs: [crates/arkavo-tdf/src/policy_binding.rs]
+    refs:
+      - crates/arkavo-tdf/src/types.rs:102-123
+      - crates/arkavo-tdf/src/a2a_handler.rs:305-331
 
   - id: TDFS-007
     name: Key escrow for data recovery
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Organization requires data recovery capability
       - User loses access to their keys
@@ -123,7 +140,10 @@ scenarios:
       - Attribute certificates checked for expiration
       - Revoked attributes rejected
       - Attribute provenance logged
-    refs: [crates/arkavo-tdf/src/attribute_authority.rs]
+    refs:
+      - crates/arkavo-tdf/src/abac.rs:31-115
+      - crates/arkavo-tdf/src/delegation.rs:96-227
+      - crates/arkavo-config-encryption/src/policy.rs:1-11
 
   - id: TDFS-009
     name: Time-based policy enforcement
@@ -137,11 +157,15 @@ scenarios:
       - Access denied outside permitted hours
       - Time window validation cryptographically bound
       - Policy engine uses tamper-evident time source
-    refs: [crates/arkavo-tdf/src/temporal_policy.rs]
+    refs:
+      - crates/arkavo-tdf/src/delegation.rs:160-164
+      - crates/arkavo-policy-cache/src/lib.rs:97-121
 
   - id: TDFS-010
     name: Data residency enforcement
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Policy requires data stay in specific jurisdiction
       - KAS servers available in multiple regions
@@ -165,11 +189,15 @@ scenarios:
       - Intermediate KEKs rotated regularly
       - DEKs never stored in plaintext
       - Key derivation uses approved algorithms
-    refs: [crates/arkavo-tdf/src/key_hierarchy.rs]
+    refs:
+      - crates/arkavo-tdf/src/a2a_handler.rs:73-171
+      - crates/arkavo-config-encryption/src/keys.rs:61-78
 
   - id: TDFS-012
     name: Offline policy evaluation
     criticality: medium
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Agent lacks network connectivity
       - Policy decision needed for cached data
@@ -193,11 +221,15 @@ scenarios:
       - Session keys derived from ephemeral exchange
       - Compromise of long-term key doesn't expose past sessions
       - Ephemeral keys destroyed after use
-    refs: [crates/arkavo-tdf/src/forward_secrecy.rs]
+    refs:
+      - crates/arkavo-tdf/src/a2a_handler.rs:120-171
+      - crates/arkavo-tdf/src/kas_client.rs:236-259
 
   - id: TDFS-014
     name: Policy update propagation
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Policy is updated for existing encrypted data
       - Data owners need to reflect new policy
@@ -212,6 +244,8 @@ scenarios:
   - id: TDFS-015
     name: TDF payload obfuscation
     criticality: medium
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Encrypted payload may leak metadata via size
       - Traffic analysis could reveal patterns

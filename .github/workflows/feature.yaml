@@ -1531,6 +1531,10 @@ jobs:
           echo "gate_exit_code=$?" >> "$GITHUB_OUTPUT"
           cat report.md
 
+      - name: Validate spec-to-code refs
+        run: |
+          cargo run -p xtask -- spec-test validate-refs --skip-wip
+
       - name: Generate traceability report and coverage diff
         run: |
           cargo run -p xtask -- spec-test export-html --output traceability.html
