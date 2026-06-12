@@ -52,6 +52,23 @@ This is different from the panel-only path (`ARKAVO_SWARMKIT_PATH` + `arkavo ui`
 
 Set `GAME_RL_SERVER=/path/to/game-rl-server` to override the server binary path.
 
+## Verification status (2026-06-12)
+
+The kit-execution chain is verified end-to-end up to the game boundary: `arkavo
+swarmkit play` parses and validates the kit, prints `[swarmkit] Zomboid Survival
+Kit v0.1.0 — launching 5 role(s): survivor, threat, scavenger, medic, critic`,
+and the `survivor` role's `game-rl` grant (declared in the kit's `mcp_servers`)
+spawns the game-rl MCP server, which auto-detects and connects to the Project
+Zomboid IPC at `~/Zomboid/Lua/`.
+
+Completing the final in-game handshake (`registerAgent` → `observe`/`step`)
+requires Project Zomboid running with the GameRL mod and a **save loaded** (so
+the Lua side sends its `Ready` message). The identical game-side survivor loop —
+`registerAgent` as an embodied `Entity`, then `observe`/`step` driving the
+character — was confirmed live against this same mod and server via the
+single-agent `examples/zomboid/` path earlier the same day. To watch the full
+swarm play: load a PZ save, then run `run-kit.sh`.
+
 ---
 
 `examples/zomboid/` is the simpler single-agent (non-kit) version of the same game.
