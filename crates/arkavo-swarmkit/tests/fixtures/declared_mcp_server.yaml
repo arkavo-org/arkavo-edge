@@ -1,0 +1,55 @@
+spec_version: "1.0.0"
+kit:
+  id: "blake3:9GChbk8OzJLxjvlxbJvN8c7stFpdi7vytdigP1YjPak"
+  name: "Declared MCP Server Kit"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-04-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+
+objective:
+  goal: "Exercise the mcp_servers registry validation rule."
+
+roles:
+  - id: "survivor"
+    role_type: "specialist"
+    agent_provisioning: {}
+    mcp_tools:
+      - server: "game-rl"
+        tools: ["observe", "step"]
+        auth: "none"
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+mcp_servers:
+  - name: "game-rl"
+    command: "${GAME_RL_SERVER}"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "all deliverables present"
+  on_failure: "abort"
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "AAA"

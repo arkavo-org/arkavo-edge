@@ -33,6 +33,9 @@ pub enum ValidationError {
     #[error("handoff target {target:?} from role {from:?} does not resolve to a known role")]
     UnresolvedHandoff { from: String, target: String },
 
+    #[error("unknown mcp server '{server}' referenced by role '{role}'")]
+    UnknownMcpServer { role: String, server: String },
+
     #[error("evaluation.critic_role {0:?} does not resolve to a known role")]
     UnresolvedCriticRole(String),
 
@@ -128,12 +131,23 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         }
     }
 
+    // Every mcp_tools grant must reference a declared mcp_servers entry.
+    let known_servers: HashSet<&str> = m.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+
     for role in &m.roles {
         for h in &role.handoffs {
             if !role_ids.contains(h.to.as_str()) {
                 return Err(ValidationError::UnresolvedHandoff {
                     from: role.id.clone(),
                     target: h.to.clone(),
+                });
+            }
+        }
+        for grant in &role.mcp_tools {
+            if !known_servers.contains(grant.server.as_str()) {
+                return Err(ValidationError::UnknownMcpServer {
+                    role: role.id.clone(),
+                    server: grant.server.clone(),
                 });
             }
         }
@@ -368,6 +382,7 @@ mod tests {
                 },
                 context_sharing: None,
             },
+            mcp_servers: vec![],
             constraints: ConstraintsSpec {
                 global_budget: GlobalBudget {
                     max_wallclock_seconds: 60,
@@ -402,6 +417,31 @@ mod tests {
     #[test]
     fn minimal_validates() {
         validate(&minimal_manifest()).unwrap();
+    }
+
+    #[test]
+    fn rejects_grant_referencing_undeclared_mcp_server() {
+        // `parse_yaml` bundles `validate`, so deserialize directly here to
+        // isolate the validation step under test (the grant references a
+        // server that is not declared in `mcp_servers`).
+        let yaml = include_str!("../tests/fixtures/undeclared_mcp_server.yaml");
+        let manifest: Manifest = serde_yaml::from_str(yaml).expect("parses");
+        let err = crate::validate(&manifest).expect_err("must reject");
+        assert!(
+            format!("{err}").contains("unknown mcp server 'game-rl'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_grant_with_declared_mcp_server() {
+        let yaml = include_str!("../tests/fixtures/declared_mcp_server.yaml");
+        let manifest = crate::parse_yaml(yaml).expect("parses");
+        assert!(
+            crate::validate(&manifest).is_ok(),
+            "expected valid, got: {:?}",
+            crate::validate(&manifest).err()
+        );
     }
 
     #[spec("SK-002")]

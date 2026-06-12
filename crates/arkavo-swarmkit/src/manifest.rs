@@ -6,6 +6,7 @@ use crate::coordination::{
     CompletionSpec, ConstraintsSpec, CoordinationSpec, EvaluationSpec, ProvenanceSpec,
 };
 use crate::governance::ProposalGovernanceSpec;
+use crate::mcp::McpServerDef;
 use crate::role::RoleSpec;
 
 /// Top-level SwarmKit manifest. Cleartext document inside the TDF payload.
@@ -20,6 +21,10 @@ pub struct Manifest {
     pub deliverables: Vec<DeliverableSpec>,
     pub roles: Vec<RoleSpec>,
     pub coordination: CoordinationSpec,
+    /// MCP servers this kit can launch/connect (spec §4.x). Roles reference
+    /// these by name from `mcp_tools[].server`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<McpServerDef>,
     pub constraints: ConstraintsSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation: Option<EvaluationSpec>,
