@@ -63,6 +63,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     match args[0].as_str() {
         "agent" => commands::agent::execute(&args[1..]),
+        "swarmkit" => commands::swarmkit::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),

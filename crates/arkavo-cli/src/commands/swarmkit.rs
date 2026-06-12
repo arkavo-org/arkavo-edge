@@ -133,6 +133,82 @@ fn slug(name: &str) -> String {
         .to_string()
 }
 
+/// `arkavo swarmkit play <kit.yaml> [--role <id>]`
+#[allow(clippy::disallowed_methods)]
+pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut kit_path: Option<String> = None;
+    let mut only_role: Option<String> = None;
+    let mut sub: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "play" => sub = Some("play"),
+            "--role" if i + 1 < args.len() => {
+                only_role = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "-h" | "--help" | "help" => {
+                print_usage();
+                return Ok(());
+            }
+            p if !p.starts_with('-') && kit_path.is_none() => kit_path = Some(p.to_string()),
+            other => return Err(format!("Unknown swarmkit arg '{other}'").into()),
+        }
+        i += 1;
+    }
+    if sub != Some("play") {
+        print_usage();
+        return Err("expected: arkavo swarmkit play <kit.yaml>".into());
+    }
+    let kit_path = kit_path.ok_or("missing <kit.yaml> path")?;
+
+    let yaml = std::fs::read_to_string(&kit_path)
+        .map_err(|e| format!("cannot read kit '{kit_path}': {e}"))?;
+    let manifest =
+        arkavo_swarmkit::parse_yaml(&yaml).map_err(|e| format!("kit parse error: {e}"))?;
+    arkavo_swarmkit::validate(&manifest).map_err(|e| format!("kit invalid: {e}"))?;
+
+    let mut configs = kit_to_agent_configs(&manifest);
+    if let Some(role) = &only_role {
+        configs.retain(|c| &c.name == role);
+        if configs.is_empty() {
+            return Err(format!("no role named '{role}' in kit").into());
+        }
+    }
+
+    println!(
+        "[swarmkit] {} v{} — launching {} role(s): {}",
+        manifest.kit.name,
+        manifest.kit.version,
+        configs.len(),
+        configs
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    // `start_agent_server`'s future is not `Send` (it holds a `Box<dyn Error>`
+    // across an await), so we can't `tokio::spawn` it. Instead we run every
+    // role's agent loop concurrently on the single `block_on` thread via
+    // `join_all`, which has no `Send` requirement.
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let tasks = configs.into_iter().map(|cfg| async move {
+            let name = cfg.name.clone();
+            if let Err(e) = crate::commands::agent::start_agent_server(&cfg, false).await {
+                eprintln!("[swarmkit] role '{name}' exited: {e}");
+            }
+        });
+        futures::future::join_all(tasks).await;
+    });
+    Ok(())
+}
+
+fn print_usage() {
+    eprintln!("Usage: arkavo swarmkit play <kit.yaml> [--role <id>]");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
