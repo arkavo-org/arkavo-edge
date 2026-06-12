@@ -1533,7 +1533,7 @@ jobs:
 
       - name: Validate spec-to-code refs
         run: |
-          cargo run -p xtask -- spec-test validate-refs --skip-wip
+          cargo run -p xtask -- spec-test validate-refs --skip-wip --fail
 
       - name: Generate traceability report and coverage diff
         run: |

@@ -186,7 +186,7 @@ impl RefsValidator {
                 // so that bare line-range entries (e.g., "141-151") reuse the prior path.
                 let mut current_path: Option<String> = None;
                 for raw_ref in &scenario.refs {
-                    let parts: Vec<&str> = raw_ref.split(',').map(|s| s.trim()).collect();
+                    let parts = Self::split_ref_parts(raw_ref);
                     for part in parts {
                         if part.is_empty() {
                             continue;
@@ -223,6 +223,36 @@ impl RefsValidator {
             }
         }
         result
+    }
+
+    fn split_ref_parts(raw_ref: &str) -> Vec<&str> {
+        // Split on commas, but ignore commas inside parentheses or brackets
+        // so annotations like "path.rs (a, b)" stay as one part.
+        let mut parts = Vec::new();
+        let mut start = 0;
+        let mut paren_depth = 0i32;
+        let mut bracket_depth = 0i32;
+        for (i, c) in raw_ref.char_indices() {
+            match c {
+                '(' => paren_depth += 1,
+                ')' => paren_depth -= 1,
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth -= 1,
+                ',' if paren_depth == 0 && bracket_depth == 0 => {
+                    let part = raw_ref[start..i].trim();
+                    if !part.is_empty() {
+                        parts.push(part);
+                    }
+                    start = i + c.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        let last = raw_ref[start..].trim();
+        if !last.is_empty() {
+            parts.push(last);
+        }
+        parts
     }
 
     fn extract_path(part: &str) -> String {
@@ -452,6 +482,17 @@ scenarios:
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_split_ref_parts_respects_parentheses() {
+        let parts = RefsValidator::split_ref_parts(
+            "crates/a/src/lib.rs:1-10, crates/b/src/lib.rs (foo, bar), 20-30",
+        );
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "crates/a/src/lib.rs:1-10");
+        assert_eq!(parts[1], "crates/b/src/lib.rs (foo, bar)");
+        assert_eq!(parts[2], "20-30");
     }
 
     #[test]

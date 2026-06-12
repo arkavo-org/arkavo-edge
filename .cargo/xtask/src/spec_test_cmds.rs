@@ -557,9 +557,9 @@ fn cmd_validate_refs(
             name.bold(),
             spec_stale.stale_refs.len()
         );
-        // Group by scenario to avoid repeating the spec header
-        let mut by_scenario: std::collections::HashMap<&str, Vec<&StaleRef>> =
-            std::collections::HashMap::new();
+        // Group by scenario to avoid repeating the spec header (sorted for stable output)
+        let mut by_scenario: std::collections::BTreeMap<&str, Vec<&StaleRef>> =
+            std::collections::BTreeMap::new();
         for r in &spec_stale.stale_refs {
             by_scenario.entry(&r.scenario_id).or_default().push(r);
         }
