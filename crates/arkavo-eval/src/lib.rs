@@ -7,3 +7,4 @@ pub mod gate;
 pub mod operator;
 pub mod plan;
 pub mod status;
+pub mod verdict;
