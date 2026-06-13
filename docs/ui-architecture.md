@@ -675,6 +675,32 @@ cargo build --release --features cef-ui,web-ui
    - Web UI needs bidirectional event handling
    - Add WebSocket endpoint for user interactions
 
+## AG-UI Protocol Compliance
+
+The gateway now emits a spec-compliant AG-UI event stream in addition to the legacy WebSocket protocol.
+
+### Dual-transport design
+
+```
+AgentConnection
+      │
+      ├─► /api/agent (POST + SSE) ──► BaseEvent stream
+      │
+      └─► /ws (WebSocket) ──► legacy AgUiEvent stream (via bridge)
+```
+
+- `crates/arkavo-agui-protocol/` defines canonical AG-UI types (`BaseEvent`, `RunAgentInput`, `Tool`, `Message`, etc.).
+- `POST /api/agent` accepts `RunAgentInput` and returns `data: <BaseEvent>` SSE messages.
+- `GET /api/agent/capabilities` returns supported capability flags.
+- `crates/arkavo-agui/src/agui_event_stream.rs` translates agent `MessageDelta`s into canonical text/tool/reasoning/lifecycle events.
+- `crates/arkavo-agui/src/legacy_agui_bridge.rs` converts canonical events back into the legacy `AgUiEvent` shape so the existing vanilla-JS frontend continues to work.
+
+### Migration path
+
+1. New frontend clients should consume `/api/agent` over SSE.
+2. Custom Arkavo events will be wrapped as `CUSTOM` events on the canonical stream and unwrapped by the legacy bridge for `/ws` clients.
+3. Once the vanilla-JS frontend is migrated to the spec protocol, the legacy bridge and `/ws` endpoint can be retired.
+
 ## Related Documentation
 
 - [MCP Integration](mcp-integration.md) - Tool integration across UIs
