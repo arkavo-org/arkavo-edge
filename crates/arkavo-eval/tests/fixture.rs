@@ -7,7 +7,10 @@ use arkavo_eval::contract::EvalContract;
 
 #[test]
 fn sample_contract_fixture_deserializes() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample_contract.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/sample_contract.json"
+    );
     let json = std::fs::read_to_string(path).expect("fixture present");
     let c: EvalContract = serde_json::from_str(&json).expect("fixture matches EvalContract schema");
 
