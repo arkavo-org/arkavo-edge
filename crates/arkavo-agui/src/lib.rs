@@ -1,4 +1,5 @@
 pub mod agent_connection;
+pub mod agui_event_stream;
 pub mod api_keys;
 pub mod arp_handler;
 pub mod budget_handler;
@@ -8,6 +9,7 @@ pub mod cost_handler;
 pub mod dataflow_handler;
 pub mod debug_handler;
 pub mod gateway;
+pub mod gateway_agent;
 pub mod gateway_config;
 pub mod gateway_context;
 pub mod gateway_events;

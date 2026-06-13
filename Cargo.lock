@@ -524,6 +524,7 @@ version = "0.80.1"
 dependencies = [
  "anyhow",
  "arkavo-adaptation",
+ "arkavo-agui-protocol",
  "arkavo-arp",
  "arkavo-arp-runtime",
  "arkavo-budget",
@@ -543,6 +544,7 @@ dependencies = [
  "arkavo-test-macros",
  "arkavo-ui-generator",
  "arkavo-validation",
+ "async-stream",
  "async-trait",
  "axum",
  "chrono",
