@@ -707,6 +707,7 @@ dependencies = [
  "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-device-identity",
+ "arkavo-eval",
  "arkavo-events",
  "arkavo-git",
  "arkavo-gossip",
@@ -959,6 +960,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-eval"
+version = "0.1.0"
+dependencies = [
+ "arkavo-memory",
+ "async-trait",
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "torg-core",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-events"
 version = "0.80.1"
 dependencies = [
@@ -1044,6 +1060,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

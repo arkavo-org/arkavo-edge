@@ -170,6 +170,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        "eval" => match args.get(1).map(|s| s.as_str()) {
+            Some("run") => commands::eval::run(&args[2..]),
+            _ => Err("usage: arkavo eval run --contract <path> [--answer id=text] [--main]".into()),
+        },
         "help" => {
             print_usage();
             Ok(())

@@ -69,6 +69,7 @@ arkavo-registration = { path = "../arkavo-registration" }
 arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+arkavo-eval = { path = "../arkavo-eval" }
 base64 = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
