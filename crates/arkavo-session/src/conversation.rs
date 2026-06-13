@@ -606,11 +606,21 @@ impl ConversationManager {
 
     /// Switch to a different session
     pub async fn switch_session(&mut self, session_id: Uuid) -> anyhow::Result<()> {
-        // Use the authoritative session list to verify the session exists.
-        // The previous semantic search could return unrelated memories as a false
-        // positive for an unknown session id.
-        let sessions = self.list_sessions().await?;
-        if sessions.iter().any(|s| s.id == session_id) {
+        // Perform a targeted lookup for the session and accept it only if the
+        // returned memory deserializes to a ConversationSession with a matching
+        // id. This avoids both false positives from unrelated memories and
+        // false negatives from a capped global list.
+        let query = format!("session_id:{session_id}");
+        let results = self
+            .memory_storage
+            .search(&query, 5, Some("conversation"))
+            .await?;
+        let found = results.into_iter().any(|result| {
+            serde_json::from_str::<ConversationSession>(&result.memory.content)
+                .is_ok_and(|session| session.id == session_id)
+        });
+
+        if found {
             self.current_session_id = Some(session_id);
             Ok(())
         } else {
