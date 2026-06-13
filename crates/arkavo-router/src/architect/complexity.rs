@@ -311,7 +311,9 @@ impl Default for ComplexityScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_simple_task_not_recommended() {
         let scorer = ComplexityScorer::new();
@@ -321,6 +323,7 @@ mod tests {
         assert!(score.estimated_subtasks < 3);
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_complex_task_recommended() {
         let scorer = ComplexityScorer::new();
@@ -336,6 +339,7 @@ mod tests {
         assert!(!score.complexity_triggers.is_empty());
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_multi_step_detection() {
         let scorer = ComplexityScorer::new();
@@ -348,6 +352,7 @@ mod tests {
         assert!(score.estimated_subtasks >= 3);
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_category_spread() {
         let scorer = ComplexityScorer::new();
@@ -362,6 +367,7 @@ mod tests {
         assert!(single_category.category_spread < 0.3);
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_savings_estimation() {
         let scorer = ComplexityScorer::new();

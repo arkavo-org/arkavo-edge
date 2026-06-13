@@ -707,6 +707,7 @@ mod tests {
     use crate::selector_quality::compute_response_quality;
     use crate::tool_extraction;
     use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
+    use arkavo_test_macros::spec;
 
     /// Regression for the bug surfaced by gitar-bot on PR #598: an empty
     /// `ToolRegistry` (or a registry whose keyword search yields zero hits)
@@ -718,6 +719,7 @@ mod tests {
     ///
     /// The fix derives `tools_were_attached` from `!tool_infos.is_empty()`,
     /// so the empty-tools path scores the same as the no-registry path.
+    #[spec("ROUTER-002")]
     #[tokio::test]
     async fn empty_tool_search_does_not_count_as_attached() {
         let registry = ToolRegistry::empty();

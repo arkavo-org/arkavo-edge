@@ -70,13 +70,16 @@ impl Default for ConnectivityChecker {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-007")]
     #[tokio::test]
     async fn test_connectivity_checker_creation() {
         let checker = ConnectivityChecker::new();
         assert_eq!(checker.timeout, Duration::from_secs(2));
     }
 
+    #[spec("ROUTER-007")]
     #[tokio::test]
     async fn test_custom_timeout() {
         let checker = ConnectivityChecker::with_timeout(Duration::from_secs(5));

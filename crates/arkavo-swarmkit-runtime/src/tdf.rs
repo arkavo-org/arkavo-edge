@@ -546,6 +546,7 @@ provenance:
         swarmkit_orchestrator_policy(None, None).unwrap()
     }
 
+    #[spec("TDFS-001")]
     #[spec("SK-050")]
     #[tokio::test]
     async fn wrap_then_unwrap_round_trips_manifest() {
@@ -575,6 +576,7 @@ provenance:
         assert_eq!(a.payload.value, b.payload.value);
     }
 
+    #[spec("TDFS-006")]
     #[spec("SK-051")]
     #[tokio::test]
     async fn unwrap_runs_cross_block_validation() {

@@ -134,7 +134,9 @@ impl Stream for RouteStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-005")]
     #[tokio::test]
     async fn test_route_stream_from_response() {
         let response = RouteResponse {

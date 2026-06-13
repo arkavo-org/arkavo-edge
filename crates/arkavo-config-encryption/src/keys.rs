@@ -81,7 +81,9 @@ impl KeyPair {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_generate_key_pair() {
         let key_pair = KeyPair::generate().unwrap();
@@ -89,6 +91,7 @@ mod tests {
         assert!(!key_pair.public_key.as_bytes().is_empty());
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_sign_and_verify() {
         let key_pair = KeyPair::generate().unwrap();
@@ -101,6 +104,7 @@ mod tests {
         assert!(verified);
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_verify_invalid_signature() {
         let key_pair = KeyPair::generate().unwrap();
@@ -114,6 +118,7 @@ mod tests {
         assert!(!verified);
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_verify_wrong_message() {
         let key_pair = KeyPair::generate().unwrap();

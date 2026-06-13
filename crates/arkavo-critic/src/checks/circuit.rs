@@ -175,6 +175,7 @@ mod tests {
     use super::*;
     use arkavo_llm::ProviderResponse;
     use arkavo_llm::tool_parser::ParsedToolCall;
+    use arkavo_test_macros::spec;
     use torg_core::{BoolOp, Node, Source};
     use torg_serde::to_bytes;
 
@@ -247,6 +248,7 @@ mod tests {
         assert!(check.is_empty());
     }
 
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_circuit_passes_or() {
         let check = CircuitCheck::new();
@@ -270,6 +272,7 @@ mod tests {
         assert!(result.is_pass());
     }
 
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_circuit_fails() {
         let check = CircuitCheck::new();
@@ -295,6 +298,7 @@ mod tests {
         assert!(evidence.description.contains("require_tools_or_code"));
     }
 
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_circuit_with_tools() {
         let check = CircuitCheck::new();
@@ -325,6 +329,7 @@ mod tests {
         assert!(result.is_pass());
     }
 
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_and_circuit() {
         let check = CircuitCheck::new();
@@ -382,6 +387,7 @@ mod tests {
         assert!(!check.is_applicable(&input));
     }
 
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_multiple_circuits() {
         let check = CircuitCheck::new();
@@ -473,6 +479,7 @@ mod tests {
     /// Full integration test: block guest writes policy.
     ///
     /// Uses Custom("is_guest") to extract guest status from context JSON.
+    #[spec("CRIT-003")]
     #[tokio::test]
     async fn test_circuit_check_blocks_guest_writes() {
         let check = CircuitCheck::new();

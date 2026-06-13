@@ -222,6 +222,7 @@ impl IssueRouter {
 mod tests {
     use super::*;
     use crate::types::{Issue, IssueAction, Label, Repository, User};
+    use arkavo_test_macros::spec;
 
     fn create_test_event(title: &str, body: &str, labels: Vec<&str>) -> IssueEvent {
         IssueEvent {
@@ -283,6 +284,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-003")]
     #[test]
     fn test_trivial_documentation_auto_execute() {
         let event = create_test_event(
@@ -296,6 +298,7 @@ mod tests {
         assert_eq!(decision.priority, Priority::Low);
     }
 
+    #[spec("ORCH-003")]
     #[test]
     fn test_simple_bug_requires_plan() {
         let event = create_test_event("Fix memory leak", "Small memory leak found", vec!["bug"]);
@@ -305,6 +308,7 @@ mod tests {
         assert_eq!(decision.priority, Priority::High);
     }
 
+    #[spec("ORCH-003")]
     #[test]
     fn test_breaking_change_requires_approval() {
         let event = create_test_event(
@@ -318,6 +322,7 @@ mod tests {
         assert!(decision.should_notify_human);
     }
 
+    #[spec("ORCH-003")]
     #[test]
     fn test_security_issue_is_critical() {
         let event = create_test_event(
@@ -331,6 +336,7 @@ mod tests {
         assert!(decision.should_notify_human);
     }
 
+    #[spec("ORCH-003")]
     #[test]
     fn test_complex_multi_tech_orchestration() {
         let event = create_test_event(

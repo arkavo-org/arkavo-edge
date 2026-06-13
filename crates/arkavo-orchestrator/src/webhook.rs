@@ -240,7 +240,9 @@ async fn health_check() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ORCH-010")]
     #[test]
     fn test_signature_verification() {
         let secret = "test-secret";
@@ -256,6 +258,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("ORCH-010")]
+    #[spec("ORCH-011")]
     #[test]
     fn test_invalid_signature() {
         let config = RateLimitConfig::default();

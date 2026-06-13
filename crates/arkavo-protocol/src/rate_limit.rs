@@ -361,7 +361,9 @@ pub fn spawn_cleanup_task(
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limit_config_default() {
         let config = RateLimitConfig::default();
@@ -372,12 +374,14 @@ mod tests {
         assert_eq!(config.ip_entry_ttl_seconds, 3600);
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limiter_creation() {
         let config = RateLimitConfig::default();
         let _limiter = RateLimiter::new(config);
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limiter_disabled() {
         let mut config = RateLimitConfig::default();
@@ -388,6 +392,7 @@ mod tests {
         assert!(limiter.check_rate_limit().is_ok());
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limiter_basic() {
         let mut config = RateLimitConfig::default();
@@ -407,6 +412,7 @@ mod tests {
         }
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_ip_rate_limiter() {
         let config = RateLimitConfig {
@@ -431,6 +437,7 @@ mod tests {
         assert!(limiter.check_rate_limit(ip2).is_ok());
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limit_from_arp_defaults() {
         let arp_rl = arkavo_arp::constraints::RateLimiting {
@@ -450,6 +457,7 @@ mod tests {
         assert_eq!(config.burst_size, defaults.burst_size);
     }
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limit_from_arp_overrides() {
         let arp_rl = arkavo_arp::constraints::RateLimiting {
@@ -472,6 +480,7 @@ mod tests {
 
     // Note: Eviction testing moved to integration tests to keep file under 400 lines
 
+    #[spec("PROTO-007")]
     #[test]
     fn test_rate_limit_status() {
         let config = RateLimitConfig::default();

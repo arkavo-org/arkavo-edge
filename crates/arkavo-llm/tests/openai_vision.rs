@@ -2,6 +2,7 @@
 
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
+use arkavo_test_macros::spec;
 use base64::Engine;
 use std::fs;
 use std::path::Path;
@@ -10,6 +11,7 @@ use std::path::Path;
 mod common;
 use common::ensure_api_key;
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_basic() {
@@ -52,6 +54,7 @@ async fn test_gpt4o_vision_basic() {
     );
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_with_text() {
@@ -100,6 +103,7 @@ async fn test_gpt4o_vision_with_text() {
     assert!(!response.is_empty());
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_multiple_images() {
@@ -143,6 +147,7 @@ async fn test_gpt4o_multiple_images() {
     );
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_streaming() {
@@ -202,6 +207,7 @@ async fn test_gpt4o_vision_streaming() {
     assert!(!full_response.is_empty());
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable"]
 async fn test_non_vision_model_with_image_fails() {
@@ -251,6 +257,7 @@ async fn test_non_vision_model_with_image_fails() {
     }
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and local test image"]
 async fn test_gpt4o_with_local_image_file() {

@@ -772,6 +772,7 @@ name = "arkavo-config-encryption"
 version = "0.80.1"
 dependencies = [
  "arkavo-config-bundle",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "opentdf",
@@ -809,6 +810,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
+ "arkavo-test-macros",
  "async-trait",
  "serde",
  "tiktoken-rs",
@@ -997,6 +999,7 @@ dependencies = [
 name = "arkavo-gemini"
 version = "0.80.1"
 dependencies = [
+ "arkavo-test-macros",
  "base64 0.22.1",
  "bytes",
  "dashmap",
@@ -1158,6 +1161,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-qwen",
  "arkavo-snpe",
+ "arkavo-test-macros",
  "async-trait",
  "base64 0.22.1",
  "bytes",
@@ -1491,6 +1495,7 @@ dependencies = [
  "arkavo-router",
  "arkavo-swarmkit",
  "arkavo-swarmkit-runtime",
+ "arkavo-test-macros",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -1946,6 +1951,7 @@ name = "arkavo-tdf"
 version = "0.80.1"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-test-macros",
  "async-trait",
  "base64 0.22.1",
  "chrono",

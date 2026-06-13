@@ -606,18 +606,16 @@ impl ConversationManager {
 
     /// Switch to a different session
     pub async fn switch_session(&mut self, session_id: Uuid) -> anyhow::Result<()> {
-        let query = format!("session_id:{session_id}");
-        let results = self
-            .memory_storage
-            .search(&query, 1, Some("conversation"))
-            .await?;
-
-        if results.is_empty() {
-            return Err(anyhow::anyhow!("Session not found"));
+        // Use the authoritative session list to verify the session exists.
+        // The previous semantic search could return unrelated memories as a false
+        // positive for an unknown session id.
+        let sessions = self.list_sessions().await?;
+        if sessions.iter().any(|s| s.id == session_id) {
+            self.current_session_id = Some(session_id);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Session not found"))
         }
-
-        self.current_session_id = Some(session_id);
-        Ok(())
     }
 
     /// Count tokens in a string
@@ -637,8 +635,46 @@ impl ConversationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    // Mock-provider support for summary tests
+    use async_trait::async_trait;
+
+    #[derive(Clone)]
+    struct MockSummaryProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for MockSummaryProvider {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok(self.response.clone())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn futures::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        fn name(&self) -> &str {
+            "mock-summary-provider"
+        }
+    }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_message_content_balances_fences() {
         // Arrange - odd number of fences
         let content = "Here is code:\n```rust\nfn main() {}";
@@ -652,6 +688,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_message_content_even_fences_unchanged() {
         let content = "```rust\nfn main() {}\n```";
         let sanitized = ConversationManager::sanitize_message_content(content);
@@ -660,6 +697,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_removes_trailing_role_markers() {
         let content = "Some text\nAssistant:";
         let sanitized = ConversationManager::sanitize_message_content(content);
@@ -682,6 +720,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-014")]
     async fn test_conversation_manager_new() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let manager = ConversationManager::new(storage);
@@ -690,6 +729,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-015")]
     async fn test_start_session_with_metadata() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -703,6 +743,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-017")]
     async fn test_add_message() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -713,6 +754,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-022")]
     async fn test_get_session_stats() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -728,6 +770,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-023")]
     async fn test_clear_session() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -736,6 +779,224 @@ mod tests {
 
         manager.clear_session().unwrap();
         assert!(manager.current_session_id().is_none());
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_compatibility() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+
+        let compatible_id = manager
+            .start_session_with_metadata(
+                "test-model-v1",
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("7B".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Restoring with matching metadata should return the session.
+        let restored = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restored, Some(compatible_id));
+        assert_eq!(manager.current_session_id(), Some(compatible_id));
+
+        // Create a newer, incompatible session.
+        let _incompatible_id = manager
+            .start_session_with_metadata(
+                "other-model-v1",
+                Some("chat-template-v2"),
+                Some("system-prompt-v2"),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Restoring with the older compatible metadata should now fail
+        // because the latest session is incompatible.
+        let incompatible_restore = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(incompatible_restore, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-018")]
+    async fn test_get_context_messages_with_limits() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("test-model").await.unwrap();
+
+        // Seed 12 short messages alternating user/assistant.
+        for i in 0..6 {
+            manager
+                .add_message_str("user", &format!("question {i}"))
+                .await
+                .unwrap();
+            manager
+                .add_message_str("assistant", &format!("answer {i}"))
+                .await
+                .unwrap();
+        }
+
+        let system = arkavo_llm::Message::system("You are helpful.");
+        let context = manager
+            .get_context_messages_with_limits(Some(system.clone()), Some(5))
+            .await
+            .unwrap();
+
+        // System message + at most 5 history turns (10 messages).
+        assert!(context.len() <= 11);
+        assert_eq!(context.first().map(|m| &m.content), Some(&system.content));
+        assert_eq!(
+            context.first().map(|m| m.role.clone()),
+            Some(arkavo_llm::Role::System)
+        );
+        // The newest user message should be present.
+        assert!(context.iter().any(|m| m.content.contains("question 5")));
+
+        // A smaller explicit limit should further reduce the returned history.
+        let limited_context = manager
+            .get_context_messages_with_limits(None, Some(2))
+            .await
+            .unwrap();
+        // Up to 2 turns (4 messages) when no system message is supplied.
+        assert!(limited_context.len() <= 4);
+        assert!(
+            limited_context
+                .iter()
+                .any(|m| m.content.contains("question 5"))
+        );
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-019")]
+    async fn test_create_summary() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+        let session_id = manager.start_session("test-model").await.unwrap();
+
+        manager
+            .add_message_str("user", "What is Rust?")
+            .await
+            .unwrap();
+        manager
+            .add_message_str("assistant", "Rust is a systems language.")
+            .await
+            .unwrap();
+
+        let messages = vec![
+            ConversationMessage {
+                id: Uuid::new_v4(),
+                session_id,
+                role: "user".to_string(),
+                content: "What is Rust?".to_string(),
+                timestamp: Utc::now(),
+                token_count: 4,
+                is_summary: false,
+            },
+            ConversationMessage {
+                id: Uuid::new_v4(),
+                session_id,
+                role: "assistant".to_string(),
+                content: "Rust is a systems language.".to_string(),
+                timestamp: Utc::now(),
+                token_count: 5,
+                is_summary: false,
+            },
+        ];
+
+        let provider = MockSummaryProvider {
+            response: "Summary of Rust discussion".to_string(),
+        };
+        let client = arkavo_llm::LlmClient::new(Box::new(provider));
+
+        let summary = manager.create_summary(&client, messages).await.unwrap();
+        assert_eq!(summary, "Summary of Rust discussion");
+
+        // Verify the summary was persisted and tagged as a summary.
+        let results = storage
+            .search("type:conversation_summary", 10, Some("conversation"))
+            .await
+            .unwrap();
+        let summary_messages: Vec<ConversationMessage> = results
+            .into_iter()
+            .filter_map(|r| serde_json::from_str::<ConversationMessage>(&r.memory.content).ok())
+            .filter(|m| m.is_summary)
+            .collect();
+        assert!(!summary_messages.is_empty());
+        assert!(
+            summary_messages
+                .iter()
+                .any(|m| m.content.contains("Summary of Rust discussion"))
+        );
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-020")]
+    async fn test_list_sessions() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let id_a = manager.start_session("model-a").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let id_b = manager.start_session("model-b").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let id_c = manager.start_session("model-c").await.unwrap();
+
+        // Semantic search can be approximate with only a few vectors; retry until
+        // all created sessions are visible.
+        let mut sessions = Vec::new();
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            sessions = manager.list_sessions().await.unwrap();
+            let ids: std::collections::HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
+            if ids.contains(&id_a) && ids.contains(&id_b) && ids.contains(&id_c) {
+                break;
+            }
+        }
+
+        let ids: std::collections::HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
+        assert!(ids.contains(&id_a), "session a should be listed");
+        assert!(ids.contains(&id_b), "session b should be listed");
+        assert!(ids.contains(&id_c), "session c should be listed");
+
+        // Sessions should be sorted by updated_at descending (newest first).
+        assert_eq!(sessions[0].id, id_c);
+        assert_eq!(sessions[1].id, id_b);
+        assert_eq!(sessions[2].id, id_a);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-021")]
+    async fn test_switch_session() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let id_a = manager.start_session("model-a").await.unwrap();
+        let id_b = manager.start_session("model-b").await.unwrap();
+        assert_eq!(manager.current_session_id(), Some(id_b));
+
+        manager.switch_session(id_a).await.unwrap();
+        assert_eq!(manager.current_session_id(), Some(id_a));
+
+        let missing = Uuid::new_v4();
+        let result = manager.switch_session(missing).await;
+        assert!(result.is_err());
+        assert_eq!(manager.current_session_id(), Some(id_a));
     }
 
     #[test]

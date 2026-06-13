@@ -311,7 +311,9 @@ impl Default for ArchitectPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_extract_json() {
         let planner = ArchitectPlanner::new();
@@ -325,6 +327,7 @@ mod tests {
         assert!(json.ends_with('}'));
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_model_selection_frontend() {
         let planner = ArchitectPlanner::new();
@@ -340,6 +343,7 @@ mod tests {
         ));
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_model_selection_backend() {
         let planner = ArchitectPlanner::new();

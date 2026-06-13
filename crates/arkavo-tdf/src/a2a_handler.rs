@@ -335,6 +335,7 @@ impl KasA2aHandler {
 mod tests {
     use super::*;
     use crate::types::{Attribute, PolicyBinding};
+    use arkavo_test_macros::spec;
     use chrono::Utc;
 
     fn make_test_policy() -> Policy {
@@ -361,6 +362,7 @@ mod tests {
         general_purpose::STANDARD.encode(json.as_bytes())
     }
 
+    #[spec("TDFS-006")]
     #[test]
     fn test_decode_policy() {
         let handler = KasA2aHandler::with_defaults();
@@ -372,6 +374,7 @@ mod tests {
         assert_eq!(decoded.attributes.len(), 1);
     }
 
+    #[spec("TDFS-006")]
     #[test]
     fn test_decode_policy_invalid_base64() {
         let handler = KasA2aHandler::with_defaults();
@@ -380,6 +383,7 @@ mod tests {
         assert!(matches!(result, Err(KasError::PolicyDecodeError(_))));
     }
 
+    #[spec("TDFS-006")]
     #[test]
     fn test_verify_policy_binding_valid() {
         let handler = KasA2aHandler::with_defaults();
@@ -395,6 +399,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("TDFS-006")]
     #[test]
     fn test_verify_policy_binding_empty_hash() {
         let handler = KasA2aHandler::with_defaults();
@@ -413,6 +418,7 @@ mod tests {
         assert!(matches!(result, Err(KasError::PolicyBindingInvalid(_))));
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_handler_without_keypair() {
         // Use new() without a keypair to test the error case
@@ -426,6 +432,8 @@ mod tests {
         assert!(matches!(result, Err(KasError::KeypairNotConfigured)));
     }
 
+    #[spec("TDFS-011")]
+    #[spec("TDFS-013")]
     #[test]
     fn test_handler_with_defaults_has_keypair() {
         // with_defaults() should generate a keypair
@@ -442,6 +450,8 @@ mod tests {
         assert_eq!(response.algorithm, "ec:secp256r1");
     }
 
+    #[spec("TDFS-011")]
+    #[spec("TDFS-013")]
     #[test]
     fn test_kas_keypair_public_key() {
         let keypair = KasKeypair::generate();
@@ -453,6 +463,7 @@ mod tests {
         assert!(public_key.len() > 80); // Base64 of 65 bytes
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_handler_with_config() {
         let config = KasA2aConfig {
@@ -472,6 +483,7 @@ mod tests {
         let _ = request;
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_delegation_token_json() {
         let token = make_test_token(&["https://arkavo.net/attr/role/value/admin"]);

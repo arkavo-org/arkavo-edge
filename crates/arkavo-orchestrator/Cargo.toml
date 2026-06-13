@@ -46,6 +46,7 @@ mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = []

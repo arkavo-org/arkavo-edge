@@ -94,9 +94,11 @@ pub fn decode_image(encoded: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_image_format_from_path() {
         assert!(matches!(
@@ -119,6 +121,7 @@ mod tests {
         assert!(ImageFormat::from_path(Path::new("test")).is_err());
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_image_format_validation() {
         let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -140,6 +143,7 @@ mod tests {
         assert!(ImageFormat::validate_bytes(&too_small).is_err());
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_encode_decode_roundtrip() {
         let test_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -150,6 +154,7 @@ mod tests {
         assert_eq!(test_data.to_vec(), decoded);
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_encode_image_file_not_found() {
         let result = encode_image_file("nonexistent.png");
@@ -157,6 +162,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_encode_image_file_success() {
         let png_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -170,6 +176,7 @@ mod tests {
         assert_eq!(png_data.to_vec(), decoded);
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_decode_invalid_base64() {
         let result = decode_image("invalid-base64!");
@@ -177,6 +184,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("Invalid base64"));
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_image_size_limit() {
         // Create an image that exceeds the size limit

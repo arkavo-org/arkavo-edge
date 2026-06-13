@@ -78,7 +78,9 @@ pub enum MdnsError {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_mdns_service_info_creation() {
         let info = MdnsServiceInfo::new(
@@ -97,6 +99,7 @@ mod tests {
         assert!(info.ip.is_none());
     }
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_mdns_service_info_with_ip() {
         let ip = Ipv4Addr::new(192, 168, 1, 100);
@@ -106,6 +109,7 @@ mod tests {
         assert_eq!(info.get_service_ip(), ip);
     }
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_get_service_ip_fallback() {
         let info = MdnsServiceInfo::new("test", "Test", 8342, "Test", "model");

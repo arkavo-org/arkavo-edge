@@ -53,6 +53,7 @@ impl Default for Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_create_policy() {
@@ -70,6 +71,7 @@ mod tests {
         assert_eq!(policy.attributes[0].value, "internal");
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_create_fqn() {
         let fqn = create_fqn("data/clearance", "confidential");

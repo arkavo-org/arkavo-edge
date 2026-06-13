@@ -213,8 +213,10 @@ impl Default for ToolRegistry {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use uuid::Uuid;
 
+    #[spec("GEM-007")]
     #[tokio::test]
     async fn test_tool_registration() {
         let dispatcher = ToolDispatcher::new(4);
@@ -231,6 +233,7 @@ mod tests {
         assert_eq!(dispatcher.list_tools().len(), 1);
     }
 
+    #[spec("GEM-007")]
     #[tokio::test]
     async fn test_idempotency() {
         let dispatcher = ToolDispatcher::new(4);
@@ -262,6 +265,7 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 
+    #[spec("GEM-007")]
     #[tokio::test]
     async fn test_failed_call_id_can_be_retried() {
         let dispatcher = ToolDispatcher::new(4);
@@ -307,6 +311,7 @@ mod tests {
         assert!(second[0].1.is_ok());
     }
 
+    #[spec("GEM-007")]
     #[tokio::test]
     async fn test_successful_call_id_is_not_reprocessed() {
         let dispatcher = ToolDispatcher::new(4);
@@ -341,6 +346,8 @@ mod tests {
         assert_eq!(second.len(), 0);
     }
 
+    #[spec("GEM-007")]
+    #[spec("GEM-008")]
     #[tokio::test]
     async fn test_dispatch_returns_error_when_tool_task_panics() {
         let dispatcher = ToolDispatcher::new(4);

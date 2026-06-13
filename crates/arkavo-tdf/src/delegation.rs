@@ -234,6 +234,7 @@ fn intersect_entitlements(a: &[String], b: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn make_test_token(
         issuer: &str,
@@ -251,6 +252,7 @@ mod tests {
         }
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_delegation_token_serialization() {
         let token = make_test_token(
@@ -268,6 +270,7 @@ mod tests {
         assert_eq!(parsed.entitlements, token.entitlements);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_subject_mismatch() {
         let token = make_test_token(
@@ -286,6 +289,7 @@ mod tests {
         ));
     }
 
+    #[spec("TDFS-009")]
     #[test]
     fn test_expired_token() {
         let mut token = make_test_token(
@@ -303,6 +307,7 @@ mod tests {
         assert!(matches!(result, Err(DelegationError::Expired(_))));
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_entitlement_intersection() {
         let a = vec![
@@ -323,6 +328,7 @@ mod tests {
         assert!(result.contains(&"https://arkavo.net/attr/clearance/value/secret".to_string()));
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_trusted_root_check() {
         let root = TrustedRoot {
@@ -336,6 +342,7 @@ mod tests {
         assert!(!verifier.is_trusted_root("did:key:z6MkOther"));
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_payload_bytes_deterministic() {
         let token = make_test_token(

@@ -185,6 +185,7 @@ mod tests {
     use super::*;
     use crate::checks::{LintCheck, PolicyCheck, SchemaCheck};
     use arkavo_llm::ProviderResponse;
+    use arkavo_test_macros::spec;
 
     fn response(content: &str) -> ProviderResponse {
         ProviderResponse {
@@ -197,6 +198,7 @@ mod tests {
         }
     }
 
+    #[spec("CRIT-001")]
     #[tokio::test]
     async fn test_empty_pipeline() {
         let pipeline = CriticPipeline::new();
@@ -208,6 +210,7 @@ mod tests {
         assert_eq!(result.checks_run, 0);
     }
 
+    #[spec("CRIT-002")]
     #[tokio::test]
     async fn test_pipeline_all_pass() {
         let pipeline = CriticPipeline::new()
@@ -227,6 +230,7 @@ mod tests {
         assert!(result.checks_run >= 1);
     }
 
+    #[spec("CRIT-008")]
     #[tokio::test]
     async fn test_pipeline_fail_fast() {
         let config = CriticConfig {

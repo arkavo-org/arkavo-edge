@@ -5,6 +5,7 @@ use arkavo_orchestrator::agent_assignment::{AgentAssignment, RoutingDecision};
 use arkavo_orchestrator::cognitive_engine::{
     ExecutionPlan, PlanStep, PrCreator, VerificationCheck,
 };
+use arkavo_test_macros::spec;
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -18,6 +19,7 @@ fn check_gh_cli() -> bool {
         .unwrap_or(false)
 }
 
+#[spec("ORCH-005")]
 #[tokio::test]
 async fn test_pr_creation_with_mcp_tool() {
     // Gracefully skip if gh CLI not available or not authenticated

@@ -188,6 +188,7 @@ mod tests {
     use super::*;
     use arkavo_llm::{Message, Provider, ProviderResponse};
     use arkavo_mcp_tools::ToolInfo;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     /// Mock provider for testing
@@ -241,6 +242,7 @@ mod tests {
         }
     }
 
+    #[spec("CRIT-005")]
     #[tokio::test]
     async fn test_semantic_with_mock_pass() {
         let mock_provider = Arc::new(MockProvider {
@@ -273,6 +275,7 @@ mod tests {
         assert!(result.is_pass());
     }
 
+    #[spec("CRIT-005")]
     #[tokio::test]
     async fn test_semantic_with_mock_fail() {
         let mock_provider = Arc::new(MockProvider {

@@ -299,33 +299,40 @@ pub fn issue_to_category(issue: &DetectedIssue, model_family: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_glm() {
         assert_eq!(detect_model_family("glm-4.7-flash"), "glm");
     }
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_gemma() {
         assert_eq!(detect_model_family("gemma-2-9b"), "gemma");
     }
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_qwen() {
         assert_eq!(detect_model_family("qwen2.5-coder"), "qwen");
     }
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_mistral() {
         assert_eq!(detect_model_family("mistral-7b"), "mistral");
         assert_eq!(detect_model_family("ministral-3b"), "mistral");
     }
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_deepseek() {
         assert_eq!(detect_model_family("deepseek-r1"), "deepseek");
     }
 
+    #[spec("CRIT-017")]
     #[test]
     fn test_detect_model_family_unknown() {
         assert_eq!(detect_model_family("some-random-model"), "unknown");
@@ -345,6 +352,7 @@ mod tests {
         assert!(!is_simple_query("write a function to sort an array"));
     }
 
+    #[spec("CRIT-010")]
     #[test]
     fn test_detect_repetition() {
         let repeated = "line\nline\nline\nline\nline";
@@ -354,6 +362,7 @@ mod tests {
         assert!(!has_repetition(normal));
     }
 
+    #[spec("CRIT-009")]
     #[test]
     fn test_analyze_code_fence_issue() {
         let analyzer = ResponseAnalyzer::new("glm-4.7-flash");
@@ -365,6 +374,7 @@ mod tests {
         assert_eq!(r.category, "model:glm:code_fence");
     }
 
+    #[spec("CRIT-010")]
     #[test]
     fn test_analyze_output_loop() {
         let analyzer = ResponseAnalyzer::new("gemma-2-9b");
@@ -376,6 +386,7 @@ mod tests {
         assert_eq!(r.category, "model:gemma:loop");
     }
 
+    #[spec("CRIT-013")]
     #[test]
     fn test_analyze_wrong_expert_glm() {
         let analyzer = ResponseAnalyzer::new("glm-4.7-flash");
@@ -409,6 +420,7 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[spec("CRIT-014")]
     #[test]
     fn test_extract_first_answer_math() {
         assert_eq!(extract_first_answer("4\n4\n4\n4", true), "4");
@@ -416,6 +428,7 @@ mod tests {
         assert_eq!(extract_first_answer("", true), "");
     }
 
+    #[spec("CRIT-014")]
     #[test]
     fn test_extract_first_answer_nonmath() {
         let response =

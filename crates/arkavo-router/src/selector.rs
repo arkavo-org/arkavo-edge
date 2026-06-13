@@ -404,6 +404,7 @@ impl Default for ModelSelector {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn gemini_only() -> ProviderAvailability {
         ProviderAvailability {
@@ -432,6 +433,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_frontend_routing_gemini() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -444,6 +446,7 @@ mod tests {
         assert!(decision.reasoning.contains("WebDev Arena"));
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_frontend_routing_anthropic() {
         let selector = ModelSelector::with_availability(anthropic_only());
@@ -456,6 +459,7 @@ mod tests {
         assert!(decision.reasoning.contains("Claude"));
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_code_search_routing() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -471,6 +475,7 @@ mod tests {
         assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_backend_api_routing_uses_local() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -483,6 +488,8 @@ mod tests {
         assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
+    #[spec("ROUTER-001")]
+    #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_no_cloud_falls_back_to_local() {
         let selector = ModelSelector::with_availability(ProviderAvailability::default());
@@ -494,6 +501,7 @@ mod tests {
         assert!(decision.recommended_model.is_local());
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_code_generation_routing_deepseek() {
         let selector = ModelSelector::with_availability(deepseek_only());
@@ -521,6 +529,7 @@ mod tests {
         assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
     }
 
+    #[spec("ROUTER-003")]
     #[test]
     fn test_feasible_models_no_cloud_has_fallback() {
         let selector = ModelSelector::with_availability(ProviderAvailability::default());
@@ -531,6 +540,7 @@ mod tests {
     // Regression: a fresh install provisions Gemma 4 E2B + Gemma 4 12B (no Ministral/Qwen).
     // The fast-model selector must not fall through to a hardcoded Ministral 3B, which made
     // `arkavo chat` silently download an un-provisioned model on first use.
+    #[spec("ROUTER-003")]
     #[test]
     fn test_fast_local_model_falls_back_to_provisioned_gemma() {
         let nothing_cached = |_: &ModelChoice| false;
@@ -540,6 +550,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-003")]
     #[test]
     fn test_fast_local_model_uses_cached_gemma_e2b() {
         // Fresh install: only the two setup models are present.
@@ -555,6 +566,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-003")]
     #[test]
     fn test_fast_local_model_honors_legacy_ministral_install() {
         // Older install with only Ministral 3B cached still resolves to it (no download).

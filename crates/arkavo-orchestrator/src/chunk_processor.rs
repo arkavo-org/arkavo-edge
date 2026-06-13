@@ -396,6 +396,7 @@ impl ChunkProcessor {
 mod tests {
     use super::*;
     use arkavo_context::ChunkRef;
+    use arkavo_test_macros::spec;
     use std::collections::HashMap;
 
     fn create_test_manifest(chunk_count: usize) -> ContextManifest {
@@ -422,6 +423,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-007")]
     #[tokio::test]
     async fn test_find_available_agents() {
         let registry = Arc::new(AgentRegistry::new());
@@ -459,6 +461,7 @@ mod tests {
         assert_eq!(agents.len(), 2);
     }
 
+    #[spec("ORCH-007")]
     #[tokio::test]
     async fn test_distribute_chunks() {
         let registry = Arc::new(AgentRegistry::new());
@@ -497,6 +500,7 @@ mod tests {
         assert_eq!(all_indices, (0..10).collect::<Vec<_>>());
     }
 
+    #[spec("ORCH-007")]
     #[tokio::test]
     async fn test_spawn_chunk_processors() {
         let registry = Arc::new(AgentRegistry::new());
@@ -543,6 +547,7 @@ mod tests {
         assert!(result.aggregated_output.contains("[Chunk 4]:"));
     }
 
+    #[spec("ORCH-007")]
     #[tokio::test]
     async fn test_aggregate_with_failures() {
         let registry = Arc::new(AgentRegistry::new());

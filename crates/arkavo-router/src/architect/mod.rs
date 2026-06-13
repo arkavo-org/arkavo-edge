@@ -257,8 +257,10 @@ impl Default for ArchitectCostMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use executor::SubtaskResult;
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_architect_plan_savings() {
         let mut plan = ArchitectPlan::new("test task".to_string(), ComplexityScore::simple());
@@ -268,6 +270,7 @@ mod tests {
         assert!((plan.estimated_savings_percent() - 70.0).abs() < 0.1);
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_subtask_builder() {
         let subtask = Subtask::new(0, "Build UI".to_string(), TaskCategory::FrontendUI)
@@ -337,6 +340,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_planner_score_all_success() {
         let plan = make_plan_with_subtasks(2);
@@ -361,6 +365,7 @@ mod tests {
         assert!(score.overall_score > 0.8, "score={}", score.overall_score);
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_planner_score_with_plan_flaw() {
         let plan = make_plan_with_subtasks(2);
@@ -387,6 +392,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_per_step_rewards_mixed() {
         let plan = make_plan_with_subtasks(3);
@@ -412,6 +418,7 @@ mod tests {
         assert!(rewards[2] > 0.5, "successful subtask should score >0.5");
     }
 
+    #[spec("ROUTER-010")]
     #[test]
     fn test_per_step_rewards_empty_plan() {
         let plan = make_plan_with_subtasks(0);

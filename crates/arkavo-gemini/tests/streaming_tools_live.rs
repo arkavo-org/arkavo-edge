@@ -8,6 +8,7 @@
 use arkavo_gemini::{
     FunctionDeclaration, GeminiSseStream, RestClient, ToolDispatcher, ToolRegistry,
 };
+use arkavo_test_macros::spec;
 use serde_json::json;
 
 fn api_key_or_skip(test: &str) -> Option<String> {
@@ -20,6 +21,10 @@ fn api_key_or_skip(test: &str) -> Option<String> {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-002")]
+#[spec("GEM-003")]
+#[spec("GEM-007")]
 #[tokio::test]
 async fn sse_streaming_invokes_tool() {
     let Some(api_key) = api_key_or_skip("sse_streaming_invokes_tool") else {

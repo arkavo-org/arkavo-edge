@@ -136,6 +136,7 @@ impl Default for PreflightModerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use torg_core::{BoolOp, Node, Source};
     use torg_serde::to_bytes;
 
@@ -161,6 +162,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_empty_moderator_allows() {
         let moderator = PreflightModerator::new();
@@ -168,6 +170,7 @@ mod tests {
         assert!(moderator.check("any input").is_allowed());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_register_and_unregister() {
         let moderator = PreflightModerator::new();
@@ -192,6 +195,7 @@ mod tests {
         assert!(moderator.is_empty());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_pii_ssn_blocked() {
         let moderator = PreflightModerator::new();
@@ -213,6 +217,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_pii_credit_card_blocked() {
         let moderator = PreflightModerator::new();
@@ -231,6 +236,7 @@ mod tests {
         assert!(result.is_blocked());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_clean_input_passes() {
         let moderator = PreflightModerator::new();
@@ -249,6 +255,7 @@ mod tests {
         assert!(result.is_allowed());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_sql_injection_blocked() {
         let moderator = PreflightModerator::new();
@@ -269,6 +276,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_shell_command_blocked() {
         let moderator = PreflightModerator::new();
@@ -289,6 +297,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_multiple_circuits_first_violation_wins() {
         let moderator = PreflightModerator::new();
@@ -313,6 +322,7 @@ mod tests {
         assert!(result.is_blocked());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_length_threshold() {
         let moderator = PreflightModerator::new();
@@ -334,6 +344,7 @@ mod tests {
         assert!(result.is_blocked());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_feature_values_in_block() {
         let moderator = PreflightModerator::new();
@@ -356,6 +367,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_empty_input_passes() {
         let moderator = PreflightModerator::new();
@@ -369,6 +381,7 @@ mod tests {
         assert!(moderator.check("").is_allowed());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_homoglyph_sql_injection_blocked() {
         let moderator = PreflightModerator::new();
@@ -383,6 +396,7 @@ mod tests {
         assert!(result.is_blocked());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_homoglyph_shell_command_blocked() {
         let moderator = PreflightModerator::new();
@@ -397,6 +411,7 @@ mod tests {
         assert!(result.is_blocked());
     }
 
+    #[spec("ROUTER-004")]
     #[test]
     fn test_100k_character_length_blocked() {
         let moderator = PreflightModerator::new();

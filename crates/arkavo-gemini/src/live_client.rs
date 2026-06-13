@@ -91,6 +91,7 @@ pub struct LiveSessionClient {
     model: String,
     tools: Vec<Value>,
     modality: LiveModality,
+    endpoint_url: String,
     ws_writer: SharedWriter,
     tool_call_tx: mpsc::UnboundedSender<Vec<FunctionCall>>,
     tool_call_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<Vec<FunctionCall>>>>>,
@@ -130,11 +131,20 @@ impl LiveSessionClient {
             model: model.into(),
             tools,
             modality: LiveModality::Text,
+            endpoint_url: GEMINI_WS_ENDPOINT.to_string(),
             ws_writer: Arc::new(Mutex::new(None)),
             tool_call_tx: tx,
             tool_call_rx: Arc::new(RwLock::new(Some(rx))),
             connected: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Override the WebSocket endpoint URL. Intended for tests that use a
+    /// local mock server; production callers should leave the default.
+    #[doc(hidden)]
+    pub fn with_endpoint_url(mut self, endpoint_url: impl Into<String>) -> Self {
+        self.endpoint_url = endpoint_url.into();
+        self
     }
 
     /// Override the response modality (default `Text`). Must be set before
@@ -174,7 +184,7 @@ impl LiveSessionClient {
     }
 
     async fn try_connect(&self) -> Result<()> {
-        let url_with_key = format!("{}?key={}", GEMINI_WS_ENDPOINT, self.api_key);
+        let url_with_key = format!("{}?key={}", self.endpoint_url, self.api_key);
         let _url = Url::parse(&url_with_key)?;
 
         debug!("Connecting to Gemini WebSocket endpoint");
@@ -386,6 +396,15 @@ impl LiveSessionClient {
         mime_type: String,
     ) -> Result<()> {
         let content = ClientContent::from_text_and_image(text, image_base64, mime_type);
+        self.send_message(ClientMessage::ClientContent {
+            client_content: content,
+        })
+        .await
+    }
+
+    /// Stream a base64-encoded audio chunk into the Live session.
+    pub async fn send_audio(&self, audio_base64: String, mime_type: String) -> Result<()> {
+        let content = ClientContent::from_audio(audio_base64, mime_type);
         self.send_message(ClientMessage::ClientContent {
             client_content: content,
         })

@@ -271,7 +271,9 @@ impl Attribute {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("TDFS-003")]
     #[test]
     fn tdf_manifest_serialization() {
         let manifest = TdfManifest {
@@ -313,6 +315,7 @@ mod tests {
         assert_eq!(parsed, manifest);
     }
 
+    #[spec("TDFS-003")]
     #[test]
     fn policy_serialization() {
         let policy = Policy {
@@ -329,6 +332,7 @@ mod tests {
         assert_eq!(parsed, policy);
     }
 
+    #[spec("TDFS-003")]
     #[test]
     fn inline_payload_constructors() {
         let binary = InlinePayload::binary("Y2lwaGVydGV4dA==");
@@ -339,6 +343,8 @@ mod tests {
         assert_eq!(json.mime_type, "application/json");
     }
 
+    #[spec("TDFS-003")]
+    #[spec("TDFS-011")]
     #[test]
     fn key_access_object_constructor() {
         let kao = KeyAccessObject::new(
@@ -352,6 +358,7 @@ mod tests {
         assert_eq!(kao.url, "https://kas.arkavo.net");
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn attribute_constructor() {
         let attr = Attribute::new(
@@ -362,6 +369,7 @@ mod tests {
         assert_eq!(attr.values.len(), 2);
     }
 
+    #[spec("TDFS-003")]
     #[test]
     fn default_implementations() {
         let info = EncryptionInformation::default();

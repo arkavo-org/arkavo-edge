@@ -128,6 +128,7 @@ impl Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_message_creation_with_string_literals() {
@@ -196,6 +197,7 @@ mod tests {
         assert_eq!(msg.content, "Hello");
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_user_with_images() {
         let images = vec!["base64image1".to_string(), "base64image2".to_string()];
@@ -206,6 +208,7 @@ mod tests {
         assert_eq!(msg.images, Some(images));
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_message_with_images_serialization() {
         let msg = Message::user_with_images("Test", vec!["image123".to_string()]);
@@ -226,6 +229,7 @@ mod tests {
         assert!(!json.contains(r#""images""#));
     }
 
+    #[spec("ROUTER-015")]
     #[test]
     fn test_message_with_images_deserialization() {
         let json = r#"{"role":"user","content":"Test","images":["img1","img2"]}"#;

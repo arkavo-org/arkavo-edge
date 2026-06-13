@@ -128,7 +128,9 @@ pub type Result<T> = std::result::Result<T, A2aError>;
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("PROTO-010")]
     #[test]
     fn test_error_codes() {
         let err = A2aError::Timeout(5000);
@@ -151,6 +153,7 @@ mod tests {
         assert_eq!(err.to_json_rpc_code(), -32000 - 10); // -32010
     }
 
+    #[spec("PROTO-010")]
     #[test]
     fn test_error_display() {
         let err = A2aError::ConnectionFailed("localhost:8080".to_string());

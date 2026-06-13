@@ -216,7 +216,9 @@ pub struct TaskPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ORCH-009")]
     #[test]
     fn test_gather_prompt_includes_task() {
         let prompt = CollaborativePlanner::build_gather_prompt("Fix bug");
@@ -224,6 +226,7 @@ mod tests {
         assert!(prompt.contains("available tools"));
     }
 
+    #[spec("ORCH-009")]
     #[test]
     fn test_plan_prompt_includes_findings() {
         let prompt = CollaborativePlanner::build_plan_prompt("Add feature", "Found 3 files");
@@ -232,6 +235,7 @@ mod tests {
         assert!(prompt.contains("## Files to Modify"));
     }
 
+    #[spec("ORCH-009")]
     #[test]
     fn test_execution_prompt_includes_task() {
         let prompt = CollaborativePlanner::build_execution_prompt("Create file");
