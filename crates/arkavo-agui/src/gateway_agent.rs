@@ -72,14 +72,14 @@ async fn resolve_agent(
     agent_connections: &Arc<tokio::sync::RwLock<HashMap<String, Arc<AgentConnection>>>>,
     agent_id: Option<String>,
 ) -> Option<String> {
-    if let Some(id) = agent_id {
-        let conns = agent_connections.read().await;
-        if conns.contains_key(&id) {
-            return Some(id);
-        }
-    }
     let conns = agent_connections.read().await;
-    conns.keys().next().cloned()
+    if let Some(id) = agent_id
+        && conns.contains_key(&id)
+    {
+        return Some(id);
+    }
+    // Deterministic fallback rather than arbitrary HashMap iteration order.
+    conns.keys().min().cloned()
 }
 #[cfg(test)]
 mod tests {

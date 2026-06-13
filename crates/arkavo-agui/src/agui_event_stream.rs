@@ -39,13 +39,7 @@ pub fn run_event_stream(
             }
         };
 
-        if let Some(text) = last_user_text(&input.messages)
-            && let Err(e) = connection.send_session_message(&session.session_id, text).await
-        {
-            yield run_error(&thread_id, &run_id, "MESSAGE_SEND_FAILED", &e.to_string());
-            return;
-        }
-
+        // Subscribe before sending the user message so no early deltas are lost.
         let mut deltas = match connection.subscribe_message_deltas(&session.session_id).await {
             Ok(s) => s,
             Err(e) => {
@@ -53,6 +47,13 @@ pub fn run_event_stream(
                 return;
             }
         };
+
+        if let Some(text) = last_user_text(&input.messages)
+            && let Err(e) = connection.send_session_message(&session.session_id, text).await
+        {
+            yield run_error(&thread_id, &run_id, "MESSAGE_SEND_FAILED", &e.to_string());
+            return;
+        }
 
         yield BaseEvent::now(EventPayload::RunStarted(RunStartedFields {
             thread_id: thread_id.clone(),
