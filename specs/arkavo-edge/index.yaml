@@ -882,7 +882,7 @@ components:
     module: arkavo_arp
     description: ARP proposal lifecycle, tightening guards, and capability gates
     criticality: critical
-    scenario_count: 8
+    scenario_count: 9
     invariants:
       - TighteningEffect is a closed enum with no loosening variant
       - Mesh blast radius never auto-applies
@@ -903,7 +903,7 @@ components:
 
 stats:
   total_specs: 77
-  total_scenarios: 707
+  total_scenarios: 708
   critical_scenarios: 193
   coverage_areas:
     - authentication
