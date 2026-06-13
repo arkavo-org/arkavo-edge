@@ -3,4 +3,5 @@
 
 pub mod contract;
 pub mod digest;
+pub mod gate;
 pub mod status;
