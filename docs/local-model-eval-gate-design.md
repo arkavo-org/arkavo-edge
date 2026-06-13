@@ -17,9 +17,11 @@ optimal way for the current state of the swarm" and reports a verdict back to Gi
 required check.
 
 This slice favors a working vertical slice: real evals gating real PRs, with the five-role
-governance structure honest but its heavier guarantees (iroh distribution, AIA/SPIRE
-attestation, TDF-encrypted records, distributed scheduling) stubbed behind clean trait seams
-for later increments.
+governance structure honest. The one heavier guarantee pulled fully into scope is the
+**baseline as trusted shared state**: baselines are TDF-encrypted, iroh-distributed, and
+referenced by commit hash so any agent that needs the baseline for a given commit can fetch and
+trust it. The remaining heavy guarantees (iroh distribution of *weights*, AIA/SPIRE attestation,
+distributed scheduling) stay stubbed behind clean trait seams for later increments.
 
 ## What exists today
 
@@ -48,13 +50,16 @@ for later increments.
 
 ## What this slice does not build (deferred behind trait seams)
 
-- iroh weight fetch-by-digest — `WeightSource` trait; slice impl reads the HF cache.
+- iroh weight fetch-by-digest — `WeightSource` trait; slice impl reads the HF cache. (Weights are
+  large and already cached; only baselines are distributed in this slice — see below.)
 - AIA/SPIRE attestation and C2PA provenance enforcement — `ProvenanceVerifier` trait; slice
   impl returns `not-enforced` (logged), records evidence without gating on it.
-- TDF-encrypted eval record — `RecordSink` trait; slice impl writes plaintext JSON to a local
-  content-addressed store.
 - Distributed SwarmKit task submission / placement — slice executes a single-node `SwarmFlight`
   (honors REQ-6.4: single-node/local swarm capability).
+
+Baselines, by contrast, are in scope as trusted shared artifacts: TDF-encrypted,
+iroh-distributed, and referenced by commit hash so other agents can fetch and trust them (see
+"Baseline lifecycle and distribution"). Per-PR eval records remain local plaintext.
 
 ## Architecture
 
@@ -75,8 +80,9 @@ arkavo-eval :: single-node SwarmFlight
   Critic⊕   TØR-G pre-flight gate (torg_core::Graph.evaluate) → allow | TYPED REFUSAL
   Operator  LlamaCppProvider load (HF cache) → run prompt-set @ seed=0/temp=0 → outputs + tok_s
   Critic⊖   EmbeddingService cosine-sim vs Historian baseline + tok_s → regression verdict
-  Scribe    write b3-addressed eval record via RecordSink (plaintext JSON now; TDF later)
-  Historian local baseline store keyed by b3:<hex>; records new baseline on merge-to-main
+  Scribe    write b3-addressed eval record via RecordSink (per-PR: local plaintext)
+  Historian on merge→main: TDF-encrypt baseline → iroh stage (b3-addressed) → index by commit
+            hash → share pointer (gossip/A2A); resolves baselines for a commit hash on fetch
   │
   ▼  terminal TypedStatus
 EvalHandler ──update Check Run──▶ success | failure | neutral | action_required + annotations
@@ -99,8 +105,9 @@ New crate `arkavo-eval` (each module under 400 lines, `std`-first, rustls-only, 
 - `gate.rs` — Critic pre-flight gate; builds a `torg_core::Graph` from preconditions.
 - `operator.rs` — Operator: model load + prompt-set execution; `WeightSource` + `ProvenanceVerifier` traits.
 - `verdict.rs` — Critic post-flight: semantic similarity + tok_s acceptance → verdict.
-- `record.rs` — Scribe: eval record type + `RecordSink` trait (plaintext content-addressed sink).
-- `historian.rs` — baseline store (local, b3-keyed) + baseline lifecycle.
+- `record.rs` — Scribe: eval record type + `RecordSink` trait (per-PR plaintext sink).
+- `historian.rs` — baseline publish/fetch (TDF + iroh), `commit_hash → {model, b3, ticket}`
+  index, baseline lifecycle.
 - `status.rs` — typed status taxonomy.
 - `lib.rs` — `run_eval(contract) -> TypedStatus` over a single-node `SwarmFlight`.
 
@@ -114,7 +121,9 @@ Touched existing crates:
 
 Reused as-is: `arkavo-llm` (`LlamaCppProvider`), `arkavo-memory` (`EmbeddingService`),
 `arkavo-torg` (`Graph`), `arkavo-swarmkit[-runtime]` (single-node `SwarmFlight` + eval-kit
-manifest), `arkavo-attestation` (evidence).
+manifest), `arkavo-attestation` (evidence), `arkavo-tdf` (`TdfService` for baseline
+encryption), `arkavo-tdf-iroh` (`IrohTransport`/`BlobTransport` for baseline distribution), and
+`arkavo-gossip` (baseline-pointer broadcast).
 
 ## The five roles
 
@@ -151,14 +160,22 @@ exact-output match.
 ### Scribe
 
 Writes the eval record (contract, digests, attestation evidence, per-prompt metrics, verdict)
-as a `b3:<hex>`-addressed artifact via the `RecordSink` trait. Slice impl: plaintext JSON to a
-local content-addressed store. TDF-encrypted sink is a later trait impl.
+as a `b3:<hex>`-addressed artifact via the `RecordSink` trait. Per-PR records use the local
+plaintext sink. When the eval runs on `main`, the Scribe hands the record's reference outputs to
+the Historian for publication as the trusted baseline (TDF + iroh).
 
 ### Historian
 
-Supplies the prior baseline for `baseline.digest` from the local store (seeded from a committed
-baseline file so it is reproducible from a git SHA per REQ-5.2). Records a new baseline when the
-eval runs on `main` after merge.
+Owns the baseline as a trusted, shared artifact. On a `main` run after merge it canonicalizes
+that run's reference outputs, TDF-encrypts them via `arkavo-tdf::TdfService`, stages the
+ciphertext to iroh via `arkavo-tdf-iroh` (yielding a `b3:<hex>` content address + an iroh
+ticket), and records `commit_hash → { model, b3_digest, iroh_ticket }` in a persistent,
+shareable index. The pointer is broadcast to other swarm agents (gossip) and answerable on
+demand (A2A), so any agent that needs the baseline for a given commit fetches it from iroh,
+TDF-decrypts under its own agent capability, and verifies the `b3` digest before trusting it.
+For a PR, the Planner resolves the applicable baseline (the relevant `main` commit) through this
+index; the contract's `baseline.digest` is the resolved `b3` address (reproducible from a git
+SHA per REQ-5.2).
 
 ## Eval Task Contract
 
@@ -202,11 +219,27 @@ each model's check independently and a regression on one model does not mask the
   `(repo, head_sha, model)` records the `TypedStatus` and `check_run_id`. The handler does not
   re-run a completed eval; on a new head SHA it runs again and updates the check.
 
-## Baseline lifecycle
+## Baseline lifecycle and distribution
 
 Per-PR runs compare against the baseline blessed on `main`. A new model or new prompt yields
 `BaselineBootstrapped` (neutral, not a failure). Baselines are auto-recorded when the eval runs
 on `main` after merge — promotion is the merge event, not a per-PR mutation.
+
+A baseline is a trusted, shareable artifact, not a local file:
+
+- Content: the canonicalized reference outputs (per prompt) plus the metric snapshot future PRs
+  compare against.
+- Encryption: TDF-encrypted via `arkavo-tdf::TdfService`; the TDF policy grants decrypt to the
+  Arkavo Edge swarm agent identities, so those agents — and only those — can use it.
+- Distribution: staged to iroh via `arkavo-tdf-iroh` (`BlobTransport::stage_bytes`), producing a
+  `b3:<hex>` content address and an iroh ticket. The ciphertext travels peer-to-peer over iroh
+  only when an agent actually fetches it.
+- Reference: the git commit hash. The Historian keeps `commit_hash → { model, b3_digest,
+  iroh_ticket }`; this is the key other agents use to ask for "the baseline at commit X", and
+  what REQ-5.2 ("reproducible from a git SHA") resolves through.
+- Trust: a fetching agent TDF-decrypts under its own capability and verifies the `b3` digest
+  before trusting the bytes; integrity and access are both enforced.
+- Sharing: the pointer (not the ciphertext) is broadcast over gossip and answerable via A2A.
 
 ## Per-PR vs nightly model selection
 
@@ -230,9 +263,11 @@ embedding model is deterministic.
 ## Security and constraints
 
 - rustls only, no OpenSSL; musl-safe; `cargo fmt` + `cargo clippy -D warnings` clean; no
-  `#[allow(dead_code)]`.
-- Eval records may contain model outputs; the local record sink stays on the swarm member.
-  Existing DLP/PII security tests must continue to pass.
+  `#[allow(dead_code)]`. The TDF/iroh path (`arkavo-tdf` `opentdf`/capability features,
+  `arkavo-tdf-iroh`) must be confirmed rustls-only and musl-safe before adoption.
+- Per-PR eval records may contain model outputs and stay local plaintext on the swarm member.
+  Baselines are TDF-encrypted before they leave the node; decrypt is gated by TDF policy to the
+  authorized swarm agent identities. Existing DLP/PII security tests must continue to pass.
 - No hardcoded paths; weights located via the existing HF-cache discovery.
 
 ## Testing strategy
@@ -259,9 +294,12 @@ embedding model is deterministic.
   conclusion reflects the typed verdict.
 - The verdict is reproducible across repeated runs of the same head SHA (deterministic
   embedding verdict), and infra errors are distinguishable from regressions.
-- Merging to `main` records the new baseline; subsequent PRs compare against it.
+- Merging to `main` publishes the baseline as a TDF-encrypted, iroh-distributed artifact
+  addressed by `b3:<hex>` and indexed by commit hash; a second agent can resolve it by commit
+  hash, fetch it over iroh, TDF-decrypt it, and verify the digest. Subsequent PRs compare
+  against it.
 - The pipeline runs as a single-node `SwarmFlight` on the Mac swarm member with weights from the
-  HF cache; iroh/attestation/TDF seams exist but are not required for the gate to function.
+  HF cache; weight-iroh/attestation seams exist but are not required for the gate to function.
 
 ## Open risks
 
@@ -271,3 +309,10 @@ embedding model is deterministic.
   from the contract schema and should be calibrated against real baseline runs.
 - Per-PR latency for 12B + E2B on a single Mac must stay within reviewers' tolerance; the
   nightly sweep absorbs the heavier variants.
+- `opentdf-rs` and `iroh` must build rustls-only / no-OpenSSL and musl-safe; confirm before
+  wiring the baseline TDF+iroh path, or the no-OpenSSL CI check (and musl target) will break.
+- The daemon must host a long-lived iroh node; baseline availability to other agents depends on
+  that node (or a relay) being reachable peer-to-peer — for a single-node swarm the publish
+  succeeds locally and fetch is exercised by tests, but cross-node fetch needs reachability.
+- TDF decrypt needs a key/capability path (KAS or `a2a` capability tokens); the slice must pin
+  which agent identities are authorized to decrypt baselines and how they obtain that capability.
