@@ -297,7 +297,7 @@ fn run_agent_input_round_trip() {
 fn capabilities_serialize() {
     let caps = AgentCapabilities::arkavo_default();
     let json = serde_json::to_string(&caps).unwrap();
-    assert!(json.contains("\"humanInTheLoop\":true"));
+    assert!(json.contains("\"humanInTheLoop\":false"));
     assert!(json.contains("\"sse\":true"));
 }
 

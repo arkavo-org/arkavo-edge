@@ -157,7 +157,7 @@ impl AgentCapabilities {
             reasoning: true,
             multimodal: false,
             execution: false,
-            human_in_the_loop: true,
+            human_in_the_loop: false,
         }
     }
 }

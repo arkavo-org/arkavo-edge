@@ -186,6 +186,9 @@ fn canonical_to_legacy_message(msg: arkavo_agui_protocol::message::Message) -> O
             tool_calls: None,
             metadata: None,
         }),
+        // Tool/Activity/Reasoning/Developer messages cannot be represented faithfully in the
+        // legacy role model (User/Assistant/System). Dropping them preserves structural
+        // integrity of the snapshot; this is a known transitional limitation.
         _ => None,
     }
 }

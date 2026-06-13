@@ -102,6 +102,18 @@ fn run_error(thread_id: &str, run_id: &str, code: &str, message: &str) -> BaseEv
     }))
 }
 
+#[allow(unreachable_patterns)]
+fn stream_end_summary(reason: &StreamEndReason) -> (&'static str, &'static str) {
+    match reason {
+        StreamEndReason::Complete => ("COMPLETE", "stream completed"),
+        StreamEndReason::UserAbort => ("USER_ABORT", "stream aborted by user"),
+        StreamEndReason::MaxTokens => ("MAX_TOKENS", "maximum token limit reached"),
+        StreamEndReason::Error => ("STREAM_ERROR", "agent reported a stream error"),
+        StreamEndReason::SessionClosed => ("SESSION_CLOSED", "session closed before completion"),
+        _ => ("STREAM_END", "stream ended"),
+    }
+}
+
 fn last_user_text(messages: &[Message]) -> Option<String> {
     messages.iter().rev().find_map(|m| match m {
         Message::User(u) => match &u.content {
@@ -182,7 +194,7 @@ impl Translator {
             MessageDeltaContent::ToolResult {
                 tool_call_id,
                 content,
-                is_error,
+                is_error: _,
             } => {
                 self.close_message(&mut out);
                 self.close_tool(&mut out);
@@ -190,7 +202,7 @@ impl Translator {
                     message_id: delta.message_id,
                     tool_call_id,
                     content,
-                    role: if is_error { Some("tool".into()) } else { None },
+                    role: Some("tool".into()),
                 }));
             }
             MessageDeltaContent::StreamEnd { reason } => {
@@ -205,12 +217,15 @@ impl Translator {
                             result: None,
                         }))
                     }
-                    other => out.push(EventPayload::RunError(RunErrorFields {
-                        thread_id: self.thread_id.clone(),
-                        run_id: self.run_id.clone(),
-                        message: format!("stream ended: {other:?}"),
-                        code: Some("STREAM_END".into()),
-                    })),
+                    other => {
+                        let (code, message) = stream_end_summary(&other);
+                        out.push(EventPayload::RunError(RunErrorFields {
+                            thread_id: self.thread_id.clone(),
+                            run_id: self.run_id.clone(),
+                            message: message.into(),
+                            code: Some(code.into()),
+                        }));
+                    }
                 }
             }
             MessageDeltaContent::Error { code, message } => {
