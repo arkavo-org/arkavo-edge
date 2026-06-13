@@ -1,6 +1,6 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.80.1
+version: 0.81.0
 last_updated: 2026-06-12
 
 components:
@@ -552,7 +552,7 @@ components:
     module: arkavo_agui
     description: Arkavo GUI application gateway
     criticality: high
-    scenario_count: 15
+    scenario_count: 20
     invariants:
       - AgUiGateway manages connections
       - mDNS discovery for peers
@@ -903,7 +903,7 @@ components:
 
 stats:
   total_specs: 77
-  total_scenarios: 702
+  total_scenarios: 707
   critical_scenarios: 193
   coverage_areas:
     - authentication
