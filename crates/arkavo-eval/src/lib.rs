@@ -2,3 +2,4 @@
 //! preconditions, runs the model, and produces a typed regression verdict.
 
 pub mod digest;
+pub mod status;
