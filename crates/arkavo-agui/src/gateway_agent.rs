@@ -81,3 +81,64 @@ async fn resolve_agent(
     let conns = agent_connections.read().await;
     conns.keys().next().cloned()
 }
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, VecDeque};
+
+    use arkavo_agui_protocol::RunAgentInput;
+    use axum::extract::{Query, State};
+
+    use super::*;
+    use crate::gateway::AppState;
+
+    fn test_app_state() -> AppState {
+        AppState {
+            connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            agents: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            agent_connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            budget_handler: Arc::new(tokio::sync::RwLock::new(
+                crate::budget_handler::BudgetHandler::new(),
+            )),
+            cost_handler: Arc::new(tokio::sync::RwLock::new(
+                crate::cost_handler::CostHandler::new(),
+            )),
+            security_handler: Arc::new(tokio::sync::RwLock::new(
+                crate::security_handler::SecurityHandler::new(),
+            )),
+            initial_prompt: Arc::new(tokio::sync::RwLock::new(None)),
+            dataflow_handler: Arc::new(crate::dataflow_handler::DataflowHandler::new()),
+            debug_handler: None,
+            rate_limiter: Arc::new(arkavo_protocol::rate_limit::IpRateLimiter::new(
+                arkavo_protocol::rate_limit::RateLimitConfig::default(),
+            )),
+            task_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            learning_module: Arc::new(tokio::sync::RwLock::new(
+                arkavo_router::learning::LearningModule::new(),
+            )),
+            routing_history: Arc::new(tokio::sync::RwLock::new(VecDeque::new())),
+            lesson_tx: None,
+            lesson_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            context_topology_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            arp_handler: Arc::new(crate::arp_handler::ArpHandler::default()),
+            swarm_flights: Arc::new(crate::swarm_flight_registry::SwarmFlightRegistry::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn capabilities_handler_returns_default_capabilities() {
+        let Json(caps) = capabilities_handler().await;
+        assert!(caps.transport.sse);
+        assert!(caps.tools.enabled);
+    }
+
+    #[tokio::test]
+    async fn run_agent_handler_returns_503_when_no_agent_available() {
+        let state = test_app_state();
+        let params = Query(RunAgentParams { agent_id: None });
+        let input = RunAgentInput::new("thread-1", "run-1");
+        let result = run_agent_handler(params, State(state), Json(input)).await;
+        assert!(result.is_err());
+        let response = result.unwrap_err();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}

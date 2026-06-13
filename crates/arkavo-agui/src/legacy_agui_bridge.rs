@@ -193,8 +193,8 @@ fn canonical_to_legacy_message(msg: arkavo_agui_protocol::message::Message) -> O
 #[cfg(test)]
 mod tests {
     use arkavo_agui_protocol::event::{
-        RunErrorFields, RunFinishedFields, RunStartedFields, TextMessageContentFields,
-        TextMessageEndFields, TextMessageStartFields,
+        RunErrorFields, RunStartedFields, TextMessageContentFields, TextMessageEndFields,
+        TextMessageStartFields,
     };
     use arkavo_agui_protocol::message::{AssistantMessage, UserMessage, UserMessageContent};
     use arkavo_test_macros::spec;
