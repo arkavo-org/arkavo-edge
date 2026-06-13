@@ -82,6 +82,7 @@ members = [
     "crates/arkavo-mcp-identity",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
+    "crates/arkavo-eval",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]

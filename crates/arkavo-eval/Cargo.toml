@@ -1,0 +1,21 @@
+[package]
+name = "arkavo-eval"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+blake3 = "1.5"
+torg-core = { workspace = true }
+tracing = { workspace = true }
+arkavo-memory = { path = "../arkavo-memory", optional = true }
+
+[features]
+default = []
+embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
