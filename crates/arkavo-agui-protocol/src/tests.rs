@@ -97,9 +97,17 @@ fn tool_call_stream_round_trip() {
         tool_call_id: "tc-1".into(),
         content: "contents".into(),
         role: Some("tool".into()),
+        is_error: Some(false),
+    }));
+    let error_result = BaseEvent::new(EventPayload::ToolCallResult(ToolCallResultFields {
+        message_id: "msg-1".into(),
+        tool_call_id: "tc-1".into(),
+        content: "file not found".into(),
+        role: Some("tool".into()),
+        is_error: Some(true),
     }));
 
-    for ev in [&start, &args, &end, &result] {
+    for ev in [&start, &args, &end, &result, &error_result] {
         assert_round_trip(ev);
     }
 }

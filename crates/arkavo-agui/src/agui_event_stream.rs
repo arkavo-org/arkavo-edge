@@ -194,7 +194,7 @@ impl Translator {
             MessageDeltaContent::ToolResult {
                 tool_call_id,
                 content,
-                is_error: _,
+                is_error,
             } => {
                 self.close_message(&mut out);
                 self.close_tool(&mut out);
@@ -203,6 +203,7 @@ impl Translator {
                     tool_call_id,
                     content,
                     role: Some("tool".into()),
+                    is_error: Some(is_error),
                 }));
             }
             MessageDeltaContent::StreamEnd { reason } => {
