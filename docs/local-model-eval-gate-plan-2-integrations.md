@@ -980,7 +980,7 @@ use arkavo_eval::embedder::MemoryEmbedder;
 use arkavo_eval::gate::Preconditions;
 use arkavo_eval::operator_llama::LlamaOperator;
 use arkavo_eval::run_eval;
-use arkavo_github::{GitHubApp, GitHubOperations};
+use arkavo_github::{CheckRunDetails, GitHubApp, GitHubOperations};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1095,14 +1095,14 @@ impl<B: BaselineStore + 'static> EvalDaemon<B> {
         let check_name = format!("arkavo-eval/{model}");
         // 4. Post a queued check.
         let check_id = ops
-            .create_check_run(owner, name, &check_name, head_sha, "in_progress", None, None, None)
+            .create_check_run(owner, name, &check_name, head_sha, "in_progress", CheckRunDetails::default())
             .await
             .map_err(|e| e.to_string())?;
 
         // 5. Resolve weights + build the contract.
         let Some((gguf_path, weight_digest)) = (self.resolve_model)(model) else {
             let summary = format!("model {model} not resident on this swarm member");
-            ops.update_check_run(owner, name, check_id, "completed", Some("neutral"), Some("Skipped"), Some(&summary))
+            ops.update_check_run(owner, name, check_id, "completed", CheckRunDetails { conclusion: Some("neutral"), output_title: Some("Skipped"), output_summary: Some(&summary) })
                 .await
                 .map_err(|e| e.to_string())?;
             return Ok(());
@@ -1128,7 +1128,7 @@ impl<B: BaselineStore + 'static> EvalDaemon<B> {
         // 8. Update the check + persist state.
         let conclusion = outcome.status.check_conclusion().unwrap_or("neutral");
         let title = outcome.status.summary();
-        ops.update_check_run(owner, name, check_id, "completed", Some(conclusion), Some(&title), Some(&title))
+        ops.update_check_run(owner, name, check_id, "completed", CheckRunDetails { conclusion: Some(conclusion), output_title: Some(&title), output_summary: Some(&title) })
             .await
             .map_err(|e| e.to_string())?;
         let status_json = serde_json::to_string(&outcome.status).unwrap_or_default();
