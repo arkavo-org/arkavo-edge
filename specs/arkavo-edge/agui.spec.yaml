@@ -226,3 +226,70 @@ scenarios:
       - Numeric interpolation only — no remote strings enter attributes
     refs: [crates/arkavo-agui/static/js/panels/arp.js, crates/arkavo-agui/src/types.rs]
     changed: "2026-06-10"
+
+  - id: AGUI-016
+    name: Gateway exposes a spec-compliant AG-UI SSE endpoint
+    criticality: critical
+    given:
+      - The gateway is running
+      - At least one agent is connected
+    when: A client POSTs RunAgentInput to /api/agent
+    then:
+      - The endpoint returns an SSE stream
+      - The stream emits RUN_STARTED and RUN_FINISHED lifecycle events
+      - "The response uses data: <json> framing"
+    refs: [crates/arkavo-agui/src/gateway_agent.rs, crates/arkavo-agui/src/gateway.rs]
+    changed: "2026-06-12"
+
+  - id: AGUI-017
+    name: Canonical text messages follow Start→Content→End streaming
+    criticality: high
+    given:
+      - An agent run is streaming via /api/agent
+    when: The agent emits assistant text
+    then:
+      - A TEXT_MESSAGE_START event precedes content
+      - Each fragment is delivered as TEXT_MESSAGE_CONTENT
+      - A TEXT_MESSAGE_END event closes the message
+    refs: [crates/arkavo-agui/src/agui_event_stream.rs]
+    changed: "2026-06-12"
+
+  - id: AGUI-018
+    name: Canonical tool calls follow Start→Args→End→Result streaming
+    criticality: high
+    given:
+      - An agent run is streaming via /api/agent
+    when: The agent invokes a tool
+    then:
+      - TOOL_CALL_START carries tool_call_id and name
+      - TOOL_CALL_ARGS streams argument fragments
+      - TOOL_CALL_END marks completion
+      - TOOL_CALL_RESULT carries the tool output
+    refs: [crates/arkavo-agui/src/agui_event_stream.rs]
+    changed: "2026-06-12"
+
+  - id: AGUI-019
+    name: Legacy WebSocket clients receive backward-compatible events
+    criticality: high
+    given:
+      - A client is connected to /ws
+      - Canonical AG-UI events are flowing
+    when: The legacy bridge translates canonical events
+    then:
+      - TEXT_MESSAGE_CONTENT maps to MessageDelta
+      - State and message snapshots preserve eventId
+      - Lifecycle events map to legacy lifecycle.start/end/error
+    refs: [crates/arkavo-agui/src/legacy_agui_bridge.rs]
+    changed: "2026-06-12"
+
+  - id: AGUI-020
+    name: Custom Arkavo events are transported as spec CUSTOM events
+    criticality: medium
+    given:
+      - A gateway producer emits an Arkavo-specific event
+    when: It is placed on the canonical stream
+    then:
+      - "The event is wrapped as { type: \"CUSTOM\", name, value }"
+      - The legacy bridge unwraps it back to the legacy shape
+    refs: [crates/arkavo-agui/src/legacy_agui_bridge.rs]
+    changed: "2026-06-12"
