@@ -29,9 +29,9 @@ pub use governance::{
     RoleProposalCeiling,
 };
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
+pub use mcp::{McpServerDef, Transport};
 #[allow(deprecated)]
 pub use role::ArpRule;
-pub use mcp::{McpServerDef, Transport};
 pub use role::{
     AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
     Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
