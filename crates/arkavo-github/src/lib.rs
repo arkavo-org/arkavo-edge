@@ -18,6 +18,6 @@ pub use filters::RepoFilter;
 pub use github_api::GitHubIssue;
 pub use issue_handler::IssueHandler;
 pub use issue_ops::{CommentRequest, IssueOperations, IssueUpdate, LabelUpdate};
-pub use operations::{GitHubOperations, MergeMethod};
+pub use operations::{CheckRunDetails, GitHubOperations, MergeMethod};
 pub use org_polling::{OrgPollingConfig, poll_organization};
 pub use poller::{OrgPoller, OrgPollerConfig};
