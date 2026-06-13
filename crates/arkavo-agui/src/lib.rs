@@ -26,6 +26,7 @@ pub mod gateway_ws;
 pub mod handler;
 pub mod health;
 pub mod health_monitor;
+pub mod legacy_agui_bridge;
 pub mod lesson_extractor;
 pub mod mdns_impl;
 pub mod renderer;

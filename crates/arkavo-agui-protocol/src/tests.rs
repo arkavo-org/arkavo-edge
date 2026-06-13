@@ -1,3 +1,4 @@
+use arkavo_test_macros::spec;
 use serde_json::json;
 
 use crate::BaseEvent;
@@ -7,6 +8,7 @@ use crate::message::*;
 use crate::patch::JsonPatch;
 
 #[test]
+#[spec("AGUI-016")]
 fn lifecycle_events_round_trip() {
     let started = BaseEvent::new(EventPayload::RunStarted(RunStartedFields {
         thread_id: "thread-1".into(),
@@ -49,6 +51,7 @@ fn lifecycle_events_round_trip() {
 }
 
 #[test]
+#[spec("AGUI-017")]
 fn text_message_stream_round_trip() {
     let start = BaseEvent::new(EventPayload::TextMessageStart(TextMessageStartFields {
         message_id: "msg-1".into(),
@@ -75,6 +78,7 @@ fn text_message_stream_round_trip() {
 }
 
 #[test]
+#[spec("AGUI-018")]
 fn tool_call_stream_round_trip() {
     let start = BaseEvent::new(EventPayload::ToolCallStart(ToolCallStartFields {
         tool_call_id: "tc-1".into(),
@@ -101,6 +105,7 @@ fn tool_call_stream_round_trip() {
 }
 
 #[test]
+#[spec("AGUI-019")]
 fn state_and_message_snapshot_round_trip() {
     let state = BaseEvent::new(EventPayload::StateSnapshot(StateSnapshotFields {
         snapshot: json!({"counter": 3}),
@@ -180,6 +185,7 @@ fn activity_and_reasoning_round_trip() {
 }
 
 #[test]
+#[spec("AGUI-020")]
 fn special_and_deprecated_events_round_trip() {
     let raw = BaseEvent::new(EventPayload::Raw(RawFields {
         event: json!({"foo": 1}),

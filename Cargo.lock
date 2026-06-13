@@ -570,6 +570,7 @@ dependencies = [
 name = "arkavo-agui-protocol"
 version = "0.80.1"
 dependencies = [
+ "arkavo-test-macros",
  "chrono",
  "serde",
  "serde_json",

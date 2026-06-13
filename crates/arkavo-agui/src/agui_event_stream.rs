@@ -254,6 +254,7 @@ impl Translator {
 #[cfg(test)]
 mod tests {
     use arkavo_agui_protocol::message::{AssistantMessage, InputContent, TextContent, UserMessage};
+    use arkavo_test_macros::spec;
 
     use super::*;
 
@@ -303,6 +304,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("AGUI-017")]
     fn translator_emits_text_lifecycle() {
         let mut t = Translator::new("t".into(), "r".into());
         let events = t.apply(MessageDelta {
@@ -336,6 +338,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("AGUI-018")]
     fn translator_emits_tool_lifecycle() {
         let mut t = Translator::new("t".into(), "r".into());
         let events = t.apply(MessageDelta {
