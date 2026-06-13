@@ -37,6 +37,7 @@ schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = []

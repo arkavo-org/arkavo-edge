@@ -64,6 +64,7 @@ arkavo-snpe = { path = "../arkavo-snpe", optional = true }
 
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }

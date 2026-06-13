@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../schema.json
 
 feature: Network Security and Secure Defaults
-module: arkavo_edge::security::network
+module: arkavo_security
 version: 1.0.0
 
 invariants:
@@ -27,7 +27,7 @@ scenarios:
       - User is guided through mandatory security setup
       - Random strong API key is generated if user doesn't provide one
       - Agent functionality is locked until setup completes
-    refs: [crates/arkavo-config-bundle/src/first_run.rs]
+    refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:190-208]
 
   - id: NET-002
     name: Localhost-only binding by default
@@ -40,7 +40,7 @@ scenarios:
       - Agent binds ONLY to 127.0.0.1, not 0.0.0.0
       - External network access is impossible without explicit configuration
       - Warning is displayed if admin changes to public binding
-    refs: [crates/arkavo-protocol/src/server_bind.rs]
+    refs: [crates/arkavo-protocol/src/config.rs:109-134, crates/arkavo-validation/src/url.rs:246-262]
 
   - id: NET-003
     name: Public binding requires explicit acknowledgment
@@ -54,7 +54,7 @@ scenarios:
       - TLS is REQUIRED for public binding
       - Authentication strength is validated
       - Warning banner is shown in logs
-    refs: [crates/arkavo-config-bundle/src/network_config.rs]
+    refs: [crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-46, crates/arkavo-cli/src/commands/security_audit.rs:180-188]
 
   - id: NET-004
     name: No localhost trust exemption
@@ -67,7 +67,7 @@ scenarios:
       - Request is REJECTED - localhost is not trusted
       - Same authentication required for all sources
       - No "trust local" configuration option exists
-    refs: [crates/arkavo-protocol/src/auth_enforcer.rs]
+    refs: [crates/arkavo-security/src/auth.rs:106-125]
 
   - id: NET-005
     name: Reverse proxy header validation
@@ -81,7 +81,7 @@ scenarios:
       - X-Forwarded-For is only trusted if secret header present
       - Requests without secret header are rejected
       - Header secret is not logged or exposed
-    refs: [crates/arkavo-protocol/src/proxy_validator.rs]
+    refs: [crates/arkavo-protocol/src/rate_limit_middleware.rs:15-46]
 
   - id: NET-006
     name: Host header validation (anti-rebinding)
@@ -95,7 +95,7 @@ scenarios:
       - For localhost binding, only "localhost", "127.0.0.1", "[::1]" accepted
       - Requests with external Host headers are dropped
       - Prevents browser-based DNS rebinding attacks
-    refs: [crates/arkavo-protocol/src/host_validator.rs]
+    refs: [crates/arkavo-validation/src/url.rs:164-224]
 
   - id: NET-007
     name: Block cloud metadata and internal network access
@@ -109,7 +109,7 @@ scenarios:
       - Blocked ranges include 169.254.169.254, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
       - Explicit allowlist can override for known-safe internal services
       - Log entry shows "SSRF attempt blocked"
-    refs: [crates/arkavo-dataflow/src/egress_filter.rs]
+    refs: [crates/arkavo-validation/src/url.rs:1-118]
 
   - id: NET-008
     name: Ephemeral setup token (secure first-run)
@@ -124,7 +124,7 @@ scenarios:
       - Token is written to file with mode 0600
       - Token expires after 10 minutes OR first successful use
       - After expiry/use, token file is securely deleted
-    refs: [crates/arkavo-agent-auth/src/bootstrap.rs]
+    refs: [crates/arkavo-agent-auth/src/storage.rs:27-79, crates/arkavo-agent-auth/src/types.rs:32-69]
 
   - id: NET-009
     name: TLS required for non-localhost
@@ -137,7 +137,7 @@ scenarios:
       - TLS is mandatory - plaintext HTTP is rejected
       - Minimum TLS 1.2 is enforced
       - Weak cipher suites are disabled
-    refs: [crates/arkavo-protocol/src/tls_enforcer.rs]
+    refs: [crates/arkavo-protocol/src/transport.rs:89-108, crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-72]
 
   - id: NET-010
     name: Rate limiting per IP
@@ -150,11 +150,13 @@ scenarios:
       - Further requests are rejected (429)
       - Exponential backoff is applied
       - Sustained abuse triggers temp ban
-    refs: [crates/arkavo-protocol/src/rate_limiter.rs]
+    refs: [crates/arkavo-protocol/src/rate_limit_middleware.rs:48-82, crates/arkavo-protocol/src/rate_limit.rs:160-247]
 
   - id: NET-011
     name: Admin interface separate from public API
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Agent has administrative interface
       - Agent has public-facing API
@@ -176,11 +178,13 @@ scenarios:
       - Security configuration is audited
       - Insecure settings generate warnings
       - Critical misconfigurations prevent startup
-    refs: [crates/arkavo-config-bundle/src/security_audit.rs]
+    refs: [crates/arkavo-cli/src/commands/security_audit.rs:45-83]
 
   - id: NET-013
     name: Service fingerprint minimization
     criticality: medium
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - External scanner probes agent ports
       - Scanner attempts to identify service
@@ -202,7 +206,7 @@ scenarios:
       - Resolved IP is checked BEFORE connection is made
       - Time-of-check/time-of-use mitigated by re-checking at connect
       - DNS rebinding during connection is blocked
-    refs: [crates/arkavo-dataflow/src/dns_validator.rs]
+    refs: [crates/arkavo-validation/src/url.rs:112-117]
 
   - id: NET-015
     name: Prompt injection attack prevention
@@ -216,7 +220,7 @@ scenarios:
       - System instructions cannot be overridden
       - Injection patterns are detected and neutralized
       - Attack attempt is logged for security audit
-    refs: [crates/arkavo-cli/src/prompt_validation.rs]
+    refs: [crates/arkavo-router/src/preflight/moderator.rs:86-127, crates/arkavo-router/src/preflight/normalize.rs:136-138, crates/arkavo-validation/src/external_content.rs:38-59]
     edge_cases:
       - condition: Multi-turn injection attack
         expected: Context reset or session termination
@@ -237,7 +241,7 @@ scenarios:
       - User confirmation required before execution
       - Dangerous commands are flagged
       - Execution is sandboxed
-    refs: [crates/arkavo-cli/src/command_guard.rs]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs:10-93, crates/arkavo-mcp-tools/src/sandbox.rs:27-85]
     edge_cases:
       - condition: LLM suggests "rm -rf /"
         expected: Blocked with warning, requires explicit confirmation
@@ -247,6 +251,8 @@ scenarios:
   - id: NET-017
     name: Egress audit logging
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Agent makes any outbound network request
       - Request may be user-initiated or agent-autonomous

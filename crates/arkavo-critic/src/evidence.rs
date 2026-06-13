@@ -170,6 +170,7 @@ impl VerificationEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_severity_ordering() {
@@ -198,6 +199,7 @@ mod tests {
         assert!(!failed.is_passed());
     }
 
+    #[spec("CRIT-006")]
     #[test]
     fn test_evidence_creation() {
         let evidence = VerificationEvidence::passed("schema", "All schemas valid", 1);

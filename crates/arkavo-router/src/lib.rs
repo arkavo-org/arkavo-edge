@@ -1091,6 +1091,7 @@ impl Router {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[tokio::test]
     async fn test_router_creation() {
@@ -1102,6 +1103,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_min_feasible_context_size_default() {
         let router = match Router::new_offline().await {

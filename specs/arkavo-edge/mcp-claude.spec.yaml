@@ -54,7 +54,7 @@ scenarios:
       - Tool schemas are validated
       - Permissions are checked
       - Tools are ready for invocation
-    refs: [crates/arkavo-mcp-claude/src/tools.rs:1-60]
+    refs: [crates/arkavo-mcp-claude/src/tools/mod.rs:295-322]
     changed: "2025-01-31"
 
   - id: MCPC-004
@@ -103,7 +103,7 @@ scenarios:
       - Payload is reformatted
       - Timestamps converted
       - Metadata preserved
-    refs: [crates/arkavo-mcp-claude/src/event_mapper.rs:1-40]
+    refs: [crates/arkavo-mcp-claude/src/event_mapper/mod.rs:26-184]
     changed: "2025-01-31"
 
   - id: MCPC-007

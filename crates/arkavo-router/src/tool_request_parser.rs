@@ -52,54 +52,64 @@ pub fn parse_tool_requests(response: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_single_request() {
         let response = "I need to check the time. [need: time]";
         assert_eq!(parse_tool_requests(response), vec!["time"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_multiple_requests() {
         let response = "I'll need [need: github] and [need: filesystem] for this.";
         assert_eq!(parse_tool_requests(response), vec!["github", "filesystem"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_case_insensitive() {
         let response = "[Need: Time] and [NEED: GITHUB]";
         assert_eq!(parse_tool_requests(response), vec!["time", "github"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_inline() {
         let response = "To read files [need: filesystem] I would use the read tool.";
         assert_eq!(parse_tool_requests(response), vec!["filesystem"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_no_requests() {
         let response = "I can help with that using the available tools.";
         assert_eq!(parse_tool_requests(response), Vec::<String>::new());
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_duplicate_requests() {
         let response = "[need: time] and also [need: time]";
         assert_eq!(parse_tool_requests(response), vec!["time"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_empty_string() {
         assert_eq!(parse_tool_requests(""), Vec::<String>::new());
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_multiword_keyword() {
         let response = "[need: code search]";
         assert_eq!(parse_tool_requests(response), vec!["code search"]);
     }
 
+    #[spec("ROUTER-008")]
     #[test]
     fn test_no_closing_bracket() {
         let response = "[need: time without closing";

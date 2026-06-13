@@ -3,6 +3,7 @@
 use arkavo_protocol::auth::{AuthBackend, JwtAuthBackend, SessionAuth};
 use arkavo_protocol::chat_session::ChatSessionManager;
 use arkavo_protocol::types::{ClientMetrics, MetricsAck};
+use arkavo_test_macros::spec;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -84,6 +85,7 @@ async fn test_jwt_authentication_expired() {
 
 /// Test chat session creation with authentication
 #[tokio::test]
+#[spec("CHAT-001")]
 async fn test_authenticated_chat_session() {
     // Create chat session manager without LLM adapter for testing
     let manager = ChatSessionManager::new(None);
@@ -111,6 +113,7 @@ async fn test_authenticated_chat_session() {
 
 /// Test back-pressure management with MetricsAck
 #[tokio::test]
+#[spec("CHAT-005")]
 async fn test_backpressure_with_metrics_ack() {
     let manager = ChatSessionManager::new(None);
 
@@ -232,6 +235,9 @@ async fn test_session_persistence() {
 
 /// Integration test for full chat flow with auth and back-pressure
 #[tokio::test]
+#[spec("CHAT-001")]
+#[spec("CHAT-005")]
+#[spec("CHAT-006")]
 async fn test_full_chat_flow_integration() {
     // This test simulates a full chat flow:
     // 1. Client authenticates with JWT
@@ -297,6 +303,8 @@ async fn test_full_chat_flow_integration() {
 
 /// Test concurrent session management
 #[tokio::test]
+#[spec("CHAT-001")]
+#[spec("CHAT-005")]
 async fn test_concurrent_sessions() {
     let manager = Arc::new(ChatSessionManager::new(None));
 

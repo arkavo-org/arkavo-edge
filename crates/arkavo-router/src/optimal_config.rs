@@ -106,7 +106,9 @@ impl Default for OptimalConfigStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-014")]
     #[test]
     fn seeded_from_compile_time_defaults() {
         let store = OptimalConfigStore::new();
@@ -116,6 +118,7 @@ mod tests {
         assert!((c.confidence - 1.0).abs() < f64::EPSILON);
     }
 
+    #[spec("ROUTER-014")]
     #[test]
     fn update_respects_confidence() {
         let store = OptimalConfigStore::new();
@@ -132,6 +135,7 @@ mod tests {
         assert!((c.temperature - 0.5).abs() < f32::EPSILON); // updated
     }
 
+    #[spec("ROUTER-014")]
     #[test]
     fn get_returns_none_for_cloud_models() {
         let store = OptimalConfigStore::new();

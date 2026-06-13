@@ -32,7 +32,7 @@ scenarios:
       - Classification level inferred (PII, credentials, internal, public)
       - Label persists through variable assignments and context
       - Taint metadata stored in sequence ledger
-    refs: [crates/arkavo-mcp/src/taint.rs]
+    refs: [crates/arkavo-protocol/src/data_classification.rs:1-107]
     changed: "2026-03-21"
     edge_cases:
       - condition: Data source classification ambiguous
@@ -82,7 +82,7 @@ scenarios:
       - PII-classified data requires explicit authorization
       - Credential-classified data blocked unconditionally
       - Violation logged with full provenance chain
-    refs: [crates/arkavo-validation/src/egress_taint.rs]
+    refs: [crates/arkavo-validation/src/url.rs:1-142]
     changed: "2026-03-21"
     edge_cases:
       - condition: Destination is sanctioned internal endpoint
@@ -127,7 +127,7 @@ scenarios:
       - Maximum path lengths per skill recorded
       - Data flow patterns (source types → sink types) profiled
       - Baseline stored with skill identifier
-    refs: [crates/arkavo-router/src/learning/baseline.rs]
+    refs: [crates/arkavo-router/src/learning/module.rs:1-413]
     changed: "2026-03-21"
     edge_cases:
       - condition: Insufficient history for baseline
@@ -153,7 +153,7 @@ scenarios:
       - Medium divergence (threshold_1 to threshold_2) triggers async alert
       - High divergence (> threshold_2) triggers synchronous gate
       - Detection completes within 50μs overhead budget
-    refs: [crates/arkavo-titan/src/sequence_anomaly.rs]
+    refs: [crates/arkavo-titan/src/accumulator.rs:1-133]
     changed: "2026-03-21"
     edge_cases:
       - condition: Novel but legitimate workflow
@@ -180,7 +180,7 @@ scenarios:
       - Data flow summaries (source→sink pairs) indexed
       - Incomplete exfiltration patterns flagged as pending
       - Ledger entries retained for configurable window (default 24h)
-    refs: [crates/arkavo-memory/src/sequence_ledger.rs]
+    refs: [crates/arkavo-memory/src/federated_memory.rs:28-39]
     changed: "2026-03-21"
 
   - id: SEQ-008
@@ -198,7 +198,7 @@ scenarios:
       - Read internal data in session A + POST external in session B detected
       - Staging patterns identified (read→store→retrieve→exfiltrate)
       - Composite threat score computed from linked sessions
-    refs: [crates/arkavo-memory/src/decomposition.rs]
+    refs: [crates/arkavo-memory/src/federated_memory.rs:41-51]
     changed: "2026-03-21"
     edge_cases:
       - condition: Legitimate multi-session workflow (e.g., daily report generation)
@@ -223,7 +223,7 @@ scenarios:
       - Composite action graph spans multiple agents
       - No single agent's graph looks anomalous in isolation
       - Combined graph triggers decomposition detection
-    refs: [crates/arkavo-memory/src/cross_agent.rs]
+    refs: [crates/arkavo-memory/src/federated_memory.rs:72-90]
     changed: "2026-03-21"
     edge_cases:
       - condition: Legitimate agent delegation (e.g., summarizer → publisher)
@@ -250,7 +250,7 @@ scenarios:
       - Pass allows action to proceed
       - Fail blocks action with policy violation
       - Evidence includes sequence context for audit
-    refs: [crates/arkavo-critic/src/checks/sequence_circuit.rs]
+    refs: [crates/arkavo-critic/src/checks/circuit.rs:29-170]
     changed: "2026-03-21"
     edge_cases:
       - condition: Circuit not compiled for current agent skill
@@ -273,7 +273,7 @@ scenarios:
       - Taint state of payload assessed
       - Decision returned before action executes
       - Latency budget 100μs for synchronous gate
-    refs: [crates/arkavo-critic/src/checks/sequence_gate.rs]
+    refs: [crates/arkavo-critic/src/pipeline.rs:43-180]
     changed: "2026-03-21"
     edge_cases:
       - condition: Gate evaluation exceeds latency budget
@@ -295,7 +295,7 @@ scenarios:
       - Anomaly score updated asynchronously
       - Threshold breach triggers alert (not retroactive block)
       - Coverage maintained for all actions in session
-    refs: [crates/arkavo-router/src/async_monitor.rs]
+    refs: [crates/arkavo-router/src/metrics.rs:1-151]
     changed: "2026-03-21"
 
   # ============================================================================
@@ -315,7 +315,7 @@ scenarios:
       - DriftDetector identifies gradual behavioral shift
       - BoundaryDetector catches actions outside learned region
       - Anomaly evidence includes sequence context
-    refs: [crates/arkavo-titan/src/sequence_bridge.rs]
+    refs: [crates/arkavo-titan/src/monitor.rs:74-170, crates/arkavo-titan/src/detector.rs:101-166]
     changed: "2026-03-21"
 
   - id: SEQ-014
@@ -334,7 +334,7 @@ scenarios:
       - Legitimate external API calls with public data pass
       - External calls carrying internal-tainted data blocked
       - Decision logged with provenance chain for forensics
-    refs: [crates/arkavo-validation/src/provenance_egress.rs]
+    refs: [crates/arkavo-validation/src/url.rs:1-142]
     changed: "2026-03-21"
     edge_cases:
       - condition: Destination on allowlist but payload tainted
@@ -357,7 +357,7 @@ scenarios:
       - Baseline comparison included (expected vs actual)
       - Correlation ID links to cross-session decomposition if applicable
       - Evidence suitable for forensic reconstruction
-    refs: [crates/arkavo-events/src/sequence_evidence.rs]
+    refs: [crates/arkavo-events/src/event.rs:1-59, crates/arkavo-events/src/payload.rs:1-74]
     changed: "2026-03-21"
 
   # ============================================================================
@@ -378,7 +378,7 @@ scenarios:
       - Gate thresholds applied from config
       - Ledger retention window set
       - Overhead budget enforced
-    refs: [crates/arkavo-protocol/src/sequence_config.rs]
+    refs: [crates/arkavo-protocol/src/agent_config.rs:1-389]
     changed: "2026-03-21"
     edge_cases:
       - condition: Sequence integrity disabled in config
@@ -400,7 +400,7 @@ scenarios:
       - High-consequence actions blocked if tracking unavailable
       - Alert sent to operator
       - Recovery attempted on next action
-    refs: [crates/arkavo-protocol/src/sequence_error.rs]
+    refs: [crates/arkavo-protocol/src/error.rs:1-87]
     changed: "2026-03-21"
     edge_cases:
       - condition: Persistent storage failure

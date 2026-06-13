@@ -606,7 +606,9 @@ fn truncate_at_sentence(text: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CRIT-016")]
     #[test]
     fn test_static_defaults_present() {
         let advisor = PromptAdvisor::new();
@@ -617,6 +619,7 @@ mod tests {
         assert!(stats.iter().any(|s| s.model_family == "qwen"));
     }
 
+    #[spec("CRIT-012")]
     #[test]
     fn test_advise_glm_simple_query() {
         let advisor = PromptAdvisor::new();
@@ -643,6 +646,7 @@ mod tests {
         assert!(!advice.system_text.is_empty());
     }
 
+    #[spec("CRIT-012")]
     #[test]
     fn test_advise_no_match() {
         let advisor = PromptAdvisor::new();
@@ -651,6 +655,7 @@ mod tests {
         assert!(advisor.advise("google", false).is_none());
     }
 
+    #[spec("CRIT-012")]
     #[test]
     fn test_advise_caps_at_800_chars() {
         let advisor = PromptAdvisor::new();
@@ -755,6 +760,7 @@ mod tests {
         assert!(!is_simple_query("refactor this module to use async"));
     }
 
+    #[spec("CRIT-012")]
     #[test]
     fn test_priority_ordering() {
         let advisor = PromptAdvisor::new();
@@ -768,6 +774,7 @@ mod tests {
         assert_eq!(advice.applied_labels[0], "glm-code-fence");
     }
 
+    #[spec("CRIT-012")]
     #[test]
     fn test_advise_excludes_non_simple_for_code_fence() {
         let advisor = PromptAdvisor::new();
@@ -794,6 +801,8 @@ mod tests {
         );
     }
 
+    #[spec("CRIT-012")]
+    #[spec("CRIT-016")]
     #[test]
     fn test_stats_snapshot() {
         let advisor = PromptAdvisor::new();
@@ -809,6 +818,7 @@ mod tests {
         assert!(!glm_applied.is_empty());
     }
 
+    #[spec("CRIT-011")]
     #[test]
     fn test_observe_detects_code_fence() {
         let advisor = PromptAdvisor::new();
@@ -821,6 +831,7 @@ mod tests {
         assert!(dynamic.label.contains("unwantedcodefence"));
     }
 
+    #[spec("CRIT-011")]
     #[test]
     fn test_observe_detects_output_loop() {
         let advisor = PromptAdvisor::new();
@@ -834,6 +845,8 @@ mod tests {
         assert!(dynamic.label.contains("outputloop"));
     }
 
+    #[spec("CRIT-011")]
+    #[spec("CRIT-015")]
     #[test]
     fn test_observe_detects_timeout() {
         let advisor = PromptAdvisor::new();
@@ -848,6 +861,7 @@ mod tests {
         assert!(!dynamic.is_static);
     }
 
+    #[spec("CRIT-011")]
     #[test]
     fn test_observe_detects_wrong_expert() {
         let advisor = PromptAdvisor::new();
@@ -873,6 +887,7 @@ mod tests {
         assert_eq!(advisor.stats().len(), initial);
     }
 
+    #[spec("CRIT-011")]
     #[test]
     fn test_observe_skips_static_family() {
         let advisor = PromptAdvisor::new();
@@ -883,6 +898,7 @@ mod tests {
         assert_eq!(advisor.stats().len(), initial);
     }
 
+    #[spec("CRIT-011")]
     #[test]
     fn test_observe_clean_response() {
         let advisor = PromptAdvisor::new();

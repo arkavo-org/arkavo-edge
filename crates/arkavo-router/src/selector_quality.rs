@@ -516,6 +516,7 @@ mod tests {
     use crate::classifier::Classification;
     use crate::learning::BurstFeedback;
     use crate::selector::ProviderAvailability;
+    use arkavo_test_macros::spec;
 
     fn gemini_only() -> ProviderAvailability {
         ProviderAvailability {
@@ -526,6 +527,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_budget_constraint() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -539,6 +541,7 @@ mod tests {
         assert!(decision.reasoning.contains("Budget constrained"));
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_uses_thompson_sampling() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -594,6 +597,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_reasoning_contains_thompson() {
         // Need both Gemini and Anthropic so feasible set has >1 model
@@ -614,6 +618,8 @@ mod tests {
         assert!(decision.reasoning.contains("Thompson Sampling"));
     }
 
+    #[spec("ROUTER-001")]
+    #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_select_adaptive_budget_excludes_cloud() {
         let selector = ModelSelector::with_availability(gemini_only());
@@ -631,6 +637,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_exclusions() {
         let selector = ModelSelector::with_availability(gemini_only());

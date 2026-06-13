@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_gemini::{FunctionDeclaration, RestClient, ToolDispatcher, ToolRegistry};
+use arkavo_test_macros::spec;
 use serde_json::json;
 
 fn api_key_or_skip(test: &str) -> Option<String> {
@@ -18,6 +19,9 @@ fn api_key_or_skip(test: &str) -> Option<String> {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-002")]
+#[spec("GEM-007")]
 #[tokio::test]
 async fn rest_generate_content_invokes_tool() {
     let Some(api_key) = api_key_or_skip("rest_generate_content_invokes_tool") else {

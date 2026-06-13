@@ -460,6 +460,7 @@ fn is_common_word(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn create_test_problem() -> ProblemStatement {
         ProblemStatement {
@@ -471,6 +472,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-008")]
     #[tokio::test]
     async fn test_extract_search_terms() {
         let router = Arc::new(Router::new().await.unwrap());
@@ -488,6 +490,7 @@ mod tests {
         assert!(terms.contains(&"password".to_string()));
     }
 
+    #[spec("ORCH-008")]
     #[tokio::test]
     async fn test_calculate_relevance() {
         let router = Arc::new(Router::new().await.unwrap());

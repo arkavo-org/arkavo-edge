@@ -140,6 +140,8 @@ scenarios:
   - id: CTX-008
     name: Calculate context offload threshold by model size
     criticality: high
+    wip: true
+    issue: "No matching implementation file exists in the codebase"
     given:
       - Model size hint provided (270M, 1B, 2B, 7B, etc.)
       - Is cloud provider flag set
@@ -168,7 +170,9 @@ scenarios:
       - Messages archived to ContextLedger
       - "[ARCHIVED: summary] pointers inserted"
       - Compressed context returned
-    refs: [crates/arkavo-context/src/ledger_chat.rs:71-120]
+    refs:
+      - crates/arkavo-hrm/src/conductor/orchestrator.rs:111-140
+      - crates/arkavo-memory/src/ledger.rs:15-28
     changed: "2025-02-05"
 
   - id: CTX-010
@@ -183,7 +187,7 @@ scenarios:
       - Archived content retrieved by ID
       - Full context reconstructed
       - Available for model processing
-    refs: [crates/arkavo-context/src/ledger_chat.rs:121-150]
+    refs: [crates/arkavo-memory/src/ledger.rs:30-37]
     changed: "2025-02-05"
 
   - id: CTX-011
@@ -211,7 +215,7 @@ scenarios:
       - Offloading skipped
       - Full context preserved
       - No [ARCHIVED] pointers added
-    refs: [crates/arkavo-context/src/ledger_chat.rs:90-100]
+    refs: [crates/arkavo-hrm/src/conductor/orchestrator.rs:117-122]
     changed: "2025-02-05"
 
   - id: CTX-013
@@ -224,7 +228,7 @@ scenarios:
       - Approximate token count returned
       - ~4 characters per token heuristic
       - Used for budget management
-    refs: [crates/arkavo-context/src/token_estimation.rs:10-30]
+    refs: [crates/arkavo-context/src/rlm_detection.rs:25-28]
     changed: "2025-02-05"
 
   - id: CTX-014

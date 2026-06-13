@@ -102,7 +102,10 @@ pub fn context_usage_percentage(content: &str, model_hint: Option<&str>, is_clou
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-016")]
+    #[spec("ROUTER-017")]
     #[test]
     fn test_check_rlm_below_threshold() {
         let content = "What is 2+2?";
@@ -110,6 +113,8 @@ mod tests {
         assert!(activation.is_none());
     }
 
+    #[spec("ROUTER-016")]
+    #[spec("ROUTER-017")]
     #[test]
     fn test_check_rlm_above_threshold() {
         // Create content that exceeds 70% of 2048 tokens (~1433 tokens)
@@ -120,6 +125,7 @@ mod tests {
         assert!(activation.unwrap().contains("context"));
     }
 
+    #[spec("ROUTER-016")]
     #[test]
     fn test_estimate_tokens() {
         let content = "Hello world"; // 11 chars
@@ -127,6 +133,7 @@ mod tests {
         assert!((2..=4).contains(&tokens));
     }
 
+    #[spec("ROUTER-017")]
     #[test]
     fn test_model_context_size_small() {
         assert_eq!(model_context_size(Some("270M"), false), 2048);
@@ -134,17 +141,21 @@ mod tests {
         assert_eq!(model_context_size(Some("7B"), false), 8192);
     }
 
+    #[spec("ROUTER-017")]
     #[test]
     fn test_model_context_size_cloud() {
         let size = model_context_size(Some("claude"), true);
         assert!(size >= 128_000);
     }
 
+    #[spec("ROUTER-017")]
     #[test]
     fn test_model_context_size_default() {
         assert_eq!(model_context_size(None, false), 4096);
     }
 
+    #[spec("ROUTER-016")]
+    #[spec("ROUTER-017")]
     #[test]
     fn test_context_usage_percentage() {
         // 100 chars = ~25 tokens, context size 4096
@@ -162,6 +173,8 @@ mod tests {
     }
 
     /// CTX-007: Verify RLM activates at exactly the 70% boundary
+    #[spec("ROUTER-016")]
+    #[spec("ROUTER-017")]
     #[test]
     fn test_rlm_exact_70_percent_boundary() {
         // Model "270M" has context_size = 2048
@@ -199,6 +212,7 @@ mod tests {
     }
 
     /// CTX-007: Unknown model names should fall back to the default context size
+    #[spec("ROUTER-017")]
     #[test]
     fn test_rlm_unknown_model_defaults() {
         let size = model_context_size(Some("totally-unknown-model-xyz"), false);

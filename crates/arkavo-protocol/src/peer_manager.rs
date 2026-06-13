@@ -223,6 +223,11 @@ impl PeerManager {
         let needs_upgrade = {
             let peers = self.peers.read().unwrap();
             if let Some(peer) = peers.get(peer_url) {
+                // Custom transports are provided externally and should not be
+                // replaced or upgraded by the peer manager.
+                if peer.transport_type == TransportType::Custom {
+                    return Ok(());
+                }
                 peer.transport_type != required_transport
             } else {
                 // Peer not connected at all
@@ -400,7 +405,11 @@ impl PeerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+    use uuid::Uuid;
 
+    #[spec("PROTO-011")]
+    #[spec("PROTO-018")]
     #[test]
     fn test_peer_manager_creation() {
         let manager = PeerManager::new("test-agent".to_string());
@@ -408,6 +417,8 @@ mod tests {
         assert_eq!(manager.peer_count(), 0);
     }
 
+    #[spec("PROTO-011")]
+    #[spec("PROTO-018")]
     #[test]
     fn test_peer_manager_with_config() {
         let config = PeerManagerConfig {
@@ -420,6 +431,7 @@ mod tests {
         assert_eq!(manager.peer_count(), 0);
     }
 
+    #[spec("PROTO-014")]
     #[test]
     fn test_is_streaming_method() {
         assert!(PeerManager::is_streaming_method("chat_stream"));
@@ -430,6 +442,8 @@ mod tests {
         assert!(!PeerManager::is_streaming_method("task_request"));
     }
 
+    #[spec("PROTO-012")]
+    #[spec("PROTO-014")]
     #[test]
     fn test_transport_selection() {
         let config = PeerManagerConfig {
@@ -460,6 +474,8 @@ mod tests {
         );
     }
 
+    #[spec("PROTO-012")]
+    #[spec("PROTO-014")]
     #[test]
     fn test_transport_selection_no_auto_upgrade() {
         let config = PeerManagerConfig {
@@ -480,6 +496,7 @@ mod tests {
         );
     }
 
+    #[spec("PROTO-013")]
     #[test]
     fn test_websocket_default_transport() {
         let config = PeerManagerConfig {
@@ -500,10 +517,132 @@ mod tests {
         );
     }
 
+    #[spec("PROTO-017")]
+    #[spec("PROTO-018")]
     #[test]
     fn test_connected_peers_empty() {
         let manager = PeerManager::new("agent".to_string());
         let peers = manager.connected_peers();
         assert!(peers.is_empty());
+    }
+
+    /// Mock transport that records requests and returns a configurable response.
+    struct MockTransport {
+        responses: std::sync::Mutex<Vec<Result<A2aResponse, anyhow::Error>>>,
+        requests: std::sync::Mutex<Vec<A2aRequest>>,
+    }
+
+    impl MockTransport {
+        fn new(responses: Vec<Result<A2aResponse, anyhow::Error>>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses),
+                requests: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn take_requests(&self) -> Vec<A2aRequest> {
+            self.requests.lock().unwrap().drain(..).collect()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl A2aTransport for MockTransport {
+        async fn connect(&self, _endpoint: &A2aEndpoint) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn send_request(&self, request: A2aRequest) -> anyhow::Result<A2aResponse> {
+            self.requests.lock().unwrap().push(request);
+            self.responses.lock().unwrap().remove(0)
+        }
+
+        async fn close(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+    }
+
+    #[spec("PROTO-015")]
+    #[tokio::test]
+    async fn test_broadcast_to_registered_peers() {
+        let manager = PeerManager::new("agent".to_string());
+
+        let peer_a = Arc::new(MockTransport::new(vec![Ok(A2aResponse::Success {
+            jsonrpc: "2.0".to_string(),
+            id: Uuid::new_v4(),
+            result: serde_json::json!({"peer": "a"}),
+        })]));
+        let peer_b = Arc::new(MockTransport::new(vec![Ok(A2aResponse::Success {
+            jsonrpc: "2.0".to_string(),
+            id: Uuid::new_v4(),
+            result: serde_json::json!({"peer": "b"}),
+        })]));
+
+        manager.register_transport("http://peer-a.example", peer_a.clone());
+        manager.register_transport("http://peer-b.example", peer_b.clone());
+
+        let results = manager
+            .broadcast("agent_query", serde_json::json!({"key": "value"}))
+            .await;
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.is_ok()));
+
+        let a_requests = peer_a.take_requests();
+        let b_requests = peer_b.take_requests();
+        assert_eq!(a_requests.len(), 1);
+        assert_eq!(b_requests.len(), 1);
+        assert_eq!(a_requests[0].method, "agent_query");
+        assert_eq!(b_requests[0].method, "agent_query");
+    }
+
+    #[spec("PROTO-016")]
+    #[tokio::test]
+    async fn test_send_to_specific_peer() {
+        let manager = PeerManager::new("agent".to_string());
+
+        let peer = Arc::new(MockTransport::new(vec![Ok(A2aResponse::Success {
+            jsonrpc: "2.0".to_string(),
+            id: Uuid::new_v4(),
+            result: serde_json::json!({"peer": "a"}),
+        })]));
+
+        manager.register_transport("http://peer-a.example", peer.clone());
+
+        let response = manager
+            .send_to(
+                "http://peer-a.example",
+                "agent_query",
+                serde_json::json!({"key": "value"}),
+            )
+            .await;
+
+        assert!(response.is_ok());
+        let requests = peer.take_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "agent_query");
+    }
+
+    #[spec("PROTO-019")]
+    #[tokio::test]
+    async fn test_connect_to_peers_empty_list() {
+        let manager = PeerManager::new("agent".to_string());
+        let result = manager.connect_to_peers(&[]).await;
+        assert!(result.is_ok());
+        assert!(!manager.has_peers());
+    }
+
+    #[spec("PROTO-019")]
+    #[tokio::test]
+    async fn test_connect_to_peers_continues_on_failure() {
+        let manager = PeerManager::new("agent".to_string());
+        // An invalid URL should fail to connect but not abort the loop.
+        let result = manager
+            .connect_to_peers(&["not-a-valid-url".to_string()])
+            .await;
+        assert!(result.is_ok());
     }
 }

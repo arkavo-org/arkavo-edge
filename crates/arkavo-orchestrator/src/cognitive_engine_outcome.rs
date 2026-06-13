@@ -124,6 +124,7 @@ pub fn record_plan_invalid(history: &Arc<AttemptHistory>, plan: &ExecutionPlan, 
 mod tests {
     use super::*;
     use crate::cognitive_engine_types::VerificationCheck;
+    use arkavo_test_macros::spec;
 
     fn passed() -> VerificationResult {
         VerificationResult {
@@ -141,6 +142,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn success_when_all_steps_done_and_verified() {
         let mut o = ExecutionOutcome::new();
@@ -149,6 +151,7 @@ mod tests {
         assert!(o.is_success(3));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn failure_when_verification_fails() {
         let mut o = ExecutionOutcome::new();
@@ -157,6 +160,7 @@ mod tests {
         assert!(!o.is_success(3));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn failure_when_steps_incomplete() {
         let mut o = ExecutionOutcome::new();
@@ -165,6 +169,7 @@ mod tests {
         assert!(!o.is_success(3));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn final_comment_success_text() {
         let mut o = ExecutionOutcome::new();
@@ -176,6 +181,7 @@ mod tests {
         assert!(c.contains("100/1000"));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn final_comment_failure_includes_count() {
         let mut o = ExecutionOutcome::new();

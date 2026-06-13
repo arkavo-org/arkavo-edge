@@ -8,6 +8,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_gemini::RestClient;
+use arkavo_test_macros::spec;
 
 fn api_key_or_skip(test: &str) -> Option<String> {
     match std::env::var("GEMINI_API_KEY") {
@@ -19,6 +20,7 @@ fn api_key_or_skip(test: &str) -> Option<String> {
     }
 }
 
+#[spec("GEM-001")]
 #[tokio::test]
 async fn lists_gemini_3_5_flash_and_streaming_methods() {
     let Some(api_key) = api_key_or_skip("lists_gemini_3_5_flash_and_streaming_methods") else {

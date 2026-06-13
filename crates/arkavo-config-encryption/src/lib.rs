@@ -204,7 +204,9 @@ impl AgentCredential {
 mod tests {
     use super::*;
     use arkavo_config_bundle::{AgentRole, BundleTarget};
+    use arkavo_test_macros::spec;
 
+    #[spec("TDFS-002")]
     #[test]
     fn test_encrypt_bundle() {
         let mut bundle = ConfigurationBundle::new(
@@ -240,6 +242,7 @@ mod tests {
         assert_eq!(encrypted.policy_manifest.dissemination.len(), 1);
     }
 
+    #[spec("TDFS-002")]
     #[test]
     fn test_decrypt_requires_kas() {
         let mut bundle = ConfigurationBundle::new(
@@ -279,6 +282,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("KAS integration"));
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_agent_credential_creation() {
         let mut attributes = HashMap::new();
@@ -290,6 +294,7 @@ mod tests {
         assert!(credential.attributes.contains_key("agent.role"));
     }
 
+    #[spec("TDFS-011")]
     #[test]
     fn test_sign_request() {
         let mut attributes = HashMap::new();
@@ -303,6 +308,7 @@ mod tests {
         assert!(!signature.is_empty());
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_has_required_attributes() {
         let mut attributes = HashMap::new();

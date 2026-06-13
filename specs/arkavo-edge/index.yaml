@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.80.0
-last_updated: 2026-06-10
+version: 0.80.1
+last_updated: 2026-06-12
 
 components:
   - name: trusted-agent
@@ -1123,8 +1123,8 @@ integration_points:
     specs: [REPO-004, CS-002]
 
   - name: Context → Router
-    description: Context compression for router prompts
-    specs: [CTX-004, ROUTER-001]
+    description: Context compression and RLM detection inform routing decisions
+    specs: [CTX-004, CTX-007, ROUTER-001, ROUTER-016, ROUTER-017]
 
   - name: Attestation → Registration
     description: Device attestation during registration
@@ -1234,10 +1234,6 @@ integration_points:
     description: CLI interactive commands use conversation manager
     specs: [CLI-008, CLI-009, CLI-012, CHAT-015]
 
-  - name: Context → Router
-    description: RLM detection informs routing decisions
-    specs: [CTX-007, ROUTER-016, ROUTER-017]
-
   - name: Repo → Context
     description: Repository context informs context decisions
     specs: [REPO-005, CTX-014, CTX-015]
@@ -1297,3 +1293,51 @@ integration_points:
   - name: Trusted Agent → Config Transport
     description: Trust chain Phase 6 delivers encrypted config over A2A
     specs: [TA-001, TA-006, CFGT-002, CFGT-003]
+
+  - name: Server → Agent
+    description: Server manages agent lifecycle and goal execution
+    specs: [SRV-007, AGENT-002]
+
+  - name: Server → Learning Bus
+    description: Server runs learning pipeline loops and feeds autolearn signals
+    specs: [SRV-004, AUTO-001]
+
+  - name: Validation → Network Security
+    description: Validation provides egress filter used by network security
+    specs: [VAL-005, NET-007]
+
+  - name: Security → Protocol
+    description: JWT and OAuth2 authentication backends secure A2A protocol transport
+    specs: [SEC-001, SEC-006, PROTO-008]
+
+  - name: MCP Traits → MCP Tools
+    description: Tools implement the trait defined by arkavo-mcp
+    specs: [MCPD-001, MCP-003]
+
+  - name: MCP Traits → MCP Runtime
+    description: Runtime executes tools defined by the MCP trait contract
+    specs: [MCPD-001, MCPR-003]
+
+  - name: Agent SDK → MCP Traits
+    description: Agent SDK discovers and registers MCP tools via the trait interface
+    specs: [CASDK-003, MCPD-001]
+
+  - name: QR Registration → Crypto
+    description: QR registration uses Ed25519 for challenge signing and verification
+    specs: [QREG-004, CRYPTO-002]
+
+  - name: KV Cache → Router
+    description: Cache slots inform context composition for routing
+    specs: [KVC-001, ROUTER-001]
+
+  - name: EvoFabric → Crypto
+    description: OpBundles are cryptographically signed with arkavo-crypto primitives
+    specs: [EVO-001, CRYPTO-002]
+
+  - name: OpenClaw → Protocol
+    description: OpenClaw translates between OpenClaw frames and A2A protocol messages
+    specs: [OCLAW-002, PROTO-001]
+
+  - name: Validation → Session Security
+    description: Validation log sanitization is used to redact session secrets and PII
+    specs: [VAL-003, SESS-010, SESS-011, SESS-012]

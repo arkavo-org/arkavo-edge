@@ -338,7 +338,9 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-006")]
     #[test]
     fn test_find_mmproj_for_model() {
         let dir = tempfile::tempdir().unwrap();
@@ -360,6 +362,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-006")]
     #[test]
     fn test_find_mmproj_none_when_absent() {
         let dir = tempfile::tempdir().unwrap();
@@ -369,6 +372,7 @@ mod tests {
         assert!(find_mmproj_for_model(&model).is_none());
     }
 
+    #[spec("ROUTER-006")]
     #[tokio::test]
     async fn test_find_gguf_model() {
         // This test will only pass if the model is already cached

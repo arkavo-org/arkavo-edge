@@ -388,7 +388,10 @@ impl ArchitectExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-002")]
+    #[spec("ROUTER-010")]
     #[test]
     fn test_model_escalation() {
         let router = futures::executor::block_on(async { Router::new().await.ok() });

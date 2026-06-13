@@ -794,8 +794,8 @@ scenarios:
       - On hit, ResolvedSkill returned with verified=true
       - On miss (id not in cache), ResolveError::RegistryMiss returned with cache_path
     refs:
-      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)
-    changed: "2026-05-08"
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs:209-235
+    changed: "2026-06-12"
 
   # --- Plane governance and flight proposal apply ---------------------------
 

@@ -849,11 +849,11 @@ impl ChatSessionManager {
             }
         }
 
-        // Mark session as zombie if it still exists (cleanup needed)
-        if let Some(session_state) = sessions.read().await.get(&session_id)
-            && session_state.state != SessionState::Closing
-            && let Some(metrics) = session_metrics.write().await.get_mut(&session_id)
-        {
+        // Mark session as zombie if metrics still exist (abnormal exit / cleanup needed).
+        // Normal closure removes the metrics before the handler exits, so a remaining
+        // metrics entry means the session channel closed unexpectedly while the session
+        // was still active.
+        if let Some(metrics) = session_metrics.write().await.get_mut(&session_id) {
             metrics.set_state(SessionState::Zombie);
             warn!("Session marked as zombie - cleanup needed");
         }
@@ -1460,11 +1460,11 @@ impl ChatSessionManager {
             }
         }
 
-        // Mark session as zombie if it wasn't properly closed
-        if let Some(session_state) = sessions.read().await.get(&session_id)
-            && session_state.state != SessionState::Closing
-            && let Some(metrics) = session_metrics.write().await.get_mut(&session_id)
-        {
+        // Mark session as zombie if metrics still exist (abnormal exit / cleanup needed).
+        // Normal closure removes the metrics before the handler exits, so a remaining
+        // metrics entry means the session channel closed unexpectedly while the session
+        // was still active.
+        if let Some(metrics) = session_metrics.write().await.get_mut(&session_id) {
             metrics.set_state(SessionState::Zombie);
             warn!("Router session marked as zombie - cleanup needed");
         }
@@ -1559,6 +1559,10 @@ fn format_tool_results(results: &[ToolExecutionResult]) -> String {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    // Mock-provider support
+    use async_trait::async_trait;
 
     #[tokio::test]
     async fn test_session_creation() {
@@ -1577,6 +1581,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-002")]
+    #[spec("CHAT-003")]
+    #[spec("CHAT-006")]
     async fn test_session_lifecycle() {
         let manager = ChatSessionManager::new(None);
         let session = manager.create_session(None).await;
@@ -1622,6 +1629,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-007")]
     async fn test_ttl_cleanup() {
         // Create manager with very short TTL for testing
         let manager = ChatSessionManager::with_config(None, None, None, 1, BufferConfig::default()); // 1 second TTL
@@ -1715,5 +1723,249 @@ mod tests {
         drop(sessions);
 
         manager.shutdown().await;
+    }
+
+    // Mock LLM provider for testing streaming/back-pressure behaviour without network calls.
+    #[derive(Clone)]
+    struct MockLlmProvider {
+        chunks: Vec<arkavo_llm::StreamResponse>,
+        error_on_stream: Option<String>,
+    }
+
+    impl MockLlmProvider {
+        fn with_text_chars(count: usize) -> Self {
+            let mut chunks = Vec::with_capacity(count);
+            for i in 0..count {
+                chunks.push(arkavo_llm::StreamResponse {
+                    content: "x".to_string(),
+                    reasoning_content: None,
+                    done: i == count - 1,
+                    inference_timing: None,
+                });
+            }
+            Self {
+                chunks,
+                error_on_stream: None,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for MockLlmProvider {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok(String::new())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn futures::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            if let Some(ref err) = self.error_on_stream {
+                return Err(arkavo_llm::Error::Stream(err.clone()));
+            }
+            let chunks = self.chunks.clone();
+            let stream = futures::stream::iter(chunks.into_iter().map(Ok));
+            Ok(Box::new(stream))
+        }
+
+        fn name(&self) -> &str {
+            "mock-llm-provider"
+        }
+    }
+
+    fn create_mock_adapter(chunk_count: usize) -> Arc<arkavo_llm::LlmClientAdapter> {
+        let provider = MockLlmProvider::with_text_chars(chunk_count);
+        let client = arkavo_llm::LlmClient::new(Box::new(provider));
+        Arc::new(arkavo_llm::LlmClientAdapter::new(client))
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-008")]
+    async fn test_get_delta_stream_active_and_missing() {
+        let adapter = create_mock_adapter(0);
+        let manager = ChatSessionManager::new(Some(adapter));
+        let session = manager.create_session(None).await;
+
+        let stream = manager.get_delta_stream(&session.session_id).await;
+        assert!(
+            stream.is_some(),
+            "Active session must expose a delta stream"
+        );
+
+        assert!(
+            manager
+                .get_delta_stream("non-existent-session")
+                .await
+                .is_none(),
+            "Missing session must not expose a delta stream"
+        );
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-004")]
+    async fn test_stream_llm_deltas_with_back_pressure() {
+        // Produce enough text chunks to exceed the 100-delta in-flight window.
+        const DELTA_COUNT: usize = 105;
+        let adapter = create_mock_adapter(DELTA_COUNT);
+
+        let mut buffers = BufferConfig::default();
+        buffers.chat_streaming_mode = ChatStreamingMode::Delta;
+
+        let manager = ChatSessionManager::with_config(Some(adapter), None, None, 3600, buffers);
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("delta stream available");
+
+        manager
+            .send_message(
+                &session_id,
+                UserMessage {
+                    content: "start".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("message accepted");
+
+        // Consume exactly the first 100 deltas; the 101st should be blocked
+        // waiting for a client acknowledgment.
+        let mut received = Vec::new();
+        for i in 0..100 {
+            let delta = tokio::time::timeout(std::time::Duration::from_secs(30), delta_rx.recv())
+                .await
+                .expect(&format!("delta {i} should arrive promptly"))
+                .expect("delta stream open");
+            received.push(delta);
+        }
+
+        // The next delta should not arrive until back-pressure is released.
+        let blocked =
+            tokio::time::timeout(std::time::Duration::from_millis(300), delta_rx.recv()).await;
+        assert!(
+            blocked.is_err(),
+            "Back-pressure must pause the stream after 100 unacknowledged deltas"
+        );
+
+        // Acknowledge half of the window and verify the stream resumes.
+        manager.process_metrics_ack(&session_id, 50).await.unwrap();
+
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), delta_rx.recv()).await
+        {
+            received.push(delta);
+        }
+
+        // 105 text deltas + 1 StreamEnd delta from the adapter.
+        assert_eq!(received.len(), DELTA_COUNT + 1);
+        assert!(
+            received
+                .iter()
+                .any(|d| matches!(d.delta, MessageDeltaContent::StreamEnd { .. }))
+        );
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-010")]
+    async fn test_session_enters_zombie_on_abnormal_exit() {
+        // Directly exercise the session handler with a channel that closes
+        // unexpectedly while metrics are still tracked.
+        let session_id = "zombie-test-session".to_string();
+        let (message_tx, message_rx) = mpsc::channel::<UserMessage>(1);
+        let (delta_tx, _delta_rx) = broadcast::channel::<MessageDelta>(16);
+
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+        let session_metrics = Arc::new(RwLock::new(HashMap::new()));
+        session_metrics
+            .write()
+            .await
+            .insert(session_id.clone(), SessionMetrics::new(session_id.clone()));
+
+        let session = ChatSession {
+            session_id: session_id.clone(),
+            capabilities: None,
+            created_at: chrono::Utc::now(),
+        };
+        let state = ChatSessionState {
+            _session: session,
+            state: SessionState::Active,
+            message_tx,
+            delta_tx: delta_tx.clone(),
+            task_manager: SessionTaskManager::new(session_id.clone()),
+            auth: None,
+            inflight_deltas: Arc::new(AtomicU64::new(0)),
+            last_acked_seq: Arc::new(AtomicU64::new(0)),
+            backpressure_notify: Arc::new(Notify::new()),
+        };
+        sessions.write().await.insert(session_id.clone(), state);
+
+        let adapter = create_mock_adapter(0);
+        let metrics_collector = MetricsCollector::new();
+        let inflight_deltas = Arc::new(AtomicU64::new(0));
+        let backpressure_notify = Arc::new(Notify::new());
+        let buffers = BufferConfig::default();
+
+        tokio::spawn(ChatSessionManager::handle_session(
+            session_id.clone(),
+            message_rx,
+            delta_tx,
+            adapter,
+            sessions.clone(),
+            session_metrics.clone(),
+            metrics_collector,
+            inflight_deltas,
+            backpressure_notify,
+            buffers,
+        ));
+
+        // Simulate abnormal cleanup: remove the session state (drops message_tx)
+        // but leave the metrics entry in place.
+        sessions.write().await.remove(&session_id);
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let metrics = session_metrics.read().await;
+        let metric = metrics
+            .get(&session_id)
+            .expect("metrics retained for zombie");
+        assert_eq!(
+            metric.state,
+            SessionState::Zombie,
+            "Session must enter zombie state when its channel closes abnormally"
+        );
+    }
+
+    #[test]
+    #[spec("CHAT-013")]
+    fn test_reject_malformed_delta_message() {
+        // Unknown delta type must fail deserialization.
+        let json = r#"{"sessionId":"s1","messageId":"m1","sequence":0,"delta":{"type":"unknown_variant"},"timestamp":"2024-01-01T00:00:00Z"}"#;
+        let result: std::result::Result<MessageDelta, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "Malformed/unknown delta payload must be rejected during deserialization"
+        );
+
+        // Missing required fields must also fail.
+        let json_missing = r#"{"sessionId":"s1","delta":{"type":"text","text":"hi"}}"#;
+        assert!(serde_json::from_str::<MessageDelta>(json_missing).is_err());
     }
 }

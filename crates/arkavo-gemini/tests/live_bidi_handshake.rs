@@ -11,6 +11,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_gemini::{LiveModality, LiveSessionClient, ToolDispatcher, ToolRegistry};
+use arkavo_test_macros::spec;
 use serde_json::json;
 use tokio::time::{Duration, timeout};
 
@@ -24,6 +25,9 @@ fn api_key_or_skip(test: &str) -> Option<String> {
     }
 }
 
+#[spec("GEM-004")]
+#[spec("GEM-007")]
+#[spec("GEM-009")]
 #[tokio::test]
 async fn live_bidi_setup_handshake() {
     let Some(api_key) = api_key_or_skip("live_bidi_setup_handshake") else {

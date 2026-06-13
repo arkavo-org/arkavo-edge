@@ -1,6 +1,7 @@
 #![allow(clippy::collection_is_never_read, clippy::disallowed_methods)]
 
 use arkavo_gemini::RestClient;
+use arkavo_test_macros::spec;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
@@ -16,6 +17,9 @@ fn should_skip_integration_tests() -> bool {
     std::env::var("GEMINI_API_KEY").is_err() || get_api_key() == "test_key"
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_safety_filter_handling() {
     if should_skip_integration_tests() {
@@ -65,6 +69,9 @@ async fn test_safety_filter_handling() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_rate_limit_backoff() {
     if should_skip_integration_tests() {
@@ -102,6 +109,8 @@ async fn test_rate_limit_backoff() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_context_window_overflow() {
     if should_skip_integration_tests() {
@@ -142,6 +151,9 @@ async fn test_context_window_overflow() {
     assert!(had_response, "Should handle large context gracefully");
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_token_limit_boundary() {
     if should_skip_integration_tests() {
@@ -190,6 +202,8 @@ async fn test_token_limit_boundary() {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_invalid_api_key_handling() {
     let client = RestClient::new("invalid_key_12345", "models/gemini-3-pro-preview");
@@ -202,6 +216,8 @@ async fn test_invalid_api_key_handling() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_network_timeout_handling() {
     if should_skip_integration_tests() {
@@ -227,6 +243,8 @@ async fn test_network_timeout_handling() {
     assert!(result.is_err(), "Should timeout appropriately");
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_empty_prompt_handling() {
     if should_skip_integration_tests() {
@@ -252,6 +270,9 @@ async fn test_empty_prompt_handling() {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_very_long_prompt() {
     if should_skip_integration_tests() {
@@ -291,6 +312,8 @@ async fn test_very_long_prompt() {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_rapid_sequential_requests() {
     if should_skip_integration_tests() {

@@ -272,7 +272,9 @@ impl TdfDecryptor for OpenTdfService {
 mod tests {
     use super::*;
     use crate::PolicyBuilder;
+    use arkavo_test_macros::spec;
 
+    #[spec("TDFS-001")]
     #[tokio::test]
     async fn encrypt_basic() {
         let service = OpenTdfService::with_kas_url("https://kas.example.com");
@@ -293,6 +295,7 @@ mod tests {
         assert!(!manifest.payload.value.is_empty());
     }
 
+    #[spec("TDFS-001")]
     #[tokio::test]
     async fn encrypt_with_dissemination() {
         let service = OpenTdfService::with_kas_url("https://kas.example.com");
@@ -308,6 +311,7 @@ mod tests {
         assert!(!manifest.encryption_information.key_access.is_empty());
     }
 
+    #[spec("TDFS-001")]
     #[tokio::test]
     async fn encrypt_stream() {
         use std::io::Cursor;
@@ -326,6 +330,7 @@ mod tests {
         assert!(!manifest.payload.value.is_empty());
     }
 
+    #[spec("TDFS-003")]
     #[tokio::test]
     async fn manifest_serialization() {
         let service = OpenTdfService::with_kas_url("https://kas.example.com");
