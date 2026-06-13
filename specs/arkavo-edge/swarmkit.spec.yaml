@@ -2,7 +2,7 @@
 
 feature: SwarmKit Manifest, Runtime, and Gateway Integration
 module: arkavo_swarmkit
-version: 0.73.0
+version: 0.74.0
 
 invariants:
   - SwarmKit manifest is parser+validator only — no runtime side effects
@@ -20,6 +20,13 @@ invariants:
   - Skill resolution is eager at SwarmFlight::launch when LaunchOptions.resolver_config is Some
   - Inline skill payloads are deserialized into typed SkillContent before signature verification
   - ed25519 signature is computed over BLAKE3 of JCS-canonical SkillContent bytes (matches kit.id canonicalization)
+  - Kit MAY declare top-level mcp_servers — a registry of {name, command, args, transport} entries roles reference by name
+  - Every roles[].mcp_tools[].server MUST resolve to a declared mcp_servers[].name or validation fails (ValidationError::UnknownMcpServer)
+  - mcp_servers command/args MAY contain ${VAR} placeholders expanded by the runtime at launch, not at parse time (keeps kit.id stable)
+  - mcp_servers is part of the canonical manifest and therefore covered by kit.id
+  - A role with a non-empty mcp_tools grant is a live/orchestrator role that drives an MCP tool loop (observe→act) terminated by completion.rules; a role with no grants is advisory
+  - coordination.topology=hub-spoke with exactly one live role is the canonical embodied-agent-plus-advisors pattern
+  - A conformant runtime MAY realize a kit as a one-shot deliverable flight OR as a live MCP tool loop; arkavo swarmkit play is the reference for the live loop
 
 scenarios:
   # --- Manifest layer (arkavo-swarmkit) -----------------------------------
@@ -839,3 +846,51 @@ scenarios:
       - A converged flight reconciles to a no-op
     refs: [crates/arkavo-swarmkit-runtime/src/flight_apply.rs, crates/arkavo-swarmkit-runtime/tests/flight_proposal_apply.rs]
     changed: "2026-06-10"
+
+  # --- MCP server registry + interactive/live-role semantics ----------------
+
+  - id: SK-096
+    name: Validate rejects a role grant referencing an undeclared mcp server
+    criticality: critical
+    given:
+      - Manifest with a role whose mcp_tools[].server names a server not present in top-level mcp_servers
+    when: validate called
+    then:
+      - Returns ValidationError::UnknownMcpServer { role, server }
+      - Error Display contains "unknown mcp server '<name>' referenced by role '<id>'"
+    refs:
+      - crates/arkavo-swarmkit/src/validate.rs
+      - crates/arkavo-swarmkit/src/mcp.rs
+      - crates/arkavo-swarmkit/tests/fixtures/undeclared_mcp_server.yaml
+    changed: "2026-06-12"
+
+  - id: SK-097
+    name: Kit declares an mcp server and a role resolves it
+    criticality: high
+    given:
+      - Manifest with top-level mcp_servers [{name game-rl, command ${GAME_RL_SERVER}, transport stdio}]
+      - A role with mcp_tools [{server game-rl, tools [...], auth none}]
+    when: validate called
+    then:
+      - Validation succeeds (the grant resolves to the declared server)
+      - mcp_servers is included in the canonical form, so kit.id covers it
+    refs:
+      - crates/arkavo-swarmkit/src/manifest.rs
+      - crates/arkavo-swarmkit/tests/fixtures/declared_mcp_server.yaml
+      - examples/zomboid-survival-kit/zomboid-survival-kit.swarmkit.yaml
+    changed: "2026-06-12"
+
+  - id: SK-098
+    name: A kit runs as a live MCP tool loop via the agent runtime
+    criticality: high
+    given:
+      - A validated kit with a single live role (non-empty mcp_tools) and advisor roles, topology hub-spoke
+    when: arkavo swarmkit play <kit> is invoked
+    then:
+      - Each role maps to an AgentConfig; the live role's mcp_tools grants resolve to mcp_servers connections
+      - The live role connects to the declared MCP server and drives an observe→act loop terminated by completion.rules
+      - Advisor roles run advisory loops and exchange A2A recommendations with the live role
+    refs:
+      - crates/arkavo-cli/src/commands/swarmkit.rs
+      - examples/zomboid-survival-kit/README.md
+    changed: "2026-06-12"

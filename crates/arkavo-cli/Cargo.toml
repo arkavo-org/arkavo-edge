@@ -48,6 +48,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-session = { path = "../arkavo-session" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-repo = { path = "../arkavo-repo" }

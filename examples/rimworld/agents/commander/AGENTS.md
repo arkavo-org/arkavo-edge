@@ -26,17 +26,17 @@ purpose: |
     | "Major break risk"       | step Action={"Type":"SetSpeed","Speed":0}    (pause; manual intervention)                    |
     | "Minor break risk"       | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
     | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
-    | "UnderAttack"            | step Action={"Type":"SetSpeed","Speed":0}    then next cycle Draft a colonist                |
-    | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"MapCenter","Count":5}  |
-    | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"MapCenter","Count":3}       |
-    | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"MapCenter","Size":"Medium"}      |
+    | "UnderAttack"            | step Action={"Type":"DefendColony"}                                                           |
+    | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"ColonyCenter","Count":5}|
+    | "Need colonist beds"     | step Action={"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks","Furnish":"Bed:3"} |
+    | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"ColonyCenter","Size":"Medium","AllowFallback":true}|
     | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
     | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
     | "Need doctor"            | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Doctor","Priority":1}|
-    | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"MapCenter","Count":1}|
+    | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"ColonyCenter","Count":1}|
     | "Need research project"  | step Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}                           |
-    | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"MapCenter","Count":4}      |
-    | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"Chess","Near":"MapCenter","Count":1}     |
+    | "Pen needed"             | step Action={"Type":"BuildRoom","Width":8,"Height":8,"Door":"S","Label":"pen"}               |
+    | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"ChessTable","Near":"ColonyCenter","Count":1}|
     | "colonist idle" / "colonists idle" | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Construction","Priority":1}|
     | (no alerts present)      | step Action={"Type":"SetSpeed","Speed":2}                                                    |
 
@@ -55,6 +55,31 @@ purpose: |
            cannot recover (eat, work, sleep) while paused. Never pause two
            cycles in a row. Never call observe twice in a row either —
            prefer an action.
+
+  RULE 8 — Spatial anchors. Valid Near values: "ColonyCenter" (preferred),
+           a building/zone id from observations, "Room_1" (rooms you built),
+           "FertileCluster_0" (best farmland), "Region_N".."Region_NW",
+           coordinates "(x,z)", or "MapCenter" (last resort). If a spatial
+           action errors, the error message lists feasible alternative
+           anchors — use one of them next cycle.
+           Farms: prefer "FertileCluster_0"; "AllowFallback":true lets the
+           game relocate to good soil and reports where it went.
+
+  RULE 9 — Build STRUCTURES, not wall spam. Buildings live in rooms:
+           1. step {"Type":"BuildRoom","Width":9,"Height":6,"Door":"S","Label":"barracks","Furnish":"Bed:3"}
+              → builds the room AND places the furniture in one action.
+              Furnish format: "<Building>:<count>", e.g. "Bed:3", "ChessTable:1".
+           2. Add more later: step {"Type":"PlaceBuildingNear","Building":"Bed","Count":2,"Inside":"Room_1"}
+           3. Verify: step {"Type":"RenderMap","Near":"Room_1","Radius":14} with Ticks=0
+              — an ASCII map (N=up, # wall, D door, B bed, P colonist) with
+              coordinate rulers; coordinates you read off it work as Near
+              anchors. Check the door is reachable and beds are inside.
+           NEVER place loose Wall buildings to make enclosures — use
+           BuildRoom. RenderMap is free (no time advance): use it before
+           and after building decisions.
+           BuildRoom REFUSES to build while an earlier room is still empty
+           — its error message contains the exact furnish action to run
+           next cycle. Never build two rooms in a row.
 
   RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
            episodeSummary() this cycle or last cycle AND its TotalReward
@@ -101,5 +126,5 @@ a2a:
 
 mcp_servers:
   - name: game-rl
-    command: /Users/arkavo/Projects/intelligence/game-rl/target/release/game-rl-server
+    command: ${GAME_RL_SERVER}
     args: []

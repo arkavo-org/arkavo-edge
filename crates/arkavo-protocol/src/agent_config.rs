@@ -66,6 +66,34 @@ pub struct McpServerConfig {
     pub url: Option<String>,
 }
 
+/// Expand `${VAR}` references from the process environment.
+///
+/// Unset variables are left literal so the misconfiguration stays visible in
+/// downstream errors instead of silently collapsing to an empty string.
+pub fn expand_env(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        match rest[start + 2..].find('}') {
+            Some(end) => {
+                let var = &rest[start + 2..start + 2 + end];
+                match std::env::var(var) {
+                    Ok(value) => out.push_str(&value),
+                    Err(_) => out.push_str(&rest[start..=start + 2 + end]),
+                }
+                rest = &rest[start + 2 + end + 1..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Parse AGENTS.md configuration content
 pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
     let mut agents = Vec::new();
@@ -150,14 +178,13 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             && let Some(server) = current_mcp_server.as_mut()
         {
             if trimmed.starts_with("command:") {
-                server.command = Some(
+                server.command = Some(expand_env(
                     trimmed
                         .strip_prefix("command:")
                         .unwrap_or("")
                         .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
+                        .trim_matches('"'),
+                ));
             } else if trimmed.starts_with("args:") {
                 // Parse array format: ["arg1", "arg2"]
                 let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
@@ -165,19 +192,18 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     let args_content = &args_str[1..args_str.len() - 1];
                     server.args = args_content
                         .split(',')
-                        .map(|s| s.trim().trim_matches('"').to_string())
+                        .map(|s| expand_env(s.trim().trim_matches('"')))
                         .filter(|s| !s.is_empty())
                         .collect();
                 }
             } else if trimmed.starts_with("url:") {
-                server.url = Some(
+                server.url = Some(expand_env(
                     trimmed
                         .strip_prefix("url:")
                         .unwrap_or("")
                         .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
+                        .trim_matches('"'),
+                ));
             } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
             {
                 // End of MCP section
@@ -391,6 +417,59 @@ pub fn parse_runtime_config(content: &str) -> RuntimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_expand_env_substitutes_set_variables() {
+        unsafe {
+            std::env::set_var("ARKAVO_TEST_EXPAND_SET", "/opt/bin/game-rl-server");
+        }
+        assert_eq!(
+            expand_env("${ARKAVO_TEST_EXPAND_SET}"),
+            "/opt/bin/game-rl-server"
+        );
+        assert_eq!(
+            expand_env("prefix-${ARKAVO_TEST_EXPAND_SET}-suffix"),
+            "prefix-/opt/bin/game-rl-server-suffix"
+        );
+    }
+
+    #[test]
+    fn test_expand_env_leaves_unset_variables_literal() {
+        // Unset vars stay literal so misconfiguration is visible downstream
+        assert_eq!(
+            expand_env("${ARKAVO_TEST_EXPAND_DEFINITELY_UNSET}"),
+            "${ARKAVO_TEST_EXPAND_DEFINITELY_UNSET}"
+        );
+        assert_eq!(expand_env("no variables here"), "no variables here");
+        assert_eq!(expand_env("dangling ${unclosed"), "dangling ${unclosed");
+    }
+
+    #[test]
+    fn test_mcp_server_config_expands_env_in_command_args_url() {
+        unsafe {
+            std::env::set_var("ARKAVO_TEST_GAME_RL_BIN", "/tmp/game-rl-server");
+            std::env::set_var("ARKAVO_TEST_GAME_RL_PORT", "8182");
+        }
+        let content = r#"
+## commander
+
+purpose: "test agent"
+mcp_servers:
+  - name: game-rl
+    command: ${ARKAVO_TEST_GAME_RL_BIN}
+    args: ["--scenario", "${ARKAVO_TEST_UNSET_SCENARIO}"]
+  - name: remote
+    url: "http://localhost:${ARKAVO_TEST_GAME_RL_PORT}"
+"#;
+        let agents = parse_agents_config(content).unwrap();
+        assert_eq!(agents.len(), 1);
+        let servers = &agents[0].mcp_servers;
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].command.as_deref(), Some("/tmp/game-rl-server"));
+        assert_eq!(servers[0].args[0], "--scenario");
+        assert_eq!(servers[0].args[1], "${ARKAVO_TEST_UNSET_SCENARIO}");
+        assert_eq!(servers[1].url.as_deref(), Some("http://localhost:8182"));
+    }
 
     #[test]
     fn test_parse_workspace_paths_relative() {
