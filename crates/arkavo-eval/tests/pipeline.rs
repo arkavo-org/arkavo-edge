@@ -147,4 +147,6 @@ async fn regression_when_output_diverges() {
     )
     .await;
     assert!(matches!(reg.status, TypedStatus::RegressionFailed { .. }));
+    // A regression must never record a new baseline.
+    assert!(reg.published.is_none());
 }
