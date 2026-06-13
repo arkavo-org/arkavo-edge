@@ -343,6 +343,7 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
 
     const MIN_DOC: &str = r#"{
         "arp_spec": "0.1.0",
@@ -610,5 +611,43 @@ mod tests {
             .proposal_state("observed-then-confirmed")
             .unwrap();
         assert_eq!(state, ProposalState::Confirmed);
+    }
+
+    #[spec("ARP-009")]
+    #[tokio::test]
+    async fn provenance_tracking_exposes_live_distilled_split() {
+        use arkavo_arp::model::BetaPrior;
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.adaptation.prior_management = Some(arkavo_arp::adaptation::PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(arkavo_arp::adaptation::DistilledDecay {
+                strategy: arkavo_arp::adaptation::DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: Some(0.05),
+                floor: Some(0.0),
+            }),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        // Seed distilled mass for a tool.
+        rt.adaptation().lock().await.seed_distilled(
+            "tool_x",
+            BetaPrior {
+                alpha: 4.0,
+                beta: 1.0,
+            },
+        );
+
+        // Record live outcomes.
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+
+        let snapshot = rt.adaptation().lock().await.snapshot();
+        let entry = snapshot.iter().find(|e| e.id == "tool_x").unwrap();
+        assert!(entry.live_alpha > 0.0);
+        assert!(entry.distilled_alpha.unwrap_or(0.0) > 0.0);
+        assert!(entry.distilled_weight.unwrap_or(1.0) < 1.0);
     }
 }
