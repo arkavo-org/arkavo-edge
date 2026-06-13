@@ -10,7 +10,6 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 blake3 = "1.5"
 torg-core = { workspace = true }
-tracing = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", optional = true }
 
 [features]
