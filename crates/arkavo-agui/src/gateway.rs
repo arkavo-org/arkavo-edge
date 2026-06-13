@@ -451,6 +451,11 @@ impl AgUiGateway {
         // Rate-limited API routes
         let api_routes = Router::new()
             .route("/ws", get(crate::gateway_ws::websocket_handler))
+            .route("/api/agent", post(crate::gateway_agent::run_agent_handler))
+            .route(
+                "/api/agent/capabilities",
+                get(crate::gateway_agent::capabilities_handler),
+            )
             .route(
                 "/agent/:id",
                 post(crate::gateway_proxy::agent_proxy_handler),

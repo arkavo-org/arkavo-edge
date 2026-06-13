@@ -119,3 +119,20 @@ scenarios:
       - No auto-apply field exists on the type
     refs: [crates/arkavo-arp/src/capability.rs]
     changed: "2026-06-10"
+
+  - id: ARP-009
+    name: Provenance tracking keeps live and distilled prior mass separate
+    criticality: high
+    given:
+      - ARP document with prior_management.provenance_tracking true
+      - Distilled decay strategy live_displacement with displacement_factor and floor
+    when: AdaptationEngine seeds distilled mass then records live outcomes
+    then:
+      - Effective prior samples live mass plus decayed distilled mass
+      - Snapshot exposes live_alpha/beta and distilled_alpha/beta split
+      - Distilled weight decays as live observations accumulate
+      - BetaPrior wire format remains unchanged
+    refs:
+      - crates/arkavo-arp/src/adaptation.rs
+      - crates/arkavo-adaptation/src/lib.rs
+    changed: "2026-06-12"

@@ -28,6 +28,7 @@ use arkavo_arp::model::BetaPrior;
 use arkavo_arp::observability::{
     DecisionTraceConfig, SelectionMethod, TraceDecision, TraceEventType, TraceLayer, TraceOutcome,
 };
+use arkavo_arp::proposal::ProposalState;
 use arkavo_observability::decision_trace::DecisionTrace;
 use arkavo_policy_cache::{PolicyCache, PolicySource};
 pub use proposal_queue::ProposalQueue;
@@ -146,6 +147,19 @@ impl ArpRuntime {
         self.decision_trace.clone()
     }
 
+    /// Advance proposal observation windows and return the transitions made.
+    ///
+    /// This is exposed so callers can drive evaluation from a periodic tick in
+    /// addition to the implicit evaluation that happens on every recorded tool
+    /// outcome (see [`record_tool_outcome_with`]).
+    pub async fn evaluate_observations_at(
+        &self,
+        now_epoch_sec: u64,
+    ) -> Vec<(String, ProposalState)> {
+        let mut queue = self.proposals.lock().await;
+        queue.evaluate_observations(now_epoch_sec)
+    }
+
     /// Quality threshold below which an outcome is treated as a failure
     /// when updating priors and the cache.
     pub fn quality_threshold(&self) -> f64 {
@@ -188,6 +202,11 @@ impl ArpRuntime {
                 .threshold_default;
             let above = q >= threshold;
             queue.record_quality_gate(above);
+            // Advance observation windows on every outcome. This wires the
+            // propose → applied → observed → confirmed | reverted lifecycle
+            // into the conductor's hot path (see #620).
+            let now = chrono::Utc::now().timestamp() as u64;
+            queue.evaluate_observations(now);
             above
         };
         let effective_success = success && above_gate;
@@ -324,6 +343,7 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
 
     const MIN_DOC: &str = r#"{
         "arp_spec": "0.1.0",
@@ -528,5 +548,106 @@ mod tests {
             entries[0].outcome.error_type.as_deref(),
             Some("connection_refused")
         );
+    }
+
+    #[tokio::test]
+    async fn record_tool_outcome_evaluates_observation_windows() {
+        use arkavo_arp::proposal::{
+            BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal,
+            TraceRef,
+        };
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.proposal_policy = Some(arkavo_arp::proposal::ProposalPolicy {
+            accepted_origins: vec![ProposalOrigin::Consolidation],
+            auto_apply_max_blast_radius: BlastRadius::SingleEntity,
+            review: None,
+            // Use a long window so the implicit evaluation during
+            // record_tool_outcome_with (real time) does not close it early.
+            observation_window_sec: Some(10_000_000_000),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        let state = rt.proposal_queue().lock().await.ingest(
+            TighteningProposal {
+                id: "observed-then-confirmed".into(),
+                origin: ProposalOrigin::Consolidation,
+                state: ProposalState::Proposed,
+                effect: TighteningEffect::RaiseQualityGateThreshold { new_threshold: 0.8 },
+                rationale: "tighten gate".into(),
+                blast_radius: BlastRadius::SingleEntity,
+                evidence: vec![TraceRef {
+                    trace_id: "t-1".into(),
+                    episode_ids: vec![],
+                }],
+                created_at: "2026-06-10T00:00:00Z".into(),
+                applied_at: None,
+                reviewed_by: None,
+                disposition_reason: None,
+            },
+            1_000,
+        );
+        assert_eq!(state, ProposalState::Observed);
+
+        // Record an outcome inside the window; the proposal should stay observed.
+        rt.record_tool_outcome_with("tool_x", true, 0.9, &ToolOutcomeContext::default())
+            .await;
+        let state = rt
+            .proposal_queue()
+            .lock()
+            .await
+            .proposal_state("observed-then-confirmed")
+            .unwrap();
+        assert_eq!(state, ProposalState::Observed);
+
+        // Advance past the window and trigger another evaluation.
+        let transitions = rt.evaluate_observations_at(10_000_001_000).await;
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].1, ProposalState::Confirmed);
+
+        let state = rt
+            .proposal_queue()
+            .lock()
+            .await
+            .proposal_state("observed-then-confirmed")
+            .unwrap();
+        assert_eq!(state, ProposalState::Confirmed);
+    }
+
+    #[spec("ARP-009")]
+    #[tokio::test]
+    async fn provenance_tracking_exposes_live_distilled_split() {
+        use arkavo_arp::model::BetaPrior;
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.adaptation.prior_management = Some(arkavo_arp::adaptation::PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(arkavo_arp::adaptation::DistilledDecay {
+                strategy: arkavo_arp::adaptation::DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: Some(0.05),
+                floor: Some(0.0),
+            }),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        // Seed distilled mass for a tool.
+        rt.adaptation().lock().await.seed_distilled(
+            "tool_x",
+            BetaPrior {
+                alpha: 4.0,
+                beta: 1.0,
+            },
+        );
+
+        // Record live outcomes.
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+
+        let snapshot = rt.adaptation().lock().await.snapshot();
+        let entry = snapshot.iter().find(|e| e.id == "tool_x").unwrap();
+        assert!(entry.live_alpha > 0.0);
+        assert!(entry.distilled_alpha.unwrap_or(0.0) > 0.0);
+        assert!(entry.distilled_weight.unwrap_or(1.0) < 1.0);
     }
 }

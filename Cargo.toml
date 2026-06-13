@@ -23,6 +23,7 @@ members = [
     "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
+    "crates/arkavo-agui-protocol",
     "crates/arkavo-observability",
     "crates/arkavo-budget",
     "crates/arkavo-router",
@@ -107,6 +108,7 @@ default-members = [
     "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
     "crates/arkavo-agui",
+    "crates/arkavo-agui-protocol",
     "crates/arkavo-observability",
     "crates/arkavo-budget",
     "crates/arkavo-router",
@@ -151,7 +153,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.80.1"
+version = "0.81.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
