@@ -59,7 +59,7 @@ impl RunEvalTool {
             schema: ToolSchema {
                 name: "run_eval".to_string(),
                 aliases: None,
-                description: "Run the local-model evaluation suite on a model and return a pass/regression verdict versus the recorded baseline. Use to gate PRs that change model behavior. Args: model (name), baseline_ref (label the baseline is keyed under, e.g. a git ref; default 'main'), update_baseline (record this run as the new baseline).".to_string(),
+                description: "Run the local-model evaluation suite on a model and return a pass/regression verdict versus the recorded baseline. Use to gate PRs that change model behavior. The result includes `check_conclusion` (GitHub Check Run conclusion: success/failure/neutral/action_required, or null to skip posting) and `summary` — after running, post these to the PR (a GitHub Check Run on the head SHA, or a PR comment) using your configured GitHub MCP tool. Args: model (name), baseline_ref (label the baseline is keyed under, e.g. a git ref; default 'main'), update_baseline (record this run as the new baseline).".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -141,7 +141,7 @@ impl Tool for RunEvalTool {
             .map(|o| json!({ "id": o.id, "text": o.text, "tok_s": o.tok_s }))
             .collect();
 
-        let (status, recorded) = match (&existing, update_baseline) {
+        let (typed_status, recorded) = match (&existing, update_baseline) {
             (None, _) | (Some(_), true) => {
                 let new_baseline = Baseline {
                     outputs: run
@@ -159,24 +159,24 @@ impl Tool for RunEvalTool {
                     .publish(baseline_ref, model, &new_baseline)
                     .await
                     .map_err(|e| ToolError::Execution(format!("run_eval baseline publish: {e}")))?;
-                ("baseline_bootstrapped".to_string(), true)
+                (crate::status::TypedStatus::BaselineBootstrapped, true)
             }
             (Some(base), false) => {
                 let verdict = assess(self.state.embedder.as_ref(), &run.outputs, base, 0.87, 0.95)
                     .await
                     .map_err(|e| ToolError::Execution(format!("run_eval verdict: {e}")))?;
-                (verdict_kind(&verdict), false)
+                (verdict, false)
             }
         };
 
-        Ok(json!({
-            "model": model,
-            "baseline_ref": baseline_ref,
-            "status": status,
-            "baseline_recorded": recorded,
-            "mean_tok_s": mean_tok_s,
-            "outputs": outputs_json,
-        }))
+        Ok(eval_result(
+            model,
+            baseline_ref,
+            &typed_status,
+            recorded,
+            mean_tok_s,
+            outputs_json,
+        ))
     }
 }
 
@@ -185,6 +185,31 @@ fn verdict_kind(status: &crate::status::TypedStatus) -> String {
         .ok()
         .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(String::from))
         .unwrap_or_else(|| "unknown".into())
+}
+
+/// Shape the tool's JSON result. Surfaces the GitHub Check Run `conclusion`
+/// (`success`/`failure`/`neutral`/`action_required`, or null to skip posting)
+/// and a one-line `summary`, so the agent can post the verdict to GitHub via
+/// its configured Check Run / PR-comment MCP tool without re-deriving the
+/// status→conclusion mapping.
+fn eval_result(
+    model: &str,
+    baseline_ref: &str,
+    status: &crate::status::TypedStatus,
+    recorded: bool,
+    mean_tok_s: f64,
+    outputs: Vec<Value>,
+) -> Value {
+    json!({
+        "model": model,
+        "baseline_ref": baseline_ref,
+        "status": verdict_kind(status),
+        "check_conclusion": status.check_conclusion(),
+        "summary": status.summary(),
+        "baseline_recorded": recorded,
+        "mean_tok_s": mean_tok_s,
+        "outputs": outputs,
+    })
 }
 
 /// Register the eval tools into a ToolRegistry (codebase pattern).
@@ -230,6 +255,48 @@ mod tests {
             }
             Ok(v)
         }
+    }
+
+    #[test]
+    fn result_surfaces_github_check_conclusion_and_summary() {
+        use crate::status::TypedStatus;
+
+        let reg = eval_result(
+            "m",
+            "main",
+            &TypedStatus::RegressionFailed {
+                metric: "similarity".into(),
+                value: 0.5,
+                threshold: 0.87,
+            },
+            false,
+            12.0,
+            vec![],
+        );
+        assert_eq!(reg["status"], "regression_failed");
+        assert_eq!(reg["check_conclusion"], "failure");
+        assert!(reg["summary"].as_str().unwrap().contains("Regression"));
+        assert_eq!(reg["baseline_recorded"], false);
+
+        let boot = eval_result(
+            "m",
+            "main",
+            &TypedStatus::BaselineBootstrapped,
+            true,
+            12.0,
+            vec![],
+        );
+        assert_eq!(boot["status"], "baseline_bootstrapped");
+        assert_eq!(boot["check_conclusion"], "neutral");
+        assert_eq!(boot["baseline_recorded"], true);
+
+        let pass = eval_result("m", "main", &TypedStatus::Passed, false, 30.0, vec![]);
+        assert_eq!(pass["check_conclusion"], "success");
+        assert_eq!(pass["mean_tok_s"], 30.0);
+
+        // Skipped posts no check: conclusion must be JSON null.
+        let skip = eval_result("m", "main", &TypedStatus::Skipped, false, 0.0, vec![]);
+        assert!(skip["check_conclusion"].is_null());
     }
 
     #[tokio::test]
