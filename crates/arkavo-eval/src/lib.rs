@@ -14,6 +14,11 @@ pub mod plan;
 pub mod status;
 pub mod verdict;
 
+#[cfg(feature = "mcp-tool")]
+pub mod tool;
+#[cfg(feature = "mcp-tool")]
+pub use tool::{register_tools, EvalState};
+
 use baseline::{BaselinePointer, BaselineStore};
 use contract::EvalContract;
 use gate::{evaluate_gate, Preconditions};
