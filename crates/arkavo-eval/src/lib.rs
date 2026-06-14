@@ -1,6 +1,10 @@
 //! Local-model evaluation pipeline: resolves an eval contract, gates on
 //! preconditions, runs the model, and produces a typed regression verdict.
 
+// Inline `#[tokio::test]` unit tests expand to Runtime::block_on, which
+// `.clippy.toml` disallows in lib/bin code; allow it only under `cfg(test)`.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
+
 pub mod baseline;
 pub mod baseline_file;
 pub mod contract;

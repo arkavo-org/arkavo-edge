@@ -1,3 +1,6 @@
+// #[tokio::test] expands to Runtime::block_on, which .clippy.toml disallows in lib/bin code.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_eval::baseline::MemBaselineStore;
 use arkavo_eval::contract::*;
 use arkavo_eval::gate::Preconditions;
