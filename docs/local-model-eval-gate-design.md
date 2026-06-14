@@ -301,6 +301,46 @@ embedding model is deterministic.
 - The pipeline runs as a single-node `SwarmFlight` on the Mac swarm member with weights from the
   HF cache; weight-iroh/attestation seams exist but are not required for the gate to function.
 
+## Implementation status (as built)
+
+What this PR delivers, and what stays gated on user-provisioned infrastructure. The seams are
+intentionally clean so activation is configuration, not a rewrite.
+
+Built, tested, and active by default:
+
+- The eval engine (`arkavo-eval`): contract, TØR-G pre-flight gate, plan, `LlamaOperator`,
+  similarity+throughput verdict, typed status taxonomy, and `b3:<hex>` digesting.
+- The `run_eval` MCP tool, registered into the autonomous agent loop. It resolves a model from
+  the HF cache, runs the prompt-set, and returns a verdict whose JSON includes `check_conclusion`
+  (the GitHub Check Run conclusion) and a one-line `summary`.
+- A **discriminating** verdict: the default embedder is `LexicalEmbedder` (word-token + char-trigram
+  feature hash, deterministic, pure-Rust, no ONNX) — used consistently by the agent, the one-shot
+  CLI command, and the live integration test. It replaces the char-frequency embedder that rated
+  unrelated short answers as similar.
+- Real tokens/sec: `LlamaOperator` measures wall-clock around generation and falls back to it
+  (over the engine's `n_eval`, or a token estimate) so the throughput gate is never silently zero.
+- `TdfBaselineStore<S, T>` — the trusted baseline store: each baseline is TDF-encrypted, staged on
+  a content-addressed `BlobTransport`, addressed by `b3:<hex>`, keyed by commit, with a BLAKE3
+  integrity check on fetch. Generic over the TDF service and transport; round-trip, tamper-detection,
+  and pointer-persistence are tested end-to-end with the XOR mock TDF service + in-memory transport
+  (no KAS). The default store remains `FileBaselineStore`, so the gate is fully functional locally.
+
+Deployment activation (code-complete, gated on user-provisioned infra):
+
+- **Trusted baseline distribution.** Enable the server's `iroh` feature and the `arkavo-tdf`
+  `opentdf` feature, provision a key path (a KAS, or an `a2a` capability token between swarm
+  identities) authorized to decrypt baselines, then construct
+  `TdfBaselineStore<OpenTdfService, IrohTransport>` and inject it as `EvalState.baselines` (an
+  `Arc<dyn BaselineStore>` — the seam already accepts it). TDF *encrypt* and iroh *stage* need no
+  KAS; only cross-agent *decrypt* does, which is why this stays deployment-gated. Confirm
+  `opentdf-rs`/`iroh` build rustls-only and musl-safe before turning it on in CI.
+- **Posting the verdict to GitHub.** By design, agent-loop tools come only from configured MCP
+  servers (this keeps small models' tool sets focused). Configure a GitHub MCP server (with
+  check-run / PR-comment tools) in the swarm member's `AGENTS.md`; the LLM then orchestrates
+  `run_eval` → post, using the `check_conclusion`/`summary` fields directly. A dedicated GitHub
+  identity with Check-Run write permission and a required-check branch-protection rule are one-time
+  org settings.
+
 ## Open risks
 
 - First-run baseline bootstrapping across many repos org-wide could generate noise; mitigated by
