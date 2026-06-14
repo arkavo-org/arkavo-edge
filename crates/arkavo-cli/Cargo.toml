@@ -37,6 +37,7 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
+eval-tool = ["arkavo-server/eval-tool"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }

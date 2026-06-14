@@ -1,0 +1,14 @@
+{
+  "contract_id": "eval/gemma-4-12b/local",
+  "task_kind": "model_eval",
+  "model": { "name": "gemma-4-12b", "quant": "Q4_K_M", "weight_digest": "b3:0000000000000000000000000000000000000000000000000000000000000000" },
+  "baseline": { "kind": "reference_outputs", "commit": "local", "digest": null },
+  "prompts": [
+    { "id": "capital", "messages": [ { "role": "user", "content": "Capital of France? One word." } ] }
+  ],
+  "acceptance": { "min_similarity": 0.87, "min_tok_s_ratio": 0.95 },
+  "execution": { "seed": 0, "temperature": 0.0, "max_tokens": 16 },
+  "preconditions": ["weights_present", "baseline_present"],
+  "policy_circuit": "torg:eval-preflight-v1",
+  "on_precondition_unmet": "refuse"
+}

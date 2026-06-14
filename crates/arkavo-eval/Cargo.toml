@@ -1,0 +1,35 @@
+[package]
+name = "arkavo-eval"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "Local-model evaluation pipeline for Arkavo (eval contract, gate, verdict)"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+blake3 = "1.5"
+torg-core = { workspace = true }
+arkavo-memory = { path = "../arkavo-memory", optional = true }
+arkavo-llm = { path = "../arkavo-llm", optional = true }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
+arkavo-tdf = { path = "../arkavo-tdf", optional = true }
+
+[features]
+default = []
+embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
+# Trusted baseline store: TDF-encrypted, content-addressed over a blob transport.
+tdf-baselines = ["dep:arkavo-tdf"]
+# Real Operator backed by arkavo-llm's llama.cpp provider.
+llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
+# The default tool path uses the discriminating LexicalEmbedder (word tokens + char trigrams, no ONNX/ort).
+# The semantic MemoryEmbedder is a separate opt-in via the `embeddings` feature,
+# kept out of mcp-tool because ort's onnxruntime prebuilt fails to link on some
+# CI targets (glibc __isoc23_* symbols).
+mcp-tool = ["dep:arkavo-mcp-tools", "llama-cpp"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["testing"] }

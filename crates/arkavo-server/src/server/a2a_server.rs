@@ -1368,6 +1368,28 @@ impl A2aServer {
         // Store the event sender so the message handler can inject A2A messages
         *self.agent_event_tx.lock().await = Some(event_tx);
 
+        #[cfg(feature = "eval-tool")]
+        let eval_state = {
+            // The ONNX semantic embedder (arkavo-eval `embeddings`) is an opt-in
+            // upgrade kept out of the default build — its onnxruntime prebuilt
+            // fails to link on some CI targets (glibc __isoc23_* symbols). The
+            // default tool uses the discriminating lexical embedder (word tokens +
+            // character trigrams) which is deterministic and pure-Rust.
+            let embedder: std::sync::Arc<dyn arkavo_eval::verdict::Embedder> =
+                std::sync::Arc::new(arkavo_eval::embedder::LexicalEmbedder::new());
+            let baseline_dir = dirs::data_local_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("arkavo/eval-baselines");
+            Some(std::sync::Arc::new(arkavo_eval::EvalState {
+                embedder,
+                baselines: std::sync::Arc::new(arkavo_eval::baseline_file::FileBaselineStore::new(
+                    baseline_dir,
+                )),
+                prompts: arkavo_eval::EvalState::default_prompts(),
+                resolve_model: std::sync::Arc::new(resolve_gguf_from_hf_cache),
+            }))
+        };
+
         let config = super::agent_loop::AgentLoopConfig {
             conductor,
             router,
@@ -1389,6 +1411,8 @@ impl A2aServer {
             context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
+            #[cfg(feature = "eval-tool")]
+            eval_state,
         };
 
         tokio::spawn(async move {
@@ -1464,6 +1488,31 @@ impl A2aServer {
             }
         }
     }
+}
+
+/// Resolve a model name to a local GGUF path from the HuggingFace cache.
+#[cfg(feature = "eval-tool")]
+fn resolve_gguf_from_hf_cache(model: &str) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let candidates = [
+        format!("{home}/.cache/huggingface/hub/models--unsloth--{model}-GGUF"),
+        format!("{home}/.cache/huggingface/hub/models--ggml-org--{model}-GGUF"),
+    ];
+    for base in candidates {
+        if let Ok(snaps) = std::fs::read_dir(format!("{base}/snapshots")) {
+            for snap in snaps.flatten() {
+                if let Ok(files) = std::fs::read_dir(snap.path()) {
+                    for f in files.flatten() {
+                        let p = f.path();
+                        if p.extension().is_some_and(|e| e == "gguf") {
+                            return Some(p.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Convert AGENTS.md budget YAML to BudgetConfig for the budget manager

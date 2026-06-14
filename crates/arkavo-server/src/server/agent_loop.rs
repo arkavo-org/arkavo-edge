@@ -35,6 +35,8 @@ pub struct AgentLoopConfig {
     pub context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+    #[cfg(feature = "eval-tool")]
+    pub eval_state: Option<std::sync::Arc<arkavo_eval::EvalState>>,
 }
 
 // --- Pending message drain helper ---
@@ -129,6 +131,12 @@ pub async fn run_agent_loop(
         }
 
         arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+
+        #[cfg(feature = "eval-tool")]
+        if let Some(ref eval_state) = config.eval_state {
+            arkavo_eval::register_tools(&mut registry, eval_state.clone());
+            tracing::info!("registered run_eval tool for the agent loop");
+        }
 
         #[cfg(feature = "iroh")]
         if let Some(ref node) = config.iroh_node {
