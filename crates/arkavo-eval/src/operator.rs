@@ -1,7 +1,8 @@
 //! Operator role: runs the model over the plan's prompts and captures the
-//! output text and tokens/sec per prompt. The real llama.cpp implementation
-//! lands in Part 2 behind the `llama-cpp` feature; this module defines the
-//! trait and a fake used by tests and the one-shot CLI demo.
+//! output text and tokens/sec per prompt. This module defines the trait, the
+//! tok/s measurement helper, and a fake used by tests and the one-shot CLI
+//! demo; the real llama.cpp `LlamaOperator` lives in `operator_llama.rs` behind
+//! the `llama-cpp` feature.
 
 use crate::plan::EvalPlan;
 use async_trait::async_trait;

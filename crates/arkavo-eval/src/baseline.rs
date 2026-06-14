@@ -1,6 +1,7 @@
 //! Historian role: stores/retrieves baselines. The trait is backend-agnostic;
-//! the TDF+iroh implementation lands in Part 2. `MemBaselineStore` is used by
-//! tests and the one-shot CLI demo.
+//! `MemBaselineStore` (here) and `FileBaselineStore` (`baseline_file.rs`) are
+//! the plaintext stores, and `TdfBaselineStore` (`baseline_tdf.rs`, feature
+//! `tdf-baselines`) is the TDF-encrypted, iroh-distributed trusted store.
 
 use crate::verdict::Baseline;
 use async_trait::async_trait;

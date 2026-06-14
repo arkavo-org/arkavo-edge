@@ -1,6 +1,8 @@
-//! Embedder implementations. `MemoryEmbedder` is the production semantic
-//! embedder (arkavo-memory's bundled offline ONNX model); `CharEmbedder` is a
-//! deterministic fallback used when the ONNX model files are not present.
+//! Embedder implementations. `LexicalEmbedder` (word-token + char-trigram
+//! feature hash) is the discriminating, pure-Rust default used by the verdict.
+//! `MemoryEmbedder` is the opt-in semantic upgrade (arkavo-memory's bundled
+//! offline ONNX model, feature `embeddings`); `CharEmbedder` is the original
+//! char-frequency embedder, kept as a minimal deterministic option.
 
 use crate::verdict::{Embedder, VerdictError};
 use async_trait::async_trait;
