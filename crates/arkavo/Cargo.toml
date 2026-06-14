@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "eval-tool", "gemini", "deepseek", "kimi", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows
@@ -32,6 +32,7 @@ kas = ["arkavo-cli/kas"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]
 claude-agent = ["arkavo-cli/claude-agent"]
+eval-tool = ["arkavo-cli/eval-tool"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
