@@ -53,6 +53,7 @@ impl Operator for LlamaOperator {
                 .iter()
                 .map(|m| Self::message(&m.role, &m.content))
                 .collect();
+            let started = std::time::Instant::now();
             let resp = provider
                 .complete_with_tools(
                     messages,
@@ -61,6 +62,7 @@ impl Operator for LlamaOperator {
                 )
                 .await
                 .map_err(|e| OperatorError::Generate(e.to_string()))?;
+            let elapsed_s = started.elapsed().as_secs_f64();
 
             // Fold any tool calls into the compared text so tool-selection
             // regressions are visible to the similarity check.
@@ -69,12 +71,12 @@ impl Operator for LlamaOperator {
                 text.push_str(&format!("\n[tool:{} {}]", tc.tool_name, tc.arguments));
             }
 
-            let tok_s = resp
+            let (gen_ms, n_eval) = resp
                 .inference_timing
                 .as_ref()
-                .filter(|t| t.generation_ms > 0.0)
-                .map(|t| t.n_eval as f64 / (t.generation_ms / 1000.0))
-                .unwrap_or(0.0);
+                .map(|t| (t.generation_ms, t.n_eval))
+                .unwrap_or((0.0, 0));
+            let tok_s = crate::operator::measured_tok_s(gen_ms, n_eval, elapsed_s, &text);
 
             outputs.push(PromptOutput {
                 id: prompt.id.clone(),
