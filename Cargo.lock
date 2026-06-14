@@ -719,7 +719,6 @@ dependencies = [
  "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-device-identity",
- "arkavo-eval",
  "arkavo-events",
  "arkavo-git",
  "arkavo-gossip",

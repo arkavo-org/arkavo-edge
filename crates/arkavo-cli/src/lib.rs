@@ -170,26 +170,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        #[cfg(feature = "eval-tool")]
-        "eval" => {
-            let run_async = async {
-                match args.get(1).map(|s| s.as_str()) {
-                    Some("run") => commands::eval::run(&args[2..]).await,
-                    _ => Err(
-                        "usage: arkavo eval run --contract <path> [--answer id=text] [--main]"
-                            .into(),
-                    ),
-                }
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         "help" => {
             print_usage();
             Ok(())
