@@ -43,28 +43,27 @@ impl Baseline {
 #[async_trait]
 pub trait Embedder: Send + Sync {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, VerdictError>;
-    fn cosine(a: &[f32], b: &[f32]) -> f32
-    where
-        Self: Sized,
-    {
-        let mut dot = 0.0;
-        let mut na = 0.0;
-        let mut nb = 0.0;
-        for (x, y) in a.iter().zip(b.iter()) {
-            dot += x * y;
-            na += x * x;
-            nb += y * y;
-        }
-        if na == 0.0 || nb == 0.0 {
-            return 0.0;
-        }
-        dot / (na.sqrt() * nb.sqrt())
+}
+
+/// Cosine similarity over the overlapping prefix of two vectors.
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    let mut dot = 0.0;
+    let mut na = 0.0;
+    let mut nb = 0.0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
     }
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
+    dot / (na.sqrt() * nb.sqrt())
 }
 
 /// Compute the verdict. `acceptance` carries the thresholds from the contract.
-pub async fn assess<E: Embedder>(
-    embed: &E,
+pub async fn assess(
+    embed: &dyn Embedder,
     outputs: &[PromptOutput],
     baseline: &Baseline,
     min_similarity: f64,
@@ -80,7 +79,7 @@ pub async fn assess<E: Embedder>(
             .ok_or_else(|| VerdictError::MissingBaselineOutput(o.id.clone()))?;
         let va = embed.embed(&o.text).await?;
         let vb = embed.embed(base).await?;
-        sim_sum += E::cosine(&va, &vb) as f64;
+        sim_sum += cosine(&va, &vb) as f64;
     }
     let mean_sim = sim_sum / outputs.len() as f64;
     if mean_sim < min_similarity {
