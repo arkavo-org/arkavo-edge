@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod chat;
 pub mod dataflow;
+#[cfg(feature = "eval-tool")]
 pub mod eval;
 pub mod mesh;
 pub mod model;

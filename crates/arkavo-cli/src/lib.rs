@@ -170,6 +170,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        #[cfg(feature = "eval-tool")]
         "eval" => {
             let run_async = async {
                 match args.get(1).map(|s| s.as_str()) {
