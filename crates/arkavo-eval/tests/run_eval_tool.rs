@@ -37,7 +37,7 @@ async fn run_eval_tool_bootstrap_then_pass() {
         Arc::new(move |_m: &str| Some(path.clone()))
     };
     let state = Arc::new(EvalState {
-        embedder: Arc::new(arkavo_eval::embedder::CharEmbedder),
+        embedder: Arc::new(arkavo_eval::embedder::LexicalEmbedder::new()),
         baselines: Arc::new(arkavo_eval::baseline_file::FileBaselineStore::new(&dir)),
         prompts: EvalState::default_prompts(),
         resolve_model: resolve,

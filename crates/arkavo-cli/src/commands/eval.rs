@@ -7,27 +7,8 @@ use arkavo_eval::baseline::MemBaselineStore;
 use arkavo_eval::contract::EvalContract;
 use arkavo_eval::gate::Preconditions;
 use arkavo_eval::operator::FakeOperator;
-use arkavo_eval::verdict::{Embedder, VerdictError};
 use arkavo_eval::{RunOutcome, run_eval};
-use async_trait::async_trait;
 use std::collections::HashMap;
-
-struct CharEmbedder;
-
-#[async_trait]
-impl Embedder for CharEmbedder {
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, VerdictError> {
-        let mut v = vec![0.0f32; 27];
-        for c in text.to_lowercase().chars() {
-            if c.is_ascii_lowercase() {
-                v[(c as u8 - b'a') as usize] += 1.0;
-            } else {
-                v[26] += 1.0;
-            }
-        }
-        Ok(v)
-    }
-}
 
 pub async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut contract_path: Option<String> = None;
@@ -65,7 +46,15 @@ pub async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         answers,
         tok_s: 100.0,
     };
-    let outcome: RunOutcome = run_eval(&contract, &pre, &op, &store, &CharEmbedder, is_main).await;
+    let outcome: RunOutcome = run_eval(
+        &contract,
+        &pre,
+        &op,
+        &store,
+        &arkavo_eval::embedder::LexicalEmbedder::new(),
+        is_main,
+    )
+    .await;
 
     println!("{}", serde_json::to_string_pretty(&outcome.status)?);
     match outcome.status.check_conclusion() {

@@ -24,7 +24,7 @@ embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
 tdf-baselines = ["dep:arkavo-tdf"]
 # Real Operator backed by arkavo-llm's llama.cpp provider.
 llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
-# The default tool path uses the deterministic CharEmbedder (no ONNX/ort).
+# The default tool path uses the discriminating LexicalEmbedder (word tokens + char trigrams, no ONNX/ort).
 # The semantic MemoryEmbedder is a separate opt-in via the `embeddings` feature,
 # kept out of mcp-tool because ort's onnxruntime prebuilt fails to link on some
 # CI targets (glibc __isoc23_* symbols).
