@@ -13,10 +13,13 @@ thiserror = { workspace = true }
 blake3 = "1.5"
 torg-core = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", optional = true }
+arkavo-llm = { path = "../arkavo-llm", optional = true }
 
 [features]
 default = []
 embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
+# Real Operator backed by arkavo-llm's llama.cpp provider.
+llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

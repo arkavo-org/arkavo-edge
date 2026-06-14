@@ -975,6 +975,7 @@ dependencies = [
 name = "arkavo-eval"
 version = "0.82.0"
 dependencies = [
+ "arkavo-llm",
  "arkavo-memory",
  "async-trait",
  "blake3",

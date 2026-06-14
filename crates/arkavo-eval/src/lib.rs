@@ -6,6 +6,8 @@ pub mod contract;
 pub mod digest;
 pub mod gate;
 pub mod operator;
+#[cfg(feature = "llama-cpp")]
+pub mod operator_llama;
 pub mod plan;
 pub mod status;
 pub mod verdict;
