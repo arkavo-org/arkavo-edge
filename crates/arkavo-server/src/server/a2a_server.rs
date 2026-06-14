@@ -1370,17 +1370,12 @@ impl A2aServer {
 
         #[cfg(feature = "eval-tool")]
         let eval_state = {
-            // Embedder: prefer the ONNX semantic model, fall back to char-frequency.
-            let mem = arkavo_eval::embedder::MemoryEmbedder::new();
+            // The ONNX semantic embedder (arkavo-eval `embeddings`) is an opt-in
+            // upgrade kept out of the default build — its onnxruntime prebuilt
+            // fails to link on some CI targets (glibc __isoc23_* symbols). The
+            // default tool uses the deterministic char-frequency embedder.
             let embedder: std::sync::Arc<dyn arkavo_eval::verdict::Embedder> =
-                if mem.available().await {
-                    std::sync::Arc::new(mem)
-                } else {
-                    tracing::warn!(
-                        "ONNX embedder unavailable; run_eval will use the char-frequency fallback"
-                    );
-                    std::sync::Arc::new(arkavo_eval::embedder::CharEmbedder)
-                };
+                std::sync::Arc::new(arkavo_eval::embedder::CharEmbedder);
             let baseline_dir = dirs::data_local_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("arkavo/eval-baselines");

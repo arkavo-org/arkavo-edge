@@ -21,7 +21,11 @@ default = []
 embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
 # Real Operator backed by arkavo-llm's llama.cpp provider.
 llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
-mcp-tool = ["dep:arkavo-mcp-tools", "llama-cpp", "embeddings"]
+# The default tool path uses the deterministic CharEmbedder (no ONNX/ort).
+# The semantic MemoryEmbedder is a separate opt-in via the `embeddings` feature,
+# kept out of mcp-tool because ort's onnxruntime prebuilt fails to link on some
+# CI targets (glibc __isoc23_* symbols).
+mcp-tool = ["dep:arkavo-mcp-tools", "llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
