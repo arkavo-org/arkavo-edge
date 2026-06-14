@@ -2,6 +2,7 @@
 //! preconditions, runs the model, and produces a typed regression verdict.
 
 pub mod baseline;
+pub mod baseline_file;
 pub mod contract;
 pub mod digest;
 pub mod embedder;
