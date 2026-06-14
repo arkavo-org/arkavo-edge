@@ -4,6 +4,7 @@
 pub mod baseline;
 pub mod contract;
 pub mod digest;
+pub mod embedder;
 pub mod gate;
 pub mod operator;
 #[cfg(feature = "llama-cpp")]

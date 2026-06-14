@@ -19,6 +19,8 @@ pub mod workspace_config;
 
 pub use advisor_state::{AdvisorStateStore, PersistedAdjustment};
 pub use case_retrieval::{CaseIndex, CaseMatch, IndexMetadata};
+#[cfg(feature = "embeddings")]
+pub use embeddings::EmbeddingService;
 pub use federated_memory::{
     ContextManifest, FederatedItem, FederatedMemoryService, FederatedQuery, FederatedResult,
     MemoryAttribute, MemoryPolicy, evaluate_entitlements,
