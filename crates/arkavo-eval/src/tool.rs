@@ -39,9 +39,11 @@ impl EvalState {
             tools: None,
         };
         vec![
-            user("capital", "What is the capital of France? Answer in one word."),
-            user("arithmetic", "A car travels 140 km in 2 hours. Average speed in km/h? Answer with the number and unit."),
-            user("instruct", "List exactly three primary colors, comma-separated, nothing else."),
+            user("capital_au", "What is the capital of Australia? Answer with one word."),
+            user("arithmetic", "What is 17 multiplied by 23? Answer with just the number."),
+            user("reverse", "Reverse the letters of the word 'algorithm'. Answer with only the reversed string, nothing else."),
+            user("symbol", "What is the chemical symbol for gold? Answer with just the symbol."),
+            user("primes", "List the first five prime numbers, comma-separated, nothing else."),
         ]
     }
 }

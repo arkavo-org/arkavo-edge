@@ -1373,9 +1373,10 @@ impl A2aServer {
             // The ONNX semantic embedder (arkavo-eval `embeddings`) is an opt-in
             // upgrade kept out of the default build — its onnxruntime prebuilt
             // fails to link on some CI targets (glibc __isoc23_* symbols). The
-            // default tool uses the deterministic char-frequency embedder.
+            // default tool uses the discriminating lexical embedder (word tokens +
+            // character trigrams) which is deterministic and pure-Rust.
             let embedder: std::sync::Arc<dyn arkavo_eval::verdict::Embedder> =
-                std::sync::Arc::new(arkavo_eval::embedder::CharEmbedder);
+                std::sync::Arc::new(arkavo_eval::embedder::LexicalEmbedder::new());
             let baseline_dir = dirs::data_local_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("arkavo/eval-baselines");
