@@ -114,6 +114,7 @@ arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 # Eval gate (optional; pulls llama-cpp + embeddings transitively via mcp-tool)
 arkavo-eval = { path = "../arkavo-eval", optional = true }
+dirs = { workspace = true }
 
 # Demo dependencies
 clap = { workspace = true, optional = true }
