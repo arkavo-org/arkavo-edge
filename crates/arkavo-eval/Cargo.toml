@@ -15,10 +15,13 @@ torg-core = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", optional = true }
 arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
+arkavo-tdf = { path = "../arkavo-tdf", optional = true }
 
 [features]
 default = []
 embeddings = ["dep:arkavo-memory", "arkavo-memory/embeddings"]
+# Trusted baseline store: TDF-encrypted, content-addressed over a blob transport.
+tdf-baselines = ["dep:arkavo-tdf"]
 # Real Operator backed by arkavo-llm's llama.cpp provider.
 llama-cpp = ["dep:arkavo-llm", "arkavo-llm/llama-cpp"]
 # The default tool path uses the deterministic CharEmbedder (no ONNX/ort).
@@ -29,3 +32,4 @@ mcp-tool = ["dep:arkavo-mcp-tools", "llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["testing"] }

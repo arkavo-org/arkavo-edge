@@ -7,6 +7,8 @@
 
 pub mod baseline;
 pub mod baseline_file;
+#[cfg(feature = "tdf-baselines")]
+pub mod baseline_tdf;
 pub mod contract;
 pub mod digest;
 pub mod embedder;
@@ -22,6 +24,9 @@ pub mod verdict;
 pub mod tool;
 #[cfg(feature = "mcp-tool")]
 pub use tool::{register_tools, EvalState};
+
+#[cfg(feature = "tdf-baselines")]
+pub use baseline_tdf::{eval_baseline_policy, TdfBaselineStore};
 
 use baseline::{BaselinePointer, BaselineStore};
 use contract::EvalContract;

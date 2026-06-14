@@ -978,6 +978,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp-tools",
  "arkavo-memory",
+ "arkavo-tdf",
  "async-trait",
  "blake3",
  "serde",
