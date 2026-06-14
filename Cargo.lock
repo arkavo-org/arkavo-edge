@@ -976,6 +976,7 @@ name = "arkavo-eval"
 version = "0.82.0"
 dependencies = [
  "arkavo-llm",
+ "arkavo-mcp-tools",
  "arkavo-memory",
  "async-trait",
  "blake3",
@@ -1785,6 +1786,7 @@ dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
  "arkavo-ensemble",
+ "arkavo-eval",
  "arkavo-events",
  "arkavo-evofabric",
  "arkavo-gossip",

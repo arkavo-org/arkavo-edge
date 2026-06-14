@@ -1389,6 +1389,8 @@ impl A2aServer {
             context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
+            #[cfg(feature = "eval-tool")]
+            eval_state: None,
         };
 
         tokio::spawn(async move {
