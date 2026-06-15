@@ -16,6 +16,42 @@ components:
       - No ambient authority from mesh membership
       - Attestation binds to device identity
 
+  - name: hardware-attestation
+    file: hardware-attestation.spec.yaml
+    module: arkavo_attestation
+    description: Hardware-rooted agent attestation — SEP/TPM P-256 key, signed quotes, assurance ladder
+    criticality: critical
+    scenario_count: 13
+    invariants:
+      - Non-extractable SEP/TPM attestation key
+      - Quote verifiable by a remote party without trusting the host
+      - No silent downgrade; software is never Trusted
+      - Additive P-256 key; existing Ed25519 did:key identities remain valid
+
+  - name: token-binding
+    file: token-binding.spec.yaml
+    module: arkavo_agent_auth
+    description: Sender-constrained agent tokens (DPoP/mTLS) and attestation-based OAuth Token Exchange
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - Stolen bearer token is unusable without proof-of-possession
+      - Proof-of-possession key equals the attested hardware key
+      - IdP-agnostic issuance via RFC 8693; no IdP-specific code in core
+      - No silent bearer downgrade
+
+  - name: agent-credentials
+    file: agent-credentials.spec.yaml
+    module: arkavo_trust
+    description: Verifiable agent credentials (SD-JWT/JSON-LD VC) on did:key and CAEP/SSF governance events
+    criticality: critical
+    scenario_count: 8
+    invariants:
+      - Attestation and entitlements expressed as verifiable credentials on did:key
+      - State changes emit standard CAEP/Shared Signals events
+      - did:key only; did:web out of scope this revision
+      - Presented credentials bound to the attested did:key
+
   - name: registration
     file: registration.spec.yaml
     module: arkavo_protocol::registration
@@ -902,9 +938,9 @@ components:
       - Sampling caps are recorded in the ledger, never silent
 
 stats:
-  total_specs: 77
-  total_scenarios: 708
-  critical_scenarios: 193
+  total_specs: 80
+  total_scenarios: 739
+  critical_scenarios: 204
   coverage_areas:
     - authentication
     - authorization
