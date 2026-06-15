@@ -133,6 +133,33 @@ SWE-bench evaluation lives in the separate `arkavo-mcp-bench` crate, run from so
 
 See [docs/coding-agent-toolset.md](docs/coding-agent-toolset.md) for complete tool documentation.
 
+## Security Status
+
+For offensive-security reviewers: here's what is real today and what is still on the roadmap.
+
+### Shipping now
+
+| Capability | Status | Notes |
+|------------|--------|-------|
+| **OpenTDF / KAS encryption** | Shipped | Tool outputs and SwarmKit payloads can be wrapped in TDF; KAS policy enforcement is live. |
+| **ABAC / attribute release policies** | Shipped | Roles declare TDF Attribute Release Policies; the orchestrator constructs role-scoped policies before data reaches the role. |
+| **SwarmKit policy isolation** | Shipped | Each kit role gets its own policy envelope; no shared blanket entitlements. |
+| **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
+| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. |
+| **Local inference** | Shipped | Gemma 4 and Ministral models run via llama.cpp on the local device; no cloud required for routing or inference. |
+| **DLP / PII scrubbing** | Shipped | Pre-flight redaction of sensitive patterns before LLM context and provider calls. |
+| **PII leak regression tests** | Shipped | `tests/e2e_security_test.sh`, `tests/security_cli_test.sh`, `tests/dlp_pii_security_test.sh`. |
+
+### Roadmap / not yet landed
+
+| Capability | Status | Notes |
+|------------|--------|-------|
+| **SEP / TPM hardware attestation** | In crate, not crypto-bound | `arkavo-attestation` detects the Secure Enclave on Apple Silicon and reports a security state, but the evidence is platform metadata, not a Secure-Enclave-signed quote. TPM backend is not implemented. |
+| **Hardware-bound key storage** | Not yet | Device identity and agent keypairs are stored on disk with filesystem permissions; they are not yet stored in the Secure Enclave, Keychain (non-extractable), or a TPM. |
+| **Verifiable remote attestation** | Not yet | Trust scoring currently treats identity as verified once a DID:key is known; there is no remote verification of attestation evidence yet. |
+
+This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots are being built in the open.
+
 ## Platform Support
 
 | Platform | Architecture | Features |

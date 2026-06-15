@@ -5,7 +5,7 @@ edition.workspace = true
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 description = "A2A server implementation for the Arkavo agentic CLI tool"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["server", "a2a", "json-rpc", "agent", "protocol"]
 categories = ["network-programming", "web-programming"]
 

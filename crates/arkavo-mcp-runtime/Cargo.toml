@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Runtime implementation for Model Context Protocol (MCP) server"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["mcp", "server", "runtime", "protocol"]
 categories = ["network-programming", "asynchronous"]
 
