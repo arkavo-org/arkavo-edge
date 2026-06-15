@@ -1,0 +1,345 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Hardware-Rooted Agent Attestation
+module: arkavo-attestation, arkavo-device-identity, arkavo-crypto
+version: 0.81.0
+
+invariants:
+  - "Non-extractable key: the attestation identity key is generated inside the platform keystore (Secure Enclave on macOS, TPM 2.0 on Linux/Windows) and cannot be exported"
+  - "Verifiable quote: attestation evidence is a signature over a verifier-supplied fresh challenge, verifiable by a remote party without trusting the agent host"
+  - "No silent downgrade: a path that cannot produce a hardware-bound quote fails closed to a lower assurance tier and is surfaced; it is never silently reported as hardware-bound"
+  - "Assurance ladder: High (Secure Enclave / discrete TPM) is Trusted-eligible; Medium (vTPM / virtualized) is capped below Trusted; None (software fingerprint) is never Trusted. Minimum tier is policy-driven per domain; software is never Trusted under any policy"
+  - "Additive identity: the P-256/ES256 hardware key is added alongside the existing Ed25519 device key; existing Ed25519 did:key (0xed01) identities remain valid"
+  - "Root for the WGs: hardware attestation is the layer the agent-identity profiles (MCP-I/KYA-OS, AIP) assume but do not specify; this spec supplies that root and binds it to the identity those profiles define"
+
+# Assurance tiers (structured data, not in base schema)
+assurance_ladder:
+  - tier: High
+    sources: [Apple Secure Enclave via App Attest, discrete TPM 2.0]
+    trusted_eligible: true
+  - tier: Medium
+    sources: [vTPM, virtualized or cloud TPM]
+    trusted_eligible: false
+    note: capped below Trusted; acceptable only where domain policy explicitly permits
+  - tier: None
+    sources: [software fingerprint]
+    trusted_eligible: false
+
+# Keypair architecture (extends trusted-agent.spec.yaml keypair_architecture)
+keypair_architecture:
+  attestation_key:
+    algorithm: P-256 / ES256 (ECDSA P-256 with SHA-256)
+    residency: Secure Enclave (macOS) / TPM 2.0 (Linux, Windows), non-extractable
+    usage: signing only — attestation quotes, DPoP proof-of-possession (token-binding.spec.yaml), orchestrator registration signing
+    did: did:key with P-256 multicodec 0x1200 (varint 0x80 0x24, prefix zDn)
+    crate: arkavo-attestation (keygen + quote), arkavo-crypto (P256SigningKeypair operations)
+    note: distinct from the TDF KAS-wrap key — sign vs key-agreement usages differ and Secure Enclave / TPM key-usage flags must not be conflated
+  device_key:
+    algorithm: Ed25519
+    residency: platform secure storage / file with 0600 (existing)
+    usage: retained for back-compat and gossip-adjacent signing; did:key 0xed01
+    note: not replaced — this is an additive migration
+  tdf_kas_key:
+    algorithm: P-256 ECDH
+    usage: TDF config bundle and KAS key wrapping (key agreement)
+    note: separate key from attestation_key; unchanged by this spec
+
+# Conformance targets (verified against live spec text on 2026-06-15 unless noted)
+conformance_targets:
+  - id: WEBAUTHN-L2
+    name: "W3C Web Authentication Level 2 (attestation statement formats, sec 8)"
+    url: https://www.w3.org/TR/webauthn-2/
+    status: verified
+  - id: APP-ATTEST
+    name: "Apple App Attest (DCAppAttestService), fmt apple-appattest, P-256/ES256"
+    url: https://developer.apple.com/documentation/devicecheck
+    status: verified (vendor docs)
+  - id: TPM2
+    name: "TCG TPM 2.0 Library (ISO/IEC 11889) — TPM2_Quote, Part 3 sec 18.4; AK + EK credential"
+    url: https://trustedcomputinggroup.org/resource/tpm-library-specification/
+    status: verified
+  - id: DIDKEY
+    name: "did:key Method v0.9 (W3C CCG draft); P-256 multicodec p256-pub 0x1200"
+    url: https://w3c-ccg.github.io/did-key-spec/
+    status: verified (community draft, not a Recommendation)
+  - id: MCP-T-020
+    name: "Model Context Protocol — Trust Extension (MCP-T) v0.2.0-draft"
+    url: https://github.com/Percival-Labs/mcp-t/blob/main/spec/mcp-t-v0.2.0.md
+    status: verified (draft spec)
+
+scenarios:
+  - id: HATT-001
+    name: Generate non-extractable P-256 attestation key in Secure Enclave (macOS)
+    criticality: critical
+    wip: true
+    conformance: [APP-ATTEST, DIDKEY]
+    conformance_status: verified
+    given:
+      - macOS device with a Secure Enclave
+      - Agent has no prior attestation key
+    when: Agent provisions its hardware attestation identity key
+    then:
+      - A P-256 / ES256 key pair is created inside the Secure Enclave
+      - The private key is non-extractable (no API returns the private scalar)
+      - A did:key (P-256 multicodec 0x1200) is derived from the public key
+      - attestation_type reported as SecureEnclave with hardware_binding true
+    refs:
+      - crates/arkavo-attestation/src/platform/macos.rs:7-219
+      - crates/arkavo-crypto/src/lib.rs:302-432
+    edge_cases:
+      - condition: Secure Enclave unavailable
+        expected: Software P-256 key created, flagged hardware_binding=false, assurance tier None
+    changed: "2026-06-15"
+
+  - id: HATT-002
+    name: Generate non-extractable attestation key in TPM 2.0 (Linux, Windows)
+    criticality: critical
+    wip: true
+    conformance: [TPM2, DIDKEY]
+    conformance_status: verified
+    given:
+      - Linux or Windows host with an accessible TPM 2.0
+      - Agent has no prior attestation key
+    when: Agent provisions its hardware attestation identity key
+    then:
+      - A P-256 attestation key is created in the TPM and marked non-extractable
+      - A did:key (0x1200) is derived from the public key
+      - attestation_type reported as TpmQuote with hardware_binding true
+    refs:
+      - crates/arkavo-attestation/src/platform.rs:67-85
+    edge_cases:
+      - condition: No TPM present
+        expected: Software fallback, assurance tier None, never Trusted
+      - condition: Virtualized TPM (vTPM)
+        expected: assurance tier Medium per assurance_ladder (see HATT-013)
+    changed: "2026-06-15"
+
+  - id: HATT-003
+    name: Signed attestation quote over a verifier-supplied nonce
+    criticality: critical
+    wip: true
+    conformance: [APP-ATTEST, TPM2]
+    conformance_status: verified
+    given:
+      - Hardware attestation key established (HATT-001 or HATT-002)
+      - Verifier supplies a fresh random challenge (nonce)
+    when: Agent produces an attestation quote
+    then:
+      - The quote is a signature over {nonce, agent did:key, platform measurements}
+      - Freshness derives from the verifier nonce, not only a local timestamp
+      - The quote replaces the v1 platform-metadata-plus-timestamp evidence blob
+    refs:
+      - crates/arkavo-attestation/src/lib.rs:37-68
+      - crates/arkavo-attestation/src/evidence.rs:1-54
+    edge_cases:
+      - condition: No nonce supplied by verifier
+        expected: Quote rejected as non-fresh; verifier must challenge
+    changed: "2026-06-15"
+
+  - id: HATT-004
+    name: Apple App Attest attestation object format (macOS)
+    criticality: high
+    wip: true
+    conformance: [APP-ATTEST]
+    conformance_status: verified
+    given:
+      - Secure Enclave attestation key (HATT-001)
+    when: Agent generates an attestation for a remote verifier
+    then:
+      - evidence_blob carries an App Attest attestation object (fmt apple-appattest; CBOR x5c chain + receipt; authData)
+      - Subsequent assertions are signed by the attested key
+      - attestation_type is SecureEnclave
+    refs:
+      - crates/arkavo-attestation/src/platform/macos.rs:86-144
+    edge_cases:
+      - condition: Confusing App Attest apple-appattest with the WebAuthn apple format
+        expected: Treated as distinct formats; verifier selects by context
+    changed: "2026-06-15"
+
+  - id: HATT-005
+    name: TPM 2.0 AK quote format (Linux, Windows)
+    criticality: high
+    wip: true
+    conformance: [TPM2]
+    conformance_status: verified
+    given:
+      - TPM 2.0 attestation key (HATT-002)
+    when: Agent generates an attestation for a remote verifier
+    then:
+      - Evidence carries a TPM2_Quote signed by the Attestation Key
+      - The EK certificate chain is included for TPM identity
+      - attestation_type is TpmQuote (currently declared but not implemented)
+    refs:
+      - crates/arkavo-attestation/src/lib.rs:30-34
+    edge_cases:
+      - condition: AK invalidated by TPM2_Clear
+        expected: Re-provision attestation key (see HATT-012)
+    changed: "2026-06-15"
+
+  - id: HATT-006
+    name: WebAuthn/FIDO2 attestation-statement interop
+    criticality: medium
+    wip: true
+    conformance: [WEBAUTHN-L2]
+    conformance_status: verified
+    given:
+      - A remote verifier that already verifies WebAuthn attestations (e.g. an IdP that issues human passkeys)
+    when: Agent attests
+    then:
+      - The quote maps to a WebAuthn attestation statement (packed, tpm, or apple format)
+      - The IdP verifies the agent with the same machinery it uses for human passkeys
+    refs:
+      - crates/arkavo-attestation/src/lib.rs:37-76
+    changed: "2026-06-15"
+
+  - id: HATT-007
+    name: Remote verification accepts or rejects, with channel binding
+    criticality: critical
+    wip: true
+    conformance: [APP-ATTEST, TPM2, WEBAUTHN-L2]
+    conformance_status: verified
+    given:
+      - Remote verifier holds the platform root certificates
+      - Agent presents an attestation quote over a TLS channel
+    when: Verifier evaluates the quote
+    then:
+      - Signature verified against the attestation key
+      - Certificate chain verified to a platform root
+      - Nonce freshness checked
+      - Quote's did:key matches the attested key
+      - Quote is bound to the session via a TLS-exporter channel binding to defeat a relayed-but-fresh quote
+    edge_cases:
+      - condition: Stale or replayed nonce
+        expected: Rejected
+      - condition: Broken or untrusted certificate chain
+        expected: Rejected
+      - condition: did:key does not match attested key
+        expected: Rejected
+      - condition: Fresh quote relayed over a different channel (MITM)
+        expected: Rejected by channel binding
+    changed: "2026-06-15"
+
+  - id: HATT-008
+    name: Attestation strength drives the MCP-T VERIFICATION dimension
+    criticality: high
+    wip: true
+    conformance: [MCP-T-020]
+    conformance_status: verified
+    given:
+      - A verified attestation quote (HATT-007)
+    when: Trust is scored for the agent
+    then:
+      - The MCP-T verification dimension reflects quote strength and assurance tier (hardware vs software)
+      - evidence_count derives from the attestation rather than a single boolean
+      - The binary has_verified_did input is retired as the source of VERIFICATION
+    refs:
+      - crates/arkavo-trust/src/mapper.rs:14-90
+    edge_cases:
+      - condition: Existing AgentTrustInput consumers still set has_verified_did
+        expected: Field deprecated, not deleted; code change shipped as a separate reviewed diff
+    changed: "2026-06-15"
+
+  - id: HATT-009
+    name: Re-attestation on TTL expiry produces a fresh quote
+    criticality: high
+    wip: true
+    conformance: [APP-ATTEST, TPM2]
+    conformance_status: verified
+    given:
+      - Agent is Trusted with an attestation TTL approaching expiry
+    when: TTL expires or the orchestrator challenges
+    then:
+      - Agent re-enters trusted-agent Phase 2 with a fresh nonce and produces a new quote
+      - On success the agent remains Trusted with refreshed evidence
+      - On failure the agent transitions to Suspended
+    refs:
+      - specs/arkavo-edge/trusted-agent.spec.yaml:88-93
+      - crates/arkavo-attestation/src/evidence.rs:16-27
+    changed: "2026-06-15"
+
+  - id: HATT-010
+    name: Software fallback is never Trusted
+    criticality: critical
+    given:
+      - No Secure Enclave or TPM available
+    when: Agent attests
+    then:
+      - attestation_type is SoftwareFingerprint
+      - hardware_binding is false
+      - Maximum security state is Suspicious or Unknown, never Trusted, regardless of domain policy
+    refs:
+      - crates/arkavo-attestation/src/platform.rs:10-49
+    changed: "2026-06-15"
+
+  - id: HATT-011
+    name: Compromised platform downgrades and is rejected for high-criticality domains
+    criticality: high
+    given:
+      - Jailbreak, debug, or root indicators present
+    when: Security state is assessed
+    then:
+      - SecurityState is Compromised
+      - Attestation is rejected for high-criticality domains
+    refs:
+      - crates/arkavo-attestation/src/evidence.rs:32-54
+    edge_cases:
+      - condition: Mixed indicators
+        expected: Most conservative state chosen
+    changed: "2026-06-15"
+
+  - id: HATT-012
+    name: Hardware key loss and rotation
+    criticality: high
+    wip: true
+    conformance: [APP-ATTEST, TPM2]
+    conformance_status: verified
+    given:
+      - The hardware attestation key is lost (OS reinstall, TPM clear, Secure Enclave wipe)
+    when: Loss is detected on next attestation
+    then:
+      - A new attestation key is generated in hardware
+      - The agent re-attests and re-registers
+      - The old did:key is revoked (ties agent-credentials.spec.yaml AGC-005)
+    edge_cases:
+      - condition: TPM2_Clear invalidates the AK mid-life
+        expected: Full re-provision; prior quotes no longer verify
+    changed: "2026-06-15"
+
+  - id: HATT-013
+    name: Virtualized TPM is capped at the Medium assurance tier
+    criticality: medium
+    wip: true
+    conformance: [TPM2]
+    conformance_status: verified
+    given:
+      - A virtualized TPM (cloud or edge Linux)
+    when: Agent attests
+    then:
+      - Assurance tier is Medium per assurance_ladder
+      - The agent is capped below Trusted unless domain policy explicitly permits vTPM
+    changed: "2026-06-15"
+
+# Security considerations (audience: offensive-security reviewers; pattern mirrors trusted-agent SEC-TA-*)
+security:
+  - id: SEC-HA-001
+    name: No silent downgrade
+    description: Force-software, missing-keystore, and failed-quote paths fail closed to a lower assurance tier and are surfaced; they are never silently reported as hardware-bound.
+  - id: SEC-HA-002
+    name: Non-extractable keys
+    description: The private attestation key never leaves the keystore; loss requires re-provision (HATT-012), not export.
+  - id: SEC-HA-003
+    name: Relay and MITM resistance
+    description: A quote is bound to both the verifier nonce and the session channel (TLS exporter); a fresh quote relayed over a different channel is rejected.
+  - id: SEC-HA-004
+    name: No self-attestation
+    description: The agent never evaluates its own quote; a remote verifier holding platform roots does, consistent with SEC-TA-001.
+  - id: SEC-HA-005
+    name: Assurance honesty
+    description: Reported attestation_type and tier reflect actual hardware binding; software paths are labeled, mirroring the SECURITY.md implemented-vs-hardened discipline.
+
+# Composed and cross-referenced specs
+composed_specs:
+  - { spec: token-binding.spec.yaml, relation: the attested key is the DPoP/mTLS proof-of-possession key }
+  - { spec: agent-credentials.spec.yaml, relation: attestation expressed as a credential; key rotation drives revocation }
+  - { spec: trusted-agent.spec.yaml, phases: [1, 2], relation: additive P-256 key in Phase 1; signed quote replaces metadata in Phase 2 }
+  - { spec: attestation.spec.yaml, relation: this file is the hardware-bound successor; attestation.spec.yaml documents today's software-fingerprint behavior }
