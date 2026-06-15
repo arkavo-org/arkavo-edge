@@ -20,6 +20,7 @@ trust_chain:
       description: Agent generates or unlocks device-bound asymmetric key pair
       outputs: [device_public_key, device_did]
       gate: device_public_key is non-null and stored in platform-appropriate secure storage; device_did is derived via did:key encoding of device_public_key
+      v2_upgrade: Additive non-extractable P-256/ES256 attestation key in Secure Enclave/TPM (hardware-attestation.spec.yaml HATT-001/002); the Ed25519 device key is retained for back-compat
 
     - phase: 2
       name: Platform attestation
@@ -29,6 +30,7 @@ trust_chain:
       inputs: [device_public_key]
       outputs: [platform_evidence]
       gate: platform_evidence.device_id matches device_public_key holder and timestamp is fresh
+      v2_upgrade: Evidence becomes a signed, nonce-bound, remotely-verifiable quote rather than metadata+timestamp (hardware-attestation.spec.yaml HATT-003/007); gate adds quote signature, chain, and channel binding
 
     - phase: 3
       name: Orchestrator registration
@@ -47,6 +49,7 @@ trust_chain:
       inputs: [device_public_key, registration_record]
       outputs: [auth_token]
       gate: auth_token is valid and initially carries only config-fetch capability
+      v2_upgrade: auth_token is sender-constrained to the attested key (DPoP cnf.jkt / mTLS) and obtainable via OAuth Token Exchange from an external IdP (token-binding.spec.yaml TOK-001/004)
 
     - phase: 5
       name: Config encryption
@@ -166,6 +169,9 @@ composed_specs:
   - { spec: agent-auth.spec.yaml, phases: [4] }
   - { spec: config-encryption.spec.yaml, phases: [5] }
   - { spec: config-transport.spec.yaml, phases: [6] }
+  - { spec: hardware-attestation.spec.yaml, phases: [1, 2] }
+  - { spec: token-binding.spec.yaml, phases: [4] }
+  - { spec: agent-credentials.spec.yaml, phases: [5, 6] }
 
 scenarios:
   - id: TA-001

@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Iroh P2P data plane for TDF blob transport - implements BlobTransport trait"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["iroh", "p2p", "tdf", "blob", "transport"]
 categories = ["network-programming", "asynchronous"]
 

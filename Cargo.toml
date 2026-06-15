@@ -153,12 +153,12 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.81.0"
+version = "0.81.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/arkavo/arkavo-edge"
+repository = "https://github.com/arkavo-org/arkavo-edge"
 description = "Secure, collaborative automation for every day use. An open-source, privacy-first, low-cost platform."
 
 [workspace.dependencies]

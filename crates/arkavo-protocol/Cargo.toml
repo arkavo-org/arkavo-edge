@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Protocol adapters for the Arkavo agentic CLI tool - MCP & A2A client implementations"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["protocol", "mcp", "a2a", "adapter", "client"]
 categories = ["network-programming", "api-bindings"]
 

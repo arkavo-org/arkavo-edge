@@ -1,0 +1,262 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Sender-Constrained Agent Tokens and Attestation-Based Issuance
+module: arkavo-agent-auth, arkavo-protocol
+version: 0.81.0
+
+invariants:
+  - "Proof-of-possession: a stolen bearer token is unusable without proof-of-possession of the agent's hardware key"
+  - "PoP key is the attested key: the proof-of-possession key MUST equal the attestation key from hardware-attestation.spec.yaml (HATT). Binding to any other key silently loses the hardware root"
+  - "IdP-agnostic by construction: token issuance is delegable to any external IdP via RFC 8693 over OIDC discovery, with no IdP-specific logic in core — only at an adapter boundary"
+  - "No silent downgrade: stripping DPoP or falling back to an unbound bearer token where binding is required fails closed"
+  - "Human accountability: where an agent acts for a human, the issued token carries the human principal (RFC 8693 act / may_act) so governance attributes agent actions to the human"
+
+# Adapter boundary (structured data)
+adapter_boundary:
+  rule: No IdP-specific logic in arkavo-protocol or arkavo-agent-auth core. Per-IdP quirks (RFC 8693 / OIDC dialect deviations) live only in an adapter shim at the edge.
+  rationale: Keeps the no-lock-in guarantee true even when an IdP's token-exchange or discovery behavior deviates.
+
+# Conformance targets (verified against live spec text on 2026-06-15 unless noted)
+conformance_targets:
+  - id: RFC9449
+    name: "OAuth 2.0 Demonstrating Proof of Possession (DPoP)"
+    url: https://www.rfc-editor.org/rfc/rfc9449
+    status: verified
+  - id: RFC8693
+    name: "OAuth 2.0 Token Exchange"
+    url: https://www.rfc-editor.org/rfc/rfc8693
+    status: verified
+  - id: RFC8705
+    name: "OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens"
+    url: https://www.rfc-editor.org/rfc/rfc8705
+    status: verified
+  - id: RFC7662
+    name: "OAuth 2.0 Token Introspection"
+    url: https://www.rfc-editor.org/rfc/rfc7662
+    status: verified
+  - id: OIDC-DISCOVERY
+    name: "OpenID Connect Discovery 1.0"
+    url: https://openid.net/specs/openid-connect-discovery-1_0.html
+    status: verified
+  - id: MCP-I-KYA
+    name: "MCP-I / KYA-OS (DIF Trusted AI Agents WG) — agent identity + delegation"
+    url: https://github.com/decentralized-identity/kya-os-mcp
+    status: verified (active WG draft; OAuth framing is informational, mechanism is DID/VC)
+  - id: AIP
+    name: "AIP: Agent Identity Protocol (arXiv:2603.24775; draft-prakash-aip-00)"
+    url: https://arxiv.org/abs/2603.24775
+    status: verified (preprint + individual IETF I-D, Informational)
+
+scenarios:
+  - id: TOK-001
+    name: DPoP proof-of-possession on the token request
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC9449]
+    conformance_status: verified
+    given:
+      - The hardware attestation key (HATT-001 / HATT-002)
+    when: Agent requests an access token
+    then:
+      - Agent sends a DPoP proof JWT (JOSE header typ = dpop+jwt) signed by the hardware key
+      - The issued access token carries cnf.jkt = base64url SHA-256 JWK thumbprint of the key (RFC 9449 sec 6.1)
+    refs:
+      - crates/arkavo-agent-auth/src/types.rs:1-70
+    changed: "2026-06-15"
+
+  - id: TOK-002
+    name: DPoP-bound token rejected without a matching proof
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC9449]
+    conformance_status: verified
+    given:
+      - An access token carrying cnf.jkt
+    when: The token is presented to a resource server
+    then:
+      - A request without a valid DPoP proof is rejected
+      - A proof signed by a different key is rejected
+    edge_cases:
+      - condition: Replayed proof (same jti)
+        expected: Rejected
+      - condition: htm or htu mismatch with the actual request
+        expected: Rejected
+      - condition: iat outside the acceptance window
+        expected: Rejected
+    changed: "2026-06-15"
+
+  - id: TOK-003
+    name: mTLS certificate-bound token, extending existing mTLS
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8705]
+    conformance_status: verified
+    given:
+      - An agent client certificate whose private key is the hardware attestation key
+    when: Agent requests a token over a mutually-authenticated TLS connection
+    then:
+      - The token carries cnf.x5t#S256 = base64url SHA-256 of the DER client certificate
+      - The token presented over a different TLS connection is rejected
+    refs:
+      - crates/arkavo-protocol/src/websocket.rs:101
+      - crates/arkavo-protocol/tests/mtls_integration.rs:76-178
+    edge_cases:
+      - condition: mTLS transport exists, but cert key is not yet hardware-resident
+        expected: Hardware-resident cert key is the wip delta; mTLS plumbing is reused, not rebuilt
+    changed: "2026-06-15"
+
+  - id: TOK-004
+    name: Token Exchange — attestation for a scoped sender-constrained token
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8693, RFC9449, OIDC-DISCOVERY]
+    conformance_status: verified
+    given:
+      - A verified attestation quote (HATT-007)
+      - An external IdP that supports RFC 8693
+    when: Agent calls the IdP token endpoint with grant_type urn:ietf:params:oauth:grant-type:token-exchange and subject_token set to the attestation/agent assertion
+    then:
+      - The IdP returns a scoped access token bound to the agent key (cnf.jkt)
+      - This is the integration seam — the IdP owns issuance and governance; Arkavo owns the hardware-rooted agent
+    changed: "2026-06-15"
+
+  - id: TOK-005
+    name: Human-to-agent accountability via the actor claim
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8693]
+    conformance_status: verified
+    aligns_with: [MCP-I-KYA, AIP]
+    aligns_note: RFC 8693 act/may_act is the verified mechanism; MCP-I/KYA-OS and AIP delegation are conceptually aligned profiles, not strict clause conformance
+    given:
+      - The existing ES256 delegation_jwt binding a human DID to the agent DID
+    when: Agent exchanges its assertion for a task token
+    then:
+      - The issued token carries act (acting party chain) and, where pre-authorized, may_act
+      - Governance attributes the agent's actions to the human principal
+    refs:
+      - crates/arkavo-agent-auth/src/types.rs:27-29
+    edge_cases:
+      - condition: Agent attempts to strip the act chain to anonymize
+        expected: Rejected; delegation chain is mandatory where a human principal exists
+    changed: "2026-06-15"
+
+  - id: TOK-006
+    name: Token Exchange downscopes capabilities (Arkavo policy)
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8693]
+    conformance_status: verified
+    given:
+      - An agent with broad entitlements
+    when: Agent exchanges for a specific task
+    then:
+      - Requested scope is constrained to entitlements intersected with attested capabilities
+      - An over-broad request is downscoped or rejected
+    edge_cases:
+      - condition: Interpreting the subset rule as an RFC 8693 requirement
+        expected: Treated as Arkavo policy — RFC 8693 permits but does not mandate scope subset; attributed as policy, not as a conformance claim
+    changed: "2026-06-15"
+
+  - id: TOK-007
+    name: IdP-agnostic issuance via OIDC discovery
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [OIDC-DISCOVERY, RFC8693]
+    conformance_status: verified
+    given:
+      - OIDC discovery metadata for an arbitrary issuer (NewCore, Okta, Entra, Ping)
+    when: The issuer is configured
+    then:
+      - Token exchange works without changes to core code
+      - IdP-specific quirks are handled only at the adapter boundary
+    edge_cases:
+      - condition: An IdP's token-exchange dialect deviates from RFC 8693
+        expected: Deviation absorbed in the adapter shim, never in core
+    changed: "2026-06-15"
+
+  - id: TOK-008
+    name: Suspended agent cannot exchange and its live token is revoked
+    criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8693, RFC7662]
+    conformance_status: verified
+    given:
+      - Agent transitioned to Suspended (failed re-attestation, HATT-009)
+    when: The agent attempts a token exchange or holds a live token
+    then:
+      - The exchange is rejected (attestation gate on issuance)
+      - Any live token is revoked mid-life via introspection/revocation, not merely blocked at the next exchange
+    refs:
+      - specs/arkavo-edge/agent-credentials.spec.yaml
+    changed: "2026-06-15"
+
+  - id: TOK-009
+    name: Offline / air-gapped token issuance
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC9449, RFC8693]
+    conformance_status: verified
+    given:
+      - A disconnected or air-gapped environment with no reachable external IdP
+    when: The agent needs a token
+    then:
+      - A local in-environment token issuer issues sender-constrained tokens (the token-layer parallel of a self-hosted KAS)
+      - Proof-of-possession and attestation gating continue to function offline
+    edge_cases:
+      - condition: RFC 8693 assumes a reachable IdP
+        expected: Closed by the local issuer; mirrors the self-hosted-KAS air-gap story in SECURITY.md
+    changed: "2026-06-15"
+
+  - id: TOK-010
+    name: TDF/KAS rewrap is bound to the attested DID
+    criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
+    conformance: [RFC8693]
+    conformance_status: verified
+    given:
+      - A TDF-wrapped tool output
+    when: The agent requests a key rewrap
+    then:
+      - KAS / ABAC policy evaluates the attested agent did:key, not a bearer claim
+    refs:
+      - crates/arkavo-tdf/src/kas_client.rs
+    edge_cases:
+      - condition: Re-specifying KAS/ABAC enforcement here
+        expected: Cross-referenced to the TDF security spec; not duplicated
+    changed: "2026-06-15"
+
+# Security considerations (audience: offensive-security reviewers)
+security:
+  - id: SEC-TB-001
+    name: PoP key equals the attested key
+    description: The cnf key MUST be the HATT hardware attestation key. Binding a token to a software key, or to any key other than the attested one, is rejected. This is the critical seam between token-binding and hardware-attestation.
+  - id: SEC-TB-002
+    name: No bearer downgrade
+    description: Removing the DPoP proof, or presenting an unbound token where binding is required, fails closed.
+  - id: SEC-TB-003
+    name: Replay resistance
+    description: DPoP jti/htm/htu/iat are enforced; mTLS connection identity is enforced for certificate-bound tokens.
+  - id: SEC-TB-004
+    name: No ambient IdP trust
+    description: Issuance is gated on a verified attestation (HATT) and a current, non-Suspended agent state.
+  - id: SEC-TB-005
+    name: Delegation accountability
+    description: The human principal is preserved through exchange; an agent cannot strip the act chain to anonymize its actions.
+
+# Composed and cross-referenced specs
+composed_specs:
+  - { spec: hardware-attestation.spec.yaml, relation: supplies the attested PoP key and the issuance gate }
+  - { spec: agent-auth.spec.yaml, relation: owns token request/store/refresh/challenge-response; this spec adds sender-constraining and exchange only }
+  - { spec: agent-credentials.spec.yaml, relation: revocation/introspection events for live-token kill }
+  - { spec: trusted-agent.spec.yaml, phases: [4], relation: Phase 4 auth token gains sender-constraining and exchange }

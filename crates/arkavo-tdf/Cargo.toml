@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Core TDF (Trusted Data Format) abstraction layer with streaming support for Arkavo"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["tdf", "opentdf", "encryption", "streaming", "security"]
 categories = ["cryptography", "asynchronous"]
 

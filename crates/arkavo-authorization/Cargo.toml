@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "OpenTDF Authorization v2 integration for Arkavo - Connect protocol client for entitlement-based access control"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["authorization", "opentdf", "connect-rpc", "abac", "security"]
 categories = ["authentication", "web-programming::http-client"]
 
