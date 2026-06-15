@@ -52,6 +52,7 @@ scenarios:
     name: DPoP proof-of-possession on the token request
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC9449]
     conformance_status: verified
     given:
@@ -68,6 +69,7 @@ scenarios:
     name: DPoP-bound token rejected without a matching proof
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC9449]
     conformance_status: verified
     given:
@@ -89,6 +91,7 @@ scenarios:
     name: mTLS certificate-bound token, extending existing mTLS
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8705]
     conformance_status: verified
     given:
@@ -109,6 +112,7 @@ scenarios:
     name: Token Exchange — attestation for a scoped sender-constrained token
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8693, RFC9449, OIDC-DISCOVERY]
     conformance_status: verified
     given:
@@ -124,6 +128,7 @@ scenarios:
     name: Human-to-agent accountability via the actor claim
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8693]
     conformance_status: verified
     aligns_with: [MCP-I-KYA, AIP]
@@ -145,6 +150,7 @@ scenarios:
     name: Token Exchange downscopes capabilities (Arkavo policy)
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8693]
     conformance_status: verified
     given:
@@ -162,6 +168,7 @@ scenarios:
     name: IdP-agnostic issuance via OIDC discovery
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [OIDC-DISCOVERY, RFC8693]
     conformance_status: verified
     given:
@@ -179,6 +186,7 @@ scenarios:
     name: Suspended agent cannot exchange and its live token is revoked
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8693, RFC7662]
     conformance_status: verified
     given:
@@ -195,6 +203,7 @@ scenarios:
     name: Offline / air-gapped token issuance
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC9449, RFC8693]
     conformance_status: verified
     given:
@@ -212,6 +221,7 @@ scenarios:
     name: TDF/KAS rewrap is bound to the attested DID
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/629
     conformance: [RFC8693]
     conformance_status: verified
     given:

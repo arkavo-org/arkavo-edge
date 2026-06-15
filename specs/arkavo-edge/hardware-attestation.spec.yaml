@@ -72,6 +72,7 @@ scenarios:
     name: Generate non-extractable P-256 attestation key in Secure Enclave (macOS)
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, DIDKEY]
     conformance_status: verified
     given:
@@ -95,6 +96,7 @@ scenarios:
     name: Generate non-extractable attestation key in TPM 2.0 (Linux, Windows)
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [TPM2, DIDKEY]
     conformance_status: verified
     given:
@@ -118,6 +120,7 @@ scenarios:
     name: Signed attestation quote over a verifier-supplied nonce
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, TPM2]
     conformance_status: verified
     given:
@@ -140,6 +143,7 @@ scenarios:
     name: Apple App Attest attestation object format (macOS)
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST]
     conformance_status: verified
     given:
@@ -160,6 +164,7 @@ scenarios:
     name: TPM 2.0 AK quote format (Linux, Windows)
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [TPM2]
     conformance_status: verified
     given:
@@ -180,6 +185,7 @@ scenarios:
     name: WebAuthn/FIDO2 attestation-statement interop
     criticality: medium
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [WEBAUTHN-L2]
     conformance_status: verified
     given:
@@ -196,6 +202,7 @@ scenarios:
     name: Remote verification accepts or rejects, with channel binding
     criticality: critical
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, TPM2, WEBAUTHN-L2]
     conformance_status: verified
     given:
@@ -223,6 +230,7 @@ scenarios:
     name: Attestation strength drives the MCP-T VERIFICATION dimension
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [MCP-T-020]
     conformance_status: verified
     given:
@@ -243,6 +251,7 @@ scenarios:
     name: Re-attestation on TTL expiry produces a fresh quote
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, TPM2]
     conformance_status: verified
     given:
@@ -260,6 +269,8 @@ scenarios:
   - id: HATT-010
     name: Software fallback is never Trusted
     criticality: critical
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     given:
       - No Secure Enclave or TPM available
     when: Agent attests
@@ -274,6 +285,8 @@ scenarios:
   - id: HATT-011
     name: Compromised platform downgrades and is rejected for high-criticality domains
     criticality: high
+    wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     given:
       - Jailbreak, debug, or root indicators present
     when: Security state is assessed
@@ -291,6 +304,7 @@ scenarios:
     name: Hardware key loss and rotation
     criticality: high
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, TPM2]
     conformance_status: verified
     given:
@@ -309,6 +323,7 @@ scenarios:
     name: Virtualized TPM is capped at the Medium assurance tier
     criticality: medium
     wip: true
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [TPM2]
     conformance_status: verified
     given:
