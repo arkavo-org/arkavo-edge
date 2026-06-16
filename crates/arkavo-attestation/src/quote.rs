@@ -31,6 +31,10 @@ fn quote_message(nonce: &[u8], did_key: &str, measurements: &[u8]) -> Vec<u8> {
     let did_bytes = did_key.as_bytes();
     let mut message = Vec::with_capacity(12 + nonce.len() + did_bytes.len() + measurements.len());
     for field in [nonce, did_bytes, measurements] {
+        debug_assert!(
+            field.len() <= u32::MAX as usize,
+            "quote field exceeds the u32 length prefix"
+        );
         message.extend_from_slice(&(field.len() as u32).to_be_bytes());
         message.extend_from_slice(field);
     }
@@ -38,6 +42,10 @@ fn quote_message(nonce: &[u8], did_key: &str, measurements: &[u8]) -> Vec<u8> {
 }
 
 /// Something that can sign a quote message and report the did:key it signs as.
+///
+/// Implementations MUST guarantee that [`QuoteSigner::did_key`] is the public
+/// key corresponding to the private key used by [`QuoteSigner::sign`]; a quote's
+/// identity binding rests on this invariant.
 pub trait QuoteSigner {
     /// The signer's P-256 did:key.
     fn did_key(&self) -> String;

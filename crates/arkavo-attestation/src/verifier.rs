@@ -27,9 +27,14 @@ pub enum RejectReason {
     NonceMismatch,
 }
 
-/// Verify a signed attestation quote: the signature must validate over `nonce`
-/// under the SEC1 public key, AND `claimed_did_key` must equal the did:key
-/// derived from that public key.
+/// Low-level primitive: verify a signature over a bare `nonce` under the SEC1
+/// public key, AND that `claimed_did_key` equals the did:key derived from it.
+///
+/// This binds only the nonce. For full attestation-quote verification that also
+/// binds the agent did:key and platform measurements (and checks nonce
+/// freshness), use [`crate::quote::verify_quote_envelope`] — that is the
+/// canonical entry point; this primitive is for callers needing only a nonce
+/// challenge.
 ///
 /// Malformed public-key bytes yield `Rejected(BadSignature)`.
 pub fn verify_quote(

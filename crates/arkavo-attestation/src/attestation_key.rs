@@ -57,9 +57,13 @@ impl AttestationKey {
     }
 
     /// The P-256 `did:key` identifier for this attestation key's public key.
+    ///
+    /// Infallible: `public_key_sec1` is validated at provisioning time (software
+    /// generation and the `provision_with` seam both reject malformed SEC1
+    /// bytes), so the stored bytes are always a valid P-256 point.
     pub fn did_key(&self) -> String {
         arkavo_crypto::P256VerifyingKey::from_sec1_bytes(&self.public_key_sec1)
-            .expect("stored SEC1 bytes are a valid P-256 public key")
+            .expect("stored SEC1 bytes are validated at provisioning time")
             .to_did_key()
     }
 }
@@ -84,6 +88,13 @@ pub struct HardwareAttestationKey {
 pub fn provision_with(keystores: &[&dyn HardwareKeystore]) -> AttestationKey {
     for keystore in keystores {
         if let Some(hardware) = keystore.generate() {
+            // Validate the public key at the seam: a keystore (including a
+            // third-party impl) that returns malformed SEC1 bytes is treated as
+            // a failed keystore and skipped, keeping did_key() infallible.
+            if arkavo_crypto::P256VerifyingKey::from_sec1_bytes(&hardware.public_key_sec1).is_err()
+            {
+                continue;
+            }
             return AttestationKey {
                 attestation_type: hardware.attestation_type,
                 hardware_binding: true,
@@ -187,6 +198,31 @@ mod tests {
         assert_eq!(key.assurance_tier(), AssuranceTier::Medium);
         assert!(key.hardware_binding());
         assert!(!key.assurance_tier().trusted_eligible());
+    }
+
+    struct FakeMalformedKeystore;
+
+    impl HardwareKeystore for FakeMalformedKeystore {
+        fn generate(&self) -> Option<HardwareAttestationKey> {
+            Some(HardwareAttestationKey {
+                // Not a valid SEC1 P-256 point.
+                public_key_sec1: vec![0x01, 0x02, 0x03],
+                attestation_type: AttestationType::SecureEnclave,
+                tier: AssuranceTier::High,
+            })
+        }
+    }
+
+    #[test]
+    fn test_malformed_keystore_output_falls_back_to_software_without_panic() {
+        // A third-party HardwareKeystore returning invalid SEC1 bytes must be
+        // rejected at the seam: provision_with falls through to the software key,
+        // keeping did_key() infallible (no panic-from-untrusted-input).
+        let key = provision_with(&[&FakeMalformedKeystore]);
+        assert_eq!(key.attestation_type(), AttestationType::SoftwareFingerprint);
+        assert!(!key.hardware_binding());
+        // Must not panic, and yields a valid P-256 did:key.
+        assert!(key.did_key().starts_with("did:key:zDn"));
     }
 
     #[spec("HATT-010")]
