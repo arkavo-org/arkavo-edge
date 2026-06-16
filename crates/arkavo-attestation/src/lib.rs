@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 pub mod attestation_key;
 pub mod evidence;
 pub mod platform;
+pub mod policy;
 #[cfg(target_os = "macos")]
 pub mod secure_enclave;
+pub mod verifier;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
