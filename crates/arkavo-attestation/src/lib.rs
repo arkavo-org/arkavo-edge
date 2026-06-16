@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod attestation_key;
 pub mod evidence;
+pub mod freshness;
 pub mod platform;
 pub mod policy;
 pub mod quote;
