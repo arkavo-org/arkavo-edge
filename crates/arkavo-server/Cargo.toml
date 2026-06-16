@@ -123,7 +123,12 @@ mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt", "arkavo-protocol/kas"]
 iroh = ["dep:arkavo-tdf-iroh"]
-llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-llama-cpp"]
+# The real LlamaTokenEstimator in agent_loop.rs is gated on this feature and
+# calls Router::any_loaded_model() / min_feasible_context_size(), which only
+# exist under arkavo-router's own llama-cpp feature. Propagate it here so the
+# real tokenizer compiles and budget/window trimming stops falling back to the
+# chars/4 MockEstimator.
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-router/llama-cpp", "dep:arkavo-llama-cpp"]
 claude-agent = ["dep:arkavo-mcp-claude"]
 
 [dev-dependencies]

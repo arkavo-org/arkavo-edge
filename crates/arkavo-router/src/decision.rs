@@ -78,6 +78,12 @@ pub enum ModelChoice {
     DeepSeekV32Speciale,
     /// Kimi K2.5 - 256K context, thinking mode support
     KimiK2,
+    /// GLM-5.2 (Zhipu AI / Z.ai) - OpenAI-compatible cloud reasoning model.
+    /// Routed through the generic OpenAI-compatible adapter (base URL +
+    /// model string + `GLM_API_KEY`). Introduced as a single Thompson
+    /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
+    /// (High/Max) split can follow once this base arm graduates probation.
+    Glm52,
 }
 
 impl ModelChoice {
@@ -118,6 +124,7 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
+            Self::Glm52 => "glm-5.2",
         }
     }
 
@@ -129,7 +136,7 @@ impl ModelChoice {
             | Self::LocalQwen35_27B
             | Self::LocalQwen36A3B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
-            Self::LocalGlm47Flash => "glm",
+            Self::LocalGlm47Flash | Self::Glm52 => "glm",
             Self::LocalGemma4E2B
             | Self::LocalGemma4E4B
             | Self::LocalGemma4_26B
@@ -162,6 +169,7 @@ impl ModelChoice {
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
             "qwen3.6-35b-a3b" | "qwen3.6" | "qwen36" => Some(Self::LocalQwen36A3B),
             "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
+            "glm-5.2" | "glm5.2" | "glm-5" | "glm52" => Some(Self::Glm52),
             "gemma-4-e2b" => Some(Self::LocalGemma4E2B),
             "gemma-4-e4b" => Some(Self::LocalGemma4E4B),
             "gemma-4-26b-a4b" => Some(Self::LocalGemma4_26B),
@@ -304,6 +312,12 @@ impl ModelChoice {
         matches!(self, Self::KimiK2)
     }
 
+    /// Cloud GLM (Zhipu AI / Z.ai) arm, reached via the OpenAI-compatible
+    /// adapter. Distinct from the local `LocalGlm47Flash` GGUF model.
+    pub fn is_glm(&self) -> bool {
+        matches!(self, Self::Glm52)
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash
@@ -330,6 +344,7 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
+            Self::Glm52 => "zhipu",
         }
     }
 
@@ -365,7 +380,8 @@ impl ModelChoice {
             | Self::ClaudeFable5
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
-            | Self::KimiK2 => PlannerTier::Large,
+            | Self::KimiK2
+            | Self::Glm52 => PlannerTier::Large,
         }
     }
 
@@ -565,6 +581,7 @@ impl ModelChoice {
             Self::DeepSeekV32 => "DeepSeek V3.2",
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
+            Self::Glm52 => "GLM-5.2",
         }
     }
 }
@@ -727,6 +744,15 @@ impl RoutingDecision {
                     ModelChoice::GeminiPro,
                 ]
             }
+            // GLM-5.2 steps down to the other low-cost cloud arms, then a
+            // capable local model, so a missing GLM key never strands a task.
+            (ModelChoice::Glm52, _) => {
+                vec![
+                    ModelChoice::DeepSeekV32,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             _ => vec![ModelChoice::GeminiFlash],
         }
     }
@@ -808,6 +834,17 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
                 input_cost + output_cost
             }
+            ModelChoice::Glm52 => {
+                // GLM-5.2 (Zhipu AI / Z.ai), GLM-4.6-class published rates:
+                // $0.60/1M input, $2.20/1M output. Cheap relative to the
+                // Anthropic/Gemini tiers, so budget enforcement keeps it
+                // routable where DeepSeek/Kimi sit. Update when Z.ai confirms
+                // GLM-5.2-specific pricing; real spend should come from the
+                // response `usage` block once surfaced.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.60;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
+                input_cost + output_cost
+            }
             // All local models are free
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -862,6 +899,9 @@ impl RoutingDecision {
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
             ModelChoice::KimiK2 => Duration::from_secs(5),
+            // GLM-5.2 reasons before answering; budget extra wall-clock on
+            // hard tasks, in line with the other thinking cloud arms.
+            ModelChoice::Glm52 => Duration::from_secs(8),
         }
     }
 }
@@ -1046,6 +1086,65 @@ mod tests {
         );
 
         assert_eq!(decision.estimated_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_glm52_properties() {
+        let model = ModelChoice::Glm52;
+        assert_eq!(model.name(), "glm-5.2");
+        assert_eq!(model.provider(), "zhipu");
+        assert_eq!(model.family(), "glm");
+        assert_eq!(model.display_name(), "GLM-5.2");
+        assert!(model.is_glm());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert_eq!(model.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_glm52_name_resolution() {
+        for alias in ["glm-5.2", "glm5.2", "glm-5", "glm52", "GLM-5.2"] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Glm52),
+                "alias {alias} should resolve to Glm52"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Glm52.name()),
+            Some(ModelChoice::Glm52),
+            "round-trip via primary name"
+        );
+        // GLM-5.2 (cloud) must not collide with the local GLM-4.7-Flash GGUF.
+        assert_eq!(
+            ModelChoice::from_name("glm-4.7-flash"),
+            Some(ModelChoice::LocalGlm47Flash)
+        );
+    }
+
+    #[test]
+    fn test_glm52_cost_is_priced_below_anthropic() {
+        // Budget enforcement only engages if GLM has a real, non-zero cost
+        // model. GLM-5.2 must be priced (cloud) yet sit well under Opus.
+        let glm = RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        let opus =
+            RoutingDecision::estimate_cost(&ModelChoice::ClaudeOpus, TaskCategory::CodeGeneration);
+        assert!(
+            glm > 0.0,
+            "GLM-5.2 must carry a real cost for budget gating"
+        );
+        assert!(glm < opus, "GLM-5.2 should be cheaper than Opus");
+    }
+
+    #[test]
+    fn test_glm52_fallback_chain_has_local_safety_net() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        assert!(decision.fallback_chain.iter().any(ModelChoice::is_local));
     }
 
     #[test]

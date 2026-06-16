@@ -105,6 +105,7 @@ impl ModelSelector {
             ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
+            ModelChoice::Glm52 => "GLM-5.2 (8s), low-cost cloud reasoning, OpenAI-compatible",
         };
 
         format!(
@@ -524,6 +525,7 @@ mod tests {
             anthropic: false,
             deepseek: false,
             kimi: false,
+            glm: false,
         }
     }
 
@@ -607,6 +609,7 @@ mod tests {
             anthropic: true,
             deepseek: false,
             kimi: false,
+            glm: false,
         });
         let learning = LearningModule::new();
         let classification =

@@ -61,6 +61,10 @@ impl super::Router {
         std::env::var("MOONSHOT_API_KEY").is_ok()
     }
 
+    pub fn is_glm_available(&self) -> bool {
+        std::env::var("GLM_API_KEY").is_ok()
+    }
+
     pub fn get_anthropic_provider(
         &self,
     ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
@@ -96,6 +100,7 @@ impl super::Router {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
             ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
+            ModelChoice::Glm52 => std::env::var("GLM_API_KEY").is_ok(),
             m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
                 (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
                 _ => false,
@@ -372,6 +377,33 @@ impl super::Router {
 
                 let provider = AnthropicProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create Kimi provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "glm")]
+            ModelChoice::Glm52 => {
+                // GLM-5.2 speaks the OpenAI chat-completions wire format, so it
+                // routes through the generic OpenAI-compatible provider rather
+                // than a bespoke crate. Base URL defaults to Z.ai's v4 endpoint
+                // and is overridable for the mainland (open.bigmodel.cn) host.
+                use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
+
+                let api_key = std::env::var("GLM_API_KEY")
+                    .map_err(|_| Error::ModelExecution("GLM_API_KEY not set".to_string()))?;
+                let base_url = std::env::var("GLM_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.z.ai/api/paas/v4".to_string());
+
+                let config = OpenAIConfig {
+                    api_key,
+                    base_url,
+                    model: model.name().to_string(),
+                    organization_id: None,
+                    api_version: None,
+                    is_azure: false,
+                };
+
+                let provider = OpenAIProvider::new(config).map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
                 })?;
                 Ok(Box::new(provider))
             }

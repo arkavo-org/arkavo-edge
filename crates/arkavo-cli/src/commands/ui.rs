@@ -1066,6 +1066,28 @@ async fn create_client_from_routing(
                 Err("Kimi support requires kimi feature".into())
             }
         }
+        ModelChoice::Glm52 => {
+            #[cfg(feature = "glm")]
+            {
+                use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
+                let api_key = std::env::var("GLM_API_KEY")?;
+                let base_url = std::env::var("GLM_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.z.ai/api/paas/v4".to_string());
+                let provider = Box::new(OpenAIProvider::new(OpenAIConfig {
+                    api_key,
+                    base_url,
+                    model: decision.recommended_model.name().to_string(),
+                    organization_id: None,
+                    api_version: None,
+                    is_azure: false,
+                })?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "glm"))]
+            {
+                Err("GLM support requires glm feature".into())
+            }
+        }
     }
 }
 
