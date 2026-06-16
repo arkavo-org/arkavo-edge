@@ -135,20 +135,29 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    fn fresh_nonce() -> Vec<u8> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_le_bytes()
+            .to_vec()
+    }
+
     #[spec("HATT-003")]
     #[test]
     fn fresh_quote_over_nonce_and_measurements_is_accepted() {
         let signer = SoftwareQuoteSigner::generate();
-        let nonce = b"verifier-challenge-001";
+        let nonce = fresh_nonce();
         let measurements = b"pcr0:deadbeef|pcr7:cafef00d";
 
-        let quote = produce_quote(&signer, nonce, measurements);
+        let quote = produce_quote(&signer, &nonce, measurements);
         let did = signer.did_key();
 
         assert_eq!(quote.nonce, nonce);
         assert_eq!(quote.did_key, did);
         assert_eq!(
-            verify_quote_envelope(&quote, nonce, &did),
+            verify_quote_envelope(&quote, &nonce, &did),
             VerifyOutcome::Accepted
         );
     }
@@ -157,16 +166,16 @@ mod tests {
     #[test]
     fn tampered_signature_is_rejected_bad_signature() {
         let signer = SoftwareQuoteSigner::generate();
-        let nonce = b"verifier-challenge-002";
+        let nonce = fresh_nonce();
         let measurements = b"pcr0:0011";
 
-        let mut quote = produce_quote(&signer, nonce, measurements);
+        let mut quote = produce_quote(&signer, &nonce, measurements);
         let did = signer.did_key();
         let last = quote.signature.len() - 1;
         quote.signature[last] ^= 0xFF;
 
         assert_eq!(
-            verify_quote_envelope(&quote, nonce, &did),
+            verify_quote_envelope(&quote, &nonce, &did),
             VerifyOutcome::Rejected(RejectReason::BadSignature)
         );
     }
@@ -175,17 +184,17 @@ mod tests {
     #[test]
     fn mutated_measurements_after_signing_is_rejected_bad_signature() {
         let signer = SoftwareQuoteSigner::generate();
-        let nonce = b"verifier-challenge-003";
+        let nonce = fresh_nonce();
         let measurements = b"pcr0:trusted";
 
-        let mut quote = produce_quote(&signer, nonce, measurements);
+        let mut quote = produce_quote(&signer, &nonce, measurements);
         let did = signer.did_key();
         // Forge the measurements without re-signing: the signature no longer
         // covers them, so verification must fail.
         quote.measurements = b"pcr0:compromised".to_vec();
 
         assert_eq!(
-            verify_quote_envelope(&quote, nonce, &did),
+            verify_quote_envelope(&quote, &nonce, &did),
             VerifyOutcome::Rejected(RejectReason::BadSignature)
         );
     }
@@ -194,15 +203,15 @@ mod tests {
     #[test]
     fn stale_quote_against_different_nonce_is_rejected_nonce_mismatch() {
         let signer = SoftwareQuoteSigner::generate();
-        let signed_nonce = b"verifier-challenge-004";
+        let signed_nonce = fresh_nonce();
         let measurements = b"pcr0:fresh";
 
-        let quote = produce_quote(&signer, signed_nonce, measurements);
+        let quote = produce_quote(&signer, &signed_nonce, measurements);
         let did = signer.did_key();
-        let different_nonce = b"a-newer-challenge-005";
+        let different_nonce = fresh_nonce();
 
         assert_eq!(
-            verify_quote_envelope(&quote, different_nonce, &did),
+            verify_quote_envelope(&quote, &different_nonce, &did),
             VerifyOutcome::Rejected(RejectReason::NonceMismatch)
         );
     }
@@ -216,14 +225,14 @@ mod tests {
         // accepted (identity confusion); it must be rejected as DidMismatch.
         let signer_a = SoftwareQuoteSigner::generate();
         let signer_b = SoftwareQuoteSigner::generate();
-        let nonce = b"verifier-challenge-006";
+        let nonce = fresh_nonce();
         let measurements = b"pcr0:from-a";
 
-        let quote = produce_quote(&signer_a, nonce, measurements);
+        let quote = produce_quote(&signer_a, &nonce, measurements);
         let expected_did_b = signer_b.did_key();
 
         assert_eq!(
-            verify_quote_envelope(&quote, nonce, &expected_did_b),
+            verify_quote_envelope(&quote, &nonce, &expected_did_b),
             VerifyOutcome::Rejected(RejectReason::DidMismatch)
         );
     }

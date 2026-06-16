@@ -37,6 +37,15 @@ mod tests {
     use crate::verifier::{RejectReason, VerifyOutcome};
     use arkavo_test_macros::spec;
 
+    fn fresh_nonce() -> Vec<u8> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_le_bytes()
+            .to_vec()
+    }
+
     #[spec("HATT-009")]
     #[test]
     fn ttl_expiry_boundary_is_inclusive_at_ttl_seconds() {
@@ -71,20 +80,22 @@ mod tests {
         let signer = SoftwareQuoteSigner::generate();
         let did = signer.did_key();
 
-        // The original quote answered challenge "nonce-1".
-        let old = produce_quote(&signer, b"nonce-1", b"m");
+        // The original quote answered the first challenge.
+        let old_nonce = fresh_nonce();
+        let old = produce_quote(&signer, &old_nonce, b"m");
         // On TTL expiry / orchestrator challenge, the agent re-enters with a
         // fresh nonce and produces a new quote.
-        let new = produce_quote(&signer, b"nonce-2", b"m");
+        let new_nonce = fresh_nonce();
+        let new = produce_quote(&signer, &new_nonce, b"m");
 
         // The fresh quote satisfies the fresh challenge.
         assert_eq!(
-            verify_quote_envelope(&new, b"nonce-2", &did),
+            verify_quote_envelope(&new, &new_nonce, &did),
             VerifyOutcome::Accepted
         );
         // The stale quote cannot satisfy the fresh challenge nonce.
         assert_eq!(
-            verify_quote_envelope(&old, b"nonce-2", &did),
+            verify_quote_envelope(&old, &new_nonce, &did),
             VerifyOutcome::Rejected(RejectReason::NonceMismatch)
         );
     }

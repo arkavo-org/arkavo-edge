@@ -66,6 +66,15 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    fn fresh_nonce() -> Vec<u8> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_le_bytes()
+            .to_vec()
+    }
+
     fn keypair() -> arkavo_crypto::P256SigningKeypair {
         arkavo_crypto::P256SigningKeypair::generate()
     }
@@ -74,12 +83,12 @@ mod tests {
     #[test]
     fn valid_signature_and_matching_did_is_accepted() {
         let kp = keypair();
-        let nonce = b"fresh-nonce-001";
-        let signature = kp.sign(nonce);
+        let nonce = fresh_nonce();
+        let signature = kp.sign(&nonce);
         let public_key_sec1 = kp.public_key().to_sec1_bytes();
         let did = kp.public_key().to_did_key();
 
-        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &did);
+        let outcome = verify_quote(&public_key_sec1, &nonce, &signature, &did);
         assert_eq!(outcome, VerifyOutcome::Accepted);
     }
 
@@ -87,13 +96,13 @@ mod tests {
     #[test]
     fn signature_over_different_nonce_is_rejected_bad_signature() {
         let kp = keypair();
-        let signed_nonce = b"original-nonce";
-        let verifier_nonce = b"different-nonce";
-        let signature = kp.sign(signed_nonce);
+        let signed_nonce = fresh_nonce();
+        let verifier_nonce = fresh_nonce();
+        let signature = kp.sign(&signed_nonce);
         let public_key_sec1 = kp.public_key().to_sec1_bytes();
         let did = kp.public_key().to_did_key();
 
-        let outcome = verify_quote(&public_key_sec1, verifier_nonce, &signature, &did);
+        let outcome = verify_quote(&public_key_sec1, &verifier_nonce, &signature, &did);
         assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
     }
 
@@ -101,15 +110,15 @@ mod tests {
     #[test]
     fn tampered_signature_is_rejected_bad_signature() {
         let kp = keypair();
-        let nonce = b"fresh-nonce-002";
-        let mut signature = kp.sign(nonce);
+        let nonce = fresh_nonce();
+        let mut signature = kp.sign(&nonce);
         // Flip a byte to corrupt the signature.
         let last = signature.len() - 1;
         signature[last] ^= 0xFF;
         let public_key_sec1 = kp.public_key().to_sec1_bytes();
         let did = kp.public_key().to_did_key();
 
-        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &did);
+        let outcome = verify_quote(&public_key_sec1, &nonce, &signature, &did);
         assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
     }
 
@@ -117,12 +126,12 @@ mod tests {
     #[test]
     fn malformed_public_key_is_rejected_bad_signature() {
         let kp = keypair();
-        let nonce = b"fresh-nonce-003";
-        let signature = kp.sign(nonce);
+        let nonce = fresh_nonce();
+        let signature = kp.sign(&nonce);
         let did = kp.public_key().to_did_key();
         let garbage = [0u8; 4];
 
-        let outcome = verify_quote(&garbage, nonce, &signature, &did);
+        let outcome = verify_quote(&garbage, &nonce, &signature, &did);
         assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
     }
 
@@ -130,13 +139,13 @@ mod tests {
     #[test]
     fn valid_signature_but_wrong_did_is_rejected_did_mismatch() {
         let kp = keypair();
-        let nonce = b"fresh-nonce-004";
-        let signature = kp.sign(nonce);
+        let nonce = fresh_nonce();
+        let signature = kp.sign(&nonce);
         let public_key_sec1 = kp.public_key().to_sec1_bytes();
         // A did:key belonging to a different keypair.
         let wrong_did = keypair().public_key().to_did_key();
 
-        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &wrong_did);
+        let outcome = verify_quote(&public_key_sec1, &nonce, &signature, &wrong_did);
         assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::DidMismatch));
     }
 }
