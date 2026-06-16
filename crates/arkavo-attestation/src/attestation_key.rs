@@ -122,10 +122,72 @@ pub fn provision_software() -> AttestationKey {
     }
 }
 
+/// The result of rotating an attestation identity after key loss or compromise.
+#[derive(Debug, Clone)]
+pub struct Rotation {
+    /// The freshly minted attestation key that supersedes the previous one.
+    pub new_key: AttestationKey,
+    /// The `did:key` of the previous key, now revoked.
+    pub revoked_did_key: String,
+}
+
+/// Rotate an attestation identity: mint a fresh key and revoke the previous one.
+pub fn rotate(previous: &AttestationKey) -> Rotation {
+    Rotation {
+        new_key: provision(),
+        revoked_did_key: previous.did_key(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
+
+    #[spec("HATT-012")]
+    #[test]
+    fn test_rotation_mints_new_key_and_revokes_previous() {
+        let old = provision_software();
+        let rotation = rotate(&old);
+        assert_ne!(
+            rotation.new_key.did_key(),
+            old.did_key(),
+            "rotation must mint a fresh key with a different did:key"
+        );
+        assert_eq!(
+            rotation.revoked_did_key,
+            old.did_key(),
+            "rotation must revoke the previous key's did:key"
+        );
+    }
+
+    struct FakeVtpm;
+
+    impl HardwareKeystore for FakeVtpm {
+        fn generate(&self) -> Option<HardwareAttestationKey> {
+            let public_key_sec1 = arkavo_crypto::P256SigningKeypair::generate()
+                .public_key()
+                .to_sec1_bytes();
+            Some(HardwareAttestationKey {
+                public_key_sec1,
+                attestation_type: AttestationType::TpmQuote,
+                tier: AssuranceTier::Medium,
+            })
+        }
+    }
+
+    #[spec("HATT-013")]
+    #[test]
+    fn test_vtpm_medium_tier_is_capped_below_trusted() {
+        // PINS existing seam behavior: a virtualized-TPM keystore reports a
+        // hardware binding at the Medium tier, and the assurance ladder caps
+        // Medium below Trusted. vTPM detection itself lives in the deferred TPM
+        // backend; this characterizes the cap the seam already enforces.
+        let key = provision_with(&[&FakeVtpm]);
+        assert_eq!(key.assurance_tier(), AssuranceTier::Medium);
+        assert!(key.hardware_binding());
+        assert!(!key.assurance_tier().trusted_eligible());
+    }
 
     #[spec("HATT-010")]
     #[test]
