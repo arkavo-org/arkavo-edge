@@ -37,6 +37,7 @@ pub struct AttestationKey {
     attestation_type: AttestationType,
     hardware_binding: bool,
     assurance_tier: AssuranceTier,
+    public_key_sec1: Vec<u8>,
 }
 
 impl AttestationKey {
@@ -54,15 +55,24 @@ impl AttestationKey {
     pub fn assurance_tier(&self) -> AssuranceTier {
         self.assurance_tier
     }
+
+    /// The P-256 `did:key` identifier for this attestation key's public key.
+    pub fn did_key(&self) -> String {
+        arkavo_crypto::P256VerifyingKey::from_sec1_bytes(&self.public_key_sec1)
+            .expect("stored SEC1 bytes are a valid P-256 public key")
+            .to_did_key()
+    }
 }
 
 /// Provision an attestation key using the software fallback (no hardware
 /// keystore available). The resulting key is never Trusted-eligible.
 pub fn provision_software() -> AttestationKey {
+    let keypair = arkavo_crypto::P256SigningKeypair::generate();
     AttestationKey {
         attestation_type: AttestationType::SoftwareFingerprint,
         hardware_binding: false,
         assurance_tier: AssuranceTier::None,
+        public_key_sec1: keypair.public_key().to_sec1_bytes(),
     }
 }
 
@@ -79,5 +89,17 @@ mod tests {
         assert!(!key.hardware_binding());
         assert_eq!(key.assurance_tier(), AssuranceTier::None);
         assert!(!key.assurance_tier().trusted_eligible());
+    }
+
+    #[spec("HATT-001")]
+    #[test]
+    fn test_software_attestation_key_derives_p256_did_key() {
+        let key = provision_software();
+        let did = key.did_key();
+        assert!(
+            did.starts_with("did:key:zDn"),
+            "expected P-256 did:key, got {did}"
+        );
+        assert!(arkavo_crypto::P256VerifyingKey::from_did_key(&did).is_ok());
     }
 }

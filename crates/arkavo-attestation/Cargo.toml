@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-crypto = { path = "../arkavo-crypto" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # DeviceCheck/App Attest via Swift interop (to be implemented)

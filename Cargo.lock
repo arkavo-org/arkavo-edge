@@ -605,6 +605,7 @@ dependencies = [
 name = "arkavo-attestation"
 version = "0.81.1"
 dependencies = [
+ "arkavo-crypto",
  "arkavo-device-identity",
  "arkavo-test-macros",
  "serde",
