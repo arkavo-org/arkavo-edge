@@ -7,6 +7,36 @@ use crate::types::{
     DimensionScore, SCHEMA_VERSION, TrustScore, TrustScoreValue, ValidityWindow, dimensions,
 };
 
+/// Assurance tier of an agent's identity attestation.
+///
+/// Drives the MCP-T VERIFICATION dimension (HATT-008): a hardware-rooted quote
+/// is worth more than a software-only claim. Variants are ordered weakest to
+/// strongest so derived enums (`Ord`) match the trust they confer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AttestationStrength {
+    /// No attestation evidence at all.
+    Unattested,
+    /// Software-only attestation (self-signed, no hardware root of trust).
+    Software,
+    /// Virtualized root of trust (e.g. vTPM, nested enclave).
+    Virtualized,
+    /// Hardware root of trust (e.g. TPM 2.0, Apple App Attest, secure element).
+    Hardware,
+}
+
+impl AttestationStrength {
+    /// VERIFICATION dimension value (0-1000) conferred by this assurance tier.
+    /// Monotonic in tier strength: stronger roots of trust score higher.
+    pub fn verification_value(self) -> u32 {
+        match self {
+            Self::Hardware => 1000,
+            Self::Virtualized => 600,
+            Self::Software => 200,
+            Self::Unattested => 0,
+        }
+    }
+}
+
 /// Input data for computing trust dimensions from internal agent scoring.
 ///
 /// Fields are optional — dimensions are only computed for available data.
@@ -18,8 +48,18 @@ pub struct AgentTrustInput {
     pub success_std_dev: Option<f64>,
     /// Total observations (alpha + beta - priors)
     pub observation_count: Option<u32>,
-    /// Whether the agent has a verified DID:key
+    /// Whether the agent has a verified DID:key.
+    ///
+    /// Deprecated as the source of the VERIFICATION dimension (HATT-008): set
+    /// `attestation` instead, which captures the assurance tier of the identity
+    /// quote. Retained as a fallback for consumers that have not yet migrated —
+    /// VERIFICATION derives from this boolean only when `attestation` is `None`.
     pub has_verified_did: bool,
+    /// Assurance tier of the agent's identity attestation (HATT-008).
+    ///
+    /// When present, the VERIFICATION dimension derives from the attestation
+    /// strength. When `None`, VERIFICATION falls back to `has_verified_did`.
+    pub attestation: Option<AttestationStrength>,
     /// Agent creation timestamp
     pub created_at: Option<DateTime<Utc>>,
     /// Anti-pattern weight for security category (decayed sum)
@@ -79,13 +119,27 @@ pub fn compute_trust_score(
         );
     }
 
-    // Verification: binary based on DID:key
+    // Verification: derived from attestation strength when present (HATT-008),
+    // falling back to the legacy DID:key boolean for un-migrated consumers.
+    let (verification_value, verification_evidence) = match input.attestation {
+        Some(strength) => (
+            strength.verification_value(),
+            // Evidence comes from the attestation tier rather than a single
+            // boolean: any present attestation counts as one piece of evidence,
+            // unattested contributes none.
+            u32::from(strength != AttestationStrength::Unattested),
+        ),
+        None => (
+            if input.has_verified_did { 1000 } else { 0 },
+            u32::from(input.has_verified_did),
+        ),
+    };
     dimensions.insert(
         dimensions::VERIFICATION.to_string(),
         DimensionScore {
-            value: if input.has_verified_did { 1000 } else { 0 },
+            value: verification_value,
             confidence: 1.0,
-            evidence_count: u32::from(input.has_verified_did),
+            evidence_count: verification_evidence,
         },
     );
 
@@ -268,6 +322,78 @@ fn compute_composite(dimensions: &HashMap<String, DimensionScore>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    fn verification_value(input: &AgentTrustInput) -> u32 {
+        let score = compute_trust_score(input, "did:key:z6MkTest", "did:key:z6MkProv", None, 3600);
+        score.score.dimensions[dimensions::VERIFICATION].value
+    }
+
+    #[spec("HATT-008")]
+    #[test]
+    fn attestation_strength_drives_verification_dimension() {
+        let hardware = AgentTrustInput {
+            attestation: Some(AttestationStrength::Hardware),
+            ..Default::default()
+        };
+        let virtualized = AgentTrustInput {
+            attestation: Some(AttestationStrength::Virtualized),
+            ..Default::default()
+        };
+        let software = AgentTrustInput {
+            attestation: Some(AttestationStrength::Software),
+            ..Default::default()
+        };
+        let unattested = AgentTrustInput {
+            attestation: Some(AttestationStrength::Unattested),
+            ..Default::default()
+        };
+
+        let hw = verification_value(&hardware);
+        let virt = verification_value(&virtualized);
+        let sw = verification_value(&software);
+        let none = verification_value(&unattested);
+
+        // Hardware attestation yields a high VERIFICATION value; unattested yields 0.
+        assert!(hw >= 900, "hardware should be high, got {hw}");
+        assert_eq!(none, 0, "unattested should be 0, got {none}");
+
+        // Strictly monotonic: Hardware > Virtualized > Software > Unattested.
+        assert!(hw > virt, "hardware {hw} should exceed virtualized {virt}");
+        assert!(virt > sw, "virtualized {virt} should exceed software {sw}");
+        assert!(sw > none, "software {sw} should exceed unattested {none}");
+    }
+
+    #[spec("HATT-008")]
+    #[test]
+    fn attestation_overrides_has_verified_did_when_present() {
+        // attestation is the source of truth when present, regardless of the
+        // legacy has_verified_did flag.
+        let input = AgentTrustInput {
+            has_verified_did: true,
+            attestation: Some(AttestationStrength::Unattested),
+            ..Default::default()
+        };
+        assert_eq!(verification_value(&input), 0);
+    }
+
+    #[spec("HATT-008")]
+    #[test]
+    fn falls_back_to_has_verified_did_when_attestation_absent() {
+        // Existing consumers that only set has_verified_did keep working.
+        let verified = AgentTrustInput {
+            has_verified_did: true,
+            attestation: None,
+            ..Default::default()
+        };
+        let unverified = AgentTrustInput {
+            has_verified_did: false,
+            attestation: None,
+            ..Default::default()
+        };
+        assert_eq!(verification_value(&verified), 1000);
+        assert_eq!(verification_value(&unverified), 0);
+    }
 
     #[test]
     fn scale_unit_boundaries() {
@@ -314,6 +440,7 @@ mod tests {
             success_std_dev: Some(0.1),
             observation_count: Some(200),
             has_verified_did: true,
+            attestation: None,
             created_at: Some(Utc::now() - chrono::Duration::days(90)),
             security_anti_pattern_weight: Some(0.5),
             total_anti_pattern_weight: Some(1.0),

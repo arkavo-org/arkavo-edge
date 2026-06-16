@@ -1,0 +1,134 @@
+//! Remote verification of signed attestation quotes (HATT-007).
+//!
+//! This slice implements the cryptographic core of remote verification: the
+//! quote signature must validate over the supplied nonce under the attested
+//! SEC1 public key, and the `claimed_did_key` must equal the did:key derived
+//! from that same public key.
+//!
+//! Deferred (out of scope for this slice, tracked under HATT-007 /
+//! github issue 628): full certificate-chain validation to a platform root,
+//! nonce-freshness/replay checking, the complete quote envelope, and the
+//! TLS-exporter channel binding that defeats a relayed-but-fresh quote.
+
+/// Outcome of remote quote verification.
+#[derive(Debug, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    Accepted,
+    Rejected(RejectReason),
+}
+
+/// Reason a quote was rejected.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RejectReason {
+    BadSignature,
+    DidMismatch,
+}
+
+/// Verify a signed attestation quote: the signature must validate over `nonce`
+/// under the SEC1 public key, AND `claimed_did_key` must equal the did:key
+/// derived from that public key.
+///
+/// Malformed public-key bytes yield `Rejected(BadSignature)`.
+pub fn verify_quote(
+    public_key_sec1: &[u8],
+    nonce: &[u8],
+    signature: &[u8],
+    claimed_did_key: &str,
+) -> VerifyOutcome {
+    // Malformed key material is indistinguishable from an unverifiable
+    // signature for the purposes of this slice: reject as BadSignature.
+    let key = match arkavo_crypto::P256VerifyingKey::from_sec1_bytes(public_key_sec1) {
+        Ok(key) => key,
+        Err(_) => return VerifyOutcome::Rejected(RejectReason::BadSignature),
+    };
+
+    if key.verify(nonce, signature).is_err() {
+        return VerifyOutcome::Rejected(RejectReason::BadSignature);
+    }
+
+    if key.to_did_key() != claimed_did_key {
+        return VerifyOutcome::Rejected(RejectReason::DidMismatch);
+    }
+
+    VerifyOutcome::Accepted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn keypair() -> arkavo_crypto::P256SigningKeypair {
+        arkavo_crypto::P256SigningKeypair::generate()
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn valid_signature_and_matching_did_is_accepted() {
+        let kp = keypair();
+        let nonce = b"fresh-nonce-001";
+        let signature = kp.sign(nonce);
+        let public_key_sec1 = kp.public_key().to_sec1_bytes();
+        let did = kp.public_key().to_did_key();
+
+        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &did);
+        assert_eq!(outcome, VerifyOutcome::Accepted);
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn signature_over_different_nonce_is_rejected_bad_signature() {
+        let kp = keypair();
+        let signed_nonce = b"original-nonce";
+        let verifier_nonce = b"different-nonce";
+        let signature = kp.sign(signed_nonce);
+        let public_key_sec1 = kp.public_key().to_sec1_bytes();
+        let did = kp.public_key().to_did_key();
+
+        let outcome = verify_quote(&public_key_sec1, verifier_nonce, &signature, &did);
+        assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn tampered_signature_is_rejected_bad_signature() {
+        let kp = keypair();
+        let nonce = b"fresh-nonce-002";
+        let mut signature = kp.sign(nonce);
+        // Flip a byte to corrupt the signature.
+        let last = signature.len() - 1;
+        signature[last] ^= 0xFF;
+        let public_key_sec1 = kp.public_key().to_sec1_bytes();
+        let did = kp.public_key().to_did_key();
+
+        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &did);
+        assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn malformed_public_key_is_rejected_bad_signature() {
+        let kp = keypair();
+        let nonce = b"fresh-nonce-003";
+        let signature = kp.sign(nonce);
+        let did = kp.public_key().to_did_key();
+        let garbage = [0u8; 4];
+
+        let outcome = verify_quote(&garbage, nonce, &signature, &did);
+        assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::BadSignature));
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn valid_signature_but_wrong_did_is_rejected_did_mismatch() {
+        let kp = keypair();
+        let nonce = b"fresh-nonce-004";
+        let signature = kp.sign(nonce);
+        let public_key_sec1 = kp.public_key().to_sec1_bytes();
+        // A did:key belonging to a different keypair.
+        let wrong_did = keypair().public_key().to_did_key();
+
+        let outcome = verify_quote(&public_key_sec1, nonce, &signature, &wrong_did);
+        assert_eq!(outcome, VerifyOutcome::Rejected(RejectReason::DidMismatch));
+    }
+}

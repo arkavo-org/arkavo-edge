@@ -2076,6 +2076,7 @@ name = "arkavo-trust"
 version = "0.81.2"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "serde",
