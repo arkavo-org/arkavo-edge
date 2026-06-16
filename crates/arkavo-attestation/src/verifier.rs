@@ -22,6 +22,9 @@ pub enum VerifyOutcome {
 pub enum RejectReason {
     BadSignature,
     DidMismatch,
+    /// The quote's nonce did not match the verifier-supplied challenge, so the
+    /// quote cannot be considered fresh (HATT-003).
+    NonceMismatch,
 }
 
 /// Verify a signed attestation quote: the signature must validate over `nonce`

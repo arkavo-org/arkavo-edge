@@ -5,6 +5,7 @@ pub mod attestation_key;
 pub mod evidence;
 pub mod platform;
 pub mod policy;
+pub mod quote;
 #[cfg(target_os = "macos")]
 pub mod secure_enclave;
 pub mod verifier;
