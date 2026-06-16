@@ -64,6 +64,37 @@ impl AttestationKey {
     }
 }
 
+/// A platform keystore that can generate a non-extractable hardware attestation key.
+pub trait HardwareKeystore {
+    /// Generate a non-extractable key, or None if unavailable / generation fails on this device.
+    fn generate(&self) -> Option<HardwareAttestationKey>;
+}
+
+/// Successful hardware key generation result.
+pub struct HardwareAttestationKey {
+    /// SEC1-encoded public key of the generated hardware key.
+    pub public_key_sec1: Vec<u8>,
+    /// How the key is attested (Secure Enclave, TPM quote, ...).
+    pub attestation_type: AttestationType,
+    /// The hardware assurance tier this keystore provides.
+    pub tier: AssuranceTier,
+}
+
+/// Provision by trying each keystore in order; fall back to software if none succeed.
+pub fn provision_with(keystores: &[&dyn HardwareKeystore]) -> AttestationKey {
+    for keystore in keystores {
+        if let Some(hardware) = keystore.generate() {
+            return AttestationKey {
+                attestation_type: hardware.attestation_type,
+                hardware_binding: true,
+                assurance_tier: hardware.tier,
+                public_key_sec1: hardware.public_key_sec1,
+            };
+        }
+    }
+    provision_software()
+}
+
 /// Provision an attestation key using the software fallback (no hardware
 /// keystore available). The resulting key is never Trusted-eligible.
 pub fn provision_software() -> AttestationKey {
@@ -101,5 +132,38 @@ mod tests {
             "expected P-256 did:key, got {did}"
         );
         assert!(arkavo_crypto::P256VerifyingKey::from_did_key(&did).is_ok());
+    }
+
+    #[test]
+    fn test_provision_with_no_keystores_falls_back_to_software() {
+        let key = provision_with(&[]);
+        assert_eq!(key.attestation_type(), AttestationType::SoftwareFingerprint);
+        assert!(!key.hardware_binding());
+        assert_eq!(key.assurance_tier(), AssuranceTier::None);
+        assert!(key.did_key().starts_with("did:key:zDn"));
+    }
+
+    struct FakeSecureEnclave;
+
+    impl HardwareKeystore for FakeSecureEnclave {
+        fn generate(&self) -> Option<HardwareAttestationKey> {
+            let public_key_sec1 = arkavo_crypto::P256SigningKeypair::generate()
+                .public_key()
+                .to_sec1_bytes();
+            Some(HardwareAttestationKey {
+                public_key_sec1,
+                attestation_type: AttestationType::SecureEnclave,
+                tier: AssuranceTier::High,
+            })
+        }
+    }
+
+    #[test]
+    fn test_provision_with_available_keystore_uses_hardware() {
+        let keystore = FakeSecureEnclave;
+        let key = provision_with(&[&keystore]);
+        assert!(key.hardware_binding());
+        assert_eq!(key.assurance_tier(), AssuranceTier::High);
+        assert_eq!(key.attestation_type(), AttestationType::SecureEnclave);
     }
 }
