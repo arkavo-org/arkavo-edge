@@ -608,6 +608,8 @@ dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
  "arkavo-test-macros",
+ "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

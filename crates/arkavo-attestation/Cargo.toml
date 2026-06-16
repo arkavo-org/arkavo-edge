@@ -13,7 +13,11 @@ arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# DeviceCheck/App Attest via Swift interop (to be implemented)
+# Secure Enclave key generation via Apple Security.framework (uses Apple's
+# native crypto, not OpenSSL). `security-framework-sys` is needed only for the
+# kSecAccessControlPrivateKeyUsage flag constant.
+security-framework = "3.7"
+security-framework-sys = "2.17"
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

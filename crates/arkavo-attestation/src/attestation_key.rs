@@ -95,6 +95,21 @@ pub fn provision_with(keystores: &[&dyn HardwareKeystore]) -> AttestationKey {
     provision_software()
 }
 
+/// Provision an attestation key using the best hardware keystore available on
+/// this platform, falling back to software when no hardware-bound key can be
+/// generated (no Secure Enclave, unsigned binary, or API failure).
+#[cfg(target_os = "macos")]
+pub fn provision() -> AttestationKey {
+    provision_with(&[&crate::secure_enclave::SecureEnclaveKeystore])
+}
+
+/// Provision an attestation key. No hardware keystore is wired on this platform
+/// yet, so this falls back to software.
+#[cfg(not(target_os = "macos"))]
+pub fn provision() -> AttestationKey {
+    provision_with(&[])
+}
+
 /// Provision an attestation key using the software fallback (no hardware
 /// keystore available). The resulting key is never Trusted-eligible.
 pub fn provision_software() -> AttestationKey {
@@ -165,5 +180,51 @@ mod tests {
         assert!(key.hardware_binding());
         assert_eq!(key.assurance_tier(), AssuranceTier::High);
         assert_eq!(key.attestation_type(), AttestationType::SecureEnclave);
+    }
+
+    #[spec("HATT-001")]
+    #[test]
+    fn test_provision_yields_consistent_attestation_key() {
+        // Runs everywhere: on CI / unsigned binaries this falls back to
+        // software; on signed hardware with a Secure Enclave it yields a
+        // hardware-bound key. Either outcome must satisfy the tier invariant.
+        let key = provision();
+        assert!(
+            key.did_key().starts_with("did:key:zDn"),
+            "expected P-256 did:key, got {}",
+            key.did_key()
+        );
+        match key.attestation_type() {
+            AttestationType::SecureEnclave => {
+                assert!(key.hardware_binding());
+                assert_eq!(key.assurance_tier(), AssuranceTier::High);
+            }
+            AttestationType::SoftwareFingerprint => {
+                assert!(!key.hardware_binding());
+                assert_eq!(key.assurance_tier(), AssuranceTier::None);
+            }
+            AttestationType::TpmQuote => {
+                panic!("provision() never yields a TPM-quoted key on this platform");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[spec("HATT-001")]
+    #[test]
+    #[ignore = "requires a signed macOS binary with Secure Enclave access"]
+    fn test_secure_enclave_generates_hardware_bound_key() {
+        use crate::secure_enclave::SecureEnclaveKeystore;
+
+        // Documents the hardware residency contract. On a signed binary with a
+        // Secure Enclave this returns Some and the key is hardware-bound; run
+        // manually on real hardware.
+        if let Some(hardware) = SecureEnclaveKeystore.generate() {
+            assert_eq!(hardware.attestation_type, AttestationType::SecureEnclave);
+            assert_eq!(hardware.tier, AssuranceTier::High);
+            let key = provision_with(&[&SecureEnclaveKeystore]);
+            assert!(key.hardware_binding());
+            assert!(key.did_key().starts_with("did:key:zDn"));
+        }
     }
 }
