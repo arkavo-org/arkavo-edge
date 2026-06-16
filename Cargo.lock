@@ -606,6 +606,7 @@ name = "arkavo-attestation"
 version = "0.81.1"
 dependencies = [
  "arkavo-device-identity",
+ "arkavo-test-macros",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

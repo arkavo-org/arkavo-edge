@@ -1,6 +1,7 @@
 use arkavo_device_identity::{AgentIdentity, DeviceId};
 use serde::{Deserialize, Serialize};
 
+pub mod attestation_key;
 pub mod evidence;
 pub mod platform;
 

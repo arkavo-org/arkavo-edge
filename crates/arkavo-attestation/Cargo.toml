@@ -14,5 +14,8 @@ arkavo-device-identity = { path = "../arkavo-device-identity" }
 [target.'cfg(target_os = "macos")'.dependencies]
 # DeviceCheck/App Attest via Swift interop (to be implemented)
 
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 [features]
 default = []
