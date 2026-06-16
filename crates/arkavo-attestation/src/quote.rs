@@ -90,14 +90,31 @@ pub fn produce_quote(signer: &dyn QuoteSigner, nonce: &[u8], measurements: &[u8]
     }
 }
 
-/// Verify a full quote envelope against the verifier's expected nonce.
+/// Verify a full quote envelope against the verifier's expected nonce and the
+/// expected agent identity.
+///
+/// Acceptance means the quote is a fresh, valid quote *from the expected agent
+/// identity* (`expected_did_key`): the nonce matches the challenge, the quote
+/// claims the expected did:key, and the signature validates under the key
+/// reconstructed from that did:key.
 ///
 /// Rejects a stale/relayed quote (`NonceMismatch`) before any signature work,
-/// then reconstructs the agent key from the embedded did:key and verifies the
+/// then rejects a quote that does not claim the expected identity
+/// (`DidMismatch`) — without this a valid self-signed quote from an unexpected
+/// key over the right nonce would be accepted (identity confusion). Finally it
+/// reconstructs the agent key from the embedded did:key and verifies the
 /// signature over the canonical quote message.
-pub fn verify_quote_envelope(quote: &Quote, expected_nonce: &[u8]) -> VerifyOutcome {
+pub fn verify_quote_envelope(
+    quote: &Quote,
+    expected_nonce: &[u8],
+    expected_did_key: &str,
+) -> VerifyOutcome {
     if quote.nonce != expected_nonce {
         return VerifyOutcome::Rejected(RejectReason::NonceMismatch);
+    }
+
+    if quote.did_key != expected_did_key {
+        return VerifyOutcome::Rejected(RejectReason::DidMismatch);
     }
 
     let key = match arkavo_crypto::P256VerifyingKey::from_did_key(&quote.did_key) {
@@ -126,11 +143,12 @@ mod tests {
         let measurements = b"pcr0:deadbeef|pcr7:cafef00d";
 
         let quote = produce_quote(&signer, nonce, measurements);
+        let did = signer.did_key();
 
         assert_eq!(quote.nonce, nonce);
-        assert_eq!(quote.did_key, signer.did_key());
+        assert_eq!(quote.did_key, did);
         assert_eq!(
-            verify_quote_envelope(&quote, nonce),
+            verify_quote_envelope(&quote, nonce, &did),
             VerifyOutcome::Accepted
         );
     }
@@ -143,11 +161,12 @@ mod tests {
         let measurements = b"pcr0:0011";
 
         let mut quote = produce_quote(&signer, nonce, measurements);
+        let did = signer.did_key();
         let last = quote.signature.len() - 1;
         quote.signature[last] ^= 0xFF;
 
         assert_eq!(
-            verify_quote_envelope(&quote, nonce),
+            verify_quote_envelope(&quote, nonce, &did),
             VerifyOutcome::Rejected(RejectReason::BadSignature)
         );
     }
@@ -160,12 +179,13 @@ mod tests {
         let measurements = b"pcr0:trusted";
 
         let mut quote = produce_quote(&signer, nonce, measurements);
+        let did = signer.did_key();
         // Forge the measurements without re-signing: the signature no longer
         // covers them, so verification must fail.
         quote.measurements = b"pcr0:compromised".to_vec();
 
         assert_eq!(
-            verify_quote_envelope(&quote, nonce),
+            verify_quote_envelope(&quote, nonce, &did),
             VerifyOutcome::Rejected(RejectReason::BadSignature)
         );
     }
@@ -178,11 +198,33 @@ mod tests {
         let measurements = b"pcr0:fresh";
 
         let quote = produce_quote(&signer, signed_nonce, measurements);
+        let did = signer.did_key();
         let different_nonce = b"a-newer-challenge-005";
 
         assert_eq!(
-            verify_quote_envelope(&quote, different_nonce),
+            verify_quote_envelope(&quote, different_nonce, &did),
             VerifyOutcome::Rejected(RejectReason::NonceMismatch)
+        );
+    }
+
+    #[spec("HATT-007")]
+    #[test]
+    fn quote_from_unexpected_identity_is_rejected_did_mismatch() {
+        // Signer A produces a perfectly valid, fresh self-signed quote over the
+        // correct nonce. The verifier expects a DIFFERENT identity (signer B).
+        // Without an identity binding, this valid self-signed quote would be
+        // accepted (identity confusion); it must be rejected as DidMismatch.
+        let signer_a = SoftwareQuoteSigner::generate();
+        let signer_b = SoftwareQuoteSigner::generate();
+        let nonce = b"verifier-challenge-006";
+        let measurements = b"pcr0:from-a";
+
+        let quote = produce_quote(&signer_a, nonce, measurements);
+        let expected_did_b = signer_b.did_key();
+
+        assert_eq!(
+            verify_quote_envelope(&quote, nonce, &expected_did_b),
+            VerifyOutcome::Rejected(RejectReason::DidMismatch)
         );
     }
 }

@@ -24,13 +24,16 @@ pub fn is_attestation_expired(issued_at_unix: i64, ttl_secs: i64, now_unix: i64)
         // Clock moved backwards: not anchored. Fail closed and re-attest.
         return true;
     }
-    now_unix - issued_at_unix >= ttl_secs
+    // Saturate the age computation: on extreme inputs a plain `now - issued`
+    // overflows i64 (panic in debug, wrap in release that could wrongly report
+    // NOT expired and defeat fail-closed). Saturation pins the age at i64::MAX.
+    now_unix.saturating_sub(issued_at_unix) >= ttl_secs
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::quote::{SoftwareQuoteSigner, produce_quote, verify_quote_envelope};
+    use crate::quote::{QuoteSigner, SoftwareQuoteSigner, produce_quote, verify_quote_envelope};
     use crate::verifier::{RejectReason, VerifyOutcome};
     use arkavo_test_macros::spec;
 
@@ -54,8 +57,19 @@ mod tests {
 
     #[spec("HATT-009")]
     #[test]
+    fn extreme_age_does_not_overflow_and_reports_expired() {
+        // A held attestation issued at i64::MIN evaluated at i64::MAX has an age
+        // far beyond any TTL. The naive `now - issued` subtraction overflows i64
+        // (panic in debug, wrap in release that could wrongly report NOT
+        // expired). The predicate must saturate and fail closed: expired.
+        assert!(is_attestation_expired(i64::MIN, 300, i64::MAX));
+    }
+
+    #[spec("HATT-009")]
+    #[test]
     fn re_attestation_produces_fresh_quote_that_stales_the_old_one() {
         let signer = SoftwareQuoteSigner::generate();
+        let did = signer.did_key();
 
         // The original quote answered challenge "nonce-1".
         let old = produce_quote(&signer, b"nonce-1", b"m");
@@ -65,12 +79,12 @@ mod tests {
 
         // The fresh quote satisfies the fresh challenge.
         assert_eq!(
-            verify_quote_envelope(&new, b"nonce-2"),
+            verify_quote_envelope(&new, b"nonce-2", &did),
             VerifyOutcome::Accepted
         );
         // The stale quote cannot satisfy the fresh challenge nonce.
         assert_eq!(
-            verify_quote_envelope(&old, b"nonce-2"),
+            verify_quote_envelope(&old, b"nonce-2", &did),
             VerifyOutcome::Rejected(RejectReason::NonceMismatch)
         );
     }
