@@ -1,8 +1,15 @@
 use arkavo_device_identity::{AgentIdentity, DeviceId};
 use serde::{Deserialize, Serialize};
 
+pub mod attestation_key;
 pub mod evidence;
+pub mod freshness;
 pub mod platform;
+pub mod policy;
+pub mod quote;
+#[cfg(target_os = "macos")]
+pub mod secure_enclave;
+pub mod verifier;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
