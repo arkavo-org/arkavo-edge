@@ -11,6 +11,7 @@ pub struct ProviderAvailability {
     pub anthropic: bool,
     pub deepseek: bool,
     pub kimi: bool,
+    pub glm: bool,
 }
 
 impl ProviderAvailability {
@@ -21,12 +22,15 @@ impl ProviderAvailability {
             anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
             deepseek: std::env::var("DEEPSEEK_API_KEY").is_ok(),
             kimi: std::env::var("MOONSHOT_API_KEY").is_ok(),
+            // Gated on the `glm` feature so the arm isn't marked feasible in a
+            // build that can't instantiate it (instantiation is cfg(glm)).
+            glm: cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
         }
     }
 
     /// Check if any cloud provider is available
     pub fn has_cloud(&self) -> bool {
-        self.gemini || self.anthropic || self.deepseek || self.kimi
+        self.gemini || self.anthropic || self.deepseek || self.kimi || self.glm
     }
 }
 
@@ -384,6 +388,12 @@ impl ModelSelector {
         if self.availability.kimi {
             models.push(ModelChoice::KimiK2);
         }
+        if self.availability.glm {
+            // GLM-5.2 enters as a single Thompson Sampling arm (cold-start
+            // cap). The learning module decides where its quality/cost point
+            // beats the other low-cost cloud arms (DeepSeek, Gemini Flash).
+            models.push(ModelChoice::Glm52);
+        }
 
         // Fallback: always include Qwen3 as baseline
         if models.is_empty() {
@@ -412,6 +422,7 @@ mod tests {
             anthropic: false,
             deepseek: false,
             kimi: false,
+            glm: false,
         }
     }
 
@@ -421,6 +432,7 @@ mod tests {
             anthropic: true,
             deepseek: false,
             kimi: false,
+            glm: false,
         }
     }
 
@@ -430,6 +442,17 @@ mod tests {
             anthropic: false,
             deepseek: true,
             kimi: false,
+            glm: false,
+        }
+    }
+
+    fn glm_only() -> ProviderAvailability {
+        ProviderAvailability {
+            gemini: false,
+            anthropic: false,
+            deepseek: false,
+            kimi: false,
+            glm: true,
         }
     }
 
@@ -527,6 +550,20 @@ mod tests {
         assert!(!feasible.contains(&ModelChoice::GeminiPro));
         assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
         assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
+    }
+
+    #[test]
+    fn test_feasible_models_glm_only() {
+        let selector = ModelSelector::with_availability(glm_only());
+        let feasible = selector.feasible_models();
+        assert!(feasible.contains(&ModelChoice::Glm52));
+        assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
+        assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
+    }
+
+    #[test]
+    fn test_provider_availability_glm_counts_as_cloud() {
+        assert!(glm_only().has_cloud());
     }
 
     #[spec("ROUTER-003")]

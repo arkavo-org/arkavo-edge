@@ -12,11 +12,10 @@ pub struct WorkspaceTool {
 
 impl WorkspaceTool {
     pub fn new() -> Self {
-        if Self::detect_runtime().is_err() {
-            eprintln!(
-                "Warning: Neither Docker nor Podman found. Install Docker Desktop (macOS/Windows) or podman"
-            );
-        }
+        // No container-runtime probe here: the workspace tool is registered on
+        // every run, but most sessions never touch it. Surfacing the missing
+        // runtime is deferred to actual use (`create_workspace` returns a typed
+        // `ContainerRuntime` error), so we don't spam unrelated runs.
         Self {
             schema: ToolSchema {
                 name: "workspace_container".to_string(),

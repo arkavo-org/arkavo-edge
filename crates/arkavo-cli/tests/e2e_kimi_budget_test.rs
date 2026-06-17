@@ -83,10 +83,10 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
     pricing.load_from_entries(&[PricingEntry {
         model_id: "moonshot-v1-32k".into(),
         provider: "kimi".into(),
-        input_cents_per_1k: 200,
-        output_cents_per_1k: 600,
-        cached_input_cents_per_1k: None,
-        cache_write_cents_per_1k: None,
+        input_cents_per_mtok: 200,
+        output_cents_per_mtok: 600,
+        cached_input_cents_per_mtok: None,
+        cache_write_cents_per_mtok: None,
         context_window: Some(32000),
         max_output_tokens: Some(8192),
     }]);

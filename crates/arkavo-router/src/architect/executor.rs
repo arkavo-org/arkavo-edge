@@ -303,6 +303,9 @@ impl ArchitectExecutor {
             ModelChoice::ClaudeOpus => ModelChoice::ClaudeFable5,
             ModelChoice::ClaudeFable5 => ModelChoice::ClaudeFable5,
             ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
+            // GLM-5.2 is a low-cost cloud arm; escalate to a stronger tier
+            // when it underperforms on a task.
+            ModelChoice::Glm52 => ModelChoice::ClaudeSonnet,
         }
     }
 

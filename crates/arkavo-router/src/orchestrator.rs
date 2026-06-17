@@ -5,6 +5,7 @@ use crate::metrics::RoutingMetrics;
 use crate::selector::ModelSelector;
 use crate::{Error, Result, Router};
 use arkavo_budget::TokenCost;
+use arkavo_budget::provider_costs::ProviderPricing;
 use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
@@ -81,6 +82,22 @@ impl OrchestratorMetrics {
     }
 }
 
+/// Resolve the budget cost of a routing decision. Manifest-authored pricing is
+/// authoritative when the model is in the table; otherwise the model's built-in
+/// static estimate is used. This is the seam that makes editing a rate in the
+/// manifest move the live budget gate (no code change, no runtime fetch).
+fn estimate_decision_cost(pricing: &ProviderPricing, decision: &RoutingDecision) -> TokenCost {
+    let est = decision.task_category.estimated_tokens();
+    pricing
+        .estimate_cost(
+            decision.recommended_model.provider(),
+            decision.recommended_model.name(),
+            est.input,
+            est.output,
+        )
+        .unwrap_or_else(|| TokenCost::from_dollars(decision.estimated_cost_usd))
+}
+
 pub struct CostOrchestrator {
     classifier: Arc<TaskClassifier>,
     selector: Arc<ModelSelector>,
@@ -88,10 +105,25 @@ pub struct CostOrchestrator {
     routing_metrics: Arc<RwLock<RoutingMetrics>>,
     orchestrator_metrics: Arc<RwLock<OrchestratorMetrics>>,
     budget_threshold: f64,
+    /// Manifest-authored per-model pricing (cents per MTok). Empty by default;
+    /// when a model is present it is the cost source of truth and overrides the
+    /// model's built-in static estimate. Populated from the SwarmKit manifest
+    /// at authoring time — never fetched from a vendor endpoint at runtime.
+    pricing: ProviderPricing,
 }
 
 impl CostOrchestrator {
     pub async fn new(budget_tracker: Arc<BudgetTracker>) -> Result<Self> {
+        Self::new_with_pricing(budget_tracker, ProviderPricing::new()).await
+    }
+
+    /// Construct with an authored pricing table (e.g. derived from a SwarmKit
+    /// manifest's `pricing` block). Models present in the table are priced from
+    /// it; everything else falls back to the built-in static estimate.
+    pub async fn new_with_pricing(
+        budget_tracker: Arc<BudgetTracker>,
+        pricing: ProviderPricing,
+    ) -> Result<Self> {
         let classifier = Arc::new(TaskClassifier::new().await?);
         let selector = Arc::new(ModelSelector::new());
 
@@ -102,6 +134,7 @@ impl CostOrchestrator {
             routing_metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             orchestrator_metrics: Arc::new(RwLock::new(OrchestratorMetrics::new())),
             budget_threshold: 0.80,
+            pricing,
         })
     }
 
@@ -125,7 +158,7 @@ impl CostOrchestrator {
             self.selector.select(&classification, task)?
         };
 
-        let estimated_token_cost = TokenCost::from_dollars(decision.estimated_cost_usd);
+        let estimated_token_cost = estimate_decision_cost(&self.pricing, &decision);
 
         let can_afford = self
             .budget_tracker
@@ -495,6 +528,55 @@ impl ArchitectRoutingResult {
 mod tests {
     use super::*;
     use arkavo_budget::{BudgetConfig, BudgetManager};
+
+    #[test]
+    fn manifest_pricing_is_authoritative_over_static_estimate() {
+        use crate::classifier::TaskCategory;
+        use crate::decision::ModelChoice;
+        use arkavo_budget::provider_costs::PricingEntry;
+
+        // Author GLM-5.2 at a deliberately inflated rate so the table-driven
+        // cost is clearly distinct from the built-in static estimate.
+        let mut pricing = ProviderPricing::new();
+        pricing.register(&PricingEntry {
+            model_id: "glm-5.2".to_string(),
+            provider: "zhipu".to_string(),
+            input_cents_per_mtok: 1400,
+            output_cents_per_mtok: 4400,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(131_072),
+        });
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "task".to_string(),
+        );
+        // CodeGeneration estimates 800 in / 3000 out:
+        // (800*1400 + 3000*4400)/1e6 = 1 + 13 = 14 cents.
+        let cost = estimate_decision_cost(&pricing, &decision);
+        assert_eq!(cost.as_cents(), 14, "authored table rate must drive cost");
+        // And it must differ from the static estimate, proving the override.
+        assert_ne!(cost, TokenCost::from_dollars(decision.estimated_cost_usd));
+    }
+
+    #[test]
+    fn empty_pricing_falls_back_to_static_estimate() {
+        use crate::classifier::TaskCategory;
+        use crate::decision::ModelChoice;
+
+        let pricing = ProviderPricing::new(); // no authored rates
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "task".to_string(),
+        );
+        let cost = estimate_decision_cost(&pricing, &decision);
+        assert_eq!(cost, TokenCost::from_dollars(decision.estimated_cost_usd));
+    }
 
     #[tokio::test]
     async fn test_cost_orchestrator_creation() {

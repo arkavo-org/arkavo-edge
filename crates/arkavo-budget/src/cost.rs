@@ -20,8 +20,23 @@ impl TokenCost {
         }
     }
 
+    /// Cost of `tokens` priced **per 1K tokens**. Prefer
+    /// [`Self::from_tokens_per_million`] for cloud rates: `ProviderPricing`
+    /// stores cents-per-MTok, and feeding a per-MTok rate here (or vice versa)
+    /// is a silent 1000x error. This per-1K form remains only for the legacy
+    /// `TokenUsage::calculate_cost` path.
     pub fn from_tokens(tokens: u32, cost_per_thousand: TokenCost) -> Self {
         let total_cents = (tokens as u64 * cost_per_thousand.cents) / 1000;
+        Self { cents: total_cents }
+    }
+
+    /// Cost of `tokens` priced at `cost_per_million` (cents per 1M tokens).
+    ///
+    /// Modern cloud rates are quoted per-MTok and are routinely sub-cent per
+    /// 1K (GLM-5.2 input is $1.40/MTok = 0.14c/1K), which floors to zero in the
+    /// per-1K integer unit. Pricing the rate per-MTok keeps it representable.
+    pub fn from_tokens_per_million(tokens: u32, cost_per_million: TokenCost) -> Self {
+        let total_cents = (tokens as u64 * cost_per_million.cents) / 1_000_000;
         Self { cents: total_cents }
     }
 
@@ -214,6 +229,16 @@ mod tests {
         let cost_per_thousand = TokenCost::from_cents(30); // $0.30 per 1K tokens
         let cost = TokenCost::from_tokens(1500, cost_per_thousand);
         assert_eq!(cost.as_cents(), 45); // 1.5 * 30 = 45 cents
+    }
+
+    #[test]
+    fn test_token_cost_from_tokens_per_million() {
+        // Per-MTok is the unit modern cloud rates are quoted in, and the only
+        // resolution that survives sub-cent-per-1K rates. GLM-5.2 input is
+        // $1.40/MTok = 140 cents/MTok; a 200K-token prompt costs $0.28 = 28c.
+        let rate_per_mtok = TokenCost::from_cents(140);
+        let cost = TokenCost::from_tokens_per_million(200_000, rate_per_mtok);
+        assert_eq!(cost.as_cents(), 28);
     }
 
     #[test]

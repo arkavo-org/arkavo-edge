@@ -1,9 +1,12 @@
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::common::{ProviderError, ProviderResult};
+use crate::provider::{InferenceTiming, ProviderResponse};
+use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// OpenAI API configuration
@@ -49,12 +52,47 @@ struct ChatCompletionRequest {
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     n: Option<u32>,
+    /// OpenAI function-calling tool list. Omitted entirely when the caller
+    /// passes no tools, so plain chat requests are unchanged on the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ApiMessage {
+    role: String,
+    /// Null for an assistant turn that is purely tool calls; otherwise the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    /// Tool calls the assistant issued (response) or is replaying (request).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ToolCallJson>>,
+    /// Set on `role:"tool"` result messages, pairing the result to its call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+}
+
+/// OpenAI tool-call wire shape: `{id, type:"function", function:{name, arguments}}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolCallJson {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(rename = "type", default = "function_call_type")]
+    call_type: String,
+    function: FunctionCallJson,
+}
+
+fn function_call_type() -> String {
+    "function".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ApiMessage {
-    role: String,
-    content: String,
+struct FunctionCallJson {
+    name: String,
+    /// Arguments as a JSON string (OpenAI sends them stringified).
+    arguments: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,20 +181,112 @@ impl OpenAIProvider {
         Ok(Self { config, client })
     }
 
-    /// Convert internal messages to API format
+    /// Convert internal messages to API format, including assistant tool calls
+    /// and `role:"tool"` results so a multi-turn tool loop replays correctly.
     fn convert_messages(&self, messages: Vec<Message>) -> Vec<ApiMessage> {
         messages
             .into_iter()
-            .map(|msg| ApiMessage {
-                role: match msg.role {
-                    Role::System => "system".to_string(),
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
-                    Role::Tool => "tool".to_string(),
-                },
-                content: msg.content,
+            .map(|msg| {
+                let role = match msg.role {
+                    Role::System => "system",
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::Tool => "tool",
+                }
+                .to_string();
+
+                let tool_calls = (!msg.tool_calls.is_empty()).then(|| {
+                    msg.tool_calls
+                        .iter()
+                        .map(|tc| ToolCallJson {
+                            id: tc.id.clone(),
+                            call_type: "function".to_string(),
+                            function: FunctionCallJson {
+                                name: tc.name.clone(),
+                                arguments: tc.arguments.clone(),
+                            },
+                        })
+                        .collect()
+                });
+
+                // OpenAI requires `content: null` (not "") on an assistant turn
+                // that only carries tool calls.
+                let content = if msg.content.is_empty() && tool_calls.is_some() {
+                    None
+                } else {
+                    Some(msg.content)
+                };
+
+                ApiMessage {
+                    role,
+                    content,
+                    tool_calls,
+                    tool_call_id: msg.tool_call_id,
+                }
             })
             .collect()
+    }
+
+    /// Convert the router's generic tool list (`[{name, description,
+    /// parameters|input_schema}]`) into OpenAI's `tools` array.
+    fn convert_tools_to_openai(tools_json: &Value) -> Vec<Value> {
+        let Some(arr) = tools_json.as_array() else {
+            return Vec::new();
+        };
+        arr.iter()
+            .filter_map(|tool| {
+                let name = tool.get("name")?.as_str()?;
+                let description = tool
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let parameters = tool
+                    .get("parameters")
+                    .or_else(|| tool.get("input_schema"))
+                    .cloned()
+                    .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+                Some(json!({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": description,
+                        "parameters": parameters,
+                    }
+                }))
+            })
+            .collect()
+    }
+
+    /// Parse a response message's `tool_calls` into the unified representation.
+    fn parse_tool_calls(message: &ApiMessage) -> Vec<ParsedToolCall> {
+        message
+            .tool_calls
+            .as_ref()
+            .map(|calls| {
+                calls
+                    .iter()
+                    .map(|tc| ParsedToolCall {
+                        tool_name: tc.function.name.clone(),
+                        // Arguments arrive as a JSON string; parse to a value,
+                        // falling back to an empty object on malformed JSON.
+                        arguments: serde_json::from_str(&tc.function.arguments)
+                            .unwrap_or_else(|_| json!({})),
+                        call_id: tc.id.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Map the response `usage` block (prompt/completion tokens) onto
+    /// `InferenceTiming` so the cost path can reconcile against real spend.
+    /// Cloud usage carries no wall-clock timing, only token counts.
+    fn timing_from_usage(usage: &Usage) -> InferenceTiming {
+        InferenceTiming {
+            n_prompt_eval: usage.prompt_tokens,
+            n_eval: usage.completion_tokens,
+            ..Default::default()
+        }
     }
 
     /// Build the API endpoint URL
@@ -257,6 +387,8 @@ impl Provider for OpenAIProvider {
             max_tokens: None,
             stream: Some(false),
             n: Some(1),
+            tools: None,
+            tool_choice: None,
         };
 
         let url = self.build_url("chat/completions");
@@ -288,7 +420,7 @@ impl Provider for OpenAIProvider {
                         completion
                             .choices
                             .first()
-                            .map(|choice| choice.message.content.clone())
+                            .map(|choice| choice.message.content.clone().unwrap_or_default())
                             .ok_or_else(|| anyhow::anyhow!("No response from OpenAI"))
                     } else {
                         // Need to handle error here without self reference
@@ -305,6 +437,98 @@ impl Provider for OpenAIProvider {
             .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         Ok(response)
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse, crate::Error> {
+        let api_messages = self.convert_messages(messages);
+
+        let temperature = if self.config.model == "gpt-5" {
+            None
+        } else {
+            Some(0.7)
+        };
+
+        // Attach tools only when the caller passed a non-empty set; otherwise
+        // the field stays off the wire and this is an ordinary completion.
+        let openai_tools = tools
+            .as_ref()
+            .map(Self::convert_tools_to_openai)
+            .filter(|t| !t.is_empty());
+        let tool_choice = openai_tools.as_ref().map(|_| json!("auto"));
+
+        let request = ChatCompletionRequest {
+            model: self.config.model.clone(),
+            messages: api_messages,
+            temperature,
+            max_tokens: max_tokens.and_then(|m| u32::try_from(m).ok()),
+            stream: Some(false),
+            n: Some(1),
+            tools: openai_tools,
+            tool_choice,
+        };
+
+        let url = self.build_url("chat/completions");
+
+        let (content, tool_calls, finish_reason, inference_timing) = self
+            .client
+            .execute_with_retry(|client| {
+                let config = self.config.clone();
+                let url = url.clone();
+                let request = request.clone();
+                Box::pin(async move {
+                    let mut req = client.post(&url).json(&request);
+                    if config.is_azure {
+                        req = req.header("api-key", &config.api_key);
+                    }
+                    if let Some(ref org_id) = config.organization_id {
+                        req = req.header("OpenAI-Organization", org_id);
+                    }
+
+                    let response = req.send().await?;
+                    if response.status().is_success() {
+                        let completion: ChatCompletionResponse = response.json().await?;
+                        let choice = completion
+                            .choices
+                            .first()
+                            .ok_or_else(|| anyhow::anyhow!("No response from OpenAI"))?;
+                        let content = choice.message.content.clone().unwrap_or_default();
+                        let tool_calls = OpenAIProvider::parse_tool_calls(&choice.message);
+                        let finish_reason = choice.finish_reason.clone();
+                        let timing = completion
+                            .usage
+                            .as_ref()
+                            .map(OpenAIProvider::timing_from_usage);
+                        Ok((content, tool_calls, finish_reason, timing))
+                    } else {
+                        let status = response.status();
+                        let error_text = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| "Failed to read error response".to_string());
+                        Err(anyhow::anyhow!("OpenAI API error {status}: {error_text}"))
+                    }
+                })
+            })
+            .await
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
+
+        Ok(ProviderResponse {
+            content,
+            reasoning_content: None,
+            tool_calls,
+            finish_reason,
+            inference_timing,
+            quality_gate_retries: 0,
+        })
     }
 
     async fn stream(
@@ -330,6 +554,8 @@ impl Provider for OpenAIProvider {
             max_tokens: None,
             stream: Some(true),
             n: Some(1),
+            tools: None,
+            tool_choice: None,
         };
 
         let url = self.build_url("chat/completions");
@@ -485,5 +711,117 @@ mod tests {
         assert_eq!(api_messages.len(), 2);
         assert_eq!(api_messages[0].role, "system");
         assert_eq!(api_messages[1].role, "user");
+    }
+
+    #[test]
+    fn provider_advertises_tool_support() {
+        let provider = OpenAIProvider::new(OpenAIConfig::default()).unwrap();
+        assert!(
+            provider.supports_tools(),
+            "OpenAI-compatible providers (incl. GLM) must advertise tool support"
+        );
+    }
+
+    #[test]
+    fn convert_tools_wraps_in_openai_function_shape() {
+        let tools = json!([{
+            "name": "get_time",
+            "description": "Get the current time",
+            "parameters": {"type": "object", "properties": {}}
+        }]);
+        let out = OpenAIProvider::convert_tools_to_openai(&tools);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["type"], "function");
+        assert_eq!(out[0]["function"]["name"], "get_time");
+        assert_eq!(out[0]["function"]["description"], "Get the current time");
+        assert!(out[0]["function"]["parameters"].is_object());
+    }
+
+    #[test]
+    fn convert_tools_accepts_input_schema_alias() {
+        // Anthropic-style `input_schema` maps onto OpenAI's `parameters`.
+        let tools = json!([{"name": "t", "input_schema": {"type": "object"}}]);
+        let out = OpenAIProvider::convert_tools_to_openai(&tools);
+        assert_eq!(out[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn parse_tool_calls_extracts_name_args_and_id() {
+        let msg = ApiMessage {
+            role: "assistant".to_string(),
+            content: None,
+            tool_calls: Some(vec![ToolCallJson {
+                id: Some("call_1".to_string()),
+                call_type: "function".to_string(),
+                function: FunctionCallJson {
+                    name: "get_time".to_string(),
+                    arguments: r#"{"tz":"UTC"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+        };
+        let parsed = OpenAIProvider::parse_tool_calls(&msg);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].tool_name, "get_time");
+        assert_eq!(parsed[0].call_id.as_deref(), Some("call_1"));
+        assert_eq!(parsed[0].arguments["tz"], "UTC");
+    }
+
+    #[test]
+    fn parse_tool_calls_empty_for_plain_text() {
+        let msg = ApiMessage {
+            role: "assistant".to_string(),
+            content: Some("hi".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        assert!(OpenAIProvider::parse_tool_calls(&msg).is_empty());
+    }
+
+    #[test]
+    fn convert_messages_round_trips_call_and_result() {
+        let provider = OpenAIProvider::new(OpenAIConfig::default()).unwrap();
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                tool_calls: vec![crate::ToolCall {
+                    name: "get_time".to_string(),
+                    arguments: "{}".to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+                ..Default::default()
+            },
+            Message {
+                role: Role::Tool,
+                content: "12:00 UTC".to_string(),
+                tool_call_id: Some("call_1".to_string()),
+                tool_name: Some("get_time".to_string()),
+                ..Default::default()
+            },
+        ];
+        let api = provider.convert_messages(messages);
+        // Assistant turn: null content + tool_calls (OpenAI requires null, not "").
+        assert_eq!(api[0].role, "assistant");
+        assert!(api[0].content.is_none());
+        assert_eq!(
+            api[0].tool_calls.as_ref().unwrap()[0].function.name,
+            "get_time"
+        );
+        // Tool result: role=tool + paired tool_call_id + content.
+        assert_eq!(api[1].role, "tool");
+        assert_eq!(api[1].content.as_deref(), Some("12:00 UTC"));
+        assert_eq!(api[1].tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn usage_maps_to_inference_timing() {
+        let usage = Usage {
+            prompt_tokens: 120,
+            completion_tokens: 45,
+            total_tokens: 165,
+        };
+        let timing = OpenAIProvider::timing_from_usage(&usage);
+        assert_eq!(timing.n_prompt_eval, 120);
+        assert_eq!(timing.n_eval, 45);
     }
 }

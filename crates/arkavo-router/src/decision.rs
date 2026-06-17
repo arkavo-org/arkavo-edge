@@ -78,6 +78,12 @@ pub enum ModelChoice {
     DeepSeekV32Speciale,
     /// Kimi K2.5 - 256K context, thinking mode support
     KimiK2,
+    /// GLM-5.2 (Zhipu AI / Z.ai) - OpenAI-compatible cloud reasoning model.
+    /// Routed through the generic OpenAI-compatible adapter (base URL +
+    /// model string + `GLM_API_KEY`). Introduced as a single Thompson
+    /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
+    /// (High/Max) split can follow once this base arm graduates probation.
+    Glm52,
 }
 
 impl ModelChoice {
@@ -118,6 +124,7 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
+            Self::Glm52 => "glm-5.2",
         }
     }
 
@@ -129,7 +136,7 @@ impl ModelChoice {
             | Self::LocalQwen35_27B
             | Self::LocalQwen36A3B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
-            Self::LocalGlm47Flash => "glm",
+            Self::LocalGlm47Flash | Self::Glm52 => "glm",
             Self::LocalGemma4E2B
             | Self::LocalGemma4E4B
             | Self::LocalGemma4_26B
@@ -162,6 +169,7 @@ impl ModelChoice {
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
             "qwen3.6-35b-a3b" | "qwen3.6" | "qwen36" => Some(Self::LocalQwen36A3B),
             "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
+            "glm-5.2" | "glm5.2" | "glm-5" | "glm52" => Some(Self::Glm52),
             "gemma-4-e2b" => Some(Self::LocalGemma4E2B),
             "gemma-4-e4b" => Some(Self::LocalGemma4E4B),
             "gemma-4-26b-a4b" => Some(Self::LocalGemma4_26B),
@@ -304,6 +312,12 @@ impl ModelChoice {
         matches!(self, Self::KimiK2)
     }
 
+    /// Cloud GLM (Zhipu AI / Z.ai) arm, reached via the OpenAI-compatible
+    /// adapter. Distinct from the local `LocalGlm47Flash` GGUF model.
+    pub fn is_glm(&self) -> bool {
+        matches!(self, Self::Glm52)
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash
@@ -330,6 +344,7 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
+            Self::Glm52 => "zhipu",
         }
     }
 
@@ -365,7 +380,8 @@ impl ModelChoice {
             | Self::ClaudeFable5
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
-            | Self::KimiK2 => PlannerTier::Large,
+            | Self::KimiK2
+            | Self::Glm52 => PlannerTier::Large,
         }
     }
 
@@ -565,6 +581,7 @@ impl ModelChoice {
             Self::DeepSeekV32 => "DeepSeek V3.2",
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
+            Self::Glm52 => "GLM-5.2",
         }
     }
 }
@@ -727,6 +744,15 @@ impl RoutingDecision {
                     ModelChoice::GeminiPro,
                 ]
             }
+            // GLM-5.2 steps down to the other low-cost cloud arms, then a
+            // capable local model, so a missing GLM key never strands a task.
+            (ModelChoice::Glm52, _) => {
+                vec![
+                    ModelChoice::DeepSeekV32,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             _ => vec![ModelChoice::GeminiFlash],
         }
     }
@@ -808,6 +834,21 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
                 input_cost + output_cost
             }
+            ModelChoice::Glm52 => {
+                // GLM-5.2 (Zhipu AI / Z.ai) published list rates:
+                // $1.40/1M input, $4.40/1M output (docs.z.ai/guides/overview/pricing,
+                // cross-checked on OpenRouter). The earlier $0.60/$2.20 placeholder
+                // was GLM-4.6's rate and undercounted spend ~2x — enough that a
+                // single category-sized call rounded to $0.00 in the integer-cent
+                // `TokenCost`, so the budget gate treated GLM calls as free. At the
+                // real rate a call carries non-zero cost and enforcement engages.
+                // Cheap relative to the Anthropic/Gemini tiers, so it stays routable
+                // where DeepSeek/Kimi sit. Real spend should come from the response
+                // `usage` block once surfaced.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.40;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 4.40;
+                input_cost + output_cost
+            }
             // All local models are free
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -862,6 +903,9 @@ impl RoutingDecision {
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
             ModelChoice::KimiK2 => Duration::from_secs(5),
+            // GLM-5.2 reasons before answering; budget extra wall-clock on
+            // hard tasks, in line with the other thinking cloud arms.
+            ModelChoice::Glm52 => Duration::from_secs(8),
         }
     }
 }
@@ -877,6 +921,11 @@ pub struct TokenEstimate {
 #[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
+    use arkavo_budget::TokenCost;
+    use arkavo_budget::config::{BudgetConfig, BudgetLimits};
+    use arkavo_budget::cost::TokenUsage;
+    use arkavo_budget::tracker::BudgetTracker;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_model_choice_name() {
@@ -1046,6 +1095,246 @@ mod tests {
         );
 
         assert_eq!(decision.estimated_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_glm52_properties() {
+        let model = ModelChoice::Glm52;
+        assert_eq!(model.name(), "glm-5.2");
+        assert_eq!(model.provider(), "zhipu");
+        assert_eq!(model.family(), "glm");
+        assert_eq!(model.display_name(), "GLM-5.2");
+        assert!(model.is_glm());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert_eq!(model.capability(), PlannerTier::Large);
+        // Contract (docs.z.ai): GLM-5.2 is text-only — the vision sibling is a
+        // separate model (glm-5v-turbo). Pinning this catches an accidental add
+        // to the supports_vision allow-list, which would send image parts the
+        // model can't accept.
+        assert!(!model.supports_vision(), "GLM-5.2 is text-only");
+    }
+
+    #[test]
+    fn test_glm52_name_resolution() {
+        for alias in ["glm-5.2", "glm5.2", "glm-5", "glm52", "GLM-5.2"] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Glm52),
+                "alias {alias} should resolve to Glm52"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Glm52.name()),
+            Some(ModelChoice::Glm52),
+            "round-trip via primary name"
+        );
+        // GLM-5.2 (cloud) must not collide with the local GLM-4.7-Flash GGUF.
+        assert_eq!(
+            ModelChoice::from_name("glm-4.7-flash"),
+            Some(ModelChoice::LocalGlm47Flash)
+        );
+    }
+
+    // BUDGET-001 (track token cost): the cost-calculation half — a GLM call is
+    // priced from real provider rates, the precondition for any budget tracking.
+    #[spec("BUDGET-001")]
+    #[test]
+    fn test_glm52_cost_is_priced_below_anthropic() {
+        // Budget enforcement only engages if GLM has a real, non-zero cost
+        // model. GLM-5.2 must be priced (cloud) yet sit well under Opus.
+        let glm = RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        let opus =
+            RoutingDecision::estimate_cost(&ModelChoice::ClaudeOpus, TaskCategory::CodeGeneration);
+        assert!(
+            glm > 0.0,
+            "GLM-5.2 must carry a real cost for budget gating"
+        );
+        assert!(glm < opus, "GLM-5.2 should be cheaper than Opus");
+    }
+
+    // BUDGET-001 (track token cost): pin the EXACT cost math, not just an
+    // inequality. The "cheaper than Opus" check above was too weak to catch the
+    // $0.60/$2.20 (GLM-4.6) vs $1.40/$4.40 (GLM-5.2) error — a ~2x under-count
+    // that still passed "< Opus". This asserts the published GLM-5.2 rate so a
+    // future stale-price edit fails CI: CodeGeneration estimates 800 in / 3000
+    // out, so cost = 800/1e6*$1.40 + 3000/1e6*$4.40 = $0.00112 + $0.0132.
+    #[spec("BUDGET-001")]
+    #[test]
+    fn test_glm52_cost_math_matches_published_rate() {
+        let cost =
+            RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        // Mirror estimate_cost's term structure (separate input/output costs) so
+        // this matches bit-for-bit and avoids a fused mul-add (suboptimal_flops).
+        let input_cost = 800.0 / 1_000_000.0 * 1.40;
+        let output_cost = 3000.0 / 1_000_000.0 * 4.40;
+        let expected = input_cost + output_cost;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "GLM-5.2 cost {cost} must equal {expected} at the published $1.40/$4.40 rate"
+        );
+        // Guard the absolute figure too, so a refactor of `estimated_tokens()`
+        // that also drifts the rate can't keep this green by coincidence.
+        assert!(
+            (cost - 0.01432).abs() < 1e-9,
+            "expected $0.01432 for a CodeGeneration-sized GLM-5.2 call, got {cost}"
+        );
+    }
+
+    #[test]
+    fn test_glm52_fallback_chain_has_local_safety_net() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        let chain = &decision.fallback_chain;
+        assert!(!chain.is_empty(), "GLM-5.2 must have a fallback chain");
+        // "A missing GLM key never strands a task" requires more than *a* local
+        // model somewhere in the chain — the chain must TERMINATE on a local
+        // model, so that even with every cloud key absent the walk reaches a
+        // runnable model instead of dead-ending on an unavailable cloud arm.
+        assert!(
+            chain.last().is_some_and(ModelChoice::is_local),
+            "GLM-5.2 fallback chain must end on a local model: {chain:?}"
+        );
+        // The chain steps down through the cheaper cloud arms first (cost
+        // discipline), then to the local net — order is part of the contract.
+        assert_eq!(
+            chain,
+            &vec![
+                ModelChoice::DeepSeekV32,
+                ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
+    }
+
+    // A realistic GLM-5.2 call (200K input + 100K output) priced at the
+    // `ModelChoice::Glm52` arm's published rates ($1.40 / $4.40 per 1M). Kept in
+    // one place so these budget tests track the cost arm above.
+    fn glm52_call_cost() -> TokenCost {
+        let input_cost = 200_000.0 / 1_000_000.0 * 1.40;
+        let output_cost = 100_000.0 / 1_000_000.0 * 4.40;
+        TokenCost::from_dollars(input_cost + output_cost)
+    }
+
+    // BUDGET-001 (track token cost): a real routed GLM call accrues non-zero,
+    // tracked spend. This exercises the exact orchestrator conversion
+    // (`TokenCost::from_dollars(decision.estimated_cost_usd)`), so it also guards
+    // the integer-cent flooring regression — under the old $0.60/$2.20 placeholder
+    // a category-sized call rounded to $0.00 and escaped tracking entirely.
+    #[spec("BUDGET-001")]
+    #[tokio::test]
+    async fn test_glm52_call_accrues_tracked_cost() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Generate code via GLM".to_string(),
+        );
+        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
+        assert!(
+            cost > TokenCost::ZERO,
+            "a routed GLM call must price above zero cents or budget tracking is a no-op"
+        );
+
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(800, 3000),
+                cost,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            cost,
+            "running total must reflect the GLM call's cost"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): with spend near the cap, a
+    // GLM call is rejected and nothing is recorded — proving the paid arm is
+    // bounded.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_blocked_when_over_budget() {
+        let config = BudgetConfig {
+            limits: BudgetLimits {
+                session_limit: Some(TokenCost::from_dollars(1.00)),
+                hourly_limit: None,
+                daily_limit: None,
+                monthly_limit: None,
+                total_limit: None,
+            },
+            ..Default::default()
+        };
+        let tracker = BudgetTracker::new(config).await.unwrap();
+        // Current spend near the $1.00 session cap.
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(0, 0),
+                TokenCost::from_dollars(0.99),
+            )
+            .await
+            .unwrap();
+
+        let call = glm52_call_cost();
+        assert!(
+            !tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call that overruns the cap must not be affordable"
+        );
+        assert!(
+            tracker
+                .try_spend(
+                    "agent-glm".to_string(),
+                    ModelChoice::Glm52.provider().to_string(),
+                    ModelChoice::Glm52.name().to_string(),
+                    TokenUsage::new(200_000, 100_000),
+                    call,
+                )
+                .await
+                .is_err(),
+            "try_spend must error rather than dispatch an over-budget GLM call"
+        );
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            TokenCost::from_dollars(0.99),
+            "a blocked GLM call must not accrue spend"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): the gate is bidirectional —
+    // the same GLM call clears and records when it fits under the budget.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_allowed_within_budget() {
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        let call = glm52_call_cost();
+        assert!(
+            tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call within the default budget must be affordable"
+        );
+        tracker
+            .try_spend(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(200_000, 100_000),
+                call,
+            )
+            .await
+            .expect("an affordable GLM call must record spend");
+        assert_eq!(tracker.get_status().await.session_spent, call);
     }
 
     #[test]

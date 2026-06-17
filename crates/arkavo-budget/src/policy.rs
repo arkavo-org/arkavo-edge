@@ -102,10 +102,12 @@ impl ModelSelectionPolicy {
                 let pricing = crate::provider_costs::ModelPricing {
                     model_id: model.model_id.clone(),
                     provider: model.provider_name.clone(),
-                    input_cost_per_thousand: input_cost,
-                    output_cost_per_thousand: output_cost,
-                    cached_input_cost_per_thousand: None,
-                    cache_write_cost_per_thousand: None,
+                    // Source rates are per-1K cents; ProviderPricing is per-MTok
+                    // (1000x) — convert so the stored entry's unit is consistent.
+                    input_cost_per_mtok: input_cost * 1000,
+                    output_cost_per_mtok: output_cost * 1000,
+                    cached_input_cost_per_mtok: None,
+                    cache_write_cost_per_mtok: None,
                     context_window: model.context_window,
                     max_output_tokens: model.max_output_tokens,
                     effective_date: model_pricing.effective_date,
