@@ -20,6 +20,11 @@ impl TokenCost {
         }
     }
 
+    /// Cost of `tokens` priced **per 1K tokens**. Prefer
+    /// [`Self::from_tokens_per_million`] for cloud rates: `ProviderPricing`
+    /// stores cents-per-MTok, and feeding a per-MTok rate here (or vice versa)
+    /// is a silent 1000x error. This per-1K form remains only for the legacy
+    /// `TokenUsage::calculate_cost` path.
     pub fn from_tokens(tokens: u32, cost_per_thousand: TokenCost) -> Self {
         let total_cents = (tokens as u64 * cost_per_thousand.cents) / 1000;
         Self { cents: total_cents }

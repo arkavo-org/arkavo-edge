@@ -62,7 +62,11 @@ impl super::Router {
     }
 
     pub fn is_glm_available(&self) -> bool {
-        std::env::var("GLM_API_KEY").is_ok()
+        // Only "available" when the arm can actually be built: instantiation is
+        // `#[cfg(feature = "glm")]`, so gate availability the same way. Without
+        // this, a no-`glm` build with GLM_API_KEY set marks Glm52 feasible and
+        // then dead-ends on the catch-all.
+        cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok()
     }
 
     pub fn get_anthropic_provider(
@@ -100,7 +104,7 @@ impl super::Router {
                 std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
             ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
-            ModelChoice::Glm52 => std::env::var("GLM_API_KEY").is_ok(),
+            ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
             m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
                 (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
                 _ => false,

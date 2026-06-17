@@ -22,7 +22,9 @@ impl ProviderAvailability {
             anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
             deepseek: std::env::var("DEEPSEEK_API_KEY").is_ok(),
             kimi: std::env::var("MOONSHOT_API_KEY").is_ok(),
-            glm: std::env::var("GLM_API_KEY").is_ok(),
+            // Gated on the `glm` feature so the arm isn't marked feasible in a
+            // build that can't instantiate it (instantiation is cfg(glm)).
+            glm: cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
         }
     }
 
