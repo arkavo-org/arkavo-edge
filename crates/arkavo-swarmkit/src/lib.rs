@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod coordination;
 pub mod governance;
 pub mod manifest;
+pub mod pricing;
 pub mod role;
 pub mod skill_content;
 pub mod validate;
@@ -28,6 +29,7 @@ pub use governance::{
     RoleProposalCeiling,
 };
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
+pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
 pub use role::ArpRule;
 pub use role::{

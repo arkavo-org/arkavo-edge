@@ -381,6 +381,7 @@ mod tests {
                     egress_allowlist: vec![],
                 },
             },
+            pricing: vec![],
             evaluation: None,
             proposal_governance: None,
             completion: CompletionSpec {
