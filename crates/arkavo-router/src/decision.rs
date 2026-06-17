@@ -835,14 +835,18 @@ impl RoutingDecision {
                 input_cost + output_cost
             }
             ModelChoice::Glm52 => {
-                // GLM-5.2 (Zhipu AI / Z.ai), GLM-4.6-class published rates:
-                // $0.60/1M input, $2.20/1M output. Cheap relative to the
-                // Anthropic/Gemini tiers, so budget enforcement keeps it
-                // routable where DeepSeek/Kimi sit. Update when Z.ai confirms
-                // GLM-5.2-specific pricing; real spend should come from the
-                // response `usage` block once surfaced.
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.60;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
+                // GLM-5.2 (Zhipu AI / Z.ai) published list rates:
+                // $1.40/1M input, $4.40/1M output (docs.z.ai/guides/overview/pricing,
+                // cross-checked on OpenRouter). The earlier $0.60/$2.20 placeholder
+                // was GLM-4.6's rate and undercounted spend ~2x — enough that a
+                // single category-sized call rounded to $0.00 in the integer-cent
+                // `TokenCost`, so the budget gate treated GLM calls as free. At the
+                // real rate a call carries non-zero cost and enforcement engages.
+                // Cheap relative to the Anthropic/Gemini tiers, so it stays routable
+                // where DeepSeek/Kimi sit. Real spend should come from the response
+                // `usage` block once surfaced.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.40;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 4.40;
                 input_cost + output_cost
             }
             // All local models are free
@@ -917,6 +921,11 @@ pub struct TokenEstimate {
 #[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
+    use arkavo_budget::TokenCost;
+    use arkavo_budget::config::{BudgetConfig, BudgetLimits};
+    use arkavo_budget::cost::TokenUsage;
+    use arkavo_budget::tracker::BudgetTracker;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_model_choice_name() {
@@ -1122,6 +1131,9 @@ mod tests {
         );
     }
 
+    // BUDGET-001 (track token cost): the cost-calculation half — a GLM call is
+    // priced from real provider rates, the precondition for any budget tracking.
+    #[spec("BUDGET-001")]
     #[test]
     fn test_glm52_cost_is_priced_below_anthropic() {
         // Budget enforcement only engages if GLM has a real, non-zero cost
@@ -1145,6 +1157,131 @@ mod tests {
             "Test".to_string(),
         );
         assert!(decision.fallback_chain.iter().any(ModelChoice::is_local));
+    }
+
+    // A realistic GLM-5.2 call (200K input + 100K output) priced at the
+    // `ModelChoice::Glm52` arm's published rates ($1.40 / $4.40 per 1M). Kept in
+    // one place so these budget tests track the cost arm above.
+    fn glm52_call_cost() -> TokenCost {
+        let usd = (200_000.0 / 1_000_000.0) * 1.40 + (100_000.0 / 1_000_000.0) * 4.40;
+        TokenCost::from_dollars(usd)
+    }
+
+    // BUDGET-001 (track token cost): a real routed GLM call accrues non-zero,
+    // tracked spend. This exercises the exact orchestrator conversion
+    // (`TokenCost::from_dollars(decision.estimated_cost_usd)`), so it also guards
+    // the integer-cent flooring regression — under the old $0.60/$2.20 placeholder
+    // a category-sized call rounded to $0.00 and escaped tracking entirely.
+    #[spec("BUDGET-001")]
+    #[tokio::test]
+    async fn test_glm52_call_accrues_tracked_cost() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Generate code via GLM".to_string(),
+        );
+        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
+        assert!(
+            cost > TokenCost::ZERO,
+            "a routed GLM call must price above zero cents or budget tracking is a no-op"
+        );
+
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(800, 3000),
+                cost,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            cost,
+            "running total must reflect the GLM call's cost"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): with spend near the cap, a
+    // GLM call is rejected and nothing is recorded — proving the paid arm is
+    // bounded.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_blocked_when_over_budget() {
+        let config = BudgetConfig {
+            limits: BudgetLimits {
+                session_limit: Some(TokenCost::from_dollars(1.00)),
+                hourly_limit: None,
+                daily_limit: None,
+                monthly_limit: None,
+                total_limit: None,
+            },
+            ..Default::default()
+        };
+        let tracker = BudgetTracker::new(config).await.unwrap();
+        // Current spend near the $1.00 session cap.
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(0, 0),
+                TokenCost::from_dollars(0.99),
+            )
+            .await
+            .unwrap();
+
+        let call = glm52_call_cost();
+        assert!(
+            !tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call that overruns the cap must not be affordable"
+        );
+        assert!(
+            tracker
+                .try_spend(
+                    "agent-glm".to_string(),
+                    ModelChoice::Glm52.provider().to_string(),
+                    ModelChoice::Glm52.name().to_string(),
+                    TokenUsage::new(200_000, 100_000),
+                    call,
+                )
+                .await
+                .is_err(),
+            "try_spend must error rather than dispatch an over-budget GLM call"
+        );
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            TokenCost::from_dollars(0.99),
+            "a blocked GLM call must not accrue spend"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): the gate is bidirectional —
+    // the same GLM call clears and records when it fits under the budget.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_allowed_within_budget() {
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        let call = glm52_call_cost();
+        assert!(
+            tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call within the default budget must be affordable"
+        );
+        tracker
+            .try_spend(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(200_000, 100_000),
+                call,
+            )
+            .await
+            .expect("an affordable GLM call must record spend");
+        assert_eq!(tracker.get_status().await.session_spent, call);
     }
 
     #[test]
