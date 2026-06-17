@@ -1108,6 +1108,11 @@ mod tests {
         assert!(model.is_cloud());
         assert!(!model.is_local());
         assert_eq!(model.capability(), PlannerTier::Large);
+        // Contract (docs.z.ai): GLM-5.2 is text-only — the vision sibling is a
+        // separate model (glm-5v-turbo). Pinning this catches an accidental add
+        // to the supports_vision allow-list, which would send image parts the
+        // model can't accept.
+        assert!(!model.supports_vision(), "GLM-5.2 is text-only");
     }
 
     #[test]
@@ -1148,6 +1153,34 @@ mod tests {
         assert!(glm < opus, "GLM-5.2 should be cheaper than Opus");
     }
 
+    // BUDGET-001 (track token cost): pin the EXACT cost math, not just an
+    // inequality. The "cheaper than Opus" check above was too weak to catch the
+    // $0.60/$2.20 (GLM-4.6) vs $1.40/$4.40 (GLM-5.2) error — a ~2x under-count
+    // that still passed "< Opus". This asserts the published GLM-5.2 rate so a
+    // future stale-price edit fails CI: CodeGeneration estimates 800 in / 3000
+    // out, so cost = 800/1e6*$1.40 + 3000/1e6*$4.40 = $0.00112 + $0.0132.
+    #[spec("BUDGET-001")]
+    #[test]
+    fn test_glm52_cost_math_matches_published_rate() {
+        let cost =
+            RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        // Mirror estimate_cost's term structure (separate input/output costs) so
+        // this matches bit-for-bit and avoids a fused mul-add (suboptimal_flops).
+        let input_cost = 800.0 / 1_000_000.0 * 1.40;
+        let output_cost = 3000.0 / 1_000_000.0 * 4.40;
+        let expected = input_cost + output_cost;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "GLM-5.2 cost {cost} must equal {expected} at the published $1.40/$4.40 rate"
+        );
+        // Guard the absolute figure too, so a refactor of `estimated_tokens()`
+        // that also drifts the rate can't keep this green by coincidence.
+        assert!(
+            (cost - 0.01432).abs() < 1e-9,
+            "expected $0.01432 for a CodeGeneration-sized GLM-5.2 call, got {cost}"
+        );
+    }
+
     #[test]
     fn test_glm52_fallback_chain_has_local_safety_net() {
         let decision = RoutingDecision::new(
@@ -1156,15 +1189,35 @@ mod tests {
             0.9,
             "Test".to_string(),
         );
-        assert!(decision.fallback_chain.iter().any(ModelChoice::is_local));
+        let chain = &decision.fallback_chain;
+        assert!(!chain.is_empty(), "GLM-5.2 must have a fallback chain");
+        // "A missing GLM key never strands a task" requires more than *a* local
+        // model somewhere in the chain — the chain must TERMINATE on a local
+        // model, so that even with every cloud key absent the walk reaches a
+        // runnable model instead of dead-ending on an unavailable cloud arm.
+        assert!(
+            chain.last().is_some_and(ModelChoice::is_local),
+            "GLM-5.2 fallback chain must end on a local model: {chain:?}"
+        );
+        // The chain steps down through the cheaper cloud arms first (cost
+        // discipline), then to the local net — order is part of the contract.
+        assert_eq!(
+            chain,
+            &vec![
+                ModelChoice::DeepSeekV32,
+                ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
     }
 
     // A realistic GLM-5.2 call (200K input + 100K output) priced at the
     // `ModelChoice::Glm52` arm's published rates ($1.40 / $4.40 per 1M). Kept in
     // one place so these budget tests track the cost arm above.
     fn glm52_call_cost() -> TokenCost {
-        let usd = (200_000.0 / 1_000_000.0) * 1.40 + (100_000.0 / 1_000_000.0) * 4.40;
-        TokenCost::from_dollars(usd)
+        let input_cost = 200_000.0 / 1_000_000.0 * 1.40;
+        let output_cost = 100_000.0 / 1_000_000.0 * 4.40;
+        TokenCost::from_dollars(input_cost + output_cost)
     }
 
     // BUDGET-001 (track token cost): a real routed GLM call accrues non-zero,
