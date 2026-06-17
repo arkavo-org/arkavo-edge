@@ -274,31 +274,31 @@ mod tests {
             PricingEntry {
                 model_id: "gpt-3.5-turbo".into(),
                 provider: "openai".into(),
-                input_cents_per_1k: 50,
-                output_cents_per_1k: 150,
-                cached_input_cents_per_1k: None,
-                cache_write_cents_per_1k: None,
+                input_cents_per_mtok: 50,
+                output_cents_per_mtok: 150,
+                cached_input_cents_per_mtok: None,
+                cache_write_cents_per_mtok: None,
                 context_window: Some(16385),
                 max_output_tokens: Some(4096),
             },
             PricingEntry {
                 model_id: "llama3.2:latest".into(),
                 provider: "ollama".into(),
-                input_cents_per_1k: 0,
-                output_cents_per_1k: 0,
-                cached_input_cents_per_1k: None,
-                cache_write_cents_per_1k: None,
+                input_cents_per_mtok: 0,
+                output_cents_per_mtok: 0,
+                cached_input_cents_per_mtok: None,
+                cache_write_cents_per_mtok: None,
                 context_window: Some(8192),
                 max_output_tokens: Some(4096),
             },
         ]);
 
-        // Test OpenAI GPT-3.5-turbo pricing
+        // Test OpenAI GPT-3.5-turbo pricing (rates are per-MTok now).
         let cost = pricing
-            .estimate_cost("openai", "gpt-3.5-turbo", 1000, 500)
+            .estimate_cost("openai", "gpt-3.5-turbo", 1_000_000, 500_000)
             .expect("Should have pricing for GPT-3.5-turbo");
 
-        // 1000 * 50/1000 + 500 * 150/1000 = 50 + 75 = 125
+        // 1M * 50/1M + 0.5M * 150/1M = 50 + 75 = 125
         assert_eq!(cost.as_cents(), 125);
 
         // Test free models
