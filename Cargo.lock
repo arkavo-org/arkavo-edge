@@ -1162,6 +1162,7 @@ name = "arkavo-llm"
 version = "0.82.0"
 dependencies = [
  "anyhow",
+ "arkavo-budget",
  "arkavo-deepseek",
  "arkavo-gemini",
  "arkavo-gossip",

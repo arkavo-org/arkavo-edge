@@ -1,6 +1,6 @@
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::common::{ProviderError, ProviderResult};
-use crate::provider::ProviderResponse;
+use crate::provider::{InferenceTiming, ProviderResponse};
 use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
@@ -278,6 +278,17 @@ impl OpenAIProvider {
             .unwrap_or_default()
     }
 
+    /// Map the response `usage` block (prompt/completion tokens) onto
+    /// `InferenceTiming` so the cost path can reconcile against real spend.
+    /// Cloud usage carries no wall-clock timing, only token counts.
+    fn timing_from_usage(usage: &Usage) -> InferenceTiming {
+        InferenceTiming {
+            n_prompt_eval: usage.prompt_tokens,
+            n_eval: usage.completion_tokens,
+            ..Default::default()
+        }
+    }
+
     /// Build the API endpoint URL
     fn build_url(&self, endpoint: &str) -> String {
         if self.config.is_azure {
@@ -467,7 +478,7 @@ impl Provider for OpenAIProvider {
 
         let url = self.build_url("chat/completions");
 
-        let (content, tool_calls, finish_reason) = self
+        let (content, tool_calls, finish_reason, inference_timing) = self
             .client
             .execute_with_retry(|client| {
                 let config = self.config.clone();
@@ -491,7 +502,12 @@ impl Provider for OpenAIProvider {
                             .ok_or_else(|| anyhow::anyhow!("No response from OpenAI"))?;
                         let content = choice.message.content.clone().unwrap_or_default();
                         let tool_calls = OpenAIProvider::parse_tool_calls(&choice.message);
-                        Ok((content, tool_calls, choice.finish_reason.clone()))
+                        let finish_reason = choice.finish_reason.clone();
+                        let timing = completion
+                            .usage
+                            .as_ref()
+                            .map(OpenAIProvider::timing_from_usage);
+                        Ok((content, tool_calls, finish_reason, timing))
                     } else {
                         let status = response.status();
                         let error_text = response
@@ -510,7 +526,7 @@ impl Provider for OpenAIProvider {
             reasoning_content: None,
             tool_calls,
             finish_reason,
-            inference_timing: None,
+            inference_timing,
             quality_gate_retries: 0,
         })
     }
@@ -795,5 +811,17 @@ mod tests {
         assert_eq!(api[1].role, "tool");
         assert_eq!(api[1].content.as_deref(), Some("12:00 UTC"));
         assert_eq!(api[1].tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn usage_maps_to_inference_timing() {
+        let usage = Usage {
+            prompt_tokens: 120,
+            completion_tokens: 45,
+            total_tokens: 165,
+        };
+        let timing = OpenAIProvider::timing_from_usage(&usage);
+        assert_eq!(timing.n_prompt_eval, 120);
+        assert_eq!(timing.n_eval, 45);
     }
 }
