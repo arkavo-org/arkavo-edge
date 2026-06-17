@@ -21,6 +21,10 @@
 //! cargo test -p arkavo-llm --test e2e_glm -- --ignored --nocapture
 //! ```
 
+// `#[tokio::test]` expands to `Runtime::block_on`, which the workspace's
+// disallowed-methods lint flags; allowed here as in the other e2e tests.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_budget::BudgetConfig;
 use arkavo_budget::cost::TokenUsage;
 use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};

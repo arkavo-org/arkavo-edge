@@ -221,7 +221,7 @@ impl OpenAIProvider {
                     role,
                     content,
                     tool_calls,
-                    tool_call_id: msg.tool_call_id.clone(),
+                    tool_call_id: msg.tool_call_id,
                 }
             })
             .collect()
