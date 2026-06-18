@@ -8,7 +8,10 @@
 //!
 //! This is the one thing a real key proves that CI can't: that a GLM-5.2 call
 //! actually round-trips through our provider. It is `#[ignore]`-d and skips
-//! cleanly when `GLM_API_KEY` is unset, so it never runs (or fails) in CI.
+//! cleanly when `GLM_API_KEY` is unset, so it never runs (or fails) in CI. It
+//! also skips on a transient provider error (429 rate-limit, exhausted
+//! balance/quota, timeout) so an unfunded or throttled key reports a skip, not
+//! a regression — only a genuine code/model failure fails the test.
 //!
 //! ## Running it
 //!
@@ -55,6 +58,23 @@ fn glm_client() -> Option<LlmClient> {
     Some(LlmClient::new(Box::new(glm_provider()?)))
 }
 
+/// True for provider errors that reflect infrastructure/account state — a 429
+/// rate-limit, an exhausted balance/quota, or a timeout — rather than a code or
+/// model defect. The live e2e *skips* (rather than fails) on these, matching
+/// `tool-bench`'s skip semantics, so an unfunded or throttled key never reads
+/// as a regression.
+fn is_transient_provider_error(err: &impl std::fmt::Display) -> bool {
+    let s = err.to_string().to_lowercase();
+    s.contains("429")
+        || s.contains("too many requests")
+        || s.contains("insufficient balance")
+        || s.contains("rate limit")
+        || s.contains("rate-limit")
+        || s.contains("quota")
+        || s.contains("timed out")
+        || s.contains("timeout")
+}
+
 #[tokio::test]
 #[ignore = "Requires GLM_API_KEY — makes a live GLM-5.2 call to Z.ai"]
 async fn glm52_round_trips_a_prompt() {
@@ -67,10 +87,14 @@ async fn glm52_round_trips_a_prompt() {
         "What is 2 + 2? Respond with only the digit and nothing else.",
     )];
 
-    let response = client
-        .complete(messages)
-        .await
-        .expect("live GLM-5.2 completion should succeed");
+    let response = match client.complete(messages).await {
+        Ok(r) => r,
+        Err(e) if is_transient_provider_error(&e) => {
+            eprintln!("Skipping live GLM-5.2 e2e: transient provider error ({e})");
+            return;
+        }
+        Err(e) => panic!("live GLM-5.2 completion failed: {e}"),
+    };
 
     eprintln!("--- GLM-5.2 raw response ---\n{response}\n---------------------------");
     assert!(
@@ -95,10 +119,17 @@ async fn glm52_usage_reconciles_to_cost_and_budget() {
     };
 
     let messages = vec![Message::user("Write a short haiku about budgets.")];
-    let response = provider
+    let response = match provider
         .complete_with_tools(messages, None, Some(128))
         .await
-        .expect("live GLM-5.2 completion should succeed");
+    {
+        Ok(r) => r,
+        Err(e) if is_transient_provider_error(&e) => {
+            eprintln!("Skipping GLM-5.2 cost e2e: transient provider error ({e})");
+            return;
+        }
+        Err(e) => panic!("live GLM-5.2 completion failed: {e}"),
+    };
 
     // The new capability: real prompt/completion token counts surfaced from
     // Z.ai's `usage` block (previously dropped).

@@ -179,10 +179,16 @@ impl CostOrchestrator {
                 estimated_token_cost,
             )
             .await
-            .map_err(|_| {
+            .map_err(|e| {
+                // Fail closed on ANY reservation failure, but don't discard the
+                // cause: an over-limit denial and a budget-store/persistence
+                // error both deny here yet mean very different things to an
+                // operator. Log and surface the underlying error instead of
+                // collapsing every failure into a bare "cannot afford".
+                tracing::warn!(error = %e, "budget reservation denied for agent {agent_id}");
                 Error::BudgetExceeded(format!(
-                    "Agent {} cannot afford estimated cost ${:.4}",
-                    agent_id, decision.estimated_cost_usd
+                    "Agent {agent_id} reservation denied for estimated cost ${:.4}: {e}",
+                    decision.estimated_cost_usd
                 ))
             })?;
 
@@ -323,6 +329,16 @@ impl CostOrchestrator {
     /// fresh add — or the call is billed twice. Wiring the live engine caller
     /// that performs that reconciliation is tracked by issue #587; until then
     /// this entry point has no production caller.
+    ///
+    /// Reconciliation is required because the reservation is **not** refunded
+    /// on its own: a route whose downstream call fails, costs less than
+    /// estimated, or never runs leaves the estimate reserved. The
+    /// `route_with_budget` path (and `BudgetMiddleware`'s own actual-recording)
+    /// are currently dormant — `CostOrchestrator` is constructed only in tests
+    /// and `route_with_architect` has no production caller — so this cannot
+    /// over-count or double-count today. Before wiring the path live (#587),
+    /// the reconcile here must replace, not stack on, any middleware
+    /// actual-recording for the same call.
     pub async fn record_actual_spending(
         &self,
         agent_id: String,
