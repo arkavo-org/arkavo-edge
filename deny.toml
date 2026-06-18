@@ -11,10 +11,6 @@ ignore = [
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
-    # hickory-dns vulnerabilities. iroh 0.98.2 hard-pins hickory-resolver =0.26.0-beta.4
-    # which still contains the bug; fix is in hickory-proto 0.26.1. Blocked on iroh upstream.
-    { id = "RUSTSEC-2026-0119", reason = "hickory-proto O(n²) name compression — pinned by iroh 0.98.2" },
-    { id = "RUSTSEC-2026-0120", reason = "hickory-net NSEC3 unbounded loop — pinned by iroh 0.98.2" },
 ]
 
 [bans]
