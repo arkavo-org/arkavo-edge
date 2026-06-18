@@ -5,6 +5,7 @@ use crate::metrics::RoutingMetrics;
 use crate::selector::ModelSelector;
 use crate::{Error, Result, Router};
 use arkavo_budget::TokenCost;
+use arkavo_budget::cost::TokenUsage;
 use arkavo_budget::provider_costs::ProviderPricing;
 use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
 use arkavo_llm::Message;
@@ -159,19 +160,31 @@ impl CostOrchestrator {
         };
 
         let estimated_token_cost = estimate_decision_cost(&self.pricing, &decision);
+        let estimated = decision.task_category.estimated_tokens();
 
-        let can_afford = self
-            .budget_tracker
-            .can_afford(agent_id, estimated_token_cost)
+        // Reserve the estimated cost atomically. `try_spend` holds the budget
+        // lock across check-and-deduct, so two concurrent agents cannot both
+        // pass against the same remaining budget and both dispatch — the race
+        // a non-deducting `can_afford` check allowed by releasing its lock
+        // before dispatch. Any reservation failure — an over-limit denial or a
+        // budget-store error — fails closed: the route is denied, never
+        // authorized. Engine-time actual usage reconciles this reservation
+        // against the real spend (see `record_actual_spending`; issue #587).
+        self.budget_tracker
+            .try_spend(
+                agent_id.to_string(),
+                decision.recommended_model.provider().to_string(),
+                decision.recommended_model.name().to_string(),
+                TokenUsage::new(estimated.input, estimated.output),
+                estimated_token_cost,
+            )
             .await
-            .unwrap_or(true);
-
-        if !can_afford {
-            return Err(Error::BudgetExceeded(format!(
-                "Agent {} cannot afford estimated cost ${:.4}",
-                agent_id, decision.estimated_cost_usd
-            )));
-        }
+            .map_err(|_| {
+                Error::BudgetExceeded(format!(
+                    "Agent {} cannot afford estimated cost ${:.4}",
+                    agent_id, decision.estimated_cost_usd
+                ))
+            })?;
 
         let mut routing_metrics = self.routing_metrics.write().await;
         routing_metrics.record_routing(&classification, &decision);
@@ -302,6 +315,14 @@ impl CostOrchestrator {
         Ok(0.0)
     }
 
+    /// Record engine-time actual spending for a routed call.
+    ///
+    /// `route_with_budget` now *reserves* the estimated cost up front (see the
+    /// `try_spend` reservation there), so this must reconcile the reservation
+    /// against the real usage — record the delta (`actual - estimated`), not a
+    /// fresh add — or the call is billed twice. Wiring the live engine caller
+    /// that performs that reconciliation is tracked by issue #587; until then
+    /// this entry point has no production caller.
     pub async fn record_actual_spending(
         &self,
         agent_id: String,
@@ -576,6 +597,47 @@ mod tests {
         );
         let cost = estimate_decision_cost(&pricing, &decision);
         assert_eq!(cost, TokenCost::from_dollars(decision.estimated_cost_usd));
+    }
+
+    #[tokio::test]
+    async fn route_with_budget_reserves_the_estimated_cost() {
+        // Regression for the cost-gate fail-open / TOCTOU race: the gate must
+        // RESERVE the estimated cost atomically (try_spend, which holds the
+        // budget lock across check-and-deduct), not run a non-deducting
+        // can_afford check that releases its lock before dispatch — that race
+        // lets two concurrent agents both pass against the same remaining
+        // budget. Proof that a reservation actually happened: a successful
+        // route leaves a spending record behind (true even for free local
+        // models, where the reserved cost is $0 but the record is still
+        // written). The old can_afford path recorded nothing.
+        let config = BudgetConfig::default();
+        let manager = BudgetManager::new(config).await.unwrap();
+        let tracker = manager.tracker();
+
+        let orchestrator = CostOrchestrator::new(tracker.clone()).await;
+        if orchestrator.is_err() {
+            eprintln!("Skipping test: Local model not available");
+            return;
+        }
+        let orchestrator = orchestrator.unwrap();
+
+        let decision = orchestrator
+            .route_with_budget(
+                "write a function that adds two numbers",
+                "reservation-agent",
+            )
+            .await;
+        assert!(
+            decision.is_ok(),
+            "route should succeed within the default budget: {decision:?}"
+        );
+
+        let history = tracker.get_spending_history(16).await;
+        assert!(
+            history.iter().any(|r| r.agent_id == "reservation-agent"),
+            "a successful route must reserve the estimated cost (leaving a \
+             spending record); found none — the gate checked without reserving"
+        );
     }
 
     #[tokio::test]

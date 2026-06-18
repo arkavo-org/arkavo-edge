@@ -2,7 +2,7 @@
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::config::{BudgetConfig, BudgetLimits, BudgetThresholds};
-    use crate::cost::TokenCost;
+    use crate::cost::{TokenCost, TokenUsage};
     use crate::tracker::BudgetTracker;
     use std::sync::Arc;
 
@@ -42,6 +42,61 @@ mod tests {
                 .can_afford("test-agent", TokenCost::from_dollars(15.0))
                 .await
                 .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn try_spend_caps_concurrent_reservations_at_budget() {
+        // The cost gate relies on try_spend holding the budget lock across
+        // check-and-deduct: when many agents reserve concurrently against a
+        // budget that affords only a few, the deductions serialize so the
+        // total can never exceed the limit. A non-atomic check-then-deduct
+        // (the old can_afford gate) would let every concurrent caller observe
+        // the same remaining budget and all pass — the overspend race.
+        let config = BudgetConfig {
+            limits: BudgetLimits {
+                session_limit: Some(TokenCost::from_dollars(3.0)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+
+        // 10 concurrent $1 reservations against a $3 session limit.
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let tracker = Arc::clone(&tracker);
+            handles.push(tokio::spawn(async move {
+                tracker
+                    .try_spend(
+                        format!("agent-{i}"),
+                        "test".to_string(),
+                        "model".to_string(),
+                        TokenUsage::new(0, 0),
+                        TokenCost::from_dollars(1.0),
+                    )
+                    .await
+                    .is_ok()
+            }));
+        }
+
+        let mut succeeded = 0;
+        for h in handles {
+            if h.await.unwrap() {
+                succeeded += 1;
+            }
+        }
+
+        assert_eq!(
+            succeeded, 3,
+            "exactly 3 of 10 concurrent $1 reservations may succeed against a \
+             $3 limit; got {succeeded} — the atomic check-and-deduct leaked budget"
+        );
+        let status = tracker.get_status().await;
+        assert!(
+            status.session_spent <= TokenCost::from_dollars(3.0),
+            "total reserved must never exceed the session limit, got {}",
+            status.session_spent
         );
     }
 

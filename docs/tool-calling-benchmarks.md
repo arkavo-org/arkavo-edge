@@ -43,6 +43,49 @@ The bench now wires through the same post-processing as the production router:
 3. `extract_tool_calls_from_text()` — fallback chain: fence → JSON → XML → Python-style → curly-brace
 4. Model discovery via `ModelChoice` registry + `is_model_cached()`
 
+## Cloud Models (GLM-5.2 and beyond)
+
+`tool-bench` benchmarks **cloud** models through the same 8-scenario suite as local models, so a cloud cell and a local cell in the same column are scored identically. The cloud path reuses the **exact production provider instantiation** (`Router::get_provider(model)` → `complete_with_tools`), not a bespoke client — the numbers reflect real routing.
+
+GLM-5.2 (Zhipu AI / Z.ai) is the first cloud arm wired in. It speaks the OpenAI chat-completions wire format and is routed through the generic OpenAI-compatible adapter, so its native function-calling is scored directly (no fence-format layer). Because cloud calls cost money, the bench reports **real per-call token usage and USD cost** from the response `usage` block, priced at the published per-MTok rate — the credibility signal that distinguishes a paid model benchmark from a latency-only run.
+
+### Results — Cloud
+
+> Cloud latency varies by region and provider load, so every cloud claim carries a date and the run command that produced it. Accuracy is reported as `passed / attempted`: scenarios skipped due to a transient provider error (429, account balance, timeout) are excluded from the denominator rather than counted as failures — a rate-limit is infrastructure, not model quality.
+
+| Model | Deployment | Parse | Tool Name | Params | Avg Latency | Cost / run | Date |
+|-------|-----------|-------|-----------|--------|-------------|-----------|------|
+| **GLM-5.2** | cloud | **7/7** | **7/7** | **7/7** | 6,007ms | $0.00577 | 2026-06-17 |
+
+**Run:** `arkavo tool-bench --model glm-5.2` (8 scenarios, 1 iteration, Z.ai `paas/v4` endpoint).
+
+**GLM-5.2 passed 7/7 scenarios it was allowed to attempt.** The 8th scenario (`multi_param_types`) returned a Z.ai `429: Insufficient balance` partway through the run — the account ran out of credits, so the model never got to answer. The bench classifies that as a skipped (transient) scenario, not a capability failure. Every attempted scenario passed, including the deliberately tricky `should_not_call`, where GLM-5.2 correctly returned a plain-text greeting and made no tool call.
+
+Per-call cost from real `usage` tokens: ~465 prompt + ~31–80 completion tokens per scenario, at the published $1.40/MTok in / $4.40/MTok out rate. The full 8-scenario run cost $0.00577.
+
+Compare against the local table above: GLM-4.7-Flash (local GGUF) scores 8/8 at 2,698ms and is free; GLM-5.2 (cloud) matches it on attempted accuracy at 6,007ms and adds a real (but small) per-run cost. The cloud arm's value is capability without local RAM/VRAM requirements, not latency — the local MoE arms remain faster on Apple Silicon.
+
+### Reproducibility
+
+```bash
+# Single cloud model (requires GLM_API_KEY; costs real money per call)
+export GLM_API_KEY=<your z.ai api key>
+# optional: mainland host
+# export GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+arkavo tool-bench --model glm-5.2
+
+# Full comparison: every cached local model + every available cloud arm
+arkavo tool-bench --all
+
+# Locals only (no paid calls) — the safe default for a dev machine
+arkavo tool-bench --all --include-cloud=false
+
+# JSON report with per-scenario token counts + cost
+arkavo tool-bench --model glm-5.2 --output glm52-report.json
+```
+
+Availability gating: a cloud arm is only benched when its feature is compiled in **and** its API key is present (mirroring the router's `is_model_available`). A missing key skips the arm with a log line rather than failing the run, so `--all` fans out across local + cloud without a missing key aborting the whole benchmark.
+
 ## Improvements Implemented
 
 ### Qwen Named-Parameter Parser
@@ -179,12 +222,18 @@ Comparing native llama-server (`tool_bench.py`, 2 scenarios) against Arkavo Edge
 ## Running Benchmarks
 
 ```bash
-# Single model
+# Single local model
 arkavo tool-bench --model Ministral-3-3B
 
-# All cached models
+# Single cloud model (requires GLM_API_KEY; paid calls)
+arkavo tool-bench --model glm-5.2
+
+# All cached local models + available cloud arms (default includes cloud)
 arkavo tool-bench --all
 
-# JSON report output
+# Locals only — no paid calls
+arkavo tool-bench --all --include-cloud=false
+
+# JSON report output (includes per-call token counts + cost for cloud arms)
 arkavo tool-bench --all --output report.json
 ```
