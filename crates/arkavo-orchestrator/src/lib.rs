@@ -39,6 +39,8 @@ pub mod policy_events;
 pub mod spawn_guard;
 pub mod step_context;
 pub mod swarmkit_apply;
+#[cfg(feature = "kas")]
+pub mod swarmkit_encrypt;
 pub mod swarmkit_transport;
 pub mod task_executor;
 pub mod task_policy_manager;
@@ -62,6 +64,8 @@ pub use swarmkit_apply::{
     AppliedKit, ApplyKitError, BundleEncryptor, BundleShipper, EnvTokenVault, InMemoryTokenVault,
     RepoScope, RoleBinding, RoleCapabilityMatcher, TokenVault, apply_kit,
 };
+#[cfg(feature = "kas")]
+pub use swarmkit_encrypt::TdfBundleEncryptor;
 pub use swarmkit_transport::{IrohBundleShipper, MeshRoleTaskTransport};
 pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
 // Re-export GitHub types from arkavo-github for backward compatibility
