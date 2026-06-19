@@ -11,6 +11,7 @@ pub mod github;
 pub mod github_api;
 pub mod github_checks;
 pub mod github_org_knowledge;
+pub mod github_pr_watch;
 pub mod github_review;
 pub mod health_check;
 #[cfg(feature = "iroh")]

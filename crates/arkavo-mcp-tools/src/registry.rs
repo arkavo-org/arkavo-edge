@@ -12,6 +12,7 @@ use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
 };
+use crate::github_pr_watch::GitHubPrWatchTool;
 use crate::github_review::GitHubReviewTool;
 use crate::health_check::HealthCheckTool;
 use crate::osv::OsvTool;
@@ -262,6 +263,7 @@ impl ToolRegistry {
         self.register("github_pr_create", Box::new(GitHubPrCreateTool::new()));
         self.register("github_pr_list", Box::new(GitHubPrListTool::new()));
         self.register("github_pr_merge", Box::new(GitHubPrMergeTool::new()));
+        self.register("github_pr_watch", Box::new(GitHubPrWatchTool::new()));
 
         // GitHub Repository tools
         self.register("github_repo_clone", Box::new(GitHubRepoCloneKit::new()));
