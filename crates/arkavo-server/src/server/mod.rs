@@ -28,6 +28,8 @@ mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
 mod startup;
+#[cfg(feature = "swarm-apply")]
+mod swarm_apply_tool;
 mod synthesis;
 mod token_estimator;
 mod tool_memory;

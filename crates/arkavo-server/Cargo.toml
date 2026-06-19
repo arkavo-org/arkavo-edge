@@ -108,6 +108,9 @@ arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 ed25519-dalek = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
+# kas-only: the agent-loop apply_swarmkit tool runs the orchestrator's
+# apply_kit pipeline (match -> TDF-wrap -> ship over Iroh -> dispatch).
+arkavo-orchestrator = { path = "../arkavo-orchestrator", optional = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
@@ -123,6 +126,10 @@ mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt", "arkavo-protocol/kas"]
 iroh = []
+# Agent-loop SwarmKit apply tool. Off by default: it pulls arkavo-orchestrator
+# (which forces the router/llama-cpp stack), so standalone server builds stay
+# light and C++-free unless this is explicitly enabled (the CLI turns it on).
+swarm-apply = ["kas", "iroh", "dep:arkavo-orchestrator", "arkavo-orchestrator/kas"]
 # The real LlamaTokenEstimator in agent_loop.rs is gated on this feature and
 # calls Router::any_loaded_model() / min_feasible_context_size(), which only
 # exist under arkavo-router's own llama-cpp feature. Propagate it here so the

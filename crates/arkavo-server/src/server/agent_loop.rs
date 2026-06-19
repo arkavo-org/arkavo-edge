@@ -91,6 +91,20 @@ async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::Tool
     if let Some(ref node) = config.iroh_node {
         arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
     }
+    // Agent-driven SwarmKit apply: the swarm-apply feature brings the
+    // KAS-backed encryptor and the long-lived Iroh data-plane node, so staged
+    // bundles stay fetchable for the agent process's lifetime.
+    #[cfg(feature = "swarm-apply")]
+    if let Some(ref node) = config.iroh_node {
+        registry.register(
+            "apply_swarmkit",
+            Box::new(super::swarm_apply_tool::SwarmApplyTool::new(
+                config.mesh_state.clone(),
+                node.clone(),
+                config.self_agent_id.clone(),
+            )),
+        );
+    }
     registry
 }
 
