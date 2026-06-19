@@ -1,0 +1,245 @@
+//! Answer adequacy gate — a hard, unsolved product problem.
+//!
+//! This module is deliberately NOT named a "quality gate". v1 cannot judge
+//! whether an answer is *good*; it can only catch visible *collapse*. It is a
+//! collapse detector. A [`CollapseVerdict::NoVisibleCollapse`] result means the
+//! output "did not visibly fall apart" — it is **not** a guarantee of adequacy.
+//!
+//! A detected collapse may *request* a cloud upgrade offer. It may never
+//! authorize cloud spend; that is the budget (spend) plane's sole job. The
+//! honest v1 policy is: local answer completed, cloud upgrade available, ask
+//! the user before spending — never "local answer seems bad, auto-spend cloud".
+
+use serde::{Deserialize, Serialize};
+
+/// A visible collapse mode. These are the only failures v1 can reliably detect;
+/// they are signs of breakdown, not a measure of answer quality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CollapseSignal {
+    /// No usable output was produced.
+    EmptyOutput,
+    /// Generation was cut off by the output-token cap.
+    TruncatedOutput,
+    /// Output degenerated into a repeating loop.
+    RepetitionLoop,
+    /// Output was expected to match a structured format and did not.
+    FormatFailure,
+    /// A tool call was emitted but failed schema validation.
+    ToolCallSchemaFailure,
+    /// The model refused although the task is allowed.
+    DisallowedRefusal,
+    /// The model plainly ignored the instructions (e.g. produced neither the
+    /// required tool call nor any answer).
+    InstructionNoncompliance,
+}
+
+/// The collapse detector's verdict on a completed local answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollapseVerdict {
+    /// No visible collapse. NOT a guarantee that the answer is adequate.
+    NoVisibleCollapse,
+    /// The output visibly collapsed in the named way.
+    Collapsed(CollapseSignal),
+}
+
+impl CollapseVerdict {
+    pub fn collapsed(&self) -> bool {
+        matches!(self, Self::Collapsed(_))
+    }
+
+    pub fn signal(&self) -> Option<CollapseSignal> {
+        match self {
+            Self::Collapsed(s) => Some(*s),
+            Self::NoVisibleCollapse => None,
+        }
+    }
+}
+
+/// Observations about a completed local answer.
+///
+/// The collapse modes the detector cannot derive from raw text — tool-schema
+/// validity, structured-format match, refusal-vs-allowed — are computed by the
+/// routing loop and passed in via [`AnswerObservation::precomputed`].
+#[derive(Debug, Clone, Default)]
+pub struct AnswerObservation<'a> {
+    /// The visible answer text (tool/think blocks already stripped).
+    pub text: &'a str,
+    /// Generation stopped because it hit the output-token cap.
+    pub hit_output_cap: bool,
+    /// The task required a tool call (function-calling) to proceed.
+    pub tool_call_required: bool,
+    /// A collapse the caller already detected from context the detector cannot
+    /// see (e.g. [`CollapseSignal::ToolCallSchemaFailure`],
+    /// [`CollapseSignal::FormatFailure`], [`CollapseSignal::DisallowedRefusal`]).
+    pub precomputed: Option<CollapseSignal>,
+}
+
+/// Detect visible collapse in a completed local answer.
+///
+/// The first matching signal wins. A caller-supplied `precomputed` signal takes
+/// priority, since it reflects context the text alone cannot reveal.
+pub fn detect(obs: &AnswerObservation<'_>) -> CollapseVerdict {
+    if let Some(signal) = obs.precomputed {
+        return CollapseVerdict::Collapsed(signal);
+    }
+
+    let trimmed = obs.text.trim();
+
+    if trimmed.is_empty() {
+        // Tool-required tasks that produced neither a valid tool call nor text
+        // ignored the instruction; a plain chat turn just came back empty.
+        return if obs.tool_call_required {
+            CollapseVerdict::Collapsed(CollapseSignal::InstructionNoncompliance)
+        } else {
+            CollapseVerdict::Collapsed(CollapseSignal::EmptyOutput)
+        };
+    }
+
+    if obs.hit_output_cap {
+        return CollapseVerdict::Collapsed(CollapseSignal::TruncatedOutput);
+    }
+
+    if has_repetition_loop(trimmed) {
+        return CollapseVerdict::Collapsed(CollapseSignal::RepetitionLoop);
+    }
+
+    CollapseVerdict::NoVisibleCollapse
+}
+
+/// Conservative repetition-loop check: flags an answer whose tail is a short
+/// phrase (1–4 words) repeated many times — the classic local-model collapse.
+fn has_repetition_loop(text: &str) -> bool {
+    const MIN_REPEATS: usize = 6;
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < MIN_REPEATS {
+        return false;
+    }
+    for cycle in 1..=4 {
+        if words.len() < cycle * MIN_REPEATS {
+            continue;
+        }
+        let tail = &words[words.len() - cycle * MIN_REPEATS..];
+        let pattern = &tail[..cycle];
+        if tail.chunks(cycle).all(|chunk| chunk == pattern) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn answer(text: &str) -> AnswerObservation<'_> {
+        AnswerObservation {
+            text,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn healthy_answer_has_no_visible_collapse() {
+        let verdict = detect(&answer("The capital of France is Paris."));
+        assert_eq!(verdict, CollapseVerdict::NoVisibleCollapse);
+        assert!(!verdict.collapsed());
+    }
+
+    #[test]
+    fn empty_chat_answer_is_empty_output() {
+        assert_eq!(
+            detect(&answer("   ")),
+            CollapseVerdict::Collapsed(CollapseSignal::EmptyOutput)
+        );
+    }
+
+    #[test]
+    fn empty_when_tool_required_is_noncompliance() {
+        let obs = AnswerObservation {
+            text: "",
+            tool_call_required: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::InstructionNoncompliance)
+        );
+    }
+
+    #[test]
+    fn refusal_on_allowed_task_collapses() {
+        let obs = AnswerObservation {
+            text: "I cannot help with that.",
+            precomputed: Some(CollapseSignal::DisallowedRefusal),
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::DisallowedRefusal)
+        );
+    }
+
+    #[test]
+    fn invalid_tool_schema_collapses() {
+        let obs = AnswerObservation {
+            text: "{\"tool\": ...}",
+            precomputed: Some(CollapseSignal::ToolCallSchemaFailure),
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::ToolCallSchemaFailure)
+        );
+    }
+
+    #[test]
+    fn format_failure_collapses() {
+        let obs = AnswerObservation {
+            text: "not json",
+            precomputed: Some(CollapseSignal::FormatFailure),
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::FormatFailure)
+        );
+    }
+
+    #[test]
+    fn output_cap_truncation_collapses() {
+        let obs = AnswerObservation {
+            text: "A long answer that ran out of room",
+            hit_output_cap: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::TruncatedOutput)
+        );
+    }
+
+    #[test]
+    fn repetition_loop_collapses() {
+        let obs = answer("ok the answer is yes yes yes yes yes yes yes yes");
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::RepetitionLoop)
+        );
+    }
+
+    #[test]
+    fn multiword_repetition_loop_collapses() {
+        let obs = answer("go on go on go on go on go on go on go on");
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::RepetitionLoop)
+        );
+    }
+
+    #[test]
+    fn ordinary_repetition_is_not_a_loop() {
+        // A few natural repeats must not trip the detector.
+        let obs = answer("very very good work overall, nicely done and complete");
+        assert_eq!(detect(&obs), CollapseVerdict::NoVisibleCollapse);
+    }
+}

@@ -14,6 +14,7 @@ pub mod metrics;
 pub mod model_discovery;
 pub mod optimal_config;
 pub mod orchestrator;
+pub mod planes;
 pub mod prediction;
 pub mod preflight;
 pub mod prompt_advisor;
@@ -47,6 +48,11 @@ pub use metrics::RoutingMetrics;
 pub use orchestrator::{
     ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
     ScalingDecision,
+};
+pub use planes::{
+    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityVerdict, LocalPlan,
+    RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility, authorize_upgrade,
+    detect_collapse, plan_local, upgrade_offer,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
