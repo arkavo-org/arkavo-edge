@@ -1,5 +1,7 @@
 # Tool-Calling Benchmarks Across Local Models
 
+> **Note:** The `arkavo tool-bench` CLI subcommand was a testing-only tool and has been removed from the CLI. The methodology it encoded now lives in the test suite: local cross-model tool-calling in `crates/arkavo-llm/tests/gemma4_compare_test.rs` (`--ignored`), and the cloud cost/budget reconciliation in the key-gated e2e tests (`crates/arkavo-llm/tests/e2e_glm.rs`, `crates/arkavo-cli/tests/e2e_kimi_budget_test.rs`, `crates/arkavo-router/tests/e2e_budget_reservation.rs`). The published per-MTok rates are guarded by free CI unit tests in `crates/arkavo-router/src/decision.rs`. The tables below are retained as a dated historical record; the `arkavo tool-bench …` invocations they reference no longer resolve.
+
 Benchmarked using `arkavo tool-bench` with 8 standardized scenarios: single-param, multi-param, no-param, enum, file path, command execution, should-not-call, and multi-type params. Five test tools registered (get_weather, read_file, search, get_time, run_command).
 
 ## Results (2026-04-04)
