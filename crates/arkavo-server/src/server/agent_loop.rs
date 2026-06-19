@@ -33,6 +33,9 @@ pub struct AgentLoopConfig {
     pub inference_active: Arc<std::sync::atomic::AtomicBool>,
     /// Published snapshot of the ConversationWindow for @context introspection
     pub context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
+    /// Shared agent metadata — read each cycle for the SwarmKit grant set
+    /// so the registry can be filtered after specialization (design D9).
+    pub agent_metadata: Arc<tokio::sync::RwLock<crate::server::config_helpers::AgentMetadata>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
@@ -68,6 +71,37 @@ fn drain_pending_messages(
         }
     }
     (block, receipts)
+}
+
+// --- Registry build helpers ---
+
+/// Build the full (unfiltered) tool registry from config sources.
+async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::ToolRegistry {
+    use arkavo_mcp_tools::ToolRegistry;
+    let mut registry = ToolRegistry::empty();
+    if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = super::mcp_bridge::McpBridgeTool::new(config.mcp_registry.clone(), tool);
+            registry.register(&tool_name, Box::new(bridge));
+        }
+    }
+    arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    #[cfg(feature = "iroh")]
+    if let Some(ref node) = config.iroh_node {
+        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
+    }
+    registry
+}
+
+/// Derive a registry filtered to the SwarmKit grant set.
+async fn derive_filtered_registry(
+    config: &AgentLoopConfig,
+    granted: &std::collections::HashSet<String>,
+) -> Arc<arkavo_mcp_tools::ToolRegistry> {
+    let mut registry = build_full_registry(config).await;
+    registry.retain_granted(granted);
+    Arc::new(registry)
 }
 
 // --- Main event loop ---
@@ -114,33 +148,15 @@ pub async fn run_agent_loop(
     conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
 
-    // Build tool registry once — same tools every cycle, no need to rebuild
-    let cached_registry = {
-        use arkavo_mcp_tools::ToolRegistry;
-        let mut registry = ToolRegistry::empty();
-
-        if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
-            for tool in mcp_tools {
-                let tool_name = tool.name.clone();
-                let bridge =
-                    super::mcp_bridge::McpBridgeTool::new(config.mcp_registry.clone(), tool);
-                registry.register(&tool_name, Box::new(bridge));
-            }
-        }
-
-        arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
-
-        #[cfg(feature = "iroh")]
-        if let Some(ref node) = config.iroh_node {
-            arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
-        }
-
-        info!(
-            "Agent loop: cached {} tools for reuse across cycles",
-            registry.list_tools().len()
-        );
-        Arc::new(registry)
-    };
+    // Build initial tool registry (unfiltered). Filtering by grant set is done
+    // lazily on first cycle after specialization (design D9).
+    let full_registry = build_full_registry(&config).await;
+    info!(
+        "Agent loop: cached {} tools for reuse across cycles",
+        full_registry.list_tools().len()
+    );
+    let mut active_registry = Arc::new(full_registry);
+    let mut active_grant_hash: u64 = 0; // 0 = unfiltered
 
     // Adaptive tick interval
     let mut cycle_interval_secs: u64 = 5;
@@ -182,6 +198,34 @@ pub async fn run_agent_loop(
                         drop(budget);
                         continue;
                     }
+                }
+
+                // 1b. Re-derive the registry to the agent's granted tool set when
+                // specialization has set/changed it. Memoized on a grant hash so
+                // this is not per-cycle work when the set hasn't changed.
+                let granted_set: std::collections::HashSet<String> = {
+                    let meta = config.agent_metadata.read().await;
+                    meta.granted_tools.iter().cloned().collect()
+                };
+                let grant_hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    // Sort names for deterministic hash regardless of HashSet order
+                    let mut names: Vec<&str> = granted_set.iter().map(String::as_str).collect();
+                    names.sort_unstable();
+                    for name in &names {
+                        name.hash(&mut h);
+                    }
+                    h.finish()
+                };
+                if !granted_set.is_empty() && grant_hash != active_grant_hash {
+                    active_registry = derive_filtered_registry(&config, &granted_set).await;
+                    active_grant_hash = grant_hash;
+                    info!(
+                        granted = granted_set.len(),
+                        tools = active_registry.list_tools().len(),
+                        "Specialized: registry filtered to granted tool set"
+                    );
                 }
 
                 // 2. Drain gossip completions into specialist_context
@@ -367,6 +411,8 @@ pub async fn run_agent_loop(
                 } else {
                     Some(&config.compute_budget)
                 };
+                let granted_opt: Option<&std::collections::HashSet<String>> =
+                    if granted_set.is_empty() { None } else { Some(&granted_set) };
                 match super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,
@@ -383,7 +429,8 @@ pub async fn run_agent_loop(
                     tool_loop_budget,
                     Some(messages),
                     true, // skip complexity — orchestrator cycles are always single tasks
-                    Some(cached_registry.clone()),
+                    Some(active_registry.clone()),
+                    granted_opt,
                     #[cfg(feature = "iroh")]
                     config.iroh_node.as_ref(),
                 )
@@ -1098,5 +1145,39 @@ mod urgency_tests {
     fn test_detect_urgency_json_without_alerts_key() {
         let data = r#"{"colonists":3,"resources":{"wood":50}}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::Low);
+    }
+}
+
+#[cfg(test)]
+mod grant_hash_tests {
+    use std::collections::HashSet;
+    use std::hash::{Hash, Hasher};
+
+    fn hash_of(set: &HashSet<String>) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut sorted: Vec<&String> = set.iter().collect();
+        sorted.sort();
+        sorted.hash(&mut h);
+        h.finish()
+    }
+
+    #[test]
+    fn grant_hash_is_order_independent() {
+        let a: HashSet<String> = ["git_diff", "gh_pr_review"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let b: HashSet<String> = ["gh_pr_review", "git_diff"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn different_grants_differ() {
+        let a: HashSet<String> = ["git_diff"].iter().map(|s| s.to_string()).collect();
+        let b: HashSet<String> = ["github_pr_create"].iter().map(|s| s.to_string()).collect();
+        assert_ne!(hash_of(&a), hash_of(&b));
     }
 }

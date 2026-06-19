@@ -1025,6 +1025,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.agent_metadata,
             &self.role_specialization,
             self.bundle_decryptor.as_ref(),
+            &self.agent_event_tx,
             request,
         )
         .await

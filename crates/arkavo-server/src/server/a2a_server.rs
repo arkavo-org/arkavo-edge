@@ -1387,6 +1387,7 @@ impl A2aServer {
             agent_mode,
             inference_active: self.inference_active.clone(),
             context_snapshot: self.context_snapshot.clone(),
+            agent_metadata: self.agent_metadata.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
         };
