@@ -3,6 +3,7 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{AgentSpecializeRequest, AgentSpecializeResponse};
+use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 use async_trait::async_trait;
 use base64::Engine;
 use jsonrpsee::types::ErrorObjectOwned;
@@ -55,6 +56,10 @@ impl BundleDecryptor for UnconfiguredBundleDecryptor {
 ///
 /// Without the `kas` feature, decryption is unavailable and the handler
 /// rejects the request rather than silently dropping the bundle.
+///
+/// When the request carries an Iroh `ticket`, the handler fetches the
+/// TDF bytes from the data plane instead of decoding `encrypted_bundle`.
+/// The inline base64 path is unchanged for callers without an Iroh node.
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_agent_specialize(
     metrics: &Arc<MetricsCollector>,
@@ -64,6 +69,7 @@ pub async fn handle_agent_specialize(
     role_specialization: &Arc<RoleSpecializationStore>,
     decryptor: &dyn BundleDecryptor,
     agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
+    iroh_node: Option<&Arc<IrohNode>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("agent.specialize".to_string(), metrics.clone());
@@ -74,6 +80,7 @@ pub async fn handle_agent_specialize(
         role_specialization,
         decryptor,
         agent_event_tx,
+        iroh_node,
         request,
     )
     .await
@@ -89,6 +96,7 @@ pub async fn handle_agent_specialize(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_inner(
     rate_limiter: &RateLimiter,
     metrics: &Arc<MetricsCollector>,
@@ -96,6 +104,7 @@ async fn handle_inner(
     role_specialization: &Arc<RoleSpecializationStore>,
     decryptor: &dyn BundleDecryptor,
     agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
+    iroh_node: Option<&Arc<IrohNode>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     if let Err(e) = rate_limiter.check_rate_limit() {
@@ -113,28 +122,67 @@ async fn handle_inner(
         request.requester_id, agent_name
     );
 
-    if request.encrypted_bundle.is_empty() {
-        return Err(ErrorObjectOwned::owned(
-            -32602,
-            "Invalid params: encrypted_bundle is required",
-            Some("The encrypted_bundle field cannot be empty".to_string()),
-        ));
-    }
-
     let session_id = request
         .session_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let tdf_bytes = base64::engine::general_purpose::STANDARD
-        .decode(request.encrypted_bundle.as_bytes())
-        .map_err(|e| {
+    // STRUCTURAL DEBT (a2a-realignment DEC-4): the `ticket`/`encrypted_bundle`
+    // split on this request rides the current A2A stack. Post-DEC-4 the bundle
+    // arrives as a TDF `Part` referenced by a `SendMessage` over
+    // arkavo-config-transport, collapsing both fields into one Part reference.
+    let tdf_bytes: Vec<u8> = if let Some(ticket_str) =
+        request.ticket.as_deref().filter(|t| !t.is_empty())
+    {
+        // Mesh path: the bundle blob is on the Iroh data plane; fetch it.
+        let node = iroh_node.ok_or_else(|| {
             ErrorObjectOwned::owned(
-                -32602,
-                "Invalid params: encrypted_bundle is not valid base64",
-                Some(e.to_string()),
+                -32603,
+                "Bundle ticket supplied but agent has no Iroh node",
+                Some(
+                    "rebuild the agent with --features iroh to fetch ticketed bundles".to_string(),
+                ),
             )
         })?;
+        let ticket: arkavo_tdf_iroh::IrohTicket = ticket_str.parse().map_err(|e| {
+            ErrorObjectOwned::owned(
+                -32602,
+                "Invalid params: ticket is not a valid Iroh ticket",
+                Some(format!("{e}")),
+            )
+        })?;
+        IrohTransport::new(node.clone())
+            .fetch_bytes(&ticket)
+            .await
+            .map_err(|e| {
+                ErrorObjectOwned::owned(
+                    -32603,
+                    "Failed to fetch bundle from Iroh ticket",
+                    Some(e.to_string()),
+                )
+            })?
+    } else {
+        // Inline path (legacy / no data plane): base64 in `encrypted_bundle`.
+        if request.encrypted_bundle.is_empty() {
+            return Err(ErrorObjectOwned::owned(
+                -32602,
+                "Invalid params: encrypted_bundle or ticket is required",
+                Some(
+                    "Provide either an inline base64 encrypted_bundle or an Iroh ticket"
+                        .to_string(),
+                ),
+            ));
+        }
+        base64::engine::general_purpose::STANDARD
+            .decode(request.encrypted_bundle.as_bytes())
+            .map_err(|e| {
+                ErrorObjectOwned::owned(
+                    -32602,
+                    "Invalid params: encrypted_bundle is not valid base64",
+                    Some(e.to_string()),
+                )
+            })?
+    };
 
     let did = agent_did.as_deref().ok_or_else(|| {
         ErrorObjectOwned::owned(
@@ -293,6 +341,31 @@ mod tests {
         }
     }
 
+    /// Decryptor that asserts the exact bytes it received (to verify
+    /// ticket fetch delivered the right blob) before returning the bundle.
+    struct AssertingDecryptor {
+        expected_bytes: Vec<u8>,
+        bundle: AgentSpecializationBundle,
+        expected_did: String,
+    }
+
+    #[async_trait]
+    impl BundleDecryptor for AssertingDecryptor {
+        async fn decrypt(
+            &self,
+            tdf_bytes: &[u8],
+            recipient_did: &str,
+        ) -> Result<AgentSpecializationBundle, String> {
+            if tdf_bytes != self.expected_bytes.as_slice() {
+                return Err("decryptor got unexpected bytes (ticket fetch path broken)".into());
+            }
+            if recipient_did != self.expected_did {
+                return Err(format!("wrong recipient: {recipient_did}"));
+            }
+            Ok(self.bundle.clone())
+        }
+    }
+
     /// Construct an `ArpDocument` from a JSON literal so this test
     /// module doesn't need a direct dependency on `arkavo-arp`. Mirrors
     /// the canonical shape produced by `derive_arp_for_role`.
@@ -409,11 +482,13 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -460,11 +535,13 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -488,11 +565,13 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: String::new(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -515,11 +594,13 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -547,11 +628,13 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -587,11 +670,13 @@ mod tests {
             &role_store,
             &decryptor,
             &event_tx,
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
                 task_context: None,
                 session_id: None,
+                ticket: None,
             },
         )
         .await
@@ -607,5 +692,84 @@ mod tests {
             }
             _ => panic!("expected IncomingMessage variant"),
         }
+    }
+
+    #[tokio::test]
+    async fn handle_specialize_fetches_bundle_from_ticket() {
+        let did = "did:web:agent-7.arkavo.net";
+        let bundle = build_bundle("analyst", "agent-7");
+        let agent_metadata = metadata_with_did("agent-7", did);
+        let (metrics, limiter, registry, role_store) = deps();
+
+        // Stage the (stand-in) TDF bytes on a shared in-memory node so the
+        // handler can fetch them back by ticket on the same node.
+        let node = IrohNode::memory().await.unwrap();
+        let staged = b"stand-in-tdf-bytes-for-ticket-path";
+        let ticket = IrohTransport::new(node.clone())
+            .stage_bytes(staged)
+            .await
+            .unwrap()
+            .to_string();
+
+        // Decryptor asserts it was handed the fetched bytes (not base64-decoded
+        // inline), then returns the prepared bundle.
+        let decryptor = AssertingDecryptor {
+            expected_bytes: staged.to_vec(),
+            bundle: bundle.clone(),
+            expected_did: did.to_string(),
+        };
+
+        let response = handle_agent_specialize(
+            &metrics,
+            &limiter,
+            &registry,
+            &agent_metadata,
+            &role_store,
+            &decryptor,
+            &no_event_tx(),
+            Some(&node),
+            AgentSpecializeRequest {
+                requester_id: "did:web:orchestrator.arkavo.net".into(),
+                encrypted_bundle: String::new(),
+                task_context: None,
+                session_id: None,
+                ticket: Some(ticket),
+            },
+        )
+        .await
+        .expect("specialize via ticket");
+
+        assert!(response.accepted);
+        let stored = role_store.get().await.expect("role context stored");
+        assert_eq!(stored.role_id, "analyst");
+    }
+
+    #[tokio::test]
+    async fn handle_specialize_errors_when_ticket_but_no_node() {
+        let did = "did:web:agent-7.arkavo.net";
+        let agent_metadata = metadata_with_did("agent-7", did);
+        let (metrics, limiter, registry, role_store) = deps();
+        let decryptor = UnconfiguredBundleDecryptor;
+
+        let err = handle_agent_specialize(
+            &metrics,
+            &limiter,
+            &registry,
+            &agent_metadata,
+            &role_store,
+            &decryptor,
+            &no_event_tx(),
+            None, // no iroh node wired
+            AgentSpecializeRequest {
+                requester_id: "did:web:orchestrator.arkavo.net".into(),
+                encrypted_bundle: String::new(),
+                task_context: None,
+                session_id: None,
+                ticket: Some("blobABC".into()),
+            },
+        )
+        .await
+        .expect_err("ticket with no node rejects");
+        assert_eq!(err.code(), -32603);
     }
 }

@@ -1053,6 +1053,14 @@ pub struct AgentSpecializeRequest {
     /// Session ID for tracking
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+
+    /// Iroh blob ticket pointing at the TDF-wrapped bundle on the data
+    /// plane. When set, the handler fetches the bundle bytes via the
+    /// agent's Iroh node instead of decoding `encrypted_bundle`. Mesh
+    /// shipping (WS-D) uses this; the inline base64 path remains for
+    /// callers without an Iroh node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<String>,
 }
 
 /// Response to agent specialization request
@@ -1484,3 +1492,40 @@ pub struct KasPublicKeyResponse {
 pub use arkavo_tdf::{
     TdfOffer, TdfOffersRequest, TdfOffersResponse, TdfShareRequest, TdfShareResponse,
 };
+
+#[cfg(test)]
+mod agent_specialize_request_tests {
+    use super::AgentSpecializeRequest;
+
+    #[test]
+    fn deserializes_legacy_inline_request_without_ticket() {
+        // Existing callers send no `ticket` — must still parse, ticket = None.
+        let json = r#"{"requester_id":"did:web:orch","encrypted_bundle":"YmFzZTY0"}"#;
+        let req: AgentSpecializeRequest = serde_json::from_str(json).expect("legacy parse");
+        assert_eq!(req.encrypted_bundle, "YmFzZTY0");
+        assert!(req.ticket.is_none());
+    }
+
+    #[test]
+    fn deserializes_ticket_request() {
+        let json = r#"{"requester_id":"did:web:orch","encrypted_bundle":"","ticket":"blobABC"}"#;
+        let req: AgentSpecializeRequest = serde_json::from_str(json).expect("ticket parse");
+        assert_eq!(req.ticket.as_deref(), Some("blobABC"));
+    }
+
+    #[test]
+    fn ticket_is_omitted_from_wire_when_none() {
+        let req = AgentSpecializeRequest {
+            requester_id: "did:web:orch".into(),
+            encrypted_bundle: "x".into(),
+            task_context: None,
+            session_id: None,
+            ticket: None,
+        };
+        let wire = serde_json::to_string(&req).expect("serialize");
+        assert!(
+            !wire.contains("ticket"),
+            "ticket must be skipped when None: {wire}"
+        );
+    }
+}
