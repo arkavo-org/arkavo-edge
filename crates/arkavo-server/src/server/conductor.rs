@@ -53,6 +53,7 @@ pub async fn execute_with_conductor(
         None,
         false,
         None,
+        None,
         #[cfg(feature = "iroh")]
         None,
     )
@@ -65,6 +66,7 @@ pub async fn execute_with_conductor(
 /// treats AGENTS.md instructions (tool examples, planning workflow) as authoritative.
 #[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::implicit_hasher)] // HashSet<String> is the right type here; callers use std hasher
 pub async fn execute_with_conductor_and_learning(
     conductor: &Arc<Conductor<InMemoryTaskStore>>,
     router: &Arc<arkavo_router::Router>,
@@ -82,6 +84,7 @@ pub async fn execute_with_conductor_and_learning(
     existing_messages: Option<Vec<arkavo_llm::Message>>,
     skip_complexity: bool,
     cached_registry: Option<Arc<arkavo_mcp_tools::ToolRegistry>>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
@@ -470,6 +473,7 @@ pub async fn execute_with_conductor_and_learning(
             learning_bus,
             tool_memory,
             compute_budget,
+            granted_tools,
         )
         .await?
     } else {
@@ -483,6 +487,7 @@ pub async fn execute_with_conductor_and_learning(
             learning_bus,
             tool_memory,
             compute_budget,
+            granted_tools,
         )
         .await?
     };

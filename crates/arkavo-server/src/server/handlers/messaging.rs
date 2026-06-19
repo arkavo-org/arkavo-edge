@@ -364,6 +364,7 @@ pub async fn handle_message_send(
                             None,
                             false, // specialists may need complexity assessment
                             Some(specialist_registry),
+                            None, // granted_tools: unfiltered for message-triggered tasks
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )
