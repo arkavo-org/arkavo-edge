@@ -9,6 +9,7 @@ use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use super::super::agent_event::{AgentEvent, CorrelationId};
 use super::super::config_helpers::{AgentMetadata, RoleSpecializationStore};
 
 /// Decrypts a TDF-wrapped specialization bundle for a specific recipient.
@@ -54,6 +55,7 @@ impl BundleDecryptor for UnconfiguredBundleDecryptor {
 ///
 /// Without the `kas` feature, decryption is unavailable and the handler
 /// rejects the request rather than silently dropping the bundle.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_agent_specialize(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
@@ -61,6 +63,7 @@ pub async fn handle_agent_specialize(
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     role_specialization: &Arc<RoleSpecializationStore>,
     decryptor: &dyn BundleDecryptor,
+    agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("agent.specialize".to_string(), metrics.clone());
@@ -70,6 +73,7 @@ pub async fn handle_agent_specialize(
         agent_metadata,
         role_specialization,
         decryptor,
+        agent_event_tx,
         request,
     )
     .await
@@ -91,6 +95,7 @@ async fn handle_inner(
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     role_specialization: &Arc<RoleSpecializationStore>,
     decryptor: &dyn BundleDecryptor,
+    agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     if let Err(e) = rate_limiter.check_rate_limit() {
@@ -165,6 +170,7 @@ async fn handle_inner(
 
     apply_bundle_to_metadata(agent_metadata, &bundle).await;
     role_specialization.set(bundle.role_context.clone()).await;
+    inject_role_kickoff(agent_event_tx, &bundle).await;
 
     info!(
         session_id = %session_id,
@@ -186,6 +192,58 @@ async fn handle_inner(
     })
 }
 
+/// Flatten a persona's `mcp_tools` grants into the deduped, sorted set of
+/// bare tool names. These are registry keys (e.g. `git_diff`) — the grant's
+/// `server` field is a logical label and is intentionally dropped here.
+fn granted_tool_names(bundle: &AgentSpecializationBundle) -> Vec<String> {
+    let mut names: Vec<String> = bundle
+        .persona
+        .mcp_tools
+        .iter()
+        .flat_map(|grant| grant.tools.iter().cloned())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Push a single kickoff task into the agent loop so a freshly specialized
+/// agent starts working its role. The task is purpose-derived, NOT a
+/// hard-coded routine — the swarm decides procedure at runtime (design D6).
+async fn inject_role_kickoff(
+    agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
+    bundle: &AgentSpecializationBundle,
+) {
+    let guard = agent_event_tx.lock().await;
+    let Some(tx) = guard.as_ref() else {
+        return;
+    };
+    let rc = &bundle.role_context;
+    let handoffs = if rc.handoff_targets.is_empty() {
+        String::new()
+    } else {
+        format!(" Hand off to: {}.", rc.handoff_targets.join(", "))
+    };
+    let content = format!(
+        "You are now specialized as the '{}' role ({}) for SwarmKit flight {}. \
+         Purpose: {}. Use ONLY your granted tools to do this role's work now.{}",
+        rc.role_id, rc.role_type, rc.flight_id, bundle.persona.purpose, handoffs
+    );
+    let task_id = rc
+        .flight_id
+        .parse::<uuid::Uuid>()
+        .unwrap_or_else(|_| uuid::Uuid::new_v4());
+    let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+    let event = AgentEvent::IncomingMessage {
+        sender: "swarmkit-orchestrator".to_string(),
+        content,
+        task_id,
+        correlation_id: CorrelationId(uuid::Uuid::new_v4()),
+        reply: reply_tx,
+    };
+    let _ = tx.send(event).await;
+}
+
 async fn apply_bundle_to_metadata(
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     bundle: &AgentSpecializationBundle,
@@ -194,6 +252,7 @@ async fn apply_bundle_to_metadata(
     meta.purpose.clone_from(&bundle.persona.purpose);
     meta.model.clone_from(&bundle.persona.model);
     meta.api_keys.clone_from(&bundle.api_tokens);
+    meta.granted_tools = granted_tool_names(bundle);
     // Persona name only swapped if the manifest's intended-agent matches
     // ours — the orchestrator should never send a persona for a different
     // agent, but if it does we keep our own identity rather than masquerade.
@@ -327,6 +386,10 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(b"placeholder-tdf")
     }
 
+    fn no_event_tx() -> Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>> {
+        Arc::new(tokio::sync::Mutex::new(None))
+    }
+
     #[tokio::test]
     async fn handle_specialize_decrypts_and_applies_bundle() {
         let did = "did:web:agent-7.arkavo.net";
@@ -345,6 +408,7 @@ mod tests {
             &agent_metadata,
             &role_store,
             &decryptor,
+            &no_event_tx(),
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
@@ -395,6 +459,7 @@ mod tests {
             &agent_metadata,
             &role_store,
             &decryptor,
+            &no_event_tx(),
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
@@ -422,6 +487,7 @@ mod tests {
             &agent_metadata,
             &role_store,
             &decryptor,
+            &no_event_tx(),
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: String::new(),
@@ -448,6 +514,7 @@ mod tests {
             &agent_metadata,
             &role_store,
             &decryptor,
+            &no_event_tx(),
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
@@ -459,5 +526,86 @@ mod tests {
         .expect_err("no decryptor wired");
 
         assert_eq!(err.code(), -32603);
+    }
+
+    #[tokio::test]
+    async fn specialize_persists_bare_granted_tool_names() {
+        let did = "did:web:agent-7.arkavo.net";
+        let bundle = build_bundle("analyst", "agent-7");
+        let agent_metadata = metadata_with_did("agent-7", did);
+        let (metrics, limiter, registry, role_store) = deps();
+        let decryptor = StubDecryptor {
+            bundle: bundle.clone(),
+            expected_did: did.to_string(),
+        };
+
+        handle_agent_specialize(
+            &metrics,
+            &limiter,
+            &registry,
+            &agent_metadata,
+            &role_store,
+            &decryptor,
+            &no_event_tx(),
+            AgentSpecializeRequest {
+                requester_id: "did:web:orchestrator.arkavo.net".into(),
+                encrypted_bundle: encoded_dummy_bytes(),
+                task_context: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("specialize");
+
+        let meta = agent_metadata.read().await;
+        // build_bundle grants tools ["read", "describe"] — expect sorted dedup
+        assert_eq!(
+            meta.granted_tools,
+            vec!["describe".to_string(), "read".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn specialize_injects_role_kickoff_task() {
+        let did = "did:web:agent-7.arkavo.net";
+        let bundle = build_bundle("pr_reviewer", "agent-7");
+        let agent_metadata = metadata_with_did("agent-7", did);
+        let (metrics, limiter, registry, role_store) = deps();
+        let decryptor = StubDecryptor {
+            bundle,
+            expected_did: did.to_string(),
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(4);
+        let event_tx = Arc::new(tokio::sync::Mutex::new(Some(tx)));
+
+        handle_agent_specialize(
+            &metrics,
+            &limiter,
+            &registry,
+            &agent_metadata,
+            &role_store,
+            &decryptor,
+            &event_tx,
+            AgentSpecializeRequest {
+                requester_id: "did:web:orchestrator.arkavo.net".into(),
+                encrypted_bundle: encoded_dummy_bytes(),
+                task_context: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("specialize");
+
+        let evt = rx.try_recv().expect("kickoff event injected");
+        match evt {
+            AgentEvent::IncomingMessage { content, .. } => {
+                assert!(
+                    content.contains("pr_reviewer"),
+                    "kickoff names the role: {content}"
+                );
+            }
+            _ => panic!("expected IncomingMessage variant"),
+        }
     }
 }

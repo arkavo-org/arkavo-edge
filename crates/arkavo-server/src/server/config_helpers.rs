@@ -50,6 +50,11 @@ pub struct AgentMetadata {
     pub delegation_jwt: Option<String>,
     /// Entitlements granted via human delegation (from JWT scope claim).
     pub delegated_entitlements: Vec<String>,
+    /// Bare MCP tool names this agent is granted by its SwarmKit role
+    /// (from `persona.mcp_tools`). Empty for an unspecialized agent (no
+    /// filtering applied). When non-empty, the agent loop filters its
+    /// `ToolRegistry` to exactly this set — least-privilege (design D9).
+    pub granted_tools: Vec<String>,
 }
 
 /// Simple agent configuration structure for validation
