@@ -1,0 +1,321 @@
+spec_version: "1.0.0"
+kit:
+  # Computed by Manifest::compute_kit_id (BLAKE3 of the canonical manifest minus
+  # kit.id and provenance.signatures). Authored empty; populated at publish.
+  id: ""
+  name: "GitHub Ops Kit"
+  version: "0.1.0"
+  description: >-
+    A GitHub agent swarm: a dispatcher triages each org event and the orchestrator
+    routes it to a spoke — PR review, PR test assessment, or repo housekeeping.
+    Each role declares its own least-privilege MCP tool grants.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo Edge"
+  created: "2026-06-14T00:00:00Z"
+  expires: "2026-09-12T00:00:00Z"
+  nonce: "g7Hk2pQ9rLm4Xc1Vn0 TZ"
+
+objective:
+  goal: "Review PRs, gate them with local-model tests, and keep monitored repos tidy."
+  success_criteria:
+    - "every eligible PR gets a review and a test verdict posted as a Check Run"
+    - "no unsupported review claims; infra errors are distinguished from regressions"
+    - "housekeeping actions are scoped to the triggering repo"
+
+inputs:
+  - name: "event"
+    type: "json"
+    required: true
+    classification: "internal"
+  - name: "repo"
+    type: "text"
+    required: true
+
+deliverables:
+  - name: "check_run"
+    type: "json"
+    classification: "internal"
+  - name: "pr_review"
+    type: "json"
+    classification: "internal"
+
+roles:
+  # ───────────────────────── HUB: triage + route ─────────────────────────
+  - id: "dispatcher"
+    role_type: "planner"
+    description: "Classify the GitHub event and route to the right spoke."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "E2B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 512
+        temperature: 0.0
+        thinking: false
+      budget:
+        max_inference_calls: 2
+        max_wallclock_ms: 20000
+        max_total_tokens: 6000
+      context:
+        max_context_tokens: 16000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:triage-github-event"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "triage-github-event"
+          description: "Classify a GitHub event and pick the handler role."
+          instructions: "Read `event`. If it is a PR opened/synchronized on model-behavior paths, hand off to pr_reviewer AND pr_test_runner. If it is a schedule or push with no PR, hand off to repo_maintainer. Never act on the repo yourself."
+          resources: []
+        signature: "PLACEHOLDER_ed25519_signature_computed_at_publish"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools:
+      - server: "arkavo-github"
+        auth: "delegated"
+        tools:
+          - "github_ci_status"
+          - "github_related_issues"
+          - "github_pr_watch"
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/planner"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs:
+      - to: "pr_reviewer"
+        on: "always"
+      - to: "pr_test_runner"
+        on: "always"
+      - to: "repo_maintainer"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  # ─────────────────────────── SPOKE 1: PR review ───────────────────────────
+  - id: "pr_reviewer"
+    role_type: "critic"
+    description: "Review the PR diff and post a line-level GitHub review."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1536
+        temperature: 0.2
+        thinking: true
+      budget:
+        max_inference_calls: 6
+        max_wallclock_ms: 120000
+        max_total_tokens: 24000
+      context:
+        max_context_tokens: 48000
+        compaction_strategy: "tool_result"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:pr-review"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "pr-review"
+          description: "Review a PR for correctness, design, and security; post line comments."
+          instructions: "Use git_diff to read the change against the base. Identify correctness, design, and security issues with file:line references and a severity. Post the result with gh_pr_review (line-level comments and suggestions). Make no claims you cannot ground in the diff."
+          resources: []
+        signature: "PLACEHOLDER_ed25519_signature_computed_at_publish"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools:
+      - server: "arkavo-git"
+        auth: "none"
+        tools:
+          - "git_diff"
+          - "git_log"
+      - server: "arkavo-github"
+        auth: "delegated"
+        tools:
+          - "gh_pr_review"
+          - "github_ci_status"
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/critic"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["dispatcher", "self"]
+      can_write: ["self"]
+
+  # ──────────────────── SPOKE 2: assess and run PR tests ────────────────────
+  - id: "pr_test_runner"
+    role_type: "operator"
+    description: "Assess what tests a PR warrants, run them, and post the verdict as a Check Run."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "E2B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 512
+        temperature: 0.0
+        thinking: false
+      budget:
+        max_inference_calls: 4
+        max_wallclock_ms: 600000
+        max_total_tokens: 8000
+      context:
+        max_context_tokens: 16000
+        compaction_strategy: "tool_result"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:run-pr-tests"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "run-pr-tests"
+          description: "Assess and run whatever tests a PR warrants; report results to GitHub."
+          instructions: "Determine what tests the PR requires. Use test_run to execute them. Take check_conclusion and summary from the result and post a Check Run on the PR head SHA with gh_checks (action=create). Do not invent a conclusion; pass the tool's check_conclusion through verbatim (null means skip posting)."
+          resources: []
+        signature: "PLACEHOLDER_ed25519_signature_computed_at_publish"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools:
+      - server: "arkavo-github"
+        auth: "none"
+        tools:
+          - "test_run"
+      - server: "arkavo-github"
+        auth: "delegated"
+        tools:
+          - "gh_checks"
+          - "github_ci_status"
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/operator"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["dispatcher", "self"]
+      can_write: ["self"]
+
+  # ──────────────────── SPOKE 3: repo-specific tasks ────────────────────
+  - id: "repo_maintainer"
+    role_type: "maintainer"
+    description: "Repo housekeeping: triage issues, label, and open chore PRs."
+    agent_provisioning:
+      model:
+        family: "qwen3"
+        size: "7B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.3
+        thinking: false
+      budget:
+        max_inference_calls: 8
+        max_wallclock_ms: 300000
+        max_total_tokens: 32000
+      context:
+        max_context_tokens: 32000
+        compaction_strategy: "summary"
+        persistence: "ephemeral"
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:repo-housekeeping"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "repo-housekeeping"
+          description: "Scoped repo maintenance: triage, label, chore PRs."
+          instructions: "Restrict every action to `repo`. Use github_issue_list to triage, add labels, and open a single focused chore PR with github_pr_create when a mechanical fix is warranted (for example a stale lockfile). Never touch other repos."
+          resources: []
+        signature: "PLACEHOLDER_ed25519_signature_computed_at_publish"
+        signed_by: "did:web:arkavo.com"
+    mcp_tools:
+      - server: "arkavo-git"
+        auth: "delegated"
+        tools:
+          - "git_status"
+          - "git_branch"
+          - "git_commit"
+          - "git_remote"
+      - server: "arkavo-github"
+        auth: "delegated"
+        tools:
+          - "github_issue_list"
+          - "github_issue_create"
+          - "github_pr_create"
+          - "github_org_repos"
+    tdf_attribute_release_policy:
+      attributes:
+        - "https://attr.arkavo.com/role/maintainer"
+        - "https://attr.arkavo.com/clearance/internal"
+      rule: "allOf"
+    handoffs: []
+    context_scope:
+      can_read: ["dispatcher", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "critic_directed"
+  context_sharing:
+    store: "per-role"
+    compaction:
+      strategy: "tool_result"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 120000
+    max_cost_usd: 0.0
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: true
+    egress_allowlist:
+      - "api.github.com"
+      - "github.com"
+
+evaluation:
+  rubric:
+    dimensions:
+      - name: "review_groundedness"
+        weight: 0.4
+        threshold: 0.8
+      - name: "gate_correctness"
+        weight: 0.4
+        threshold: 0.85
+      - name: "housekeeping_scope"
+        weight: 0.2
+        threshold: 0.9
+  critic_role: "pr_reviewer"
+
+completion:
+  rules:
+    - "PR events: a pr_review and a check_run deliverable exist"
+    - "no role in error state"
+  on_failure: "escalate"
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "PLACEHOLDER_provenance_signature_computed_at_publish"
