@@ -59,8 +59,8 @@ pub use error::{Error, Result};
 pub use plan_validator::{ContractViolation, ValidationReport, validate as validate_plan};
 pub use step_context::StepTrace;
 pub use swarmkit_apply::{
-    AppliedKit, ApplyKitError, BundleEncryptor, BundleShipper, InMemoryTokenVault, RoleBinding,
-    RoleCapabilityMatcher, TokenVault, apply_kit,
+    AppliedKit, ApplyKitError, BundleEncryptor, BundleShipper, EnvTokenVault, InMemoryTokenVault,
+    RepoScope, RoleBinding, RoleCapabilityMatcher, TokenVault, apply_kit,
 };
 pub use swarmkit_transport::{IrohBundleShipper, MeshRoleTaskTransport};
 pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
