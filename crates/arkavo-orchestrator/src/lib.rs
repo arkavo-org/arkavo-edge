@@ -39,6 +39,7 @@ pub mod policy_events;
 pub mod spawn_guard;
 pub mod step_context;
 pub mod swarmkit_apply;
+pub mod swarmkit_transport;
 pub mod task_executor;
 pub mod task_policy_manager;
 pub mod text_utils;
@@ -61,6 +62,7 @@ pub use swarmkit_apply::{
     AppliedKit, ApplyKitError, BundleEncryptor, BundleShipper, InMemoryTokenVault, RoleBinding,
     RoleCapabilityMatcher, TokenVault, apply_kit,
 };
+pub use swarmkit_transport::{IrohBundleShipper, MeshRoleTaskTransport};
 pub use token_estimator::{estimate_tokens, tokens_from_response, tokens_from_texts};
 // Re-export GitHub types from arkavo-github for backward compatibility
 pub use arkavo_github::{GitHubApp, IssueOperations, IssueUpdate};

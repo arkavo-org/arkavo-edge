@@ -39,6 +39,7 @@ arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-swarmkit-runtime = { path = "../arkavo-swarmkit-runtime" }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 base64 = { workspace = true }
 hmac = "0.12"
 hex = "0.4"
