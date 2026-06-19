@@ -310,9 +310,17 @@ pub async fn handle_message_send(
                     // Read both name and granted_tools in a single lock acquisition
                     // so the specialist path honours the same least-privilege grant
                     // set that the orchestrator-loop path enforces (design D9).
-                    let (specialist_id, specialist_granted): (String, Vec<String>) = {
+                    let (specialist_id, specialist_granted, specialist_specialized): (
+                        String,
+                        Vec<String>,
+                        bool,
+                    ) = {
                         let meta = agent_metadata.read().await;
-                        (meta.name.clone(), meta.granted_tools.clone())
+                        (
+                            meta.name.clone(),
+                            meta.granted_tools.clone(),
+                            meta.specialized,
+                        )
                     };
                     let task_start = std::time::Instant::now();
                     #[cfg(feature = "iroh")]
@@ -354,13 +362,13 @@ pub async fn handle_message_send(
                                     reg.register(&name, Box::new(bridge));
                                 }
                             }
-                            if !granted_set.is_empty() {
+                            if specialist_specialized {
                                 reg.retain_granted(&granted_set);
                             }
                             Arc::new(reg)
                         };
                         let granted_opt: Option<&std::collections::HashSet<String>> =
-                            if granted_set.is_empty() {
+                            if !specialist_specialized {
                                 None
                             } else {
                                 Some(&granted_set)

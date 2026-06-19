@@ -274,10 +274,18 @@ impl RepoScope {
     /// `"maintainer"`. All other role types are returned unchanged.
     pub fn wrap_task(&self, _role_id: &str, role_type: &str, task: &str) -> String {
         if role_type == "maintainer" {
-            format!(
-                "[SCOPE: owner={} repo={} — you MUST NOT act on any other owner or repo]\n{}",
-                self.owner, self.repo, task
-            )
+            let scope = if self.repo.is_empty() {
+                format!(
+                    "[SCOPE: owner={} (all repos in this org only) — you MUST NOT act on any other owner]",
+                    self.owner
+                )
+            } else {
+                format!(
+                    "[SCOPE: owner={} repo={} — you MUST NOT act on any other owner or repo]",
+                    self.owner, self.repo
+                )
+            };
+            format!("{scope}\n{task}")
         } else {
             task.to_string()
         }

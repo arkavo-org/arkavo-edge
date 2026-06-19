@@ -217,9 +217,9 @@ pub async fn run_agent_loop(
                 // 1b. Re-derive the registry to the agent's granted tool set when
                 // specialization has set/changed it. Memoized on a grant hash so
                 // this is not per-cycle work when the set hasn't changed.
-                let granted_set: std::collections::HashSet<String> = {
+                let (granted_set, specialized): (std::collections::HashSet<String>, bool) = {
                     let meta = config.agent_metadata.read().await;
-                    meta.granted_tools.iter().cloned().collect()
+                    (meta.granted_tools.iter().cloned().collect(), meta.specialized)
                 };
                 let grant_hash = {
                     use std::hash::{Hash, Hasher};
@@ -232,7 +232,7 @@ pub async fn run_agent_loop(
                     }
                     h.finish()
                 };
-                if !granted_set.is_empty() && grant_hash != active_grant_hash {
+                if specialized && grant_hash != active_grant_hash {
                     active_registry = derive_filtered_registry(&config, &granted_set).await;
                     active_grant_hash = grant_hash;
                     info!(
@@ -426,7 +426,7 @@ pub async fn run_agent_loop(
                     Some(&config.compute_budget)
                 };
                 let granted_opt: Option<&std::collections::HashSet<String>> =
-                    if granted_set.is_empty() { None } else { Some(&granted_set) };
+                    if !specialized { None } else { Some(&granted_set) };
                 match super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,

@@ -50,7 +50,7 @@ cargo clippy -- -D warnings
 cargo test -p arkavo-protocol --test security_vulnerabilities
 
 ## Mock provider unit tests
-cargo test -p arkavo-cli mock_provider
+cargo test -p arkavo-cli --lib mock_provider::
 
 ## E2E DLP/PII leak detection tests
 ./tests/e2e_security_test.sh

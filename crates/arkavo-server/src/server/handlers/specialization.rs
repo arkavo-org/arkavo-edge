@@ -301,6 +301,7 @@ async fn apply_bundle_to_metadata(
     meta.model.clone_from(&bundle.persona.model);
     meta.api_keys.clone_from(&bundle.api_tokens);
     meta.granted_tools = granted_tool_names(bundle);
+    meta.specialized = true;
     // Persona name only swapped if the manifest's intended-agent matches
     // ours — the orchestrator should never send a persona for a different
     // agent, but if it does we keep our own identity rather than masquerade.

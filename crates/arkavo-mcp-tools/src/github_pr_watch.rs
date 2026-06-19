@@ -104,11 +104,13 @@ impl Tool for GitHubPrWatchTool {
             .await
             .map_err(|e| ToolError::Mcp(format!("github_pr_watch: parse PRs failed: {e}")))?;
 
+        let fetched_count = prs.len();
         let selected = select_updated_prs(prs, since);
         Ok(serde_json::json!({
             "owner": owner,
             "repo": repo,
             "count": selected.len(),
+            "truncated": fetched_count >= 100,
             "pull_requests": selected,
         }))
     }
