@@ -107,7 +107,7 @@ arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 ed25519-dalek = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
-arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
@@ -122,7 +122,7 @@ stub_handlers = []
 mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt", "arkavo-protocol/kas"]
-iroh = ["dep:arkavo-tdf-iroh"]
+iroh = []
 # The real LlamaTokenEstimator in agent_loop.rs is gated on this feature and
 # calls Router::any_loaded_model() / min_feasible_context_size(), which only
 # exist under arkavo-router's own llama-cpp feature. Propagate it here so the

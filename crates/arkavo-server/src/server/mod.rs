@@ -1018,6 +1018,10 @@ impl A2aRpcServer for A2aRpcImpl {
         &self,
         request: AgentSpecializeRequest,
     ) -> RpcResult<AgentSpecializeResponse> {
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.as_ref();
+        #[cfg(not(feature = "iroh"))]
+        let iroh_node: Option<&std::sync::Arc<arkavo_tdf_iroh::IrohNode>> = None;
         handlers::specialization::handle_agent_specialize(
             &self.metrics,
             &self.rate_limiter,
@@ -1026,6 +1030,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.role_specialization,
             self.bundle_decryptor.as_ref(),
             &self.agent_event_tx,
+            iroh_node,
             request,
         )
         .await
