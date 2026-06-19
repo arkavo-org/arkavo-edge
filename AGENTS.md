@@ -19,7 +19,7 @@
   - No numbered headings in Markdown.
 - **Performance**:
   - Router response ≤ 50ms.
-  - Binary ≤ 60MB.
+  - Binary ≤ 65MB.
   - No `--release` builds during development (use debug).
 
 ## Testing & Quality
@@ -87,7 +87,9 @@ cargo test -p arkavo-cli mock_provider
   - **NO Conventional Commits** (e.g., avoid `feat:`, `fix:`).
   - Bump semver in `Cargo.toml` on feature completion.
   - Commit `Cargo.lock` whenever `Cargo.toml` changes.
-- **PRs**: Short titles. No changelog files (GitHub handles it).
+- **PRs**:
+  - **Short titles** (≤ 60 chars). One topic per PR — do not join unrelated changes with `+`, `&`, or `and`. Use the body for detail.
+  - No changelog files (GitHub handles it).
 - **Docs**: Technical docs in `docs/`. 
 
 ## Agent Configuration

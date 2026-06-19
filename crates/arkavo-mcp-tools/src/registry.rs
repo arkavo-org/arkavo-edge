@@ -344,6 +344,15 @@ impl ToolRegistry {
         self.tools.insert(name.to_string(), tool);
     }
 
+    /// Drop every tool whose registry key is not in `granted`, realizing a
+    /// SwarmKit role's least-privilege MCP-tool grant. Matching is by the
+    /// registry key (the bare tool name, e.g. `git_diff`) — the manifest's
+    /// `McpToolGrant.server` is a logical label and is never matched here.
+    /// Granting a tool the agent does not have is a no-op (never fabricates).
+    pub fn retain_granted(&mut self, granted: &std::collections::HashSet<String>) {
+        self.tools.retain(|name, _| granted.contains(name));
+    }
+
     /// Register a `search_tools` meta-tool that lets the model discover tools by keyword.
     ///
     /// Call this after all other tools are registered so the search tool has a complete
@@ -1024,5 +1033,61 @@ mod tests {
 
         let total = result.get("total_available").unwrap().as_u64().unwrap();
         assert!(total > 0);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod retain_granted_tests {
+    use super::*;
+    use arkavo_memory::MemoryStorage;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    fn names(reg: &ToolRegistry) -> Vec<String> {
+        let mut n: Vec<String> = reg.list_tools().into_iter().map(|t| t.name).collect();
+        n.sort();
+        n
+    }
+
+    #[tokio::test]
+    async fn retains_only_granted_tools() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        assert!(
+            reg.get("github_pr_create").is_some(),
+            "precondition: full catalog"
+        );
+
+        let granted: HashSet<String> = ["git_diff", "git_log", "gh_pr_review", "github_ci_status"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        reg.retain_granted(&granted);
+
+        let kept = names(&reg);
+        assert_eq!(
+            kept,
+            vec!["gh_pr_review", "git_diff", "git_log", "github_ci_status"]
+        );
+        assert!(reg.get("github_pr_create").is_none());
+    }
+
+    #[tokio::test]
+    async fn empty_grant_set_clears_registry() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        reg.retain_granted(&HashSet::new());
+        assert!(reg.list_tools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn grant_for_absent_tool_is_a_noop_not_an_insert() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        let granted: HashSet<String> = ["does_not_exist".to_string()].into_iter().collect();
+        reg.retain_granted(&granted);
+        assert!(reg.get("does_not_exist").is_none());
+        assert!(reg.list_tools().is_empty());
     }
 }
