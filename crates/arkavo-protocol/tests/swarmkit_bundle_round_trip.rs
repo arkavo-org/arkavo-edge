@@ -25,6 +25,7 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::MetricsCollector;
 use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use arkavo_protocol::types::AgentSpecializeRequest;
+use arkavo_server::server::AgentEvent;
 use arkavo_server::server::config_helpers::{AgentMetadata, RoleSpecializationStore};
 use arkavo_server::server::handlers::specialization::{BundleDecryptor, handle_agent_specialize};
 use arkavo_tdf::TdfManifest;
@@ -111,6 +112,10 @@ impl BundleDecryptor for LocalDecryptor {
     }
 }
 
+fn no_event_tx() -> Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>> {
+    Arc::new(tokio::sync::Mutex::new(None))
+}
+
 #[tokio::test]
 async fn bundle_round_trips_orchestrator_to_agent() {
     let did = "did:web:agent-7.arkavo.net";
@@ -143,11 +148,14 @@ async fn bundle_round_trips_orchestrator_to_agent() {
         &agent_metadata,
         &role_store,
         &decryptor,
+        &no_event_tx(),
+        None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),
             encrypted_bundle: encoded,
             task_context: None,
             session_id: None,
+            ticket: None,
         },
     )
     .await
@@ -204,11 +212,14 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
         &agent_metadata,
         &role_store,
         &decryptor,
+        &no_event_tx(),
+        None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),
             encrypted_bundle: encoded,
             task_context: None,
             session_id: None,
+            ticket: None,
         },
     )
     .await
@@ -216,4 +227,47 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
 
     assert_eq!(err.code(), -32603);
     assert!(role_store.get().await.is_none());
+}
+
+/// WS-D data-plane round trip: the orchestrator stages a TDF-wrapped
+/// bundle on one Iroh node; a *different* node fetches it by ticket and
+/// `unwrap_bundle`s it. This crosses the same boundary the production
+/// IrohBundleShipper + agent.specialize handler cross, minus the A2A hop.
+#[tokio::test]
+async fn bundle_round_trips_across_two_iroh_nodes() {
+    use arkavo_tdf_iroh::{IrohNode, IrohTransport};
+
+    let did = "did:web:agent-7.arkavo.net";
+    let svc = MockTdfService::default();
+    let bundle = build_bundle("analyst", did);
+
+    // Orchestrator side: wrap → TDF bytes → stage on node A.
+    let tdf = wrap_bundle(&bundle, &svc, did).await.expect("wrap");
+    let tdf_bytes = serde_json::to_vec(&tdf).expect("serialize tdf");
+
+    let node_a = IrohNode::memory().await.expect("node a");
+    let ticket = IrohTransport::new(node_a.clone())
+        .stage_bytes(&tdf_bytes)
+        .await
+        .expect("stage");
+    let ticket_str = ticket.to_string();
+
+    // Agent side: a separate node fetches by ticket, then unwraps.
+    // Two in-memory Iroh nodes can reach each other via loopback addrs
+    // embedded in the ticket (direct connection without relay needed).
+    let node_b = IrohNode::memory().await.expect("node b");
+    let fetched = IrohTransport::new(node_b.clone())
+        .fetch_bytes(&ticket_str.parse().expect("parse ticket"))
+        .await
+        .expect("fetch across nodes");
+    assert_eq!(fetched, tdf_bytes, "fetched blob must be byte-identical");
+
+    let refetched_tdf: TdfManifest = serde_json::from_slice(&fetched).expect("parse fetched tdf");
+    let recovered = unwrap_bundle(&refetched_tdf, &svc, did)
+        .await
+        .expect("unwrap fetched bundle");
+    assert_eq!(recovered.role_context.role_id, "analyst");
+
+    node_a.stop().await.ok();
+    node_b.stop().await.ok();
 }

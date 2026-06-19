@@ -27,6 +27,8 @@ if [ ! -f "$ARKAVO_BIN" ]; then
     echo "Usage: $0 [path/to/arkavo]"
     exit 1
 fi
+# Resolve to an absolute path so later `cd` into temp dirs doesn't break it
+ARKAVO_BIN="$(cd "$(dirname "$ARKAVO_BIN")" && pwd)/$(basename "$ARKAVO_BIN")"
 
 echo "Testing with binary: $ARKAVO_BIN"
 echo "Using LOCAL MODELS (llama.cpp) - Arkavo Edge!"

@@ -36,7 +36,7 @@ llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/ll
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
-iroh = ["arkavo-server/iroh"]
+iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
 
 [dependencies]

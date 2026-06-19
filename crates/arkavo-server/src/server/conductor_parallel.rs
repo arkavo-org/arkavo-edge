@@ -5,7 +5,9 @@
 //! - Executor (mid model): executes tool calls via MCP
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
-use super::conductor_tool_loop::{ToolCallObservation, ToolLoopResult, distill_with_small_model};
+use super::conductor_tool_loop::{
+    ToolCallObservation, ToolLoopResult, distill_with_small_model, tool_call_permitted,
+};
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
 use arkavo_llm::ParsedToolCall;
@@ -58,6 +60,7 @@ pub(super) async fn run_tool_loop_parallel(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
 ) -> Result<ToolLoopResult, String> {
     let loop_start = std::time::Instant::now();
 
@@ -71,6 +74,10 @@ pub(super) async fn run_tool_loop_parallel(
     let (result_tx, result_rx) = mpsc::channel::<ExecutionResult>(16);
     let (feedback_tx, feedback_rx) = mpsc::channel::<JudgeFeedback>(4);
     let (obs_tx, mut obs_rx) = mpsc::channel::<ToolCallObservation>(64);
+
+    // Clone granted_tools into an owned HashSet so the spawned executor can own it.
+    // None = no filtering (unspecialized agent), Some = least-privilege grant set.
+    let exec_granted: Option<std::collections::HashSet<String>> = granted_tools.cloned();
 
     // Spawn executor track (3B model, chat_semaphore)
     let exec_router = router.clone();
@@ -90,6 +97,7 @@ pub(super) async fn run_tool_loop_parallel(
             exec_mem.as_ref(),
             &exec_declared,
             obs_tx,
+            exec_granted.as_ref(),
         )
         .await;
     });
@@ -465,11 +473,28 @@ async fn executor_track(
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
     declared_scope: &[String],
     obs_tx: mpsc::Sender<ToolCallObservation>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
 ) {
     let mut step_idx: usize = 0;
 
     while let Some(planned) = plan_rx.recv().await {
-        let tool_calls = dedup_tool_calls(planned.tool_calls);
+        // Filter calls to only those permitted by the grant set before
+        // executing — deny at the boundary, never fabricate.
+        let raw_calls = dedup_tool_calls(planned.tool_calls);
+        let tool_calls: Vec<_> = raw_calls
+            .into_iter()
+            .filter(|tc| {
+                if tool_call_permitted(&tc.tool_name, granted_tools) {
+                    true
+                } else {
+                    warn!(
+                        tool = %tc.tool_name,
+                        "Parallel executor: tool call denied (least-privilege)"
+                    );
+                    false
+                }
+            })
+            .collect();
         info!(
             tool_count = tool_calls.len(),
             "Executor: received action batch"

@@ -248,6 +248,7 @@ async fn execute_subtask(
         learning_bus,
         tool_memory,
         None, // compute_budget: planner doesn't enforce per-iteration budget
+        None, // granted_tools: subtask planner is called from the orchestrator's own loop
     )
     .await
     {

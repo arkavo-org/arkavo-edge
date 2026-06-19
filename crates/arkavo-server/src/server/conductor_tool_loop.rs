@@ -37,6 +37,16 @@ pub(super) struct ToolLoopResult {
     pub tool_observations: Vec<ToolCallObservation>,
 }
 
+/// True if a tool call is permitted under an optional grant set.
+/// `None` = unspecialized agent (no filtering). `Some(set)` = specialized;
+/// only names in the set may execute.
+pub(super) fn tool_call_permitted(
+    name: &str,
+    granted: Option<&std::collections::HashSet<String>>,
+) -> bool {
+    granted.is_none_or(|g| g.contains(name))
+}
+
 /// Run the agentic tool loop: LLM calls tools → results fed back → LLM continues.
 /// Allows multi-step workflows like observe → delegate → monitor → execute.
 #[allow(clippy::too_many_arguments)]
@@ -50,6 +60,7 @@ pub(super) async fn run_tool_loop(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
 ) -> Result<ToolLoopResult, String> {
     const MAX_TOOL_ITERATIONS: u8 = 4;
     let mut final_result = String::new();
@@ -473,6 +484,7 @@ pub(super) async fn run_tool_loop(
             &mut total_step_idx,
             &declared_scope,
             &mut tool_observations,
+            granted_tools,
         )
         .await;
 
@@ -650,10 +662,26 @@ async fn execute_tool_calls(
     total_step_idx: &mut usize,
     declared_scope: &[String],
     observations: &mut Vec<ToolCallObservation>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
 ) -> Vec<String> {
     let mut tool_result_parts = Vec::new();
 
     for tool_call in tool_calls {
+        // Enforce least-privilege: deny tool calls not in the agent's grant set.
+        if !tool_call_permitted(&tool_call.tool_name, granted_tools) {
+            warn!(
+                tool = %tool_call.tool_name,
+                "Tool call denied: not in this agent's granted set (least-privilege)"
+            );
+            tool_result_parts.push(format!(
+                "Tool {} (Denied): not permitted for this role — \
+                 it is not in the agent's granted tool set.",
+                tool_call.tool_name
+            ));
+            *total_step_idx += 1;
+            continue;
+        }
+
         // Skip setup tools that already succeeded (e.g., registerAgent)
         if let Some(mem) = tool_memory
             && mem.read().await.is_setup_complete(&tool_call.tool_name)
@@ -1515,5 +1543,24 @@ mod tests {
         assert!(result.contains("1170"), "Lost resource data: {result}");
         // Alerts must survive
         assert!(result.contains("Need beds"), "Lost alert: {result}");
+    }
+
+    #[spec("SRV-009")]
+    #[test]
+    fn ungranted_tool_call_is_denied() {
+        use std::collections::HashSet;
+        let granted: HashSet<String> = ["git_diff", "gh_pr_review"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(tool_call_permitted("git_diff", Some(&granted)));
+        assert!(tool_call_permitted("gh_pr_review", Some(&granted)));
+        assert!(!tool_call_permitted("github_pr_create", Some(&granted)));
+    }
+
+    #[spec("SRV-009")]
+    #[test]
+    fn no_grant_set_permits_everything() {
+        assert!(tool_call_permitted("anything", None));
     }
 }

@@ -22,7 +22,9 @@
 //! hyperspecialized.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use arkavo_protocol::AgentSpecializationBundle;
@@ -30,8 +32,8 @@ use arkavo_protocol::agent_registry::AgentRegistry;
 use arkavo_protocol::agent_specialization::{AgentPersona, McpToolGrant, RoleContext};
 use arkavo_swarmkit::{Manifest, RoleSpec, parse_json, parse_yaml};
 use arkavo_swarmkit_runtime::{
-    DispatchHandle, KitPathKind, LaunchOptions, RoleTaskTransport, SwarmFlight, classify_kit_path,
-    derive::DeriveOptions, derive::derive_arp_for_role,
+    DispatchHandle, KitPathKind, LaunchOptions, RoleTaskEnvelope, RoleTaskTransport, SwarmFlight,
+    classify_kit_path, derive::DeriveOptions, derive::derive_arp_for_role,
 };
 use async_trait::async_trait;
 use tracing::{info, warn};
@@ -159,6 +161,39 @@ pub trait BundleShipper: Send + Sync {
     async fn ship(&self, agent_did: &str, tdf_bytes: &[u8]) -> Result<(), String>;
 }
 
+/// Token vault that reads tokens from environment variables. Tokens are
+/// looked up per-server at call time (not cached), so rotating env vars
+/// between calls is visible. Supported mappings:
+///
+/// | `grant.server`                         | env var read        |
+/// |----------------------------------------|---------------------|
+/// | `"arkavo-github"` or `"github-mcp"`    | `GITHUB_TOKEN`      |
+///
+/// Any server not in the table produces no tokens; the role still runs
+/// but its tools that require a token will fail at the GitHub API level,
+/// surfacing a clear error rather than a silent omission.
+#[derive(Default)]
+pub struct EnvTokenVault;
+
+#[async_trait]
+impl TokenVault for EnvTokenVault {
+    async fn tokens_for_role(&self, role: &RoleSpec) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for grant in &role.mcp_tools {
+            match grant.server.as_str() {
+                "arkavo-github" | "github-mcp" => {
+                    if let Ok(tok) = std::env::var("GITHUB_TOKEN") {
+                        out.insert("GITHUB_TOKEN".to_string(), tok);
+                    }
+                }
+                // Extend here as new server types are added to manifests.
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
 /// Pluggable capability matcher. Reads a role's `skills` and
 /// `mcp_tools` and ranks the agent pool. Default impl uses
 /// `AgentRegistry::find_best_agent`.
@@ -212,6 +247,73 @@ impl RoleCapabilityMatcher {
     }
 }
 
+/// Pins the `repo_maintainer` role's execution context to a specific
+/// org and repo. The orchestrator controls scoping — the model is not
+/// trusted to restrict itself.
+///
+/// The [`RepoScope::wrap_task`] method prepends a non-negotiable scope
+/// preamble to maintainer-role tasks. Non-maintainer roles pass through
+/// unchanged. `apply_kit` applies this to every first-task envelope
+/// (via [`ScopedTransport`]) before it reaches the real transport, so
+/// the constraint cannot be skipped by a misbehaving role agent.
+pub struct RepoScope {
+    owner: String,
+    repo: String,
+}
+
+impl RepoScope {
+    /// Create a scope bound to the given org (`owner`) and repository name.
+    pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self {
+        Self {
+            owner: owner.into(),
+            repo: repo.into(),
+        }
+    }
+
+    /// Prepend a scope constraint to any role whose `role_type` is
+    /// `"maintainer"`. All other role types are returned unchanged.
+    pub fn wrap_task(&self, _role_id: &str, role_type: &str, task: &str) -> String {
+        if role_type == "maintainer" {
+            let scope = if self.repo.is_empty() {
+                format!(
+                    "[SCOPE: owner={} (all repos in this org only) — you MUST NOT act on any other owner]",
+                    self.owner
+                )
+            } else {
+                format!(
+                    "[SCOPE: owner={} repo={} — you MUST NOT act on any other owner or repo]",
+                    self.owner, self.repo
+                )
+            };
+            format!("{scope}\n{task}")
+        } else {
+            task.to_string()
+        }
+    }
+}
+
+/// Transport decorator that applies a [`RepoScope`] to every envelope's
+/// task string before delegating to the real transport. Lives at the
+/// orchestrator layer so repo scoping is enforced before dispatch — the
+/// runtime's `dispatch_initial_tasks` builds envelopes from the role's
+/// `initial_task`, and this wrapper rewrites that task in flight.
+struct ScopedTransport<'a> {
+    inner: &'a dyn RoleTaskTransport,
+    scope: &'a RepoScope,
+}
+
+impl RoleTaskTransport for ScopedTransport<'_> {
+    fn dispatch<'a>(
+        &'a self,
+        mut envelope: RoleTaskEnvelope,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+        envelope.task =
+            self.scope
+                .wrap_task(&envelope.role_id, &envelope.role_type, &envelope.task);
+        self.inner.dispatch(envelope)
+    }
+}
+
 /// Apply a SwarmKit manifest end-to-end. See the module docs for the
 /// step-by-step flow.
 pub async fn apply_kit(
@@ -221,6 +323,7 @@ pub async fn apply_kit(
     encryptor: &dyn BundleEncryptor,
     shipper: &dyn BundleShipper,
     transport: &dyn RoleTaskTransport,
+    scope: Option<&RepoScope>,
 ) -> Result<AppliedKit, ApplyKitError> {
     let manifest = load_manifest(kit_path)?;
     info!(
@@ -299,11 +402,21 @@ pub async fn apply_kit(
     .map_err(|e| ApplyKitError::Launch(e.to_string()))?;
     let flight = Arc::new(flight);
 
-    // 5. Dispatch first task per role via the supplied transport.
-    let dispatch_handles = flight
-        .dispatch_initial_tasks(transport)
-        .await
-        .map_err(|e| ApplyKitError::Dispatch(e.to_string()))?;
+    // 5. Dispatch first task per role via the supplied transport. When a
+    //    RepoScope is set, decorate the transport so maintainer envelopes
+    //    are pinned to the triggering org/repo before they leave the
+    //    orchestrator — the role agent never sees an unscoped task.
+    let dispatch_result = match scope {
+        Some(scope) => {
+            let scoped = ScopedTransport {
+                inner: transport,
+                scope,
+            };
+            flight.dispatch_initial_tasks(&scoped).await
+        }
+        None => flight.dispatch_initial_tasks(transport).await,
+    };
+    let dispatch_handles = dispatch_result.map_err(|e| ApplyKitError::Dispatch(e.to_string()))?;
 
     info!(
         kit_name = %manifest.kit.name,
@@ -432,6 +545,107 @@ async fn build_bundle(
         api_tokens,
         arp_overlay,
         role_context,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod env_token_vault_tests {
+    use super::*;
+    use arkavo_swarmkit::AuthMode;
+
+    fn role_with_server(server: &str) -> RoleSpec {
+        use arkavo_swarmkit::AgentProvisioning;
+        RoleSpec {
+            id: "test-role".to_string(),
+            role_type: "planner".to_string(),
+            plane: None,
+            description: None,
+            agent_provisioning: AgentProvisioning::default(),
+            skills: vec![],
+            mcp_tools: vec![arkavo_swarmkit::McpToolGrant {
+                server: server.to_string(),
+                tools: vec!["some_tool".to_string()],
+                auth: AuthMode::Delegated,
+            }],
+            tdf_attribute_release_policy: None,
+            handoffs: vec![],
+            context_scope: None,
+        }
+    }
+
+    // Set/clear of the process-global GITHUB_TOKEN is sequenced inside one
+    // test so the two assertions can't race under `cargo test` (which runs
+    // test fns as threads in a single process and shares the environment).
+    // `set_var`/`remove_var` are `unsafe` on edition 2024.
+    #[tokio::test]
+    async fn reads_github_token_for_github_server_then_empty_when_absent() {
+        let vault = EnvTokenVault::default();
+        let role = role_with_server("arkavo-github");
+
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-ghtoken-abc123") };
+        let tokens = vault.tokens_for_role(&role).await;
+        assert_eq!(
+            tokens.get("GITHUB_TOKEN"),
+            Some(&"test-ghtoken-abc123".to_string())
+        );
+
+        unsafe { std::env::remove_var("GITHUB_TOKEN") };
+        let tokens = vault.tokens_for_role(&role).await;
+        assert!(
+            tokens.is_empty(),
+            "no token should be returned when env var is unset"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_github_server_returns_empty() {
+        // Does not touch GITHUB_TOKEN, so it is safe regardless of env state.
+        let vault = EnvTokenVault::default();
+        let role = role_with_server("some-other-service");
+        let tokens = vault.tokens_for_role(&role).await;
+        assert!(tokens.is_empty());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod repo_scope_tests {
+    use super::*;
+
+    #[test]
+    fn maintainer_task_gets_scoped() {
+        let scope = RepoScope::new("my-org", "my-repo");
+        let wrapped = scope.wrap_task("repo_maintainer", "maintainer", "Triage open issues");
+        assert!(
+            wrapped.starts_with("[SCOPE: owner=my-org repo=my-repo"),
+            "maintainer task must begin with scope preamble: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("Triage open issues"),
+            "original task text must be preserved"
+        );
+    }
+
+    #[test]
+    fn non_maintainer_task_is_unchanged() {
+        let scope = RepoScope::new("my-org", "my-repo");
+        let task = "Review PR #42 diff and post a review";
+        let wrapped = scope.wrap_task("pr_reviewer", "critic", task);
+        assert_eq!(
+            wrapped, task,
+            "non-maintainer task must be returned unchanged"
+        );
+    }
+
+    #[test]
+    fn scope_contains_must_not_act_instruction() {
+        let scope = RepoScope::new("acme", "widget");
+        let wrapped = scope.wrap_task("repo_maintainer", "maintainer", "open chore PR");
+        assert!(
+            wrapped.contains("MUST NOT act on any other owner or repo"),
+            "scope preamble must include the restriction instruction"
+        );
     }
 }
 
@@ -612,9 +826,11 @@ provenance:
         let shipper = StubShipper::default();
         let transport = StubTransport::default();
 
-        let applied = apply_kit(&path, &matcher, &vault, &encryptor, &shipper, &transport)
-            .await
-            .expect("apply");
+        let applied = apply_kit(
+            &path, &matcher, &vault, &encryptor, &shipper, &transport, None,
+        )
+        .await
+        .expect("apply");
 
         assert_eq!(applied.bindings.len(), 2);
         assert_eq!(applied.bindings[0].role_id, "analyst");
@@ -661,9 +877,11 @@ provenance:
         let shipper = StubShipper::default();
         let transport = StubTransport::default();
 
-        let err = apply_kit(&path, &matcher, &vault, &encryptor, &shipper, &transport)
-            .await
-            .expect_err("uncoverable");
+        let err = apply_kit(
+            &path, &matcher, &vault, &encryptor, &shipper, &transport, None,
+        )
+        .await
+        .expect_err("uncoverable");
 
         match err {
             ApplyKitError::RoleUncoverable { role_id, .. } => assert_eq!(role_id, "analyst"),
@@ -684,9 +902,11 @@ provenance:
         let path = dir.path().join("kit.swarmkit.tdf");
         std::fs::write(&path, b"unused").expect("write");
 
-        let err = apply_kit(&path, &matcher, &vault, &encryptor, &shipper, &transport)
-            .await
-            .expect_err("tdf rejected");
+        let err = apply_kit(
+            &path, &matcher, &vault, &encryptor, &shipper, &transport, None,
+        )
+        .await
+        .expect_err("tdf rejected");
         assert!(matches!(err, ApplyKitError::TdfNotSupported { .. }));
     }
 

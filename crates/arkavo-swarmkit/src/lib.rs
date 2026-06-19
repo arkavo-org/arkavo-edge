@@ -33,9 +33,9 @@ pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
 pub use role::ArpRule;
 pub use role::{
-    AgentProvisioning, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant, Model,
-    Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy, TdfReleaseRule,
-    ToolUse,
+    AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
+    Model, Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy,
+    TdfReleaseRule, ToolUse,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use validate::{ValidationError, validate};

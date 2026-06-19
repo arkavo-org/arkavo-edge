@@ -307,7 +307,21 @@ pub async fn handle_message_send(
                     let compute_budget = compute_budget.clone();
                     let mesh_state = mesh_state.cloned();
                     let agent_memory = agent_memory.clone();
-                    let specialist_id = agent_metadata.read().await.name.clone();
+                    // Read both name and granted_tools in a single lock acquisition
+                    // so the specialist path honours the same least-privilege grant
+                    // set that the orchestrator-loop path enforces (design D9).
+                    let (specialist_id, specialist_granted, specialist_specialized): (
+                        String,
+                        Vec<String>,
+                        bool,
+                    ) = {
+                        let meta = agent_metadata.read().await;
+                        (
+                            meta.name.clone(),
+                            meta.granted_tools.clone(),
+                            meta.specialized,
+                        )
+                    };
                     let task_start = std::time::Instant::now();
                     #[cfg(feature = "iroh")]
                     let iroh_node = iroh_node.cloned();
@@ -325,6 +339,14 @@ pub async fn handle_message_send(
 
                         // Build a registry with mesh tools so specialists can
                         // use send_task/list_agents to communicate with the swarm.
+                        // When the agent has a non-empty grant set (i.e. it is a
+                        // SwarmKit-specialized agent), filter the registry down to
+                        // exactly those tools before handing it to the conductor.
+                        // This closes the least-privilege bypass on the A2A
+                        // message.send specialist path (mirrors the orchestrator
+                        // loop enforcement in agent_loop.rs — design D9).
+                        let granted_set: std::collections::HashSet<String> =
+                            specialist_granted.iter().cloned().collect();
                         let specialist_registry = {
                             let mut reg = arkavo_mcp_tools::ToolRegistry::empty();
                             if let Some(ref ms) = mesh_state {
@@ -340,8 +362,17 @@ pub async fn handle_message_send(
                                     reg.register(&name, Box::new(bridge));
                                 }
                             }
+                            if specialist_specialized {
+                                reg.retain_granted(&granted_set);
+                            }
                             Arc::new(reg)
                         };
+                        let granted_opt: Option<&std::collections::HashSet<String>> =
+                            if !specialist_specialized {
+                                None
+                            } else {
+                                Some(&granted_set)
+                            };
 
                         match execute_with_conductor_and_learning(
                             &conductor,
@@ -364,6 +395,7 @@ pub async fn handle_message_send(
                             None,
                             false, // specialists may need complexity assessment
                             Some(specialist_registry),
+                            granted_opt,
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )
