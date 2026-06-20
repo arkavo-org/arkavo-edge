@@ -106,6 +106,10 @@ pub struct CostOrchestrator {
     routing_metrics: Arc<RwLock<RoutingMetrics>>,
     orchestrator_metrics: Arc<RwLock<OrchestratorMetrics>>,
     budget_threshold: f64,
+    /// Spend-plane posture. A cloud arm must pass `authorize_cloud_spend`
+    /// (policy + live cap) — the same authority the route loop uses — so this
+    /// path and the loop share one spend gate rather than two heuristics.
+    cloud_policy: arkavo_budget::CloudPolicy,
     /// Manifest-authored per-model pricing (cents per MTok). Empty by default;
     /// when a model is present it is the cost source of truth and overrides the
     /// model's built-in static estimate. Populated from the SwarmKit manifest
@@ -135,6 +139,7 @@ impl CostOrchestrator {
             routing_metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             orchestrator_metrics: Arc::new(RwLock::new(OrchestratorMetrics::new())),
             budget_threshold: 0.80,
+            cloud_policy: arkavo_budget::CloudPolicy::default(),
             pricing,
         })
     }
@@ -157,6 +162,33 @@ impl CostOrchestrator {
             switched_decision
         } else {
             self.selector.select(&classification, task)?
+        };
+
+        // Spend plane: a cloud arm must clear the same authority the route loop
+        // uses — policy AND live cap — not just the budget-usage heuristic. If
+        // the spend plane denies (AskBeforeCloud without confirmation, or over
+        // cap), fall back to a budget-constrained local model.
+        let decision = if decision.recommended_model.is_cloud() {
+            let caps = self.cloud_spend_caps().await;
+            let request = arkavo_budget::CloudSpendRequest {
+                reason: arkavo_budget::CloudSpendReason::UserRequested,
+                projected_cost: estimate_decision_cost(&self.pricing, &decision),
+                user_confirmed: false,
+            };
+            if arkavo_budget::authorize_cloud_spend(self.cloud_policy, &request, caps)
+                .is_authorized()
+            {
+                decision
+            } else {
+                let mut metrics = self.orchestrator_metrics.write().await;
+                metrics.budget_switches += 1;
+                drop(metrics);
+                self.selector
+                    .select_with_budget_constraint(&classification, task, 1.0)
+                    .await?
+            }
+        } else {
+            decision
         };
 
         let estimated_token_cost = estimate_decision_cost(&self.pricing, &decision);
@@ -356,6 +388,32 @@ impl CostOrchestrator {
     pub fn with_budget_threshold(mut self, threshold: f64) -> Self {
         self.budget_threshold = threshold.clamp(0.0, 1.0);
         self
+    }
+
+    /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
+    pub fn with_cloud_policy(mut self, policy: arkavo_budget::CloudPolicy) -> Self {
+        self.cloud_policy = policy;
+        self
+    }
+
+    /// Spend caps from the live budget tracker (session remaining). Without a
+    /// session limit the cap is effectively unbounded; the policy gate still
+    /// applies.
+    async fn cloud_spend_caps(&self) -> arkavo_budget::SpendCaps {
+        let unbounded = TokenCost::from_dollars(f64::from(u32::MAX));
+        let status = self.budget_tracker.get_status().await;
+        let remaining_cap = status
+            .session_limit
+            .map(|limit| {
+                limit
+                    .checked_sub(status.session_spent)
+                    .unwrap_or(TokenCost::ZERO)
+            })
+            .unwrap_or(unbounded);
+        arkavo_budget::SpendCaps {
+            remaining_cap,
+            per_request_max: None,
+        }
     }
 
     /// Check if a task should use architect mode based on complexity
