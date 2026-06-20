@@ -408,6 +408,12 @@ impl super::Router {
                 "Semaphore acquired"
             );
 
+            // Feasibility plane (pre-dispatch): assess whether the local model
+            // can run this prompt now, surfacing a reshape/unavailable signal
+            // before we spend an inference on a doomed call. Local-only; never
+            // spends.
+            self.check_local_feasibility(&current_decision.recommended_model, input_tokens as u32);
+
             let max_tokens = if execution_mode { Some(200usize) } else { None };
             let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, max_tokens)
@@ -737,6 +743,18 @@ impl super::Router {
                     .with_usage(current_decision.estimated_cost_usd, 0),
                 )
                 .await;
+
+            // Feasibility plane (post-dispatch): fold this call's real decode
+            // throughput into the per-config baseline so "slow" is learned per
+            // model+context, and surface a degraded-throughput signal when this
+            // sample is slow for that configuration.
+            if let Some(timing) = response.inference_timing.as_ref() {
+                self.record_local_throughput(
+                    &current_decision.recommended_model,
+                    timing,
+                    input_tokens as u32,
+                );
+            }
 
             // Record which model was selected so the conductor can attribute
             // reward-based corrective feedback to the right Thompson Sampling prior.

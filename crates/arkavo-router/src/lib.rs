@@ -50,9 +50,9 @@ pub use orchestrator::{
     ScalingDecision,
 };
 pub use planes::{
-    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityVerdict, LocalPlan,
-    RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility, augment_exclusions_for_policy,
-    authorize_upgrade, detect_collapse, plan_local, upgrade_offer,
+    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityBaseline, FeasibilityVerdict,
+    LocalPlan, RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility,
+    augment_exclusions_for_policy, authorize_upgrade, detect_collapse, plan_local, upgrade_offer,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
@@ -112,6 +112,23 @@ pub enum RouterEvent {
         reason: String,
         /// The cloud policy that refused, e.g. `AskBeforeCloud`.
         policy: String,
+    },
+    /// The feasibility plane reported a non-nominal local runtime condition.
+    ///
+    /// Pre-dispatch this surfaces a reshape need (prompt does not fit the
+    /// context) or unavailability; post-dispatch it surfaces degraded
+    /// throughput for the model+context configuration. It is a *cost/feasibility*
+    /// signal only — it never authorizes cloud spend. Consumers (UI, the RLM
+    /// chunking layer) decide what to do with it.
+    LocalFeasibility {
+        model: String,
+        /// The `FeasibilityVerdict` as a debug string, e.g. `LocalNeedsChunking`.
+        verdict: String,
+        prompt_tokens: u32,
+        n_ctx: u32,
+        /// Observed decode throughput (tokens/sec); `None` for the pre-dispatch
+        /// structural check, `Some` for the post-dispatch throughput sample.
+        tokens_per_sec: Option<f32>,
     },
 }
 
@@ -199,6 +216,10 @@ pub struct Router {
     /// cross into paid cloud. Defaults to `AskBeforeCloud`, so an availability
     /// failure or a quality collapse never silently spends — it stays local.
     cloud_policy: arkavo_budget::CloudPolicy,
+    /// Per-config runtime-cost baseline for the feasibility plane. Learns each
+    /// model+context's decode throughput from real `InferenceTiming` so "slow"
+    /// is judged relative to that configuration, not an absolute threshold.
+    feasibility_baseline: Arc<planes::FeasibilityBaseline>,
 }
 
 impl Router {
@@ -244,6 +265,7 @@ impl Router {
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
+            feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
         })
     }
 
@@ -289,6 +311,7 @@ impl Router {
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
+            feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
         })
     }
 
@@ -328,6 +351,89 @@ impl Router {
     async fn reroute_exclusions(&self) -> Vec<String> {
         let excluded = self.get_excluded_models().await;
         planes::augment_exclusions_for_policy(excluded, self.cloud_policy)
+    }
+
+    /// Free KV-cache slots for a local model, read from the live context pool.
+    /// Defaults to 1 ("assume placeable") when the pool has no entry or on
+    /// builds without the local engine — an honest fallback, not a fake count.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn kv_slots_free(&self, model_name: &str) -> usize {
+        self.model_registry
+            .context_pool()
+            .stats(model_name)
+            .map(|s| s.available)
+            .unwrap_or(1)
+    }
+
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    fn kv_slots_free(&self, _model_name: &str) -> usize {
+        1
+    }
+
+    /// Pre-dispatch feasibility check for a local model (the feasibility plane).
+    ///
+    /// Assembles live `RuntimeStats` (prompt estimate, model context window,
+    /// KV-cache availability) and classifies. When the prompt does not fit
+    /// (reshape) or local cannot run, it emits a `LocalFeasibility` event so the
+    /// UI / RLM chunking layer can react. Cloud models are skipped, and this
+    /// never authorizes spend — it only surfaces a cost/feasibility signal.
+    fn check_local_feasibility(&self, model: &ModelChoice, prompt_tokens: u32) {
+        if !model.is_local() {
+            return;
+        }
+        let n_ctx =
+            arkavo_context::rlm_detection::model_context_size(Some(model.name()), false) as u32;
+        let stats = RuntimeStats {
+            prompt_tokens,
+            n_ctx,
+            local_model_available: self.is_model_available(model),
+            kv_cache_slots_free: self.kv_slots_free(model.name()),
+            tokens_per_sec: None,
+            context_overflow: false,
+        };
+        let key = FeasibilityBaseline::key(model.name(), n_ctx);
+        let verdict = self.feasibility_baseline.classify(&stats, &key);
+        if verdict.needs_reshape() || verdict == FeasibilityVerdict::LocalCannotRun {
+            self.emit_event(RouterEvent::LocalFeasibility {
+                model: model.name().to_string(),
+                verdict: format!("{verdict:?}"),
+                prompt_tokens,
+                n_ctx,
+                tokens_per_sec: None,
+            });
+        }
+    }
+
+    /// Post-dispatch: record observed decode throughput for a local model into
+    /// the per-config baseline, and emit a `LocalFeasibility` event when the
+    /// sample is slow *for that configuration*. Feasibility telemetry only —
+    /// it learns "slow" per model+context rather than from an absolute floor,
+    /// and never authorizes spend.
+    fn record_local_throughput(
+        &self,
+        model: &ModelChoice,
+        timing: &arkavo_llm::InferenceTiming,
+        prompt_tokens: u32,
+    ) {
+        if !model.is_local() || timing.generation_ms <= 0.0 || timing.n_eval == 0 {
+            return;
+        }
+        let tps = (f64::from(timing.n_eval) / (timing.generation_ms / 1000.0)) as f32;
+        let n_ctx =
+            arkavo_context::rlm_detection::model_context_size(Some(model.name()), false) as u32;
+        let key = FeasibilityBaseline::key(model.name(), n_ctx);
+        // Judge against prior history before folding this sample in.
+        let slow = self.feasibility_baseline.is_slow(&key, tps) == Some(true);
+        self.feasibility_baseline.record(&key, tps);
+        if slow {
+            self.emit_event(RouterEvent::LocalFeasibility {
+                model: model.name().to_string(),
+                verdict: format!("{:?}", FeasibilityVerdict::LocalCanRunSlowly),
+                prompt_tokens,
+                n_ctx,
+                tokens_per_sec: Some(tps),
+            });
+        }
     }
 
     /// Run preflight moderation check without full classification.
@@ -1144,6 +1250,7 @@ impl Router {
             spec_stats: self.spec_stats.clone(),
             pending_events: self.pending_events.clone(),
             cloud_policy: self.cloud_policy,
+            feasibility_baseline: self.feasibility_baseline.clone(),
         })
     }
 

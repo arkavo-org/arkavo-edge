@@ -14,7 +14,15 @@ use serde::{Deserialize, Serialize};
 
 /// Runtime telemetry sampled from the local llama.cpp engine for one request.
 ///
-/// Every field is a measurement of *cost/feasibility*, not answer quality.
+/// Every field is a measurement of *cost/feasibility*, not answer quality, and
+/// every field is fed from a real source: `prompt_tokens` from the tokenizer
+/// estimate (or `InferenceTiming.n_prompt_eval`), `n_ctx` from
+/// `model_context_size`, `kv_cache_slots_free` from the context pool's
+/// `PoolStats`, and `tokens_per_sec` from `InferenceTiming` (or the learned
+/// per-config baseline). Signals with no honest local source — thermal/SMC
+/// temperature, OS scheduler queue depth — are deliberately absent rather than
+/// stubbed: "local busy" is represented by KV-cache saturation and a degraded
+/// `tokens_per_sec`.
 #[derive(Debug, Clone)]
 pub struct RuntimeStats {
     /// Prompt token count for this request.
@@ -25,21 +33,18 @@ pub struct RuntimeStats {
     pub local_model_available: bool,
     /// Free KV-cache slots in the context pool (`0` = saturated).
     pub kv_cache_slots_free: usize,
-    /// Requests queued ahead of this one.
-    pub queue_depth: usize,
     /// Recent decode throughput (tokens/sec). `None` if not yet measured.
     pub tokens_per_sec: Option<f32>,
-    /// Device is thermally throttled or under heavy load.
-    pub thermal_throttling: bool,
     /// The previous attempt hit OOM / context overflow.
     pub context_overflow: bool,
 }
 
 impl RuntimeStats {
-    /// Below this decode rate the experience is "slow but working".
-    const SLOW_TOKENS_PER_SEC: f32 = 8.0;
-    /// More than this many requests queued ahead makes the wait noticeable.
-    const SLOW_QUEUE_DEPTH: usize = 2;
+    /// Below this absolute decode rate the experience is "slow but working".
+    /// This is the cold-start floor; once a per-config baseline has enough
+    /// samples, [`super::FeasibilityBaseline`] refines "slow" relative to that
+    /// model+context's own learned distribution.
+    pub(crate) const SLOW_TOKENS_PER_SEC: f32 = 8.0;
     /// Once the prompt crosses this fraction of context, too little headroom
     /// remains for a useful completion.
     const CONTEXT_PRESSURE: f32 = 0.9;
@@ -54,7 +59,7 @@ impl RuntimeStats {
 pub enum FeasibilityVerdict {
     /// Local can run this request now at an acceptable speed.
     LocalCanRunNow,
-    /// Local can run, but slowly (queue depth, low tok/s, thermal throttle).
+    /// Local can run, but slowly (low tok/s for this model+context).
     LocalCanRunSlowly,
     /// The prompt alone exceeds the context window; it must be chunked first.
     LocalNeedsChunking,
@@ -111,14 +116,13 @@ pub fn assess(stats: &RuntimeStats) -> FeasibilityVerdict {
         return FeasibilityVerdict::LocalCannotRun;
     }
 
-    // Feasible. Is it fast enough to be pleasant?
-    let throttled = stats.thermal_throttling
-        || stats.queue_depth > RuntimeStats::SLOW_QUEUE_DEPTH
-        || stats
-            .tokens_per_sec
-            .is_some_and(|t| t < RuntimeStats::SLOW_TOKENS_PER_SEC);
+    // Feasible. Is it fast enough to be pleasant? This is the absolute
+    // cold-start floor; the per-config baseline refines it once it has samples.
+    let slow = stats
+        .tokens_per_sec
+        .is_some_and(|t| t < RuntimeStats::SLOW_TOKENS_PER_SEC);
 
-    if throttled {
+    if slow {
         FeasibilityVerdict::LocalCanRunSlowly
     } else {
         FeasibilityVerdict::LocalCanRunNow
@@ -136,9 +140,7 @@ mod tests {
             n_ctx: 8_192,
             local_model_available: true,
             kv_cache_slots_free: 4,
-            queue_depth: 0,
             tokens_per_sec: Some(40.0),
-            thermal_throttling: false,
             context_overflow: false,
         }
     }
@@ -195,30 +197,12 @@ mod tests {
         assert_eq!(assess(&stats), FeasibilityVerdict::LocalCannotRun);
     }
 
-    // Each of these is a *feasibility* degradation, not a quality degradation:
-    // the request still runs, just slowly. None may authorize cloud spend.
+    // A throughput degradation is a *feasibility* degradation, not a quality
+    // one: the request still runs, just slowly. It may not authorize cloud spend.
     #[test]
     fn low_throughput_runs_slowly() {
         let stats = RuntimeStats {
             tokens_per_sec: Some(3.0),
-            ..healthy()
-        };
-        assert_eq!(assess(&stats), FeasibilityVerdict::LocalCanRunSlowly);
-    }
-
-    #[test]
-    fn deep_queue_runs_slowly() {
-        let stats = RuntimeStats {
-            queue_depth: 5,
-            ..healthy()
-        };
-        assert_eq!(assess(&stats), FeasibilityVerdict::LocalCanRunSlowly);
-    }
-
-    #[test]
-    fn thermal_throttle_runs_slowly() {
-        let stats = RuntimeStats {
-            thermal_throttling: true,
             ..healthy()
         };
         assert_eq!(assess(&stats), FeasibilityVerdict::LocalCanRunSlowly);

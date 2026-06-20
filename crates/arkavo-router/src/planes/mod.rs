@@ -23,9 +23,11 @@
 
 pub mod collapse;
 pub mod feasibility;
+pub mod feasibility_baseline;
 
 pub use collapse::{AnswerObservation, CollapseSignal, CollapseVerdict, detect as detect_collapse};
 pub use feasibility::{FeasibilityVerdict, RuntimeStats, assess as assess_feasibility};
+pub use feasibility_baseline::FeasibilityBaseline;
 
 use arkavo_budget::TokenCost;
 use arkavo_budget::cloud_policy::{
@@ -159,9 +161,7 @@ mod tests {
             n_ctx: 8_192,
             local_model_available: true,
             kv_cache_slots_free: 4,
-            queue_depth: 0,
             tokens_per_sec: Some(40.0),
-            thermal_throttling: false,
             context_overflow: false,
         }
     }
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn slow_runtime_runs_local_slow_not_cloud() {
         let stats = RuntimeStats {
-            thermal_throttling: true,
+            tokens_per_sec: Some(3.0),
             ..healthy_stats()
         };
         // A slow laptop stays local. There is no cloud variant in LocalPlan.

@@ -18,8 +18,11 @@ Budget policy changes what is allowed.    -> spend plane
 `arkavo_router::planes::feasibility`
 
 Consumes llama.cpp / runtime statistics only: `prompt_tokens` vs `n_ctx`,
-KV-cache availability, queue depth, tokens/sec, thermal/load state, whether a
-local model is loaded, and OOM / context overflow.
+KV-cache availability, tokens/sec, whether a local model is loaded, and OOM /
+context overflow. `RuntimeStats` carries only fields with an honest local
+source — thermal/SMC temperature and OS queue depth have none, so "local busy"
+is represented by KV-cache saturation and degraded throughput rather than a
+stubbed field.
 
 Allowed conclusions (`FeasibilityVerdict`):
 
@@ -112,6 +115,15 @@ trigger automatic spend by default.
   candidate when `CloudPolicy::permits_silent_cloud` is true. Otherwise the
   router retries locally and emits a `RouterEvent::CloudEscalationBlocked` so the
   quality→spend boundary is observable.
+- **Feasibility is fed from real llama.cpp stats.** Before dispatch,
+  `Router::check_local_feasibility` assembles `RuntimeStats` (prompt estimate,
+  model context window, KV-cache slots) and classifies — emitting a
+  `RouterEvent::LocalFeasibility` when the prompt needs reshaping or local can't
+  run, before an inference is wasted. After dispatch, `record_local_throughput`
+  folds the call's real `InferenceTiming` decode rate into a per-config
+  `FeasibilityBaseline` (rolling median/MAD), so "slow" is judged relative to
+  each `model@context`'s own history rather than an absolute threshold — and
+  never authorizes cloud spend.
 
 `Router::with_cloud_policy` sets the posture; it defaults to `AskBeforeCloud`.
 
