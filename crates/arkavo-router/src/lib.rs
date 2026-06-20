@@ -133,6 +133,17 @@ pub enum RouterEvent {
     },
 }
 
+impl RouterEvent {
+    /// Stable snake_case kind, used as the observability counter key.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::SpecDecodingDisabled { .. } => "spec_decoding_disabled",
+            Self::CloudEscalationBlocked { .. } => "cloud_escalation_blocked",
+            Self::LocalFeasibility { .. } => "local_feasibility",
+        }
+    }
+}
+
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
 use arkavo_llm::{Message, Role};
@@ -610,20 +621,11 @@ impl Router {
         let decision = self.spec_stats.decide(model_name);
         if let Some(rate_pct) = decision.crossed_below_threshold {
             let sample_size = self.spec_stats.window();
-            if let Ok(mut g) = self.pending_events.lock() {
-                // Cap to prevent unbounded growth in the absence of a
-                // drain_events() consumer. In practice the queue fires
-                // at most once per model per threshold crossing, but a
-                // long-running process with many models flapping above
-                // and below threshold would accumulate otherwise.
-                if g.len() < 1024 {
-                    g.push(RouterEvent::SpecDecodingDisabled {
-                        model: model_name.to_string(),
-                        accept_rate_pct: rate_pct,
-                        sample_size,
-                    });
-                }
-            }
+            self.emit_event(RouterEvent::SpecDecodingDisabled {
+                model: model_name.to_string(),
+                accept_rate_pct: rate_pct,
+                sample_size,
+            });
         }
         decision.use_spec
     }
@@ -633,6 +635,9 @@ impl Router {
     /// Capped at 1024 pending events to bound growth when no `drain_events()`
     /// consumer is polling.
     pub(crate) fn emit_event(&self, event: RouterEvent) {
+        // Backend sink: count by kind at emit time so events are observable
+        // even when no `drain_events()` consumer (e.g. the AG-UI gateway) runs.
+        arkavo_observability::event_counters::global_event_counters().increment(event.kind());
         if let Ok(mut g) = self.pending_events.lock()
             && g.len() < 1024
         {
