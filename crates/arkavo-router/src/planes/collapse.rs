@@ -108,6 +108,14 @@ pub fn detect(obs: &AnswerObservation<'_>) -> CollapseVerdict {
 
 /// Conservative repetition-loop check: flags an answer whose tail is a short
 /// phrase (1–4 words) repeated many times — the classic local-model collapse.
+///
+/// Known blind spots, acceptable for a v1 collapse detector that must not
+/// over-fire: it only inspects the final `cycle * MIN_REPEATS` words with cycle
+/// length ≤ 4, so a longer-period loop (5+ word phrase), a mid-answer loop that
+/// recovers with a non-repeating tail, or a loop shorter than `MIN_REPEATS`
+/// reads as `NoVisibleCollapse`. It can also false-positive on a naturally
+/// emphatic repeated tail. A clean verdict means "did not visibly collapse",
+/// not "the answer is good" — callers must not over-trust it.
 fn has_repetition_loop(text: &str) -> bool {
     const MIN_REPEATS: usize = 6;
     let words: Vec<&str> = text.split_whitespace().collect();

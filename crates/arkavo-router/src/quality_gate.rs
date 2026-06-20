@@ -662,7 +662,7 @@ impl super::Router {
                     );
                     let allow_cloud = matches!(offer, UpgradeOffer::Offer(_))
                         && self.cloud_policy().permits_silent_cloud();
-                    let excluded = if allow_cloud {
+                    let mut excluded = if allow_cloud {
                         self.get_excluded_models().await
                     } else {
                         // Quality collapse, but the spend plane won't authorize
@@ -675,6 +675,13 @@ impl super::Router {
                         }
                         self.reroute_exclusions().await
                     };
+                    // Exclude the model that just collapsed so re-selection
+                    // actually rotates the arm instead of reproducing the same
+                    // collapse and burning a retry.
+                    let collapsed_name = current_decision.recommended_model.name().to_string();
+                    if !excluded.iter().any(|e| e == &collapsed_name) {
+                        excluded.push(collapsed_name);
+                    }
                     let re_class = classifier::Classification::new(
                         current_decision.task_category,
                         current_decision.confidence,
@@ -685,6 +692,20 @@ impl super::Router {
                         .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
                         .await
                     {
+                        // Steer Thompson Sampling away from the collapsing
+                        // model before rotating off it, mirroring the
+                        // Judge-rejection path — otherwise the retry doesn't
+                        // learn from the collapse.
+                        self.model_learning
+                            .immediate_update(
+                                current_decision.recommended_model.name(),
+                                &BurstFeedback::failure(
+                                    uuid::Uuid::new_v4(),
+                                    current_decision.task_category.as_str().to_string(),
+                                    inference_start.elapsed().as_millis() as u64,
+                                ),
+                            )
+                            .await;
                         tracing::info!(
                             signal = ?signal,
                             from = %current_decision.recommended_model.name(),

@@ -120,17 +120,26 @@ fn median(sorted: &[f32]) -> f32 {
 }
 
 /// Robust z-score: `(x - median) / (1.4826 * MAD)`. The 1.4826 scales MAD to a
-/// standard-deviation-equivalent for normal data; a small epsilon avoids a
-/// divide-by-zero when every sample is identical.
+/// standard-deviation-equivalent for normal data.
+///
+/// When a config's history has little spread the MAD collapses to ~0 (common
+/// once more than half the retained samples are near-identical), and a bare
+/// `1.4826 * MAD` denominator would amplify a marginal dip into an enormous
+/// z-score — flagging a 79.9 tok/s sample against an all-80 history as "slow".
+/// To keep the scale meaningful, floor it at a small fraction of the median so
+/// only a *materially* lower throughput trips the threshold.
 fn robust_z(x: f32, samples: &[f32]) -> f32 {
     const EPS: f32 = 1e-6;
+    /// Minimum scale as a fraction of the median, used when MAD is ~0.
+    const MIN_SCALE_FRAC: f32 = 0.05;
     let mut sorted: Vec<f32> = samples.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let med = median(&sorted);
     let mut deviations: Vec<f32> = sorted.iter().map(|v| (v - med).abs()).collect();
     deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mad = median(&deviations);
-    (x - med) / 1.4826f32.mul_add(mad, EPS)
+    let scale = (1.4826 * mad).max(med.abs() * MIN_SCALE_FRAC).max(EPS);
+    (x - med) / scale
 }
 
 #[cfg(test)]
@@ -236,6 +245,28 @@ mod tests {
     fn robust_z_is_zero_at_median() {
         let samples = vec![10.0, 20.0, 30.0, 40.0, 50.0];
         assert_eq!(robust_z(30.0, &samples), 0.0);
+    }
+
+    // Regression (gitar-bot): a near-zero MAD must not amplify a marginal dip
+    // into a "slow" verdict. A perfectly stable 80 tok/s history has MAD 0, so
+    // without the scale floor a 79.9 sample produced a huge negative z and
+    // spurious LocalCanRunSlowly. A *material* drop must still register.
+    #[test]
+    fn stable_config_does_not_overflag_marginal_dip() {
+        let b = FeasibilityBaseline::new();
+        for _ in 0..16 {
+            b.record("stable@8192", 80.0);
+        }
+        assert_eq!(
+            b.is_slow("stable@8192", 79.9),
+            Some(false),
+            "a 0.1 tok/s dip on a stable config must not read as slow"
+        );
+        assert_eq!(
+            b.is_slow("stable@8192", 30.0),
+            Some(true),
+            "a material drop must still read as slow"
+        );
     }
 
     #[test]
