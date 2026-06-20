@@ -92,15 +92,10 @@ pub async fn process_with_tools(
         arkavo_router::preflight::PreflightModerator::new()
     });
 
-    // Spend plane: adopt the AGENTS.md cloud policy and share one budget
-    // tracker between the router (live-cap enforcement) and UCP below.
-    let cloud_policy = arkavo_router::load_agent_config()
-        .unwrap_or_default()
-        .budget
-        .as_ref()
-        .and_then(|b| b.cloud_policy.as_deref())
-        .and_then(arkavo_budget::CloudPolicy::parse)
-        .unwrap_or_default();
+    // Spend plane: adopt the AGENTS.md cloud policy (resolved by the shared
+    // server-crate helper) and share one budget tracker between the router
+    // (live-cap enforcement) and UCP below.
+    let cloud_policy = arkavo_server::cloud_policy_from_agents_md();
     let ucp_budget_tracker = std::sync::Arc::new(
         arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
             .await

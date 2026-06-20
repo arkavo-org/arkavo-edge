@@ -36,14 +36,10 @@ impl LocalEngine {
             router
         };
 
-        // Spend plane: adopt the configured cloud policy, and share one budget
-        // tracker between the router (live-cap enforcement) and UCP.
-        let cloud_policy = agent_config
-            .budget
-            .as_ref()
-            .and_then(|b| b.cloud_policy.as_deref())
-            .and_then(arkavo_budget::CloudPolicy::parse)
-            .unwrap_or_default();
+        // Spend plane: adopt the configured cloud policy (shared resolver), and
+        // share one budget tracker between the router (live-cap enforcement) and
+        // UCP.
+        let cloud_policy = crate::spend_plane::cloud_policy_from_config(&agent_config);
         let budget_tracker =
             arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
                 .await
