@@ -175,6 +175,10 @@ pub struct BudgetYamlConfig {
     pub max_cost_per_session: Option<f64>,
     /// Maximum token cost per day in dollars
     pub max_cost_per_day: Option<f64>,
+    /// Cloud spend posture: `local_only` | `ask_before_cloud` | `cloud_within_cap`.
+    /// Omitted → the safe default `ask_before_cloud`.
+    #[serde(default)]
+    pub cloud_policy: Option<String>,
 }
 
 /// KAS section in AGENTS.md YAML frontmatter

@@ -456,6 +456,27 @@ impl A2aServer {
         // Use cached AGENTS.md config for preflight, budget, KAS
         let agent_config = self.agent_config.read().await.clone();
 
+        // Build the budget manager up front so the router can both enforce the
+        // live remaining cap (spend plane) and adopt the configured cloud policy.
+        let budget_manager = if let Some(ref budget_yaml) = agent_config.budget {
+            let budget_config = build_budget_config(budget_yaml);
+            match arkavo_budget::BudgetManager::new(budget_config).await {
+                Ok(manager) => Some(Arc::new(manager)),
+                Err(e) => {
+                    warn!("Failed to initialize budget manager: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let cloud_policy = agent_config
+            .budget
+            .as_ref()
+            .and_then(|b| b.cloud_policy.as_deref())
+            .and_then(arkavo_budget::CloudPolicy::parse)
+            .unwrap_or_default();
+
         let router_result = if offline_mode {
             arkavo_router::Router::new_offline().await
         } else {
@@ -464,6 +485,15 @@ impl A2aServer {
 
         match router_result {
             Ok(router) => {
+                // Spend plane: adopt the configured cloud policy and the live
+                // budget tracker so cloud escalation honors policy + cap.
+                let router = router.with_cloud_policy(cloud_policy);
+                let router = if let Some(ref manager) = budget_manager {
+                    router.with_budget_tracker(manager.tracker())
+                } else {
+                    router
+                };
+
                 // Wire preflight from AGENTS.md
                 let router = if let Some(ref pf) = agent_config.preflight {
                     let moderator = arkavo_router::build_moderator_from_config(pf);
@@ -548,18 +578,11 @@ impl A2aServer {
                     offline_mode
                 );
 
-                // Wire budget from AGENTS.md
-                if let Some(ref budget_yaml) = agent_config.budget {
-                    let budget_config = build_budget_config(budget_yaml);
-                    match arkavo_budget::BudgetManager::new(budget_config).await {
-                        Ok(manager) => {
-                            *self.budget_manager.write().await = Some(Arc::new(manager));
-                            info!("Budget enforcement loaded from AGENTS.md");
-                        }
-                        Err(e) => {
-                            warn!("Failed to initialize budget manager: {}", e);
-                        }
-                    }
+                // Store the budget manager built up front (also wired into the
+                // router above for live-cap spend enforcement).
+                if let Some(manager) = budget_manager {
+                    *self.budget_manager.write().await = Some(manager);
+                    info!("Budget enforcement loaded from AGENTS.md");
                 }
 
                 // Set router on learning bus for LLM-based synthesis
@@ -1476,6 +1499,13 @@ fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget:
     }
     if let Some(daily_cost) = yaml.max_cost_per_day {
         config.limits.daily_limit = Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
+    }
+    if let Some(policy) = yaml
+        .cloud_policy
+        .as_deref()
+        .and_then(arkavo_budget::CloudPolicy::parse)
+    {
+        config.cloud_policy = policy;
     }
 
     config

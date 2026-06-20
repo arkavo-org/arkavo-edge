@@ -515,6 +515,13 @@ fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
                 config.limits.daily_limit =
                     Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
             }
+            if let Some(policy) = budget_yaml
+                .cloud_policy
+                .as_deref()
+                .and_then(arkavo_budget::CloudPolicy::parse)
+            {
+                config.cloud_policy = policy;
+            }
             tracing::info!(
                 "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",
                 budget_yaml.max_cost_per_session,

@@ -33,6 +33,23 @@ pub enum CloudPolicy {
 }
 
 impl CloudPolicy {
+    /// Parse a policy from a config/AGENTS.md string. Accepts snake_case,
+    /// kebab-case, and a few natural aliases. Returns `None` for unknown input
+    /// so the caller can keep the safe default.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', ' '], "_")
+            .as_str()
+        {
+            "local_only" | "local" | "offline" => Some(Self::LocalOnly),
+            "ask_before_cloud" | "ask" | "prompt" => Some(Self::AskBeforeCloud),
+            "cloud_within_cap" | "cloud" | "auto" | "within_cap" => Some(Self::CloudWithinCap),
+            _ => None,
+        }
+    }
+
     /// Whether the router may route to a paid cloud model *without first asking*
     /// the user. Only `CloudWithinCap` permits silent cloud spend; `LocalOnly`
     /// and `AskBeforeCloud` require staying local (or an explicit confirmation
@@ -177,6 +194,31 @@ mod tests {
     #[test]
     fn default_policy_is_ask_before_cloud() {
         assert_eq!(CloudPolicy::default(), CloudPolicy::AskBeforeCloud);
+    }
+
+    #[test]
+    fn parse_accepts_aliases_and_rejects_unknown() {
+        assert_eq!(
+            CloudPolicy::parse("local_only"),
+            Some(CloudPolicy::LocalOnly)
+        );
+        assert_eq!(
+            CloudPolicy::parse("Local-Only"),
+            Some(CloudPolicy::LocalOnly)
+        );
+        assert_eq!(
+            CloudPolicy::parse("ask before cloud"),
+            Some(CloudPolicy::AskBeforeCloud)
+        );
+        assert_eq!(
+            CloudPolicy::parse("cloud_within_cap"),
+            Some(CloudPolicy::CloudWithinCap)
+        );
+        assert_eq!(
+            CloudPolicy::parse("auto"),
+            Some(CloudPolicy::CloudWithinCap)
+        );
+        assert_eq!(CloudPolicy::parse("nonsense"), None);
     }
 
     #[test]
