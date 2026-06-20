@@ -660,8 +660,26 @@ impl super::Router {
                         &collapse,
                         planes::UpgradeContext::default(),
                     );
-                    let allow_cloud = matches!(offer, UpgradeOffer::Offer(_))
-                        && self.cloud_policy().permits_silent_cloud();
+                    // Spend plane: a collapse only *requests* cloud. Authorize
+                    // it through the budget plane — policy AND the live remaining
+                    // cap — never on the quality signal alone. No user
+                    // confirmation channel here yet, so `user_confirmed=false`:
+                    // AskBeforeCloud stays local, CloudWithinCap escalates only
+                    // within cap.
+                    let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
+                        let caps = self.cloud_spend_caps().await;
+                        let projected = self.projected_cloud_cost(&current_decision);
+                        planes::authorize_upgrade(
+                            self.cloud_policy(),
+                            reason,
+                            projected,
+                            caps,
+                            false,
+                        )
+                        .is_authorized()
+                    } else {
+                        false
+                    };
                     let mut excluded = if allow_cloud {
                         self.get_excluded_models().await
                     } else {

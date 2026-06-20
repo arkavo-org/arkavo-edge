@@ -220,6 +220,10 @@ pub struct Router {
     /// model+context's decode throughput from real `InferenceTiming` so "slow"
     /// is judged relative to that configuration, not an absolute threshold.
     feasibility_baseline: Arc<planes::FeasibilityBaseline>,
+    /// Optional live budget tracker (spend plane). When present, the loop's
+    /// cloud-escalation decision consults the real remaining cap via
+    /// `authorize_cloud_spend`; when absent there is no cap to enforce.
+    budget_tracker: Option<Arc<arkavo_budget::BudgetTracker>>,
 }
 
 impl Router {
@@ -266,6 +270,7 @@ impl Router {
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
             feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
+            budget_tracker: None,
         })
     }
 
@@ -312,6 +317,7 @@ impl Router {
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
             feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
+            budget_tracker: None,
         })
     }
 
@@ -340,6 +346,57 @@ impl Router {
     /// The configured spend-plane cloud policy.
     pub fn cloud_policy(&self) -> arkavo_budget::CloudPolicy {
         self.cloud_policy
+    }
+
+    /// Attach a live budget tracker so the loop's cloud-escalation decision
+    /// enforces the real remaining cap (spend plane), not just the policy gate.
+    #[must_use]
+    pub fn with_budget_tracker(mut self, tracker: Arc<arkavo_budget::BudgetTracker>) -> Self {
+        self.budget_tracker = Some(tracker);
+        self
+    }
+
+    /// Spend caps for a cloud-escalation decision, read from the live budget
+    /// tracker. Without a tracker (or a session limit) there is no cap to
+    /// enforce, so the remaining cap is reported as effectively unbounded — the
+    /// policy gate in `authorize_cloud_spend` still applies.
+    async fn cloud_spend_caps(&self) -> arkavo_budget::SpendCaps {
+        let unbounded = arkavo_budget::TokenCost::from_dollars(f64::from(u32::MAX));
+        let remaining_cap = match &self.budget_tracker {
+            Some(tracker) => {
+                let status = tracker.get_status().await;
+                status
+                    .session_limit
+                    .map(|limit| {
+                        limit
+                            .checked_sub(status.session_spent)
+                            .unwrap_or(arkavo_budget::TokenCost::ZERO)
+                    })
+                    .unwrap_or(unbounded)
+            }
+            None => unbounded,
+        };
+        arkavo_budget::SpendCaps {
+            remaining_cap,
+            per_request_max: None,
+        }
+    }
+
+    /// Projected cost of escalating this decision to cloud, used by the spend
+    /// plane's cap check. Estimates against the first cloud arm in the decision's
+    /// fallback chain (or a cheap default), since the concrete arm is only
+    /// chosen after the spend gate passes.
+    fn projected_cloud_cost(&self, decision: &RoutingDecision) -> arkavo_budget::TokenCost {
+        let arm = decision
+            .fallback_chain
+            .iter()
+            .find(|m| m.is_cloud())
+            .cloned()
+            .unwrap_or(ModelChoice::GeminiFlash);
+        arkavo_budget::TokenCost::from_dollars(RoutingDecision::estimate_cost(
+            &arm,
+            decision.task_category,
+        ))
     }
 
     /// Exclusion set for a feasibility/quality-driven re-route.
@@ -1251,6 +1308,7 @@ impl Router {
             pending_events: self.pending_events.clone(),
             cloud_policy: self.cloud_policy,
             feasibility_baseline: self.feasibility_baseline.clone(),
+            budget_tracker: self.budget_tracker.clone(),
         })
     }
 
