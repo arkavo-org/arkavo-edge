@@ -97,6 +97,7 @@ mod tests {
                 n_draft: None,
                 n_accepted: None,
                 spec_bypassed: None,
+                avg_logprob: None,
             }),
             quality_gate_retries: 0,
         };

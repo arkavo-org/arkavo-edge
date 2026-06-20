@@ -31,6 +31,11 @@ pub enum CollapseSignal {
     /// The model plainly ignored the instructions (e.g. produced neither the
     /// required tool call nor any answer).
     InstructionNoncompliance,
+    /// The model generated this answer with low token-level confidence (mean
+    /// log-probability well below the confident range). This is the closest v1
+    /// has to an *adequacy* signal — uncertainty, not visible breakdown — and
+    /// is weaker than the structural collapses above.
+    LowConfidence,
 }
 
 /// The collapse detector's verdict on a completed local answer.
@@ -72,7 +77,17 @@ pub struct AnswerObservation<'a> {
     /// see (e.g. [`CollapseSignal::ToolCallSchemaFailure`],
     /// [`CollapseSignal::FormatFailure`], [`CollapseSignal::DisallowedRefusal`]).
     pub precomputed: Option<CollapseSignal>,
+    /// Mean per-token log-probability of the generated answer, when the local
+    /// engine reported it (`InferenceTiming.avg_logprob`). `None` for providers
+    /// that don't surface logprobs. Values near `0` are confident; very negative
+    /// values mean the model was guessing.
+    pub avg_logprob: Option<f32>,
 }
+
+/// Mean log-probability below which the answer is flagged as low-confidence.
+/// −3.0 nats ≈ an average chosen-token probability of ~5%, i.e. the model was
+/// consistently unsure. Conservative so a confident answer never trips it.
+const LOW_CONFIDENCE_LOGPROB: f32 = -3.0;
 
 /// Detect visible collapse in a completed local answer.
 ///
@@ -101,6 +116,15 @@ pub fn detect(obs: &AnswerObservation<'_>) -> CollapseVerdict {
 
     if has_repetition_loop(trimmed) {
         return CollapseVerdict::Collapsed(CollapseSignal::RepetitionLoop);
+    }
+
+    // Weakest signal, checked last so it never masks a structural collapse: the
+    // model produced fluent text but with consistently low token confidence.
+    if obs
+        .avg_logprob
+        .is_some_and(|lp| lp.is_finite() && lp < LOW_CONFIDENCE_LOGPROB)
+    {
+        return CollapseVerdict::Collapsed(CollapseSignal::LowConfidence);
     }
 
     CollapseVerdict::NoVisibleCollapse
@@ -248,6 +272,49 @@ mod tests {
     fn ordinary_repetition_is_not_a_loop() {
         // A few natural repeats must not trip the detector.
         let obs = answer("very very good work overall, nicely done and complete");
+        assert_eq!(detect(&obs), CollapseVerdict::NoVisibleCollapse);
+    }
+
+    #[test]
+    fn low_token_confidence_flags_collapse() {
+        let obs = AnswerObservation {
+            text: "A fluent but low-confidence guess.",
+            avg_logprob: Some(-3.5),
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::LowConfidence)
+        );
+    }
+
+    #[test]
+    fn confident_answer_is_not_low_confidence() {
+        let obs = AnswerObservation {
+            text: "The capital of France is Paris.",
+            avg_logprob: Some(-0.4),
+            ..Default::default()
+        };
+        assert_eq!(detect(&obs), CollapseVerdict::NoVisibleCollapse);
+    }
+
+    #[test]
+    fn low_confidence_never_masks_a_structural_collapse() {
+        // Empty output wins over low confidence (structural beats uncertainty).
+        let obs = AnswerObservation {
+            text: "   ",
+            avg_logprob: Some(-9.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            detect(&obs),
+            CollapseVerdict::Collapsed(CollapseSignal::EmptyOutput)
+        );
+    }
+
+    #[test]
+    fn missing_logprob_is_not_low_confidence() {
+        let obs = answer("No logprob reported by this provider.");
         assert_eq!(detect(&obs), CollapseVerdict::NoVisibleCollapse);
     }
 }

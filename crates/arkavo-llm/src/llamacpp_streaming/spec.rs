@@ -403,6 +403,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
             n_draft: Some(n_draft_total),
             n_accepted: Some(n_accepted_total),
             spec_bypassed: None,
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
@@ -748,6 +749,7 @@ pub(super) async fn generate_tokens_with_spec(
             n_draft: Some(n_draft_total),
             n_accepted: Some(n_accepted_total),
             spec_bypassed: None,
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((

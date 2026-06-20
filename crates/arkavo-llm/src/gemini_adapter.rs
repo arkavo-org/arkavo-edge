@@ -349,6 +349,7 @@ fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
         n_draft: None,
         n_accepted: None,
         spec_bypassed: None,
+        avg_logprob: None,
     }
 }
 

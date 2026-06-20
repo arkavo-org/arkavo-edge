@@ -648,11 +648,19 @@ impl super::Router {
                     hit_output_cap: response.finish_reason.as_deref() == Some("length"),
                     tool_call_required: false,
                     precomputed: None,
+                    avg_logprob: response
+                        .inference_timing
+                        .as_ref()
+                        .and_then(|t| t.avg_logprob),
                 });
-                // Retry only on breakdowns where a fresh attempt clearly helps;
-                // a truncated-but-coherent long answer is not re-rolled.
+                // Retry/offer on breakdowns where a fresh attempt or a stronger
+                // model helps: empty/repetition (local re-roll) and low token
+                // confidence (the adequacy signal — a stronger model may be
+                // surer). A truncated-but-coherent long answer is not re-rolled.
                 if let CollapseVerdict::Collapsed(
-                    signal @ (CollapseSignal::EmptyOutput | CollapseSignal::RepetitionLoop),
+                    signal @ (CollapseSignal::EmptyOutput
+                    | CollapseSignal::RepetitionLoop
+                    | CollapseSignal::LowConfidence),
                 ) = collapse
                 {
                     let offer = planes::upgrade_offer(
@@ -662,35 +670,47 @@ impl super::Router {
                     );
                     // Spend plane: a collapse only *requests* cloud. Authorize
                     // it through the budget plane — policy AND the live remaining
-                    // cap — never on the quality signal alone. No user
-                    // confirmation channel here yet, so `user_confirmed=false`:
-                    // AskBeforeCloud stays local, CloudWithinCap escalates only
-                    // within cap.
+                    // cap — never on the quality signal alone. A one-shot user
+                    // confirmation (set via confirm_next_cloud_upgrade after a
+                    // CloudUpgradeOffered) satisfies AskBeforeCloud; otherwise the
+                    // decision tells us whether to offer (ask) or refuse.
                     let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
                         let caps = self.cloud_spend_caps().await;
                         let projected = self.projected_cloud_cost(&current_decision);
-                        planes::authorize_upgrade(
+                        let confirmed = self.consume_cloud_confirmation();
+                        match planes::authorize_upgrade(
                             self.cloud_policy(),
                             reason,
                             projected,
                             caps,
-                            false,
-                        )
-                        .is_authorized()
+                            confirmed,
+                        ) {
+                            arkavo_budget::CloudSpendDecision::Authorized { .. } => true,
+                            arkavo_budget::CloudSpendDecision::NeedsUserConfirmation {
+                                projected_cost,
+                            } => {
+                                // Policy permits cloud but needs the user's OK:
+                                // surface the offer and stay local this turn.
+                                self.emit_event(crate::RouterEvent::CloudUpgradeOffered {
+                                    reason: format!("{reason:?}"),
+                                    projected_cost_cents: projected_cost.as_cents(),
+                                });
+                                false
+                            }
+                            arkavo_budget::CloudSpendDecision::Denied(_) => {
+                                self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
+                                    reason: format!("collapse:{signal:?}"),
+                                    policy: format!("{:?}", self.cloud_policy()),
+                                });
+                                false
+                            }
+                        }
                     } else {
                         false
                     };
                     let mut excluded = if allow_cloud {
                         self.get_excluded_models().await
                     } else {
-                        // Quality collapse, but the spend plane won't authorize
-                        // silent cloud — stay local and surface the boundary.
-                        if matches!(offer, UpgradeOffer::Offer(_)) {
-                            self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
-                                reason: format!("collapse:{signal:?}"),
-                                policy: format!("{:?}", self.cloud_policy()),
-                            });
-                        }
                         self.reroute_exclusions().await
                     };
                     // Exclude the model that just collapsed so re-selection

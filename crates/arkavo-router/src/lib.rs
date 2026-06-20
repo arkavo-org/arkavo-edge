@@ -131,6 +131,17 @@ pub enum RouterEvent {
         /// structural check, `Some` for the post-dispatch throughput sample.
         tokens_per_sec: Option<f32>,
     },
+    /// A local answer collapsed and the cloud policy *permits* cloud but
+    /// requires confirmation (`AskBeforeCloud`). The router stayed local and
+    /// surfaced this offer so the caller (CLI / UI) can prompt the user, then
+    /// `confirm_next_cloud_upgrade()` + re-dispatch to escalate. This is the
+    /// "ask before cloud" handshake made observable.
+    CloudUpgradeOffered {
+        /// Why the upgrade is offered, e.g. `LocalCollapsed`.
+        reason: String,
+        /// Projected cloud cost in cents.
+        projected_cost_cents: u64,
+    },
 }
 
 impl RouterEvent {
@@ -140,6 +151,7 @@ impl RouterEvent {
             Self::SpecDecodingDisabled { .. } => "spec_decoding_disabled",
             Self::CloudEscalationBlocked { .. } => "cloud_escalation_blocked",
             Self::LocalFeasibility { .. } => "local_feasibility",
+            Self::CloudUpgradeOffered { .. } => "cloud_upgrade_offered",
         }
     }
 }
@@ -236,6 +248,11 @@ pub struct Router {
     /// cloud-escalation decision consults the real remaining cap via
     /// `authorize_cloud_spend`; when absent there is no cap to enforce.
     budget_tracker: Option<Arc<arkavo_budget::BudgetTracker>>,
+    /// One-shot user confirmation for the next cloud upgrade under
+    /// `AskBeforeCloud`. The caller sets it via `confirm_next_cloud_upgrade()`
+    /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
+    /// when authorizing spend.
+    cloud_confirmation: std::sync::atomic::AtomicBool,
 }
 
 impl Router {
@@ -287,6 +304,7 @@ impl Router {
                     .unwrap_or_default(),
             ),
             budget_tracker: None,
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -338,6 +356,7 @@ impl Router {
                     .unwrap_or_default(),
             ),
             budget_tracker: None,
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -366,6 +385,23 @@ impl Router {
     /// The configured spend-plane cloud policy.
     pub fn cloud_policy(&self) -> arkavo_budget::CloudPolicy {
         self.cloud_policy
+    }
+
+    /// Grant one-shot user confirmation for the next cloud upgrade.
+    ///
+    /// Call this after the user approves a `CloudUpgradeOffered` event, then
+    /// re-dispatch the request: under `AskBeforeCloud` the next collapse-driven
+    /// escalation will be authorized (within the budget cap). The flag is
+    /// consumed by the first routing decision that consults it.
+    pub fn confirm_next_cloud_upgrade(&self) {
+        self.cloud_confirmation
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Consume the one-shot cloud confirmation (read-and-clear).
+    fn consume_cloud_confirmation(&self) -> bool {
+        self.cloud_confirmation
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Attach a live budget tracker so the loop's cloud-escalation decision
@@ -1323,6 +1359,7 @@ impl Router {
             cloud_policy: self.cloud_policy,
             feasibility_baseline: self.feasibility_baseline.clone(),
             budget_tracker: self.budget_tracker.clone(),
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
