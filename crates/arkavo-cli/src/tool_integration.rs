@@ -92,7 +92,22 @@ pub async fn process_with_tools(
         arkavo_router::preflight::PreflightModerator::new()
     });
 
-    let router = Arc::new(Router::new().await?.with_preflight(moderator));
+    // Spend plane: adopt the AGENTS.md cloud policy (resolved by the shared
+    // server-crate helper) and share one budget tracker between the router
+    // (live-cap enforcement) and UCP below.
+    let cloud_policy = arkavo_server::cloud_policy_from_agents_md();
+    let ucp_budget_tracker = std::sync::Arc::new(
+        arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
+            .await
+            .map_err(|e| format!("Failed to create budget tracker: {e}"))?,
+    );
+    let router = Arc::new(
+        Router::new()
+            .await?
+            .with_preflight(moderator)
+            .with_cloud_policy(cloud_policy)
+            .with_budget_tracker(ucp_budget_tracker.clone()),
+    );
 
     // Create critic pipeline for post-LLM validation
     let critic = arkavo_critic::default_pipeline();
@@ -113,13 +128,9 @@ pub async fn process_with_tools(
     ));
     arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
 
-    // Register UCP payment tools for AI agent commerce
-    // Uses the same budget tracker infrastructure for spending limits
-    let ucp_budget_tracker = std::sync::Arc::new(
-        arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
-            .await
-            .map_err(|e| format!("Failed to create UCP budget tracker: {e}"))?,
-    );
+    // Register UCP payment tools for AI agent commerce.
+    // Reuses the same budget tracker wired into the router above so spend
+    // accounting is unified.
     let ucp_state = std::sync::Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(
         ucp_budget_tracker,
     )));

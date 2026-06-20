@@ -252,6 +252,25 @@ impl ModelChoice {
         Self::LocalQwen35_27B,
     ];
 
+    /// All paid cloud model variants. Used by the spend plane to exclude cloud
+    /// arms from a feasibility/quality re-route when the cloud policy does not
+    /// authorize silent spend. Every entry satisfies `is_cloud()`.
+    pub const ALL_CLOUD: &[Self] = &[
+        Self::GeminiFlash,
+        Self::Gemini35Flash,
+        Self::Gemini35FlashMinimal,
+        Self::Gemini35FlashMedium,
+        Self::Gemini35FlashHigh,
+        Self::GeminiPro,
+        Self::ClaudeSonnet,
+        Self::ClaudeOpus,
+        Self::ClaudeFable5,
+        Self::DeepSeekV32,
+        Self::DeepSeekV32Speciale,
+        Self::KimiK2,
+        Self::Glm52,
+    ];
+
     pub fn is_anthropic(&self) -> bool {
         matches!(
             self,
@@ -757,7 +776,7 @@ impl RoutingDecision {
         }
     }
 
-    fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
+    pub(crate) fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
         let token_estimate = category.estimated_tokens();
 
         match model {
@@ -1083,6 +1102,23 @@ mod tests {
     fn test_model_choice_is_local() {
         assert!(ModelChoice::LocalGemma4B.is_local());
         assert!(!ModelChoice::GeminiFlash.is_local());
+    }
+
+    // Regression: the spend plane excludes ALL_CLOUD on a feasibility/quality
+    // re-route, so every listed arm must actually be a cloud arm — a local arm
+    // slipping in would wrongly block a free local model.
+    #[test]
+    fn all_cloud_entries_are_cloud_and_disjoint_from_local() {
+        for m in ModelChoice::ALL_CLOUD {
+            assert!(m.is_cloud(), "{m:?} is in ALL_CLOUD but is not cloud");
+        }
+        for m in ModelChoice::ALL_LOCAL {
+            assert!(m.is_local(), "{m:?} is in ALL_LOCAL but is not local");
+            assert!(
+                !ModelChoice::ALL_CLOUD.contains(m),
+                "{m:?} appears in both ALL_LOCAL and ALL_CLOUD"
+            );
+        }
     }
 
     #[test]

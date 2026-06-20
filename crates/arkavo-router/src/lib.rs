@@ -14,6 +14,7 @@ pub mod metrics;
 pub mod model_discovery;
 pub mod optimal_config;
 pub mod orchestrator;
+pub mod planes;
 pub mod prediction;
 pub mod preflight;
 pub mod prompt_advisor;
@@ -47,6 +48,12 @@ pub use metrics::RoutingMetrics;
 pub use orchestrator::{
     ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
     ScalingDecision,
+};
+pub use planes::{
+    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityBaseline,
+    FeasibilityBaselineSnapshot, FeasibilityVerdict, LocalPlan, RuntimeStats, UpgradeContext,
+    UpgradeOffer, assess_feasibility, augment_exclusions_for_policy, authorize_upgrade,
+    detect_collapse, plan_local, upgrade_offer,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
@@ -95,6 +102,58 @@ pub enum RouterEvent {
         accept_rate_pct: u32,
         sample_size: u32,
     },
+    /// A local answer visibly collapsed and a cloud upgrade was offered, but the
+    /// cloud policy did not authorize silent spend, so the router stayed local.
+    ///
+    /// This is the quality→spend boundary made observable: the collapse (a
+    /// quality signal) requested an upgrade, and the spend plane refused to
+    /// spend without asking. Operators see how often local-first holds.
+    CloudEscalationBlocked {
+        /// What triggered the refused escalation, e.g. `collapse:RepetitionLoop`.
+        reason: String,
+        /// The cloud policy that refused, e.g. `AskBeforeCloud`.
+        policy: String,
+    },
+    /// The feasibility plane reported a non-nominal local runtime condition.
+    ///
+    /// Pre-dispatch this surfaces a reshape need (prompt does not fit the
+    /// context) or unavailability; post-dispatch it surfaces degraded
+    /// throughput for the model+context configuration. It is a *cost/feasibility*
+    /// signal only — it never authorizes cloud spend. Consumers (UI, the RLM
+    /// chunking layer) decide what to do with it.
+    LocalFeasibility {
+        model: String,
+        /// The `FeasibilityVerdict` as a debug string, e.g. `LocalNeedsChunking`.
+        verdict: String,
+        prompt_tokens: u32,
+        n_ctx: u32,
+        /// Observed decode throughput (tokens/sec); `None` for the pre-dispatch
+        /// structural check, `Some` for the post-dispatch throughput sample.
+        tokens_per_sec: Option<f32>,
+    },
+    /// A local answer collapsed and the cloud policy *permits* cloud but
+    /// requires confirmation (`AskBeforeCloud`). The router stayed local and
+    /// surfaced this offer so the caller (CLI / UI) can prompt the user, then
+    /// `confirm_next_cloud_upgrade()` + re-dispatch to escalate. This is the
+    /// "ask before cloud" handshake made observable.
+    CloudUpgradeOffered {
+        /// Why the upgrade is offered, e.g. `LocalCollapsed`.
+        reason: String,
+        /// Projected cloud cost in cents.
+        projected_cost_cents: u64,
+    },
+}
+
+impl RouterEvent {
+    /// Stable snake_case kind, used as the observability counter key.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::SpecDecodingDisabled { .. } => "spec_decoding_disabled",
+            Self::CloudEscalationBlocked { .. } => "cloud_escalation_blocked",
+            Self::LocalFeasibility { .. } => "local_feasibility",
+            Self::CloudUpgradeOffered { .. } => "cloud_upgrade_offered",
+        }
+    }
 }
 
 #[cfg(feature = "llama-cpp")]
@@ -177,6 +236,23 @@ pub struct Router {
     /// Structured router events waiting to be consumed by the caller.
     /// Callers drain these via `drain_events()` instead of scraping log lines.
     pending_events: Arc<std::sync::Mutex<Vec<RouterEvent>>>,
+    /// Spend-plane posture. Decides whether a feasibility/quality re-route may
+    /// cross into paid cloud. Defaults to `AskBeforeCloud`, so an availability
+    /// failure or a quality collapse never silently spends — it stays local.
+    cloud_policy: arkavo_budget::CloudPolicy,
+    /// Per-config runtime-cost baseline for the feasibility plane. Learns each
+    /// model+context's decode throughput from real `InferenceTiming` so "slow"
+    /// is judged relative to that configuration, not an absolute threshold.
+    feasibility_baseline: Arc<planes::FeasibilityBaseline>,
+    /// Optional live budget tracker (spend plane). When present, the loop's
+    /// cloud-escalation decision consults the real remaining cap via
+    /// `authorize_cloud_spend`; when absent there is no cap to enforce.
+    budget_tracker: Option<Arc<arkavo_budget::BudgetTracker>>,
+    /// One-shot user confirmation for the next cloud upgrade under
+    /// `AskBeforeCloud`. The caller sets it via `confirm_next_cloud_upgrade()`
+    /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
+    /// when authorizing spend.
+    cloud_confirmation: std::sync::atomic::AtomicBool,
 }
 
 impl Router {
@@ -221,6 +297,14 @@ impl Router {
             )),
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
+            cloud_policy: arkavo_budget::CloudPolicy::default(),
+            feasibility_baseline: Arc::new(
+                planes::FeasibilityBaseline::default_path()
+                    .map(planes::FeasibilityBaseline::load)
+                    .unwrap_or_default(),
+            ),
+            budget_tracker: None,
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -265,6 +349,14 @@ impl Router {
             )),
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
+            cloud_policy: arkavo_budget::CloudPolicy::default(),
+            feasibility_baseline: Arc::new(
+                planes::FeasibilityBaseline::default_path()
+                    .map(planes::FeasibilityBaseline::load)
+                    .unwrap_or_default(),
+            ),
+            budget_tracker: None,
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -276,6 +368,185 @@ impl Router {
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
         self
+    }
+
+    /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
+    ///
+    /// Governs whether a feasibility/quality re-route may cross into paid
+    /// cloud. Only `CloudWithinCap` permits silent cloud spend; the other
+    /// postures keep an availability failure or quality collapse on a local
+    /// model.
+    #[must_use]
+    pub fn with_cloud_policy(mut self, policy: arkavo_budget::CloudPolicy) -> Self {
+        self.cloud_policy = policy;
+        self
+    }
+
+    /// The configured spend-plane cloud policy.
+    pub fn cloud_policy(&self) -> arkavo_budget::CloudPolicy {
+        self.cloud_policy
+    }
+
+    /// Grant one-shot user confirmation for the next cloud upgrade.
+    ///
+    /// Call this after the user approves a `CloudUpgradeOffered` event, then
+    /// re-dispatch the request: under `AskBeforeCloud` the next collapse-driven
+    /// escalation will be authorized (within the budget cap). The flag is
+    /// consumed by the first routing decision that consults it.
+    pub fn confirm_next_cloud_upgrade(&self) {
+        self.cloud_confirmation
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Consume the one-shot cloud confirmation (read-and-clear).
+    fn consume_cloud_confirmation(&self) -> bool {
+        self.cloud_confirmation
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Attach a live budget tracker so the loop's cloud-escalation decision
+    /// enforces the real remaining cap (spend plane), not just the policy gate.
+    #[must_use]
+    pub fn with_budget_tracker(mut self, tracker: Arc<arkavo_budget::BudgetTracker>) -> Self {
+        self.budget_tracker = Some(tracker);
+        self
+    }
+
+    /// Spend caps for a cloud-escalation decision, read from the live budget
+    /// tracker. Without a tracker (or a session limit) there is no cap to
+    /// enforce, so the remaining cap is reported as effectively unbounded — the
+    /// policy gate in `authorize_cloud_spend` still applies.
+    async fn cloud_spend_caps(&self) -> arkavo_budget::SpendCaps {
+        let unbounded = arkavo_budget::TokenCost::from_dollars(f64::from(u32::MAX));
+        let remaining_cap = match &self.budget_tracker {
+            Some(tracker) => {
+                let status = tracker.get_status().await;
+                status
+                    .session_limit
+                    .map(|limit| {
+                        limit
+                            .checked_sub(status.session_spent)
+                            .unwrap_or(arkavo_budget::TokenCost::ZERO)
+                    })
+                    .unwrap_or(unbounded)
+            }
+            None => unbounded,
+        };
+        arkavo_budget::SpendCaps {
+            remaining_cap,
+            per_request_max: None,
+        }
+    }
+
+    /// Projected cost of escalating this decision to cloud, used by the spend
+    /// plane's cap check. Estimates against the first cloud arm in the decision's
+    /// fallback chain (or a cheap default), since the concrete arm is only
+    /// chosen after the spend gate passes.
+    fn projected_cloud_cost(&self, decision: &RoutingDecision) -> arkavo_budget::TokenCost {
+        let arm = decision
+            .fallback_chain
+            .iter()
+            .find(|m| m.is_cloud())
+            .cloned()
+            .unwrap_or(ModelChoice::GeminiFlash);
+        arkavo_budget::TokenCost::from_dollars(RoutingDecision::estimate_cost(
+            &arm,
+            decision.task_category,
+        ))
+    }
+
+    /// Exclusion set for a feasibility/quality-driven re-route.
+    ///
+    /// Starts from the cooldown-excluded models, then applies the spend plane:
+    /// unless the cloud policy authorizes silent spend, all cloud arms are
+    /// excluded so re-selection stays local. This is how the routing loop keeps
+    /// an availability failure or a quality collapse from silently spending.
+    async fn reroute_exclusions(&self) -> Vec<String> {
+        let excluded = self.get_excluded_models().await;
+        planes::augment_exclusions_for_policy(excluded, self.cloud_policy)
+    }
+
+    /// Free KV-cache slots for a local model, read from the live context pool.
+    /// Defaults to 1 ("assume placeable") when the pool has no entry or on
+    /// builds without the local engine — an honest fallback, not a fake count.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn kv_slots_free(&self, model_name: &str) -> usize {
+        self.model_registry
+            .context_pool()
+            .stats(model_name)
+            .map(|s| s.available)
+            .unwrap_or(1)
+    }
+
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    fn kv_slots_free(&self, _model_name: &str) -> usize {
+        1
+    }
+
+    /// Pre-dispatch feasibility check for a local model (the feasibility plane).
+    ///
+    /// Assembles live `RuntimeStats` (prompt estimate, model context window,
+    /// KV-cache availability) and classifies. When the prompt does not fit
+    /// (reshape) or local cannot run, it emits a `LocalFeasibility` event so the
+    /// UI / RLM chunking layer can react. Cloud models are skipped, and this
+    /// never authorizes spend — it only surfaces a cost/feasibility signal.
+    fn check_local_feasibility(&self, model: &ModelChoice, prompt_tokens: u32) {
+        if !model.is_local() {
+            return;
+        }
+        let n_ctx =
+            arkavo_context::rlm_detection::model_context_size(Some(model.name()), false) as u32;
+        let stats = RuntimeStats {
+            prompt_tokens,
+            n_ctx,
+            local_model_available: self.is_model_available(model),
+            kv_cache_slots_free: self.kv_slots_free(model.name()),
+            tokens_per_sec: None,
+            context_overflow: false,
+        };
+        let key = FeasibilityBaseline::key(model.name(), n_ctx);
+        let verdict = self.feasibility_baseline.classify(&stats, &key);
+        if verdict.needs_reshape() || verdict == FeasibilityVerdict::LocalCannotRun {
+            self.emit_event(RouterEvent::LocalFeasibility {
+                model: model.name().to_string(),
+                verdict: format!("{verdict:?}"),
+                prompt_tokens,
+                n_ctx,
+                tokens_per_sec: None,
+            });
+        }
+    }
+
+    /// Post-dispatch: record observed decode throughput for a local model into
+    /// the per-config baseline, and emit a `LocalFeasibility` event when the
+    /// sample is slow *for that configuration*. Feasibility telemetry only —
+    /// it learns "slow" per model+context rather than from an absolute floor,
+    /// and never authorizes spend.
+    fn record_local_throughput(
+        &self,
+        model: &ModelChoice,
+        timing: &arkavo_llm::InferenceTiming,
+        prompt_tokens: u32,
+    ) {
+        if !model.is_local() || timing.generation_ms <= 0.0 || timing.n_eval == 0 {
+            return;
+        }
+        let tps = (f64::from(timing.n_eval) / (timing.generation_ms / 1000.0)) as f32;
+        let n_ctx =
+            arkavo_context::rlm_detection::model_context_size(Some(model.name()), false) as u32;
+        let key = FeasibilityBaseline::key(model.name(), n_ctx);
+        // Judge against prior history before folding this sample in.
+        let slow = self.feasibility_baseline.is_slow(&key, tps) == Some(true);
+        self.feasibility_baseline.record(&key, tps);
+        if slow {
+            self.emit_event(RouterEvent::LocalFeasibility {
+                model: model.name().to_string(),
+                verdict: format!("{:?}", FeasibilityVerdict::LocalCanRunSlowly),
+                prompt_tokens,
+                n_ctx,
+                tokens_per_sec: Some(tps),
+            });
+        }
     }
 
     /// Run preflight moderation check without full classification.
@@ -386,22 +657,28 @@ impl Router {
         let decision = self.spec_stats.decide(model_name);
         if let Some(rate_pct) = decision.crossed_below_threshold {
             let sample_size = self.spec_stats.window();
-            if let Ok(mut g) = self.pending_events.lock() {
-                // Cap to prevent unbounded growth in the absence of a
-                // drain_events() consumer. In practice the queue fires
-                // at most once per model per threshold crossing, but a
-                // long-running process with many models flapping above
-                // and below threshold would accumulate otherwise.
-                if g.len() < 1024 {
-                    g.push(RouterEvent::SpecDecodingDisabled {
-                        model: model_name.to_string(),
-                        accept_rate_pct: rate_pct,
-                        sample_size,
-                    });
-                }
-            }
+            self.emit_event(RouterEvent::SpecDecodingDisabled {
+                model: model_name.to_string(),
+                accept_rate_pct: rate_pct,
+                sample_size,
+            });
         }
         decision.use_spec
+    }
+
+    /// Enqueue a structured router event for telemetry consumers.
+    ///
+    /// Capped at 1024 pending events to bound growth when no `drain_events()`
+    /// consumer is polling.
+    pub(crate) fn emit_event(&self, event: RouterEvent) {
+        // Backend sink: count by kind at emit time so events are observable
+        // even when no `drain_events()` consumer (e.g. the AG-UI gateway) runs.
+        arkavo_observability::event_counters::global_event_counters().increment(event.kind());
+        if let Ok(mut g) = self.pending_events.lock()
+            && g.len() < 1024
+        {
+            g.push(event);
+        }
     }
 
     /// Drain all pending structured router events.
@@ -1079,6 +1356,10 @@ impl Router {
             reward_failure_counts: self.reward_failure_counts.clone(),
             spec_stats: self.spec_stats.clone(),
             pending_events: self.pending_events.clone(),
+            cloud_policy: self.cloud_policy,
+            feasibility_baseline: self.feasibility_baseline.clone(),
+            budget_tracker: self.budget_tracker.clone(),
+            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
 

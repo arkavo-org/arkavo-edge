@@ -36,8 +36,23 @@ impl LocalEngine {
             router
         };
 
+        // Spend plane: adopt the configured cloud policy (shared resolver), and
+        // share one budget tracker between the router (live-cap enforcement) and
+        // UCP.
+        let cloud_policy = crate::spend_plane::cloud_policy_from_config(&agent_config);
+        let budget_tracker =
+            arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
+                .await
+                .ok()
+                .map(Arc::new);
+        let router = router.with_cloud_policy(cloud_policy);
+        let router = match budget_tracker {
+            Some(ref tracker) => router.with_budget_tracker(tracker.clone()),
+            None => router,
+        };
+
         let router = Arc::new(router);
-        let tool_registry = Arc::new(Self::build_tool_registry(&router).await);
+        let tool_registry = Arc::new(Self::build_tool_registry(&router, budget_tracker).await);
 
         Ok(Self {
             router,
@@ -56,7 +71,10 @@ impl LocalEngine {
     }
 
     /// Build a ToolRegistry with all available tool sets.
-    async fn build_tool_registry(router: &Arc<Router>) -> ToolRegistry {
+    async fn build_tool_registry(
+        router: &Arc<Router>,
+        budget_tracker: Option<Arc<arkavo_budget::BudgetTracker>>,
+    ) -> ToolRegistry {
         // Start with built-in tools (time, filesystem, etc.)
         let storage = match arkavo_memory::storage::MemoryStorage::new().await {
             Ok(s) => Arc::new(s),
@@ -80,18 +98,19 @@ impl LocalEngine {
         ));
         arkavo_hrm::tools::register_tools(&mut registry, hrm_state);
 
-        // UCP payment tools
-        match arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default()).await {
-            Ok(tracker) => {
-                let ucp_budget_tracker = Arc::new(tracker);
-                let ucp_state = Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(
-                    ucp_budget_tracker,
-                )));
-                arkavo_ucp::register_tools(&mut registry, ucp_state);
-            }
-            Err(e) => {
-                warn!("UCP tools disabled: {e}");
-            }
+        // UCP payment tools — reuse the router's budget tracker so spend
+        // accounting is unified; fall back to a fresh default tracker.
+        let ucp_budget_tracker = match budget_tracker {
+            Some(tracker) => Some(tracker),
+            None => arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
+                .await
+                .map(Arc::new)
+                .map_err(|e| warn!("UCP tools disabled: {e}"))
+                .ok(),
+        };
+        if let Some(tracker) = ucp_budget_tracker {
+            let ucp_state = Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(tracker)));
+            arkavo_ucp::register_tools(&mut registry, ucp_state);
         }
 
         // Claude Agent SDK tools (feature-gated)

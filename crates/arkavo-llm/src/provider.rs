@@ -58,6 +58,12 @@ pub struct InferenceTiming {
     /// requested, or spec ran (in which case n_draft/n_accepted are Some).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_bypassed: Option<String>,
+    /// Mean per-token log-probability of the generated answer, when the engine
+    /// computes it. Near `0` is confident; very negative means the model was
+    /// guessing. Feeds the quality plane's `LowConfidence` adequacy signal.
+    /// `None` for providers/paths that don't surface logprobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avg_logprob: Option<f32>,
 }
 
 /// Per-request completion options that the router populates and the

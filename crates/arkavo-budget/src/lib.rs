@@ -1,4 +1,5 @@
 pub mod api;
+pub mod cloud_policy;
 pub mod compute_budget;
 pub mod config;
 pub mod cost;
@@ -7,6 +8,10 @@ pub mod policy;
 pub mod provider_costs;
 pub mod tracker;
 
+pub use cloud_policy::{
+    CloudPolicy, CloudSpendDecision, CloudSpendReason, CloudSpendRequest, DenyReason, SpendCaps,
+    authorize_cloud_spend,
+};
 pub use compute_budget::{
     AgentAllocationSummary, AgentComputeBudget, BudgetAllocation, BudgetPolicy,
     ComputeBudgetSnapshot, SharedComputeBudget, UrgencyLevel, new_shared_compute_budget,

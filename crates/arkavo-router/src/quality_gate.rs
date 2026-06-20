@@ -408,6 +408,12 @@ impl super::Router {
                 "Semaphore acquired"
             );
 
+            // Feasibility plane (pre-dispatch): assess whether the local model
+            // can run this prompt now, surfacing a reshape/unavailable signal
+            // before we spend an inference on a doomed call. Local-only; never
+            // spends.
+            self.check_local_feasibility(&current_decision.recommended_model, input_tokens as u32);
+
             let max_tokens = if execution_mode { Some(200usize) } else { None };
             let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, max_tokens)
@@ -419,21 +425,48 @@ impl super::Router {
                         .await;
 
                     if attempt + 1 < MAX_RETRIES {
-                        let excluded = self.get_excluded_models().await;
+                        // Feasibility plane: a provider error (timeout / OOM /
+                        // crash) is an *availability* failure, not a quality
+                        // one. Per the plane separation it may not silently
+                        // cross into paid cloud — `reroute_exclusions` drops the
+                        // cloud arms unless the cloud policy authorizes silent
+                        // spend, so the retry stays local under the default
+                        // `AskBeforeCloud` posture.
+                        let excluded = self.reroute_exclusions().await;
                         let re_class = classifier::Classification::new(
                             current_decision.task_category,
                             current_decision.confidence,
                             "Re-routed after availability failure".to_string(),
                         );
-                        current_decision = self
+                        match self
                             .selector
                             .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
-                            .await?;
-                        tracing::info!(
-                            model = %current_decision.recommended_model.name(),
-                            "Re-routed after availability failure: {e}"
-                        );
-                        continue;
+                            .await
+                        {
+                            Ok(next) => {
+                                current_decision = next;
+                                tracing::info!(
+                                    model = %current_decision.recommended_model.name(),
+                                    cloud_policy = ?self.cloud_policy(),
+                                    stayed_local = current_decision.recommended_model.is_local(),
+                                    "Re-routed after availability failure: {e}"
+                                );
+                                continue;
+                            }
+                            Err(reroute_err) => {
+                                // No local model could be selected and the cloud
+                                // policy bars a silent paid fallback. Surface the
+                                // quality→spend boundary so callers can tell
+                                // "local unavailable, cloud blocked by policy"
+                                // from a generic provider failure, then propagate
+                                // the more specific re-route error.
+                                self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
+                                    reason: format!("availability:{e}"),
+                                    policy: format!("{:?}", self.cloud_policy()),
+                                });
+                                return Err(reroute_err);
+                            }
+                        }
                     }
                     return Err(Error::ModelExecution(format!("Provider error: {e}")));
                 }
@@ -621,6 +654,127 @@ impl super::Router {
                 }
             }
 
+            // Collapse plane (adequacy v1): catch visible breakdowns the
+            // validator and Judge miss — empty output and repetition loops on a
+            // final-answer turn. A collapse may trigger a retry/offer, but per
+            // the plane separation it never silently spends: cloud becomes a
+            // retry candidate only when the policy authorizes silent spend.
+            if !execution_mode && response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
+                use crate::planes::{self, CollapseSignal, CollapseVerdict, UpgradeOffer};
+                let collapse = planes::detect_collapse(&planes::AnswerObservation {
+                    text: &response.content,
+                    hit_output_cap: response.finish_reason.as_deref() == Some("length"),
+                    tool_call_required: false,
+                    precomputed: None,
+                    avg_logprob: response
+                        .inference_timing
+                        .as_ref()
+                        .and_then(|t| t.avg_logprob),
+                });
+                // Retry/offer on breakdowns where a fresh attempt or a stronger
+                // model helps: empty/repetition (local re-roll) and low token
+                // confidence (the adequacy signal — a stronger model may be
+                // surer). A truncated-but-coherent long answer is not re-rolled.
+                if let CollapseVerdict::Collapsed(
+                    signal @ (CollapseSignal::EmptyOutput
+                    | CollapseSignal::RepetitionLoop
+                    | CollapseSignal::LowConfidence),
+                ) = collapse
+                {
+                    let offer = planes::upgrade_offer(
+                        self.cloud_policy(),
+                        &collapse,
+                        planes::UpgradeContext::default(),
+                    );
+                    // Spend plane: a collapse only *requests* cloud. Authorize
+                    // it through the budget plane — policy AND the live remaining
+                    // cap — never on the quality signal alone. A one-shot user
+                    // confirmation (set via confirm_next_cloud_upgrade after a
+                    // CloudUpgradeOffered) satisfies AskBeforeCloud; otherwise the
+                    // decision tells us whether to offer (ask) or refuse.
+                    let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
+                        let caps = self.cloud_spend_caps().await;
+                        let projected = self.projected_cloud_cost(&current_decision);
+                        let confirmed = self.consume_cloud_confirmation();
+                        match planes::authorize_upgrade(
+                            self.cloud_policy(),
+                            reason,
+                            projected,
+                            caps,
+                            confirmed,
+                        ) {
+                            arkavo_budget::CloudSpendDecision::Authorized { .. } => true,
+                            arkavo_budget::CloudSpendDecision::NeedsUserConfirmation {
+                                projected_cost,
+                            } => {
+                                // Policy permits cloud but needs the user's OK:
+                                // surface the offer and stay local this turn.
+                                self.emit_event(crate::RouterEvent::CloudUpgradeOffered {
+                                    reason: format!("{reason:?}"),
+                                    projected_cost_cents: projected_cost.as_cents(),
+                                });
+                                false
+                            }
+                            arkavo_budget::CloudSpendDecision::Denied(_) => {
+                                self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
+                                    reason: format!("collapse:{signal:?}"),
+                                    policy: format!("{:?}", self.cloud_policy()),
+                                });
+                                false
+                            }
+                        }
+                    } else {
+                        false
+                    };
+                    let mut excluded = if allow_cloud {
+                        self.get_excluded_models().await
+                    } else {
+                        self.reroute_exclusions().await
+                    };
+                    // Exclude the model that just collapsed so re-selection
+                    // actually rotates the arm instead of reproducing the same
+                    // collapse and burning a retry.
+                    let collapsed_name = current_decision.recommended_model.name().to_string();
+                    if !excluded.iter().any(|e| e == &collapsed_name) {
+                        excluded.push(collapsed_name);
+                    }
+                    let re_class = classifier::Classification::new(
+                        current_decision.task_category,
+                        current_decision.confidence,
+                        format!("Re-routed after local collapse ({signal:?})"),
+                    );
+                    if let Ok(next) = self
+                        .selector
+                        .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
+                        .await
+                    {
+                        // Steer Thompson Sampling away from the collapsing
+                        // model before rotating off it, mirroring the
+                        // Judge-rejection path — otherwise the retry doesn't
+                        // learn from the collapse.
+                        self.model_learning
+                            .immediate_update(
+                                current_decision.recommended_model.name(),
+                                &BurstFeedback::failure(
+                                    uuid::Uuid::new_v4(),
+                                    current_decision.task_category.as_str().to_string(),
+                                    inference_start.elapsed().as_millis() as u64,
+                                ),
+                            )
+                            .await;
+                        tracing::info!(
+                            signal = ?signal,
+                            from = %current_decision.recommended_model.name(),
+                            to = %next.recommended_model.name(),
+                            cloud_allowed = allow_cloud,
+                            "Re-routed after local collapse"
+                        );
+                        current_decision = next;
+                        continue;
+                    }
+                }
+            }
+
             if let Some(ref labels) = advice_labels {
                 self.advisor.record_feedback(labels, true);
             }
@@ -666,6 +820,18 @@ impl super::Router {
                     .with_usage(current_decision.estimated_cost_usd, 0),
                 )
                 .await;
+
+            // Feasibility plane (post-dispatch): fold this call's real decode
+            // throughput into the per-config baseline so "slow" is learned per
+            // model+context, and surface a degraded-throughput signal when this
+            // sample is slow for that configuration.
+            if let Some(timing) = response.inference_timing.as_ref() {
+                self.record_local_throughput(
+                    &current_decision.recommended_model,
+                    timing,
+                    input_tokens as u32,
+                );
+            }
 
             // Record which model was selected so the conductor can attribute
             // reward-based corrective feedback to the right Thompson Sampling prior.

@@ -315,6 +315,14 @@ impl LlamaModel {
         unsafe { ffi::llama_model_get_vocab(self.ptr) }
     }
 
+    /// Number of tokens in the model's vocabulary — the length of one row of
+    /// logits from `get_logits_ith`. Used to read per-token logprobs.
+    pub fn n_vocab(&self) -> i32 {
+        // SAFETY: get_vocab returns the model's vocab pointer (non-null for a
+        // loaded model); llama_vocab_n_tokens reads its token count.
+        unsafe { ffi::llama_vocab_n_tokens(self.get_vocab()) }
+    }
+
     pub fn get_eos_token(&self) -> i32 {
         let vocab = self.get_vocab();
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime

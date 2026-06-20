@@ -371,6 +371,11 @@ async fn generate_tokens_pooled_baseline(
 
         let mut pos = start_pos;
         let end_pos = start_pos.saturating_add(i32::try_from(max_generation).unwrap_or(i32::MAX));
+        // Per-token confidence accumulation for the quality plane's
+        // LowConfidence signal: mean log-probability of the sampled tokens.
+        let n_vocab = model.n_vocab().max(0) as usize;
+        let mut logprob_sum = 0.0f64;
+        let mut logprob_count = 0u32;
         while pos < end_pos {
             validate_logits(&ctx)?;
             let token = sampler.sample(&ctx, -1);
@@ -424,6 +429,21 @@ async fn generate_tokens_pooled_baseline(
             }
             tokens_generated += 1;
 
+            // Accumulate the sampled token's log-probability from the logits
+            // that produced it (still valid until the next decode_batch below).
+            if n_vocab > 0 && token >= 0 {
+                let logits_ptr = ctx.get_logits_ith(-1);
+                if !logits_ptr.is_null() {
+                    // SAFETY: get_logits_ith(-1) returns a row of n_vocab f32s
+                    // for the just-sampled position; valid before the next decode.
+                    let logits = unsafe { std::slice::from_raw_parts(logits_ptr, n_vocab) };
+                    if let Some(lp) = token_logprob(logits, token as usize) {
+                        logprob_sum += f64::from(lp);
+                        logprob_count += 1;
+                    }
+                }
+            }
+
             if !piece.is_empty()
                 && tx
                     .send(Ok(StreamResponse {
@@ -474,6 +494,8 @@ async fn generate_tokens_pooled_baseline(
             n_draft: None,
             n_accepted: None,
             spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
+            avg_logprob: (logprob_count > 0)
+                .then(|| (logprob_sum / f64::from(logprob_count)) as f32),
         };
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
             tokens_generated,
@@ -859,6 +881,8 @@ async fn generate_tokens_baseline(
             n_draft: None,
             n_accepted: None,
             spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
+            // This path does not accumulate per-token logprobs.
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
@@ -931,6 +955,55 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
     }
 
     Ok(())
+}
+
+/// Log-probability of `token` under `logits` (length n_vocab): the log-softmax
+/// value, computed stably as `logits[token] - logsumexp(logits)`. Returns
+/// `None` if the token is out of range or the distribution is degenerate.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn token_logprob(logits: &[f32], token: usize) -> Option<f32> {
+    let chosen = *logits.get(token)?;
+    if !chosen.is_finite() {
+        return None;
+    }
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    if !max.is_finite() {
+        return None;
+    }
+    let sum_exp: f64 = logits.iter().map(|&l| f64::from(l - max).exp()).sum();
+    if sum_exp <= 0.0 {
+        return None;
+    }
+    let logsumexp = f64::from(max) + sum_exp.ln();
+    Some((f64::from(chosen) - logsumexp) as f32)
+}
+
+#[cfg(all(test, feature = "llama-cpp", not(target_env = "musl")))]
+mod logprob_tests {
+    use super::token_logprob;
+
+    #[test]
+    fn two_equal_logits_give_ln_half() {
+        let lp = token_logprob(&[1.0, 1.0], 0).unwrap();
+        assert!((lp - 0.5f32.ln()).abs() < 1e-4, "got {lp}");
+    }
+
+    #[test]
+    fn dominant_token_is_high_confidence() {
+        let lp = token_logprob(&[20.0, 0.0, 0.0], 0).unwrap();
+        assert!(lp > -0.01, "dominant token ≈ 0 logprob, got {lp}");
+    }
+
+    #[test]
+    fn unlikely_token_is_low_confidence() {
+        let lp = token_logprob(&[20.0, 0.0, 0.0], 1).unwrap();
+        assert!(lp < -10.0, "unlikely token very negative, got {lp}");
+    }
+
+    #[test]
+    fn out_of_range_token_is_none() {
+        assert!(token_logprob(&[1.0, 2.0], 5).is_none());
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
