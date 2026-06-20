@@ -438,17 +438,35 @@ impl super::Router {
                             current_decision.confidence,
                             "Re-routed after availability failure".to_string(),
                         );
-                        current_decision = self
+                        match self
                             .selector
                             .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
-                            .await?;
-                        tracing::info!(
-                            model = %current_decision.recommended_model.name(),
-                            cloud_policy = ?self.cloud_policy(),
-                            stayed_local = current_decision.recommended_model.is_local(),
-                            "Re-routed after availability failure: {e}"
-                        );
-                        continue;
+                            .await
+                        {
+                            Ok(next) => {
+                                current_decision = next;
+                                tracing::info!(
+                                    model = %current_decision.recommended_model.name(),
+                                    cloud_policy = ?self.cloud_policy(),
+                                    stayed_local = current_decision.recommended_model.is_local(),
+                                    "Re-routed after availability failure: {e}"
+                                );
+                                continue;
+                            }
+                            Err(reroute_err) => {
+                                // No local model could be selected and the cloud
+                                // policy bars a silent paid fallback. Surface the
+                                // quality→spend boundary so callers can tell
+                                // "local unavailable, cloud blocked by policy"
+                                // from a generic provider failure, then propagate
+                                // the more specific re-route error.
+                                self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
+                                    reason: format!("availability:{e}"),
+                                    policy: format!("{:?}", self.cloud_policy()),
+                                });
+                                return Err(reroute_err);
+                            }
+                        }
                     }
                     return Err(Error::ModelExecution(format!("Provider error: {e}")));
                 }
