@@ -419,7 +419,14 @@ impl super::Router {
                         .await;
 
                     if attempt + 1 < MAX_RETRIES {
-                        let excluded = self.get_excluded_models().await;
+                        // Feasibility plane: a provider error (timeout / OOM /
+                        // crash) is an *availability* failure, not a quality
+                        // one. Per the plane separation it may not silently
+                        // cross into paid cloud — `reroute_exclusions` drops the
+                        // cloud arms unless the cloud policy authorizes silent
+                        // spend, so the retry stays local under the default
+                        // `AskBeforeCloud` posture.
+                        let excluded = self.reroute_exclusions().await;
                         let re_class = classifier::Classification::new(
                             current_decision.task_category,
                             current_decision.confidence,
@@ -431,6 +438,8 @@ impl super::Router {
                             .await?;
                         tracing::info!(
                             model = %current_decision.recommended_model.name(),
+                            cloud_policy = ?self.cloud_policy(),
+                            stayed_local = current_decision.recommended_model.is_local(),
                             "Re-routed after availability failure: {e}"
                         );
                         continue;
@@ -617,6 +626,68 @@ impl super::Router {
                         Err(e) => {
                             tracing::debug!("Judge validation skipped (model unavailable): {}", e);
                         }
+                    }
+                }
+            }
+
+            // Collapse plane (adequacy v1): catch visible breakdowns the
+            // validator and Judge miss — empty output and repetition loops on a
+            // final-answer turn. A collapse may trigger a retry/offer, but per
+            // the plane separation it never silently spends: cloud becomes a
+            // retry candidate only when the policy authorizes silent spend.
+            if !execution_mode && response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
+                use crate::planes::{self, CollapseSignal, CollapseVerdict, UpgradeOffer};
+                let collapse = planes::detect_collapse(&planes::AnswerObservation {
+                    text: &response.content,
+                    hit_output_cap: response.finish_reason.as_deref() == Some("length"),
+                    tool_call_required: false,
+                    precomputed: None,
+                });
+                // Retry only on breakdowns where a fresh attempt clearly helps;
+                // a truncated-but-coherent long answer is not re-rolled.
+                if let CollapseVerdict::Collapsed(
+                    signal @ (CollapseSignal::EmptyOutput | CollapseSignal::RepetitionLoop),
+                ) = collapse
+                {
+                    let offer = planes::upgrade_offer(
+                        self.cloud_policy(),
+                        &collapse,
+                        planes::UpgradeContext::default(),
+                    );
+                    let allow_cloud = matches!(offer, UpgradeOffer::Offer(_))
+                        && self.cloud_policy().permits_silent_cloud();
+                    let excluded = if allow_cloud {
+                        self.get_excluded_models().await
+                    } else {
+                        // Quality collapse, but the spend plane won't authorize
+                        // silent cloud — stay local and surface the boundary.
+                        if matches!(offer, UpgradeOffer::Offer(_)) {
+                            self.emit_event(crate::RouterEvent::CloudEscalationBlocked {
+                                reason: format!("collapse:{signal:?}"),
+                                policy: format!("{:?}", self.cloud_policy()),
+                            });
+                        }
+                        self.reroute_exclusions().await
+                    };
+                    let re_class = classifier::Classification::new(
+                        current_decision.task_category,
+                        current_decision.confidence,
+                        format!("Re-routed after local collapse ({signal:?})"),
+                    );
+                    if let Ok(next) = self
+                        .selector
+                        .select_adaptive(&self.model_learning, &re_class, 0.0, &excluded)
+                        .await
+                    {
+                        tracing::info!(
+                            signal = ?signal,
+                            from = %current_decision.recommended_model.name(),
+                            to = %next.recommended_model.name(),
+                            cloud_allowed = allow_cloud,
+                            "Re-routed after local collapse"
+                        );
+                        current_decision = next;
+                        continue;
                     }
                 }
             }

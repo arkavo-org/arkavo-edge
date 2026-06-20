@@ -125,6 +125,30 @@ pub fn authorize_upgrade(
     authorize_cloud_spend(policy, &request, caps)
 }
 
+/// Augment a re-route exclusion set per the plane separation.
+///
+/// A retry triggered by a feasibility failure (timeout/OOM) or a quality
+/// collapse may not silently cross into paid cloud spend. Unless the cloud
+/// policy authorizes spending without asking
+/// ([`CloudPolicy::permits_silent_cloud`]), every cloud arm is added to the
+/// `excluded` set so re-selection stays local. This is the single place the
+/// "availability/quality may not silently spend" rule is enforced in the
+/// routing loop, and it is pure so it can be unit-tested without a model.
+pub fn augment_exclusions_for_policy(
+    mut excluded: Vec<String>,
+    policy: CloudPolicy,
+) -> Vec<String> {
+    if !policy.permits_silent_cloud() {
+        for model in crate::decision::ModelChoice::ALL_CLOUD {
+            let name = model.name().to_string();
+            if !excluded.iter().any(|e| e == &name) {
+                excluded.push(name);
+            }
+        }
+    }
+    excluded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +264,51 @@ mod tests {
         // After the user confirms, the same request is authorized.
         let confirmed = authorize_upgrade(policy, reason, TokenCost::from_dollars(0.2), caps, true);
         assert!(confirmed.is_authorized());
+    }
+
+    // The plane separation in the routing loop: a feasibility/quality re-route
+    // excludes all cloud arms unless the policy permits silent cloud.
+    #[test]
+    fn reroute_excludes_cloud_unless_policy_permits() {
+        use crate::decision::ModelChoice;
+
+        for policy in [CloudPolicy::LocalOnly, CloudPolicy::AskBeforeCloud] {
+            let excluded = augment_exclusions_for_policy(Vec::new(), policy);
+            for cloud in ModelChoice::ALL_CLOUD {
+                assert!(
+                    excluded.iter().any(|e| e == cloud.name()),
+                    "{policy:?} must exclude cloud arm {}",
+                    cloud.name()
+                );
+            }
+            // Local arms must remain selectable.
+            assert!(
+                !excluded.iter().any(|e| e == ModelChoice::LocalQwen3.name()),
+                "local arms must not be excluded"
+            );
+        }
+
+        // CloudWithinCap leaves the set untouched — cloud stays selectable.
+        let excluded = augment_exclusions_for_policy(Vec::new(), CloudPolicy::CloudWithinCap);
+        assert!(excluded.is_empty());
+    }
+
+    #[test]
+    fn augment_preserves_existing_exclusions_without_duplicating() {
+        use crate::decision::ModelChoice;
+        let seed = vec![
+            ModelChoice::LocalQwen3.name().to_string(),
+            ModelChoice::Glm52.name().to_string(),
+        ];
+        let excluded = augment_exclusions_for_policy(seed, CloudPolicy::AskBeforeCloud);
+        // Glm52 was already present; it must appear exactly once.
+        let glm_count = excluded
+            .iter()
+            .filter(|e| *e == ModelChoice::Glm52.name())
+            .count();
+        assert_eq!(glm_count, 1, "existing cloud exclusion must not duplicate");
+        // The seeded local exclusion is preserved.
+        assert!(excluded.iter().any(|e| e == ModelChoice::LocalQwen3.name()));
     }
 
     // Regression: budget exhaustion keeps us local even when the user confirmed

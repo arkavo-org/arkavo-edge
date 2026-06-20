@@ -96,6 +96,25 @@ user outcomes.
 The key distinction: a collapse can trigger an upgrade *offer*; it does not
 trigger automatic spend by default.
 
+## Enforcement in the routing loop
+
+`Router::route_with_tools` (in `quality_gate.rs`) consumes the planes directly:
+
+- **Availability failure → stays local.** A provider error (timeout / OOM /
+  crash) is a feasibility failure, so the re-route runs through
+  `Router::reroute_exclusions`, which calls `augment_exclusions_for_policy`.
+  Unless the cloud policy permits silent spend (`CloudWithinCap`), every cloud
+  arm is excluded and re-selection stays local. A slow laptop never escalates to
+  a paid model on its own.
+- **Quality collapse → offer, gated by the spend plane.** On a final-answer
+  turn the loop runs `detect_collapse`. An empty or repetition-loop collapse
+  asks `upgrade_offer` whether to offer cloud; cloud only becomes a retry
+  candidate when `CloudPolicy::permits_silent_cloud` is true. Otherwise the
+  router retries locally and emits a `RouterEvent::CloudEscalationBlocked` so the
+  quality→spend boundary is observable.
+
+`Router::with_cloud_policy` sets the posture; it defaults to `AskBeforeCloud`.
+
 ## The premise to measure
 
 The cost-vs-time premise is an explicit measurement, not an assumption.

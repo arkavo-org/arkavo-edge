@@ -32,6 +32,16 @@ pub enum CloudPolicy {
     CloudWithinCap,
 }
 
+impl CloudPolicy {
+    /// Whether the router may route to a paid cloud model *without first asking*
+    /// the user. Only `CloudWithinCap` permits silent cloud spend; `LocalOnly`
+    /// and `AskBeforeCloud` require staying local (or an explicit confirmation
+    /// step) so a feasibility/quality signal can never silently spend.
+    pub fn permits_silent_cloud(self) -> bool {
+        matches!(self, Self::CloudWithinCap)
+    }
+}
+
 /// Why a cloud upgrade is being requested.
 ///
 /// A request is a *question*, never an authorization. There is deliberately no
@@ -167,6 +177,13 @@ mod tests {
     #[test]
     fn default_policy_is_ask_before_cloud() {
         assert_eq!(CloudPolicy::default(), CloudPolicy::AskBeforeCloud);
+    }
+
+    #[test]
+    fn only_cloud_within_cap_permits_silent_cloud() {
+        assert!(!CloudPolicy::LocalOnly.permits_silent_cloud());
+        assert!(!CloudPolicy::AskBeforeCloud.permits_silent_cloud());
+        assert!(CloudPolicy::CloudWithinCap.permits_silent_cloud());
     }
 
     #[test]

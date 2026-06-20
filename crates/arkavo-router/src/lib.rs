@@ -51,8 +51,8 @@ pub use orchestrator::{
 };
 pub use planes::{
     AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityVerdict, LocalPlan,
-    RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility, authorize_upgrade,
-    detect_collapse, plan_local, upgrade_offer,
+    RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility, augment_exclusions_for_policy,
+    authorize_upgrade, detect_collapse, plan_local, upgrade_offer,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
@@ -100,6 +100,18 @@ pub enum RouterEvent {
         model: String,
         accept_rate_pct: u32,
         sample_size: u32,
+    },
+    /// A local answer visibly collapsed and a cloud upgrade was offered, but the
+    /// cloud policy did not authorize silent spend, so the router stayed local.
+    ///
+    /// This is the quality→spend boundary made observable: the collapse (a
+    /// quality signal) requested an upgrade, and the spend plane refused to
+    /// spend without asking. Operators see how often local-first holds.
+    CloudEscalationBlocked {
+        /// What triggered the refused escalation, e.g. `collapse:RepetitionLoop`.
+        reason: String,
+        /// The cloud policy that refused, e.g. `AskBeforeCloud`.
+        policy: String,
     },
 }
 
@@ -183,6 +195,10 @@ pub struct Router {
     /// Structured router events waiting to be consumed by the caller.
     /// Callers drain these via `drain_events()` instead of scraping log lines.
     pending_events: Arc<std::sync::Mutex<Vec<RouterEvent>>>,
+    /// Spend-plane posture. Decides whether a feasibility/quality re-route may
+    /// cross into paid cloud. Defaults to `AskBeforeCloud`, so an availability
+    /// failure or a quality collapse never silently spends — it stays local.
+    cloud_policy: arkavo_budget::CloudPolicy,
 }
 
 impl Router {
@@ -227,6 +243,7 @@ impl Router {
             )),
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
+            cloud_policy: arkavo_budget::CloudPolicy::default(),
         })
     }
 
@@ -271,6 +288,7 @@ impl Router {
             )),
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
+            cloud_policy: arkavo_budget::CloudPolicy::default(),
         })
     }
 
@@ -282,6 +300,34 @@ impl Router {
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
         self
+    }
+
+    /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
+    ///
+    /// Governs whether a feasibility/quality re-route may cross into paid
+    /// cloud. Only `CloudWithinCap` permits silent cloud spend; the other
+    /// postures keep an availability failure or quality collapse on a local
+    /// model.
+    #[must_use]
+    pub fn with_cloud_policy(mut self, policy: arkavo_budget::CloudPolicy) -> Self {
+        self.cloud_policy = policy;
+        self
+    }
+
+    /// The configured spend-plane cloud policy.
+    pub fn cloud_policy(&self) -> arkavo_budget::CloudPolicy {
+        self.cloud_policy
+    }
+
+    /// Exclusion set for a feasibility/quality-driven re-route.
+    ///
+    /// Starts from the cooldown-excluded models, then applies the spend plane:
+    /// unless the cloud policy authorizes silent spend, all cloud arms are
+    /// excluded so re-selection stays local. This is how the routing loop keeps
+    /// an availability failure or a quality collapse from silently spending.
+    async fn reroute_exclusions(&self) -> Vec<String> {
+        let excluded = self.get_excluded_models().await;
+        planes::augment_exclusions_for_policy(excluded, self.cloud_policy)
     }
 
     /// Run preflight moderation check without full classification.
@@ -408,6 +454,18 @@ impl Router {
             }
         }
         decision.use_spec
+    }
+
+    /// Enqueue a structured router event for telemetry consumers.
+    ///
+    /// Capped at 1024 pending events to bound growth when no `drain_events()`
+    /// consumer is polling.
+    pub(crate) fn emit_event(&self, event: RouterEvent) {
+        if let Ok(mut g) = self.pending_events.lock()
+            && g.len() < 1024
+        {
+            g.push(event);
+        }
     }
 
     /// Drain all pending structured router events.
@@ -1085,6 +1143,7 @@ impl Router {
             reward_failure_counts: self.reward_failure_counts.clone(),
             spec_stats: self.spec_stats.clone(),
             pending_events: self.pending_events.clone(),
+            cloud_policy: self.cloud_policy,
         })
     }
 
