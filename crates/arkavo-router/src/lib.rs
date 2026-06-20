@@ -50,9 +50,10 @@ pub use orchestrator::{
     ScalingDecision,
 };
 pub use planes::{
-    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityBaseline, FeasibilityVerdict,
-    LocalPlan, RuntimeStats, UpgradeContext, UpgradeOffer, assess_feasibility,
-    augment_exclusions_for_policy, authorize_upgrade, detect_collapse, plan_local, upgrade_offer,
+    AnswerObservation, CollapseSignal, CollapseVerdict, FeasibilityBaseline,
+    FeasibilityBaselineSnapshot, FeasibilityVerdict, LocalPlan, RuntimeStats, UpgradeContext,
+    UpgradeOffer, assess_feasibility, augment_exclusions_for_policy, authorize_upgrade,
+    detect_collapse, plan_local, upgrade_offer,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
@@ -269,7 +270,11 @@ impl Router {
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
-            feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
+            feasibility_baseline: Arc::new(
+                planes::FeasibilityBaseline::default_path()
+                    .map(planes::FeasibilityBaseline::load)
+                    .unwrap_or_default(),
+            ),
             budget_tracker: None,
         })
     }
@@ -316,7 +321,11 @@ impl Router {
             spec_stats: Arc::new(spec_stats::SpecStats::default()),
             pending_events: Arc::new(std::sync::Mutex::new(Vec::new())),
             cloud_policy: arkavo_budget::CloudPolicy::default(),
-            feasibility_baseline: Arc::new(planes::FeasibilityBaseline::new()),
+            feasibility_baseline: Arc::new(
+                planes::FeasibilityBaseline::default_path()
+                    .map(planes::FeasibilityBaseline::load)
+                    .unwrap_or_default(),
+            ),
             budget_tracker: None,
         })
     }

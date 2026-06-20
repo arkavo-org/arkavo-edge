@@ -14,14 +14,28 @@
 //! nothing here can authorize cloud spend.
 
 use super::feasibility::{FeasibilityVerdict, RuntimeStats, assess};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Serializable form of the baseline for persistence across restarts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FeasibilityBaselineSnapshot {
+    /// Config key (`model@n_ctx`) → recent throughput samples.
+    pub windows: HashMap<String, Vec<f32>>,
+}
 
 /// Rolling per-config throughput baseline.
 #[derive(Debug, Default)]
 pub struct FeasibilityBaseline {
     windows: RwLock<HashMap<String, VecDeque<f32>>>,
+    /// Where the baseline autosaves, if persistence is enabled.
+    path: Option<PathBuf>,
+    /// Records observed since the last autosave.
+    writes_since_save: AtomicU64,
 }
 
 impl FeasibilityBaseline {
@@ -34,9 +48,69 @@ impl FeasibilityBaseline {
     /// A sample this many robust-sigma below the config median is "slow for
     /// this config", even if it clears the absolute floor.
     const SLOW_Z: f32 = 1.5;
+    /// Autosave cadence (records). A few-KB JSON write every N inferences is
+    /// negligible next to an LLM call.
+    const SAVE_EVERY: u64 = 16;
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Default persistence path (`<cache>/arkavo/feasibility_baseline.json`),
+    /// or `None` if no cache dir is available.
+    pub fn default_path() -> Option<PathBuf> {
+        dirs::cache_dir().map(|d| d.join("arkavo").join("feasibility_baseline.json"))
+    }
+
+    /// Load a persisted baseline from `path` (if present and valid) and retain
+    /// `path` for autosave. A missing or corrupt file yields an empty baseline.
+    pub fn load(path: PathBuf) -> Self {
+        let snapshot = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<FeasibilityBaselineSnapshot>(&s).ok())
+            .unwrap_or_default();
+        Self {
+            windows: RwLock::new(snapshot_to_windows(snapshot)),
+            path: Some(path),
+            writes_since_save: AtomicU64::new(0),
+        }
+    }
+
+    /// Restore from an in-memory snapshot (no autosave path attached).
+    pub fn restore(snapshot: FeasibilityBaselineSnapshot) -> Self {
+        Self {
+            windows: RwLock::new(snapshot_to_windows(snapshot)),
+            path: None,
+            writes_since_save: AtomicU64::new(0),
+        }
+    }
+
+    /// Serializable snapshot of the current state.
+    pub fn snapshot(&self) -> FeasibilityBaselineSnapshot {
+        let windows = self
+            .windows
+            .read()
+            .ok()
+            .map(|w| {
+                w.iter()
+                    .map(|(k, v)| (k.clone(), v.iter().copied().collect()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        FeasibilityBaselineSnapshot { windows }
+    }
+
+    /// Write the snapshot to the autosave path. No-op when no path is set.
+    pub fn save(&self) -> std::io::Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string(&self.snapshot())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
     }
 
     /// Canonical config key. Throughput is comparable only within a
@@ -45,7 +119,8 @@ impl FeasibilityBaseline {
         format!("{model_name}@{n_ctx}")
     }
 
-    /// Record an observed decode throughput for a config.
+    /// Record an observed decode throughput for a config, autosaving every
+    /// [`Self::SAVE_EVERY`] records when persistence is enabled.
     pub fn record(&self, key: &str, tokens_per_sec: f32) {
         if !tokens_per_sec.is_finite() || tokens_per_sec <= 0.0 {
             return;
@@ -56,6 +131,13 @@ impl FeasibilityBaseline {
             while window.len() > Self::WINDOW {
                 window.pop_front();
             }
+        }
+        // Autosave outside the write lock (`save` takes the read lock).
+        if self.path.is_some()
+            && self.writes_since_save.fetch_add(1, Ordering::Relaxed) + 1 >= Self::SAVE_EVERY
+        {
+            self.writes_since_save.store(0, Ordering::Relaxed);
+            let _ = self.save();
         }
     }
 
@@ -107,6 +189,25 @@ impl FeasibilityBaseline {
             None => structural,
         }
     }
+}
+
+/// Rebuild the bounded windows from a snapshot, dropping non-positive samples
+/// and capping each window to [`FeasibilityBaseline::WINDOW`].
+fn snapshot_to_windows(snapshot: FeasibilityBaselineSnapshot) -> HashMap<String, VecDeque<f32>> {
+    snapshot
+        .windows
+        .into_iter()
+        .map(|(key, samples)| {
+            let mut window: VecDeque<f32> = samples
+                .into_iter()
+                .filter(|x| x.is_finite() && *x > 0.0)
+                .collect();
+            while window.len() > FeasibilityBaseline::WINDOW {
+                window.pop_front();
+            }
+            (key, window)
+        })
+        .collect()
 }
 
 /// Median of a non-empty slice. Caller guarantees non-empty.
@@ -276,5 +377,52 @@ mod tests {
         b.record("m@8192", -5.0);
         b.record("m@8192", f32::NAN);
         assert_eq!(b.sample_count("m@8192"), 0);
+    }
+
+    // Regression: per-config learning must survive a restart. A snapshot
+    // round-trip preserves the windows and the resulting slow/fast verdict.
+    #[test]
+    fn snapshot_round_trip_preserves_learning() {
+        let b = FeasibilityBaseline::new();
+        for _ in 0..16 {
+            b.record("m3@8192", 80.0);
+        }
+        let restored = FeasibilityBaseline::restore(b.snapshot());
+        assert_eq!(restored.sample_count("m3@8192"), 16);
+        // The learned distribution carries over: 30 tok/s is still slow here.
+        assert_eq!(restored.is_slow("m3@8192", 30.0), Some(true));
+        assert_eq!(restored.is_slow("m3@8192", 79.0), Some(false));
+    }
+
+    #[test]
+    fn snapshot_drops_non_positive_and_caps_window() {
+        let mut snapshot = FeasibilityBaselineSnapshot::default();
+        let mut samples = vec![0.0, -1.0, f32::NAN];
+        samples.extend(std::iter::repeat_n(50.0, FeasibilityBaseline::WINDOW + 10));
+        snapshot.windows.insert("m@8192".to_string(), samples);
+        let restored = FeasibilityBaseline::restore(snapshot);
+        assert_eq!(
+            restored.sample_count("m@8192"),
+            FeasibilityBaseline::WINDOW,
+            "non-positive samples dropped and window capped on restore"
+        );
+    }
+
+    #[test]
+    fn save_and_load_via_disk_round_trip() {
+        let dir =
+            std::env::temp_dir().join(format!("arkavo_feasibility_test_{}", std::process::id()));
+        let path = dir.join("baseline.json");
+        let _ = std::fs::remove_file(&path);
+        {
+            let b = FeasibilityBaseline::load(path.clone());
+            for _ in 0..20 {
+                b.record("disk@8192", 60.0);
+            }
+            b.save().unwrap();
+        }
+        let reloaded = FeasibilityBaseline::load(path.clone());
+        assert_eq!(reloaded.sample_count("disk@8192"), 20);
+        let _ = std::fs::remove_file(&path);
     }
 }

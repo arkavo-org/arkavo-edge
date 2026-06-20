@@ -27,7 +27,7 @@ pub mod feasibility_baseline;
 
 pub use collapse::{AnswerObservation, CollapseSignal, CollapseVerdict, detect as detect_collapse};
 pub use feasibility::{FeasibilityVerdict, RuntimeStats, assess as assess_feasibility};
-pub use feasibility_baseline::FeasibilityBaseline;
+pub use feasibility_baseline::{FeasibilityBaseline, FeasibilityBaselineSnapshot};
 
 use arkavo_budget::TokenCost;
 use arkavo_budget::cloud_policy::{
