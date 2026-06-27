@@ -446,9 +446,15 @@ impl Router {
     /// authoritative source for `projected_cloud_cost`. Safe to call from a
     /// shared `&Arc<Router>` because pricing is behind an `RwLock`.
     pub fn apply_manifest_pricing(&self, pricing: arkavo_budget::provider_costs::ProviderPricing) {
-        if let Ok(mut guard) = self.pricing.write() {
-            *guard = pricing;
-        }
+        // Recover the guard on poison: the inner data is still valid after a
+        // panic elsewhere, and a pricing assignment can never itself panic, so
+        // we always want the update to land rather than silently leaving the
+        // gate on the stale/static table.
+        let mut guard = match self.pricing.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = pricing;
     }
 
     /// Spend caps for a cloud-escalation decision, read from the live budget
@@ -486,6 +492,12 @@ impl Router {
     /// the built-in static per-model estimate when the arm is absent from the
     /// registry. This makes authored manifest rates authoritative for the live
     /// gate (#635) while keeping a safe static fallback for unknown models.
+    ///
+    /// Naming contract: the manifest's `provider`/`model_id` must match the
+    /// router's `ModelChoice::provider()`/`name()` strings exactly (e.g.
+    /// `google` / `gemini-flash-latest`). A mismatch is not an error — the arm
+    /// falls back to the static estimate — but it is logged so operators can
+    /// detect that an authored rate silently did not apply.
     fn projected_cloud_cost(&self, decision: &RoutingDecision) -> arkavo_budget::TokenCost {
         let arm = decision
             .fallback_chain
@@ -494,12 +506,30 @@ impl Router {
             .cloned()
             .unwrap_or(ModelChoice::GeminiFlash);
         let est = decision.task_category.estimated_tokens();
-        let authored = self
+        let (authored, registry_populated) = self
             .pricing
             .read()
-            .ok()
-            .and_then(|p| p.estimate_cost(arm.provider(), arm.name(), est.input, est.output));
+            .map(|p| {
+                (
+                    p.estimate_cost(arm.provider(), arm.name(), est.input, est.output),
+                    p.model_count() > 0,
+                )
+            })
+            .unwrap_or((None, false));
         authored.unwrap_or_else(|| {
+            if registry_populated {
+                // Authored table present but this arm isn't in it: a
+                // provider/model-id naming mismatch between the manifest and
+                // ModelChoice. Without this log the gate silently reverts to
+                // the static estimate — exactly what #635 set out to fix.
+                tracing::warn!(
+                    provider = arm.provider(),
+                    model = arm.name(),
+                    "authored pricing table present but model not found; \
+                     falling back to static estimate. Manifest model_id/provider \
+                     must match ModelChoice::name()/provider() exactly."
+                );
+            }
             arkavo_budget::TokenCost::from_dollars(RoutingDecision::estimate_cost(
                 &arm,
                 decision.task_category,
