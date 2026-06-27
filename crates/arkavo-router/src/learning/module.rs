@@ -23,6 +23,21 @@ pub struct AgentUtilityStats {
     pub avg_latency_ms: f64,
 }
 
+/// Per-call cost floor (USD) used when discounting the quality sample by cost.
+///
+/// Local models report a $0 authored cost; dividing by that would make them
+/// infinitely preferable. The floor is sized against the cheapest paid per-call
+/// estimate in the authored table: DeepSeek V3.2 on the smallest task category
+/// (CodeSearch: 200 input / 500 output tokens) ≈
+/// (200/1M)·$0.27 + (500/1M)·$1.10 ≈ $0.0006. Rounding up to $0.001 gives
+/// local/free models a bounded cost advantage (not infinite) and caps the
+/// discount spread between a local and a paid arm. At the default
+/// `cost_sensitivity = 0.25` the floor yields a bounded (not runaway) edge for
+/// free arms. If the pricing table shifts so the cheapest paid tier changes
+/// materially, `COST_FLOOR` should be revisited —
+/// `test_rank_agents_cost_aware_local_not_infinitely_favored` is the tripwire.
+const COST_FLOOR: f64 = 0.001;
+
 /// Learning module for Thompson Sampling based agent selection
 pub struct LearningModule {
     config: LearningConfig,
@@ -262,6 +277,67 @@ impl LearningModule {
         }
 
         // Sort by score descending
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored
+    }
+
+    /// Rank agents by Thompson Sampling, discounting the quality sample by cost.
+    ///
+    /// For each feasible agent:
+    /// ```text
+    /// cost     = max(cost_by_agent[id], COST_FLOOR)
+    /// min_cost = min over the candidate set of `cost`
+    /// score    = quality_sample * (min_cost / cost) ^ cost_sensitivity
+    /// ```
+    ///
+    /// Normalizing against the *cheapest* candidate makes the multiplier ≤ 1.0
+    /// everywhere: the cheapest model is unpenalized, every other is discounted.
+    /// This keeps the score in `[0, 1]` (matching the raw Thompson sample's range)
+    /// and avoids the cost → 0 singularity a `quality / cost` objective would
+    /// introduce. At `cost_sensitivity == 0` the cost term vanishes and the
+    /// ranking is identical to [`rank_agents`](Self::rank_agents).
+    ///
+    /// `cost_by_agent` carries authored per-call USD estimates (see
+    /// `RoutingDecision::estimate_cost`); any agent missing from the map is
+    /// treated as free (floored to `COST_FLOOR`).
+    pub async fn rank_agents_cost_aware(
+        &self,
+        agent_ids: &[String],
+        category: Option<&str>,
+        cost_by_agent: &HashMap<String, f64>,
+    ) -> Vec<(String, f64)> {
+        let sensitivity = self.config.cost_sensitivity;
+        if sensitivity <= 0.0 || agent_ids.is_empty() {
+            // No cost discount to apply; delegate to the pure-quality path.
+            return self.rank_agents(agent_ids, category).await;
+        }
+
+        // Floor each cost and find the cheapest survivor for normalization.
+        let floored: Vec<(String, f64)> = agent_ids
+            .iter()
+            .map(|id| {
+                let c = cost_by_agent
+                    .get(id)
+                    .copied()
+                    .unwrap_or(0.0)
+                    .max(COST_FLOOR);
+                (id.clone(), c)
+            })
+            .collect();
+        let min_cost = floored
+            .iter()
+            .map(|(_, c)| *c)
+            .fold(f64::INFINITY, f64::min)
+            .max(COST_FLOOR);
+
+        let mut scored: Vec<(String, f64)> = Vec::with_capacity(agent_ids.len());
+        for (agent_id, cost) in &floored {
+            let quality = self.thompson_sample(agent_id, category).await;
+            // min_cost / cost ∈ (0, 1]; raised to `sensitivity` keeps it ≤ 1.
+            let discount = (min_cost / cost).powf(sensitivity);
+            scored.push((agent_id.clone(), quality * discount));
+        }
+
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored
     }
@@ -603,6 +679,191 @@ mod tests {
         assert!(
             good_first > 15,
             "Good agent should be ranked first most of the time"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rank_agents_cost_aware_favors_cheaper_equal_quality() {
+        let module = LearningModule::new();
+
+        // Two agents with identical, well-established priors (50 successes each).
+        for agent in ["cheap", "pricey"] {
+            for _ in 0..50 {
+                module
+                    .immediate_update(
+                        agent,
+                        &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                    )
+                    .await;
+            }
+        }
+
+        let costs = HashMap::from([("cheap".to_string(), 0.001), ("pricey".to_string(), 0.10)]);
+
+        let mut cheap_first = 0;
+        for _ in 0..20 {
+            let ranked = module
+                .rank_agents_cost_aware(&["cheap".to_string(), "pricey".to_string()], None, &costs)
+                .await;
+            if ranked[0].0 == "cheap" {
+                cheap_first += 1;
+            }
+        }
+
+        assert!(
+            cheap_first > 15,
+            "At equal quality the cheaper agent should win most of the time; won {cheap_first}/20"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rank_agents_cost_aware_quality_dominates_at_zero_sensitivity() {
+        let config = LearningConfig {
+            cost_sensitivity: 0.0,
+            ..Default::default()
+        };
+        let module = LearningModule::with_config(config);
+
+        // well-established priors so sampling is stable.
+        for _ in 0..50 {
+            module
+                .immediate_update(
+                    "good",
+                    &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+            module
+                .immediate_update(
+                    "bad",
+                    &BurstFeedback::failure(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+
+        // `good` is far cheaper too — but at zero sensitivity cost is irrelevant,
+        // so ranking must match the pure-quality `rank_agents` order.
+        let costs = HashMap::from([("good".to_string(), 0.001), ("bad".to_string(), 0.10)]);
+
+        let ids = ["good".to_string(), "bad".to_string()];
+        let mut agree = 0;
+        for _ in 0..20 {
+            let plain = module.rank_agents(&ids, None).await;
+            let costed = module.rank_agents_cost_aware(&ids, None, &costs).await;
+            if plain[0].0 == costed[0].0 {
+                agree += 1;
+            }
+        }
+        assert!(
+            agree == 20,
+            "At cost_sensitivity=0 the cost-aware ranking must equal rank_agents on every draw"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rank_agents_cost_aware_cold_start_band() {
+        // Regression for the reviewer's hazard: a cheap, under-observed arm must
+        // neither monopolize selection nor be starved. We assert a BAND, not a
+        // one-sided threshold, so the test fails both ways.
+        //
+        // Setup is tuned so the two arms are near-parity in *expected* score,
+        // making the outcome genuinely sample-dependent (a real coin-flip band):
+        //   established: Beta(42,11) → mean ≈ 0.79, cost = 0.002 (expensive)
+        //   cheap-cold : Beta(2,1)   → mean ≈ 0.667, cost = 0.001 (cheap)
+        // At cost_sensitivity = 0.25 the established arm's expected discounted
+        // score is 0.79·(0.001/0.002)^0.25 ≈ 0.667 — matching the cold arm's
+        // mean. So selection swings with the Thompson draw, not the cost.
+        let module = LearningModule::new();
+
+        for _ in 0..40 {
+            module
+                .immediate_update(
+                    "established",
+                    &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+        for _ in 0..10 {
+            module
+                .immediate_update(
+                    "established",
+                    &BurstFeedback::failure(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+
+        // Cheap arm stays at the cold-start prior (no observations) → wide Beta.
+        let costs = HashMap::from([
+            ("established".to_string(), 0.002),
+            ("cheap-cold".to_string(), 0.001),
+        ]);
+        let ids = ["established".to_string(), "cheap-cold".to_string()];
+
+        let mut cheap_selected = 0;
+        const N: u32 = 60;
+        for _ in 0..N {
+            let ranked = module.rank_agents_cost_aware(&ids, None, &costs).await;
+            if ranked[0].0 == "cheap-cold" {
+                cheap_selected += 1;
+            }
+        }
+
+        let rate = f64::from(cheap_selected) / f64::from(N);
+        // Two-sided band: the cold arm is explored (rate ≥ 0.20) but does not
+        // crowd out the established arm (rate ≤ 0.80). A one-sided threshold
+        // could pass trivially on a lucky seed without proving exploration.
+        assert!(
+            (0.20..=0.80).contains(&rate),
+            "cheap cold-start arm selected {cheap_selected}/{N} (rate {rate:.2}); \
+             expected between 0.20 and 0.80"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rank_agents_cost_aware_local_not_infinitely_favored() {
+        // Pins COST_FLOOR: a low-quality local (free) model must NOT beat a
+        // much-higher-quality paid model merely because it's cheap. If the
+        // pricing table shifts so the cheapest paid tier changes materially,
+        // this test is the tripwire.
+        let module = LearningModule::new();
+
+        // High-quality paid arm.
+        for _ in 0..50 {
+            module
+                .immediate_update(
+                    "paid-strong",
+                    &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+        // Low-quality local arm.
+        for _ in 0..50 {
+            module
+                .immediate_update(
+                    "local-weak",
+                    &BurstFeedback::failure(Uuid::new_v4(), "test".to_string(), 100),
+                )
+                .await;
+        }
+
+        // Local is free (floored to COST_FLOOR); paid is ~100x the floor.
+        let costs = HashMap::from([
+            ("paid-strong".to_string(), 0.10),
+            ("local-weak".to_string(), 0.0),
+        ]);
+        let ids = ["paid-strong".to_string(), "local-weak".to_string()];
+
+        let mut paid_first = 0;
+        for _ in 0..20 {
+            let ranked = module.rank_agents_cost_aware(&ids, None, &costs).await;
+            if ranked[0].0 == "paid-strong" {
+                paid_first += 1;
+            }
+        }
+
+        assert!(
+            paid_first >= 15,
+            "A much-higher-quality paid model should still outrank a weak free one; \
+             paid won {paid_first}/20"
         );
     }
 
