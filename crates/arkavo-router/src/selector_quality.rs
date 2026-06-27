@@ -288,7 +288,21 @@ impl ModelSelector {
             "Thompson Sampling: evaluating feasible models"
         );
 
-        let ranked = learning.rank_agents(&model_ids, category).await;
+        // Cost-aware ranking: discount each quality sample by the model's
+        // authored per-call cost (see #637). Local models hit COST_FLOOR rather
+        // than $0, so free arms get a bounded, not infinite, advantage.
+        let cost_by_model: std::collections::HashMap<String, f64> = feasible
+            .iter()
+            .map(|m| {
+                (
+                    m.name().to_string(),
+                    RoutingDecision::estimate_cost(m, classification.category),
+                )
+            })
+            .collect();
+        let ranked = learning
+            .rank_agents_cost_aware(&model_ids, category, &cost_by_model)
+            .await;
 
         for (i, (name, score)) in ranked.iter().enumerate() {
             tracing::info!(
@@ -323,6 +337,12 @@ impl ModelSelector {
                 budget_usage,
                 excluded_names,
             );
+            // NOTE: the persisted `thompson_scores` here are RANK-LOCAL — each
+            // score is the quality sample discounted by cost relative to the
+            // cheapest model in *this* feasible set. The value depends on which
+            // other models were feasible this call, so it is not a stable
+            // cross-call quality estimate and must not be regressed against as
+            // one. Compare ranks across calls, not raw scores.
             Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
@@ -529,6 +549,46 @@ mod tests {
         }
     }
 
+    /// Seed every locally-cached model with failures so it drops out of
+    /// contention. `feasible_models()` adds whichever local models happen to be
+    /// cached on the host; without this, free local arms (cost-discount
+    /// multiplier 1.0) can outscore seeded paid arms and obscure the behavior a
+    /// test intends to exercise.
+    async fn weaken_local_models(learning: &LearningModule) {
+        let locals = [
+            "qwen3.5-0.8b",
+            "ministral-3b",
+            "ministral-8b",
+            "qwen3.5-9b",
+            "qwen3.5-27b",
+            "qwen3.6-35b-a3b",
+            "glm-4.7-flash",
+            "gemma-4-e2b",
+            "gemma-4-e4b",
+            "gemma-4-26b-a4b",
+            "gemma-4-31b",
+            "gemma-4-12b",
+            "gemma-3-270m-it",
+            "gemma-3-4b-it",
+            "gemma-3-12b-it",
+            "deepseek-coder-v2-lite-instruct",
+        ];
+        for agent in locals {
+            for _ in 0..20 {
+                learning
+                    .immediate_update(
+                        agent,
+                        &BurstFeedback::failure(
+                            uuid::Uuid::new_v4(),
+                            "frontend_ui".to_string(),
+                            100,
+                        ),
+                    )
+                    .await;
+            }
+        }
+    }
+
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_budget_constraint() {
@@ -573,6 +633,10 @@ mod tests {
                 )
                 .await;
         }
+        // Locally-cached models enter the feasible set on this host; weaken them
+        // so the assertion exercises Thompson Sampling among the Gemini tiers
+        // (its actual intent), not a cost contest with free locals.
+        weaken_local_models(&learning).await;
 
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
@@ -656,6 +720,79 @@ mod tests {
             decision.recommended_model,
             ModelChoice::GeminiFlash,
             "Excluded model should not be selected"
+        );
+    }
+
+    #[spec("ROUTER-001")]
+    #[tokio::test]
+    async fn test_select_adaptive_prefers_cheaper_at_equal_quality() {
+        // Isolate the cost signal across two 3.5 Flash tiers with very different
+        // authored cost (Minimal: 0x thinking ≈ $0.019 vs High: 8x ≈ $0.163 on
+        // FrontendUI). Both are seeded to the same strong prior (equal quality).
+        // Every other model that can enter the feasible set — the other Gemini
+        // tiers AND any locally-cached model — is seeded with failures so it
+        // cannot contaminate the Minimal-vs-High comparison. At equal quality
+        // the cheaper tier must be selected more often than the expensive one.
+        let selector = ModelSelector::with_availability(gemini_only());
+        let learning = LearningModule::new();
+
+        for _ in 0..50 {
+            learning
+                .immediate_update(
+                    "gemini-3.5-flash-minimal",
+                    &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
+                )
+                .await;
+            learning
+                .immediate_update(
+                    "gemini-3.5-flash-high",
+                    &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
+                )
+                .await;
+        }
+        // Push everything else that may be feasible out of contention: the
+        // remaining Gemini tiers plus the locally-cached model set (which
+        // feasible_models() adds on this host).
+        for weak_gemini in [
+            "gemini-flash-latest",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-medium",
+        ] {
+            for _ in 0..50 {
+                learning
+                    .immediate_update(
+                        weak_gemini,
+                        &BurstFeedback::failure(
+                            uuid::Uuid::new_v4(),
+                            "frontend_ui".to_string(),
+                            100,
+                        ),
+                    )
+                    .await;
+            }
+        }
+        weaken_local_models(&learning).await;
+
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
+        let mut minimal_count = 0;
+        let mut high_count = 0;
+        for _ in 0..40 {
+            let decision = selector
+                .select_adaptive(&learning, &classification, 0.0, &[])
+                .await
+                .unwrap();
+            match decision.recommended_model {
+                ModelChoice::Gemini35FlashMinimal => minimal_count += 1,
+                ModelChoice::Gemini35FlashHigh => high_count += 1,
+                _ => {}
+            }
+        }
+
+        assert!(
+            minimal_count > high_count,
+            "At equal quality the cheaper tier should outrank the expensive one; \
+             minimal={minimal_count} high={high_count}"
         );
     }
 

@@ -776,7 +776,7 @@ impl RoutingDecision {
         }
     }
 
-    pub(crate) fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
+    pub fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
         let token_estimate = category.estimated_tokens();
 
         match model {
