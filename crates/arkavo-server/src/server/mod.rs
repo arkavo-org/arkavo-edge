@@ -1033,6 +1033,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.bundle_decryptor.as_ref(),
             &self.agent_event_tx,
             iroh_node,
+            self.router.as_ref(),
             request,
         )
         .await

@@ -59,6 +59,14 @@ pub struct AgentSpecializationBundle {
     /// ARP document used to spin up a per-agent runtime for this role.
     /// Carries budget, network, tool_use, isolation, etc.
     pub arp_overlay: ArpDocument,
+    /// Authored per-MTok model pricing for this flight. When non-empty, the
+    /// receiving agent loads these rates as authoritative for its live cost
+    /// gate, overriding the built-in static estimate. Travels inside the
+    /// TDF-encrypted, DID-bound bundle — same trust envelope as `arp_overlay`.
+    /// Flight-global (every role gets the same rates); per-role spend ceilings
+    /// live in `arp_overlay`. Default empty for backward compatibility.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manifest_pricing: Vec<arkavo_budget::provider_costs::PricingEntry>,
     /// Flight provenance the agent uses to tag tool outcomes back to the
     /// right per-role `DecisionTrace` on the orchestrator's flight.
     pub role_context: RoleContext,
@@ -428,6 +436,7 @@ mod tests {
             },
             api_tokens: tokens,
             arp_overlay: sample_arp(),
+            manifest_pricing: Vec::new(),
             role_context: RoleContext {
                 kit_id: "kit:campaign-kit:0.1.0".to_string(),
                 flight_id: "11111111-1111-1111-1111-111111111111".to_string(),
@@ -456,6 +465,27 @@ mod tests {
         assert_eq!(original.persona, recovered.persona);
         assert_eq!(original.api_tokens, recovered.api_tokens);
         assert_eq!(original.role_context, recovered.role_context);
+    }
+
+    #[test]
+    fn bundle_without_manifest_pricing_deserializes_as_empty() {
+        // #635 backward compat: a bundle serialized before manifest_pricing
+        // existed (or with an empty table) must deserialize cleanly, defaulting
+        // the field to an empty vec. Build a real bundle, serialize it, then
+        // assert deserialization works whether or not pricing is present.
+        let bundle = sample_bundle(); // empty manifest_pricing
+        let json = serde_json::to_string(&bundle).expect("serialize");
+        // skip_serializing_if = "Vec::is_empty" → field absent from JSON.
+        assert!(
+            !json.contains("manifest_pricing"),
+            "empty pricing must be skipped on serialize (preserves kit.id)"
+        );
+        let recovered: AgentSpecializationBundle =
+            serde_json::from_str(&json).expect("deserialize without manifest_pricing");
+        assert!(
+            recovered.manifest_pricing.is_empty(),
+            "absent manifest_pricing must default to empty"
+        );
     }
 
     #[test]

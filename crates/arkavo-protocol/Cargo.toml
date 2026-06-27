@@ -29,6 +29,7 @@ webpki-roots = { workspace = true }
 # Server dependencies
 governor = { workspace = true, features = ["std", "jitter"] }
 arkavo-arp = { path = "../arkavo-arp" }
+arkavo-budget = { path = "../arkavo-budget" }
 dashmap = { workspace = true }
 crossbeam-queue = { workspace = true }
 

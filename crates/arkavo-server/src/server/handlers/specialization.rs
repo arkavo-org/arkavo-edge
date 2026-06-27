@@ -70,6 +70,7 @@ pub async fn handle_agent_specialize(
     decryptor: &dyn BundleDecryptor,
     agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
     iroh_node: Option<&Arc<IrohNode>>,
+    live_router: Option<&Arc<arkavo_router::Router>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("agent.specialize".to_string(), metrics.clone());
@@ -81,6 +82,7 @@ pub async fn handle_agent_specialize(
         decryptor,
         agent_event_tx,
         iroh_node,
+        live_router,
         request,
     )
     .await
@@ -105,6 +107,7 @@ async fn handle_inner(
     decryptor: &dyn BundleDecryptor,
     agent_event_tx: &Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>>,
     iroh_node: Option<&Arc<IrohNode>>,
+    live_router: Option<&Arc<arkavo_router::Router>>,
     request: AgentSpecializeRequest,
 ) -> Result<AgentSpecializeResponse, ErrorObjectOwned> {
     if let Err(e) = rate_limiter.check_rate_limit() {
@@ -218,6 +221,26 @@ async fn handle_inner(
 
     apply_bundle_to_metadata(agent_metadata, &bundle).await;
     role_specialization.set(bundle.role_context.clone()).await;
+
+    // Apply authored pricing to the live Router so the spend-plane gate prices
+    // cloud arms from the manifest rather than the static estimate. The
+    // pricing arrived inside the TDF-encrypted, DID-bound bundle, so it is
+    // trusted config — the agent may treat it as authoritative.
+    if let Some(router) = live_router
+        .as_ref()
+        .filter(|_| !bundle.manifest_pricing.is_empty())
+    {
+        let mut pricing = arkavo_budget::provider_costs::ProviderPricing::new();
+        pricing.load_from_entries(&bundle.manifest_pricing);
+        router.apply_manifest_pricing(pricing);
+        info!(
+            session_id = %session_id,
+            agent = %agent_name,
+            entries = bundle.manifest_pricing.len(),
+            "applied authored manifest pricing to live cost gate"
+        );
+    }
+
     inject_role_kickoff(agent_event_tx, &bundle).await;
 
     info!(
@@ -302,6 +325,9 @@ async fn apply_bundle_to_metadata(
     meta.api_keys.clone_from(&bundle.api_tokens);
     meta.granted_tools = granted_tool_names(bundle);
     meta.specialized = true;
+    // Carry authored pricing through to the agent's metadata; the caller is
+    // responsible for forwarding it to the live Router via `with_pricing`.
+    meta.manifest_pricing.clone_from(&bundle.manifest_pricing);
     // Persona name only swapped if the manifest's intended-agent matches
     // ours — the orchestrator should never send a persona for a different
     // agent, but if it does we keep our own identity rather than masquerade.
@@ -419,6 +445,7 @@ mod tests {
             },
             api_tokens: tokens,
             arp_overlay: arp_doc(),
+            manifest_pricing: Vec::new(),
             role_context: RoleContext {
                 kit_id: "kit:campaign:0.1".into(),
                 flight_id: "33333333-3333-3333-3333-333333333333".into(),
@@ -484,6 +511,7 @@ mod tests {
             &decryptor,
             &no_event_tx(),
             None,
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
@@ -537,6 +565,7 @@ mod tests {
             &decryptor,
             &no_event_tx(),
             None,
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: encoded_dummy_bytes(),
@@ -567,6 +596,7 @@ mod tests {
             &decryptor,
             &no_event_tx(),
             None,
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: String::new(),
@@ -595,6 +625,7 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
@@ -629,6 +660,7 @@ mod tests {
             &role_store,
             &decryptor,
             &no_event_tx(),
+            None,
             None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
@@ -671,6 +703,7 @@ mod tests {
             &role_store,
             &decryptor,
             &event_tx,
+            None,
             None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
@@ -729,6 +762,7 @@ mod tests {
             &decryptor,
             &no_event_tx(),
             Some(&node),
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: String::new(),
@@ -761,6 +795,7 @@ mod tests {
             &decryptor,
             &no_event_tx(),
             None, // no iroh node wired
+            None,
             AgentSpecializeRequest {
                 requester_id: "did:web:orchestrator.arkavo.net".into(),
                 encrypted_bundle: String::new(),
