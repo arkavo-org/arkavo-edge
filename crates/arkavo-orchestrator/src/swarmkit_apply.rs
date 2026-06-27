@@ -544,6 +544,11 @@ async fn build_bundle(
         persona,
         api_tokens,
         arp_overlay,
+        manifest_pricing: manifest
+            .pricing
+            .iter()
+            .map(arkavo_budget::provider_costs::PricingEntry::from)
+            .collect(),
         role_context,
     }
 }

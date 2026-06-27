@@ -114,6 +114,7 @@ mod tests {
             },
             api_tokens: Default::default(),
             arp_overlay,
+            manifest_pricing: Vec::new(),
             role_context: RoleContext {
                 kit_id: "kit:demo:0.1.0".into(),
                 flight_id: "44444444-4444-4444-4444-444444444444".into(),

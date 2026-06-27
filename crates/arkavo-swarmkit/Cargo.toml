@@ -17,6 +17,7 @@ semver = { workspace = true }
 blake3 = "1.5"
 base64 = { workspace = true }
 thiserror = { workspace = true }
+arkavo-budget = { path = "../arkavo-budget" }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

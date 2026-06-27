@@ -78,6 +78,7 @@ fn build_bundle(role: &str, agent_did: &str) -> AgentSpecializationBundle {
         },
         api_tokens: tokens,
         arp_overlay: arp_doc(),
+        manifest_pricing: Vec::new(),
         role_context: RoleContext {
             kit_id: "kit:demo:0.1.0".into(),
             flight_id: "44444444-4444-4444-4444-444444444444".into(),
@@ -150,6 +151,7 @@ async fn bundle_round_trips_orchestrator_to_agent() {
         &decryptor,
         &no_event_tx(),
         None,
+        None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),
             encrypted_bundle: encoded,
@@ -213,6 +215,7 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
         &role_store,
         &decryptor,
         &no_event_tx(),
+        None,
         None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),

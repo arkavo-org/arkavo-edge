@@ -248,6 +248,17 @@ pub struct Router {
     /// cloud-escalation decision consults the real remaining cap via
     /// `authorize_cloud_spend`; when absent there is no cap to enforce.
     budget_tracker: Option<Arc<arkavo_budget::BudgetTracker>>,
+    /// Authored per-MTok pricing registry (spend plane). When non-empty,
+    /// `projected_cloud_cost` prices a cloud arm from these authored rates
+    /// (the manifest is the pricing home); when empty it falls back to the
+    /// built-in static per-model estimate. Behind an `Arc<RwLock>` so a
+    /// specialization bundle can replace it live without rebuilding the
+    /// Router (which is shared across handlers via `Arc`). Populated from a
+    /// specialization bundle's `manifest_pricing` via [`Router::with_pricing`]
+    /// (builder) or [`Router::apply_manifest_pricing`] (live update). Uses a
+    /// std `RwLock` (not tokio) so `projected_cloud_cost` can read it without
+    /// `.await` on the (rare) collapse-driven upgrade path.
+    pricing: Arc<std::sync::RwLock<arkavo_budget::provider_costs::ProviderPricing>>,
     /// One-shot user confirmation for the next cloud upgrade under
     /// `AskBeforeCloud`. The caller sets it via `confirm_next_cloud_upgrade()`
     /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
@@ -304,6 +315,9 @@ impl Router {
                     .unwrap_or_default(),
             ),
             budget_tracker: None,
+            pricing: Arc::new(std::sync::RwLock::new(
+                arkavo_budget::provider_costs::ProviderPricing::new(),
+            )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -356,6 +370,9 @@ impl Router {
                     .unwrap_or_default(),
             ),
             budget_tracker: None,
+            pricing: Arc::new(std::sync::RwLock::new(
+                arkavo_budget::provider_costs::ProviderPricing::new(),
+            )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -412,6 +429,34 @@ impl Router {
         self
     }
 
+    /// Install authored per-MTok pricing as the cost source for the spend
+    /// plane's projected-cost gate. When a cloud arm is present in the
+    /// registry, its authored rate is authoritative; otherwise the built-in
+    /// static estimate is used. Typically populated from a specialization
+    /// bundle's `manifest_pricing` so distributed agents share one trusted
+    /// cost model sourced from the signed manifest.
+    pub fn with_pricing(mut self, pricing: arkavo_budget::provider_costs::ProviderPricing) -> Self {
+        self.pricing = Arc::new(std::sync::RwLock::new(pricing));
+        self
+    }
+
+    /// Replace the live cost gate's pricing registry in place. Used when a
+    /// specialization bundle arrives after the Router is already running: the
+    /// bundle's `manifest_pricing` (trusted, TDF-delivered config) becomes the
+    /// authoritative source for `projected_cloud_cost`. Safe to call from a
+    /// shared `&Arc<Router>` because pricing is behind an `RwLock`.
+    pub fn apply_manifest_pricing(&self, pricing: arkavo_budget::provider_costs::ProviderPricing) {
+        // Recover the guard on poison: the inner data is still valid after a
+        // panic elsewhere, and a pricing assignment can never itself panic, so
+        // we always want the update to land rather than silently leaving the
+        // gate on the stale/static table.
+        let mut guard = match self.pricing.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = pricing;
+    }
+
     /// Spend caps for a cloud-escalation decision, read from the live budget
     /// tracker. Without a tracker (or a session limit) there is no cap to
     /// enforce, so the remaining cap is reported as effectively unbounded — the
@@ -442,6 +487,17 @@ impl Router {
     /// plane's cap check. Estimates against the first cloud arm in the decision's
     /// fallback chain (or a cheap default), since the concrete arm is only
     /// chosen after the spend gate passes.
+    ///
+    /// Pricing source: authored registry first (`with_pricing`), falling back to
+    /// the built-in static per-model estimate when the arm is absent from the
+    /// registry. This makes authored manifest rates authoritative for the live
+    /// gate (#635) while keeping a safe static fallback for unknown models.
+    ///
+    /// Naming contract: the manifest's `provider`/`model_id` must match the
+    /// router's `ModelChoice::provider()`/`name()` strings exactly (e.g.
+    /// `google` / `gemini-flash-latest`). A mismatch is not an error — the arm
+    /// falls back to the static estimate — but it is logged so operators can
+    /// detect that an authored rate silently did not apply.
     fn projected_cloud_cost(&self, decision: &RoutingDecision) -> arkavo_budget::TokenCost {
         let arm = decision
             .fallback_chain
@@ -449,10 +505,36 @@ impl Router {
             .find(|m| m.is_cloud())
             .cloned()
             .unwrap_or(ModelChoice::GeminiFlash);
-        arkavo_budget::TokenCost::from_dollars(RoutingDecision::estimate_cost(
-            &arm,
-            decision.task_category,
-        ))
+        let est = decision.task_category.estimated_tokens();
+        let (authored, registry_populated) = self
+            .pricing
+            .read()
+            .map(|p| {
+                (
+                    p.estimate_cost(arm.provider(), arm.name(), est.input, est.output),
+                    p.model_count() > 0,
+                )
+            })
+            .unwrap_or((None, false));
+        authored.unwrap_or_else(|| {
+            if registry_populated {
+                // Authored table present but this arm isn't in it: a
+                // provider/model-id naming mismatch between the manifest and
+                // ModelChoice. Without this log the gate silently reverts to
+                // the static estimate — exactly what #635 set out to fix.
+                tracing::warn!(
+                    provider = arm.provider(),
+                    model = arm.name(),
+                    "authored pricing table present but model not found; \
+                     falling back to static estimate. Manifest model_id/provider \
+                     must match ModelChoice::name()/provider() exactly."
+                );
+            }
+            arkavo_budget::TokenCost::from_dollars(RoutingDecision::estimate_cost(
+                &arm,
+                decision.task_category,
+            ))
+        })
     }
 
     /// Exclusion set for a feasibility/quality-driven re-route.
@@ -1359,6 +1441,7 @@ impl Router {
             cloud_policy: self.cloud_policy,
             feasibility_baseline: self.feasibility_baseline.clone(),
             budget_tracker: self.budget_tracker.clone(),
+            pricing: Arc::clone(&self.pricing),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -1396,5 +1479,147 @@ mod tests {
         };
         let size = router.min_feasible_context_size();
         assert_eq!(size, 4096);
+    }
+
+    /// #635 acceptance test: the live spend-plane gate (`projected_cloud_cost`)
+    /// prices a cloud arm from authored manifest rates when present, and falls
+    /// back to the static per-model estimate when the arm is absent. Proves
+    /// "editing a model rate in the authored config changes the cost the live
+    /// budget gate uses."
+    #[tokio::test]
+    async fn projected_cloud_cost_uses_authored_pricing_over_static() {
+        use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
+
+        // A decision whose first cloud fallback arm is GeminiFlash.
+        let decision = RoutingDecision {
+            recommended_model: ModelChoice::GeminiFlash,
+            fallback_chain: vec![ModelChoice::GeminiFlash],
+            confidence: 0.9,
+            reasoning: String::new(),
+            estimated_cost_usd: 0.0,
+            estimated_time: std::time::Duration::ZERO,
+            task_category: TaskCategory::FrontendUI,
+            should_compress: false,
+            compression_target: None,
+            use_spec_decoding: false,
+            trace: arkavo_router_learning_default_trace(),
+        };
+
+        // Baseline: empty pricing → static estimate.
+        let router = match Router::new_offline().await {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("Skipping: Router::new_offline requires llama-cpp");
+                return;
+            }
+        };
+        let static_cost = router.projected_cloud_cost(&decision);
+
+        // Authored: a deliberately distinct rate for gemini-flash-latest.
+        // FrontendUI = 500 input / 2000 output. TokenCost is integer cents, so
+        // use rates that clear 1 cent: $100/MTok in (10000 cents) + $50/MTok
+        // out (5000 cents) → (500/1M)*10000 + (2000/1M)*5000 = 5 + 10 = 15 cents.
+        // The static table for GeminiFlash gives a sub-cent result (0 cents),
+        // so authored (15) is cleanly distinguishable from static (0).
+        let mut pricing = ProviderPricing::new();
+        pricing.register(&PricingEntry {
+            model_id: "gemini-flash-latest".to_string(),
+            provider: "google".to_string(),
+            input_cents_per_mtok: 10000,
+            output_cents_per_mtok: 5000,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: None,
+            max_output_tokens: None,
+        });
+        let router = router.with_pricing(pricing);
+        let authored_cost = router.projected_cloud_cost(&decision);
+
+        assert_ne!(
+            static_cost.as_cents(),
+            authored_cost.as_cents(),
+            "authored pricing must change the projected cost vs the static estimate"
+        );
+        assert_eq!(
+            authored_cost.as_cents(),
+            15,
+            "authored cost should match the 15-cent rate we set (5 in + 10 out)"
+        );
+        assert_eq!(
+            static_cost.as_cents(),
+            0,
+            "static estimate for GeminiFlash/FrontendUI is sub-cent → 0 cents; \
+             the authored rate is what makes the gate see real cost"
+        );
+    }
+
+    /// #635: `apply_manifest_pricing` updates the live gate in place on a
+    /// shared `&Arc<Router>` (the path the specialization handler uses).
+    #[tokio::test]
+    async fn apply_manifest_pricing_updates_live_gate() {
+        use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
+
+        let router = Arc::new(match Router::new_offline().await {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("Skipping: Router::new_offline requires llama-cpp");
+                return;
+            }
+        });
+        let decision = RoutingDecision {
+            recommended_model: ModelChoice::GeminiFlash,
+            fallback_chain: vec![ModelChoice::GeminiFlash],
+            confidence: 0.9,
+            reasoning: String::new(),
+            estimated_cost_usd: 0.0,
+            estimated_time: std::time::Duration::ZERO,
+            task_category: TaskCategory::FrontendUI,
+            should_compress: false,
+            compression_target: None,
+            use_spec_decoding: false,
+            trace: arkavo_router_learning_default_trace(),
+        };
+
+        let before = router.projected_cloud_cost(&decision);
+
+        // Apply authored pricing through the live setter (shared-reference path).
+        let mut pricing = ProviderPricing::new();
+        pricing.register(&PricingEntry {
+            model_id: "gemini-flash-latest".to_string(),
+            provider: "google".to_string(),
+            input_cents_per_mtok: 10000,
+            output_cents_per_mtok: 5000,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: None,
+            max_output_tokens: None,
+        });
+        router.apply_manifest_pricing(pricing);
+
+        let after = router.projected_cloud_cost(&decision);
+        assert_ne!(
+            before.as_cents(),
+            after.as_cents(),
+            "live pricing update must change the gate's projected cost"
+        );
+        assert_eq!(
+            after.as_cents(),
+            15,
+            "after live apply the gate must use the authored 15-cent rate"
+        );
+    }
+
+    /// Helper: a minimal `DecisionTrace` for constructing test decisions.
+    fn arkavo_router_learning_default_trace() -> crate::learning::DecisionTrace {
+        crate::learning::DecisionTrace::thompson(
+            TaskCategory::FrontendUI,
+            0.0,
+            vec![],
+            vec![],
+            "",
+            0,
+            0.0,
+            vec![],
+        )
     }
 }

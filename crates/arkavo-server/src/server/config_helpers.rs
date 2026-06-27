@@ -59,6 +59,11 @@ pub struct AgentMetadata {
     /// Distinguishes "unspecialized" from "specialized with zero tool grants"
     /// so a zero-grant role yields zero tools, not the full registry.
     pub specialized: bool,
+    /// Authored per-MTok pricing table received in a specialization bundle.
+    /// Applied to the agent's `Router` so its live spend-plane gate prices
+    /// cloud arms from the manifest (the pricing home) instead of the built-in
+    /// static estimate. Empty for an unspecialized agent → static fallback.
+    pub manifest_pricing: Vec<arkavo_budget::provider_costs::PricingEntry>,
 }
 
 /// Simple agent configuration structure for validation
