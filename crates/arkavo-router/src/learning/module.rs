@@ -306,7 +306,11 @@ impl LearningModule {
         category: Option<&str>,
         cost_by_agent: &HashMap<String, f64>,
     ) -> Vec<(String, f64)> {
-        let sensitivity = self.config.cost_sensitivity;
+        // Clamp at the point of use so the documented [0,1] policy holds no
+        // matter how the value was set (Default, with_config, pub-field
+        // mutation, or deserialized config). The field is pub and Deserialize,
+        // so construction-time clamping alone cannot enforce the invariant.
+        let sensitivity = self.config.cost_sensitivity.clamp(0.0, 1.0);
         if sensitivity <= 0.0 || agent_ids.is_empty() {
             // No cost discount to apply; delegate to the pure-quality path.
             return self.rank_agents(agent_ids, category).await;
@@ -756,6 +760,92 @@ mod tests {
         assert!(
             agree == 20,
             "At cost_sensitivity=0 the cost-aware ranking must equal rank_agents on every draw"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rank_agents_cost_aware_clamps_out_of_range_sensitivity() {
+        // Regression: cost_sensitivity is clamped to [0,1] at the point of use,
+        // so a pub-field mutation or deserialized config value outside the range
+        // is coerced, not silently honored. A value > 1.0 must behave as 1.0,
+        // and a negative value must behave as 0.0 (pure quality).
+        //
+        // Setup makes the two arms competitive *at s=1.0* so a clamp to 1.0 is
+        // observable: pricey has ~2x the quality of cheap, and a 2x cost spread.
+        // At s=1.0 the discount balances the quality gap (~50/50 split); at an
+        // unclamped s=5.0 the discount would crush pricey to ~0 wins.
+        async fn build(cost_sensitivity: f64, cheap_quality: f64) -> LearningModule {
+            let module = LearningModule::with_config(LearningConfig {
+                cost_sensitivity,
+                ..Default::default()
+            });
+            // Pricey: strong prior (~0.98 mean). Cheap: weaker prior matching
+            // `cheap_quality` via fractional successes/failures.
+            for _ in 0..50 {
+                module
+                    .immediate_update(
+                        "pricey",
+                        &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                    )
+                    .await;
+            }
+            let cheap_successes = (50.0 * cheap_quality).round() as usize;
+            let cheap_failures = 50 - cheap_successes;
+            for _ in 0..cheap_successes {
+                module
+                    .immediate_update(
+                        "cheap",
+                        &BurstFeedback::success(Uuid::new_v4(), "test".to_string(), 100),
+                    )
+                    .await;
+            }
+            for _ in 0..cheap_failures {
+                module
+                    .immediate_update(
+                        "cheap",
+                        &BurstFeedback::failure(Uuid::new_v4(), "test".to_string(), 100),
+                    )
+                    .await;
+            }
+            module
+        }
+
+        // 2x cost spread; cheap quality ~0.49 so its mean (~0.49) × 1.0 ≈ pricey
+        // mean (~0.98) × (1/2)^1 = 0.49 → near-parity at s=1.0.
+        let costs = HashMap::from([("cheap".to_string(), 0.001), ("pricey".to_string(), 0.002)]);
+        let ids = ["cheap".to_string(), "pricey".to_string()];
+
+        // > 1.0 must clamp to 1.0: pricey stays competitive (wins a meaningful
+        // share). If the value were honored as 5.0, pricey would win ~0.
+        let over = build(5.0, 0.49).await;
+        let mut pricey_wins_over = 0;
+        for _ in 0..60 {
+            let ranked = over.rank_agents_cost_aware(&ids, None, &costs).await;
+            if ranked[0].0 == "pricey" {
+                pricey_wins_over += 1;
+            }
+        }
+        assert!(
+            pricey_wins_over >= 10,
+            "cost_sensitivity=5.0 should clamp to 1.0, keeping pricey competitive; \
+             got {pricey_wins_over}/60"
+        );
+
+        // Negative must clamp to 0.0 (pure quality): pricey's far higher quality
+        // then dominates, so pricey should win the large majority. If the cost
+        // term were active at any nonzero value, cheap would steal wins.
+        let neg = build(-3.0, 0.49).await;
+        let mut pricey_wins_neg = 0;
+        for _ in 0..60 {
+            let ranked = neg.rank_agents_cost_aware(&ids, None, &costs).await;
+            if ranked[0].0 == "pricey" {
+                pricey_wins_neg += 1;
+            }
+        }
+        assert!(
+            pricey_wins_neg >= 50,
+            "negative cost_sensitivity should clamp to 0.0, letting the higher-quality \
+             pricey arm dominate; got {pricey_wins_neg}/60"
         );
     }
 

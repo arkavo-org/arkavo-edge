@@ -28,11 +28,12 @@ pub struct LearningConfig {
     /// Exponent on the cost-discount multiplier in `rank_agents_cost_aware`.
     ///
     /// 0.0 = rank on pure quality (reverts to pre-cost-aware behavior);
-    /// 1.0 = full proportional cost penalty. Clamped to `[0, 1]` at construction.
+    /// 1.0 = full proportional cost penalty.
     ///
-    /// The clamp is a policy choice (cost must not dominate quality), not a
-    /// numerical guard: the math is valid above 1.0, it just sharpens the bend.
-    /// Raise this ceiling if cost-cutting should outweigh quality.
+    /// Enforced to `[0, 1]` at the point of use in `rank_agents_cost_aware`
+    /// (the field is `pub` and `Deserialize`, so clamping at construction alone
+    /// could not cover pub-field mutation or deserialized configs). The clamp is
+    /// a policy choice (cost must not dominate quality), not a numerical guard.
     ///
     /// The default (0.25) is tuned so cost *bends* the ranking without
     /// overriding quality at modest cost ratios: at a 3× spread a clearly
